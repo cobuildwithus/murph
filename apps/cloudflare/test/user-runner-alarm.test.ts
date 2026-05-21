@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedRuntimeWebStatusResponse,
+  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -78,6 +79,12 @@ const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 const WORKSPACE_NEXT_WAKE_AT = "2026-04-27T00:02:00.000Z";
 const RUNNER_TIMEOUT_AT = "2026-04-27T00:01:00.000Z";
 const TEST_USER_ID = "member_123";
+const RUNNER_STATUS_REASON_CASES = [
+  "manual",
+  "browser_vault_refresh",
+  "retry",
+  "nudge",
+] satisfies HostedWorkspaceInvocationReason[];
 
 const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -144,6 +151,51 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
   });
 
+  it("accepts runtime processing start before the invocation reaches idle", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:03:05.000Z",
+      runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      last_invocation_at: null,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
+  });
+
   it("sends a payloadless wake behind an active write fence without starting another container run", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -182,6 +234,45 @@ describe("HostedUserRunner execution coordination", () => {
       reason: "nudge",
       userId: TEST_USER_ID,
     });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token?.attemptId,
+      active_expires_at: RUNNER_TIMEOUT_AT,
+      backoff_until: null,
+      wake_at: null,
+    });
+  });
+
+  it("accepts a fresh starting write fence when no active child is wakeable yet", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "already_running",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: token?.attemptId,
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token?.attemptId,
@@ -296,6 +387,7 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
 
     await expect(runner.runnerStatus()).resolves.toMatchObject({
+      activeWriteFence: null,
       inFlight: false,
       nextAlarmAt: null,
       userId: TEST_USER_ID,
@@ -309,12 +401,69 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "3",
     });
     await expect(runner.runnerStatus()).resolves.toMatchObject({
+      activeWriteFence: {
+        attemptId: token?.attemptId,
+        reason: "manual",
+        userId: TEST_USER_ID,
+        workspaceVersion: "3",
+      },
       inFlight: true,
       nextAlarmAt: RUNNER_TIMEOUT_AT,
       userId: TEST_USER_ID,
     });
     expect(token?.expiresAt).toBe(RUNNER_TIMEOUT_AT);
   });
+
+  it.each(RUNNER_STATUS_REASON_CASES)(
+    "reports the active %s write-fence reason in status",
+    async (reason) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(FIXED_NOW));
+      const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+      const { invoke, runner, sql } = createRunnerHarness({
+        invocationResults: [invocationResult.promise],
+        workspace: createWorkspaceState({ version: "12" }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+
+      const ensure = runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: `test-orchestration-status-${reason}`,
+        reason,
+        userId: TEST_USER_ID,
+      });
+      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+      const activeAttemptId = readRunnerMeta(sql).active_attempt_id;
+      expect(activeAttemptId).toEqual(expect.any(String));
+      const status = await runner.runnerStatus() as Awaited<
+        ReturnType<HostedUserRunner["runnerStatus"]>
+      > & {
+        activeWriteFence: { expiresAt: string } | null;
+      };
+
+      expect(status.activeWriteFence?.expiresAt).toBe(status.nextAlarmAt);
+      expect(status).toMatchObject({
+        activeWriteFence: {
+          attemptId: activeAttemptId,
+          reason,
+          userId: TEST_USER_ID,
+          workspaceVersion: "12",
+        },
+        inFlight: true,
+        nextAlarmAt: expect.any(String),
+        userId: TEST_USER_ID,
+      });
+
+      invocationResult.resolve({
+        nextWakeAt: null,
+        status: "idle",
+      });
+      await expect(ensure).resolves.toMatchObject({
+        action: "started",
+        kind: "runtime_completed",
+        runtimeStatus: "idle",
+      });
+    },
+  );
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});

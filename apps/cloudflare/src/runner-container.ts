@@ -186,7 +186,7 @@ export interface RunnerRuntimeWakeInput {
 }
 
 export type RunnerRuntimeWakeResult =
-  | { kind: "accepted" }
+  | { action: "already_running" | "woken"; kind: "accepted" }
   | {
       kind: "not-wakeable";
       reason: "no-active-child";
@@ -211,7 +211,7 @@ export interface RunnerContainerEnsureProcessingInput {
 
 export type RunnerContainerEnsureProcessingResult =
   | {
-      action: "restarted" | "started" | "woken";
+      action: "already_running" | "restarted" | "started" | "woken";
       kind: "accepted";
       result?: HostedExecutionRunnerJobResult;
     }
@@ -289,7 +289,7 @@ export class RunnerContainer extends Container {
       const wake = await this.wakeRuntime(input.activeRuntime);
       if (wake.kind === "accepted") {
         return {
-          action: "woken",
+          action: wake.action,
           kind: "accepted",
         };
       }
@@ -346,6 +346,7 @@ export class RunnerContainer extends Container {
         },
       );
       const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
+      const pending = response.headers.get("x-runtime-wake-pending") === "1";
       await drainRunnerContainerMetadataResponseBody(response, {
         signal: runtimeWakeSignal,
       });
@@ -364,7 +365,7 @@ export class RunnerContainer extends Container {
         });
       }
       if (response.ok && accepted) {
-        return { kind: "accepted" };
+        return { action: pending ? "already_running" : "woken", kind: "accepted" };
       }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {

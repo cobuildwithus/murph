@@ -9,6 +9,7 @@ import {
   accountHostedAiUsageForAllowanceTx,
   claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
+  readHostedAiUsageGate,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -746,6 +747,43 @@ describe("resolveHostedAiUsageGate", () => {
   });
 });
 
+describe("readHostedAiUsageGate", () => {
+  it("reads gate state without creating or updating usage-period rows", async () => {
+    const aggregate = vi.fn(async () => ({
+      _sum: {
+        allowanceCostUsdMicros: 11_000_000n,
+      },
+    }));
+    const prisma = createGatePrisma({
+      aggregate,
+      findUniquePeriod: null,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 11_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceCounted: true,
+        allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        memberId: "member_123",
+      }),
+    }));
+  });
+});
+
 describe("claimHostedAiUsageLimitNotice", () => {
   it("claims the usage-period limit notice once", async () => {
     const updateMany = vi.fn()
@@ -849,7 +887,7 @@ function createGatePrisma(input: {
     periodEnd: Date;
     periodStart: Date;
     spentUsdMicros: bigint;
-  };
+  } | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -866,6 +904,14 @@ function createGatePrisma(input: {
 }) {
   const periodStart = input.periodStart ?? new Date("2026-03-01T00:00:00.000Z");
   const periodEnd = input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z");
+  const defaultPeriod = {
+    billingPlanCode: input.billingPlanCode ?? "launch_monthly",
+    blockedAt: null,
+    limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
+    periodEnd,
+    periodStart,
+    spentUsdMicros: input.spentUsdMicros,
+  };
 
   return {
     $executeRaw: input.executeRaw ?? vi.fn(async () => 1),
@@ -882,17 +928,12 @@ function createGatePrisma(input: {
     },
     hostedAiUsagePeriod: {
       delete: vi.fn(async () => undefined),
-      findUnique: vi.fn(async () => ({
-        blockedAt: null,
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-      })),
-      findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? ({
-        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-        periodEnd,
-        periodStart,
-        spentUsdMicros: input.spentUsdMicros,
-      })),
+      findUnique: vi.fn(async () =>
+        input.findUniquePeriod === undefined
+          ? defaultPeriod
+          : input.findUniquePeriod
+      ),
+      findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? defaultPeriod),
       update: input.update ?? vi.fn(),
       upsert: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",

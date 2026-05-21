@@ -225,6 +225,8 @@ export async function startHostedContainerEntrypoint(input: {
   let activeHostedRunnerJobCount = 0;
   let activeRuntimeWake: (() => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
+  let activeRuntimeWakePending = false;
+  let activeRuntimeWakePendingAttemptId: string | null = null;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
@@ -251,14 +253,23 @@ export async function startHostedContainerEntrypoint(input: {
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;
-        const accepted = wake?.() === true;
+        let pending = false;
+        let accepted = wake?.() === true;
+        if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
+          activeRuntimeWakePending = true;
+          pending = true;
+          accepted = true;
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             activeHostedRunnerJobCount,
+            activeRuntimeWakePending,
             activeRuntimeWakePresent: wake !== null,
             runtimeWakeAccepted: accepted,
+            runtimeWakePending: pending,
             workspaceAttemptId: activeRuntimeWakeAttemptId,
+            workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
           },
           message: "Hosted container entrypoint handled runtime wake request.",
           phase: "wake.running",
@@ -268,6 +279,9 @@ export async function startHostedContainerEntrypoint(input: {
           response.setHeader("x-runtime-wake-accepted", "1");
         } else {
           response.setHeader("x-runtime-wake-accepted", "0");
+        }
+        if (pending) {
+          response.setHeader("x-runtime-wake-pending", "1");
         }
         response.statusCode = 204;
         response.end();
@@ -406,6 +420,7 @@ export async function startHostedContainerEntrypoint(input: {
         phase: "wake.running",
         userId: readHostedExecutionRunnerJobUserId(job),
       });
+      activeRuntimeWakePendingAttemptId = readHostedContainerWorkspaceAttemptId(job);
       stopActiveJobDiagnostics = startHostedContainerActiveJobDiagnostics({
         job,
         processApi: runtime.processApi,
@@ -418,11 +433,14 @@ export async function startHostedContainerEntrypoint(input: {
             ? readHostedContainerWorkspaceAttemptId(job)
             : null;
           runtimeWakeForRequest = sendWake;
+          const pendingWake = activeRuntimeWakePending;
+          activeRuntimeWakePending = false;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
+              pendingRuntimeWakeDelivered: pendingWake ? sendWake() : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
             },
             message: "Hosted container child reported runtime wake readiness.",
@@ -472,6 +490,13 @@ export async function startHostedContainerEntrypoint(input: {
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
+      }
+      if (
+        job
+        && activeRuntimeWakePendingAttemptId === readHostedContainerWorkspaceAttemptId(job)
+      ) {
+        activeRuntimeWakePending = false;
+        activeRuntimeWakePendingAttemptId = null;
       }
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);

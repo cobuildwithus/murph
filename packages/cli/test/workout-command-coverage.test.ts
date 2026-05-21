@@ -11,7 +11,6 @@ import {
   createTempVaultContext,
   repoRoot,
   requireData,
-  runRawCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 import { localParallelCliTest as test } from './local-parallel-test.js'
@@ -59,6 +58,23 @@ async function runWorkoutCli<TData>(
   return await runInProcessJsonCli<TData>(cli, args, {
     env: process.env,
   })
+}
+
+async function runWorkoutCliRaw(
+  cli: Cli.Cli,
+  args: string[],
+) {
+  const output: string[] = []
+
+  await cli.serve([...args, '--format', 'json'], {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return output.join('').trim()
 }
 
 test('canonical measurement capture and workout unit preferences round-trip through the registered CLI', async () => {
@@ -455,7 +471,12 @@ test('top-level measurement commands accept open metrics and normalize qualifier
 })
 
 test('measurement help surfaces steer agents toward the canonical command path', async () => {
-  const measurementHelp = await runRawCli(['measurement', 'add', '--help'])
+  const cli = createWorkoutSliceCli()
+  const measurementHelp = await runWorkoutCliRaw(cli, [
+    'measurement',
+    'add',
+    '--help',
+  ])
 
   assert.match(
     measurementHelp,

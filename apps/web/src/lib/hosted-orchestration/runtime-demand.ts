@@ -35,15 +35,23 @@ import {
 } from "../prisma";
 import {
   resolveHostedRuntimeAiUsageDemandGate,
+  type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
 
 const HOSTED_RUNTIME_AI_USAGE_SOURCES = new Set<HostedRuntimeDemandRunSource>([
   "manual",
 ]);
 
+type HostedRuntimeDemandUsageGateStatus =
+  | HostedRuntimeUsageGateCheck["status"]
+  | "not_required";
+
+type HostedRuntimeDemandUsageGateMode = "mutating" | "read_only";
+
 export async function readHostedRuntimeDemand(
   input: HostedRuntimeDemandRequest & {
     now?: Date | string;
+    usageGateMode?: HostedRuntimeDemandUsageGateMode;
   },
 ): Promise<HostedRuntimeDemand> {
   const prisma = getPrisma();
@@ -53,12 +61,19 @@ export async function readHostedRuntimeDemand(
   });
 
   if (!member || !hasHostedMemberActiveAccess(member)) {
-    return buildHostedRuntimeBlockedDemand({
+    const demand = buildHostedRuntimeBlockedDemand({
       mailboxLag: [],
       reason: "user_not_active",
       retryAt: null,
       workspace: null,
     });
+    emitHostedRuntimeDemandDecision({
+      demand,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    });
+    return demand;
   }
 
   const [workspace, maxSeqByLane] = await Promise.all([
@@ -75,18 +90,39 @@ export async function readHostedRuntimeDemand(
     })
   );
 
-  return buildHostedRuntimeDemand({
+  const decision = await buildHostedRuntimeDemandDecision({
     ...input,
     mailboxLag,
     workspace,
   });
+  emitHostedRuntimeDemandDecision({
+    demand: decision.demand,
+    request: input,
+    usageGateRequired: decision.usageGateRequired,
+    usageGateStatus: decision.usageGateStatus,
+  });
+  return decision.demand;
 }
 
 export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest & {
   mailboxLag: HostedMailboxLaneLag[];
   now?: Date | string;
+  usageGateMode?: HostedRuntimeDemandUsageGateMode;
   workspace: HostedWorkspaceRecord | null;
 }): Promise<HostedRuntimeDemand> {
+  return (await buildHostedRuntimeDemandDecision(input)).demand;
+}
+
+async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandRequest & {
+  mailboxLag: HostedMailboxLaneLag[];
+  now?: Date | string;
+  usageGateMode?: HostedRuntimeDemandUsageGateMode;
+  workspace: HostedWorkspaceRecord | null;
+}): Promise<{
+  demand: HostedRuntimeDemand;
+  usageGateRequired: boolean;
+  usageGateStatus: HostedRuntimeDemandUsageGateStatus;
+}> {
   const now = normalizeHostedRuntimeDemandDate(input.now);
   const workspace = projectHostedRuntimeDemandWorkspace(input.workspace);
   const run = selectHostedRuntimeRunDemand({
@@ -102,25 +138,33 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
   });
 
   if (!run) {
-    return parseHostedRuntimeDemand({
-      kind: "idle",
-      mailboxLag: input.mailboxLag,
-      nextWakeAt: readEarliestFutureWakeAt({
-        now,
-        runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
+    return {
+      demand: parseHostedRuntimeDemand({
+        kind: "idle",
+        mailboxLag: input.mailboxLag,
+        nextWakeAt: readEarliestFutureWakeAt({
+          now,
+          runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
+          workspace,
+        }),
         workspace,
       }),
-      workspace,
-    });
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    };
   }
 
   if (workspace === null) {
-    return buildHostedRuntimeBlockedDemand({
-      mailboxLag: input.mailboxLag,
-      reason: "hosted_runtime_not_configured",
-      retryAt: null,
-      workspace,
-    });
+    return {
+      demand: buildHostedRuntimeBlockedDemand({
+        mailboxLag: input.mailboxLag,
+        reason: "hosted_runtime_not_configured",
+        retryAt: null,
+        workspace,
+      }),
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    };
   }
 
   const shouldGateAiUsage = hostedRuntimeDemandNeedsAiUsageGate(
@@ -135,38 +179,63 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
 
   if (shouldGateAiUsage) {
     const gate = await resolveHostedRuntimeAiUsageDemandGate({
+      mode: input.usageGateMode ?? "mutating",
       now,
       userId: input.userId,
     });
 
     if (gate.status === "denied") {
-      return parseHostedRuntimeDemand({
-        kind: "blocked",
-        mailboxLag: input.mailboxLag,
-        reason: "ai_usage_denied",
-        retryAt: null,
-        workspace,
-      });
+      return {
+        demand: parseHostedRuntimeDemand({
+          kind: "blocked",
+          mailboxLag: input.mailboxLag,
+          reason: "ai_usage_denied",
+          retryAt: null,
+          workspace,
+        }),
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      };
     }
 
     if (gate.status === "unavailable") {
-      return parseHostedRuntimeDemand({
-        kind: "blocked",
-        mailboxLag: input.mailboxLag,
-        reason: "ai_usage_gate_unavailable",
-        retryAt: gate.retryAt,
-        workspace,
-      });
+      return {
+        demand: parseHostedRuntimeDemand({
+          kind: "blocked",
+          mailboxLag: input.mailboxLag,
+          reason: "ai_usage_gate_unavailable",
+          retryAt: gate.retryAt,
+          workspace,
+        }),
+        usageGateRequired: true,
+        usageGateStatus: gate.status,
+      };
     }
+
+    return {
+      demand: parseHostedRuntimeDemand({
+        kind: "run",
+        mailboxLag: input.mailboxLag,
+        reason: run.reason,
+        source: run.source,
+        workspace,
+      }),
+      usageGateRequired: true,
+      usageGateStatus: gate.status,
+    };
   }
 
-  return parseHostedRuntimeDemand({
-    kind: "run",
-    mailboxLag: input.mailboxLag,
-    reason: run.reason,
-    source: run.source,
-    workspace,
-  });
+  return {
+    demand: parseHostedRuntimeDemand({
+      kind: "run",
+      mailboxLag: input.mailboxLag,
+      reason: run.reason,
+      source: run.source,
+      workspace,
+    }),
+    usageGateRequired: false,
+    usageGateStatus: "not_required",
+  };
 }
 
 function buildHostedRuntimeBlockedDemand(input: {
@@ -340,6 +409,69 @@ function hasHostedMailboxLag(
       return false;
     }
   });
+}
+
+function emitHostedRuntimeDemandDecision(decision: {
+  demand: HostedRuntimeDemand;
+  request: HostedRuntimeDemandRequest;
+  usageGateRequired: boolean;
+  usageGateStatus: HostedRuntimeDemandUsageGateStatus;
+}): void {
+  console.info("Hosted runtime demand decision.", {
+    blockedReason:
+      decision.demand.kind === "blocked" ? decision.demand.reason : null,
+    browserVaultRefreshRequested:
+      decision.request.browserVaultRefreshRequested === true,
+    component: "hosted.runtime.demand",
+    conversationLagPresent: hasHostedMailboxLag(
+      decision.demand.mailboxLag,
+      "conversation",
+    ),
+    demandKind: decision.demand.kind,
+    demandReason: decision.demand.kind === "run" ? decision.demand.reason : null,
+    demandSource: decision.demand.kind === "run" ? decision.demand.source : null,
+    deviceSyncRecoveryRequested:
+      decision.request.deviceSyncRecoveryRequested === true,
+    ignoredWorkspaceWakeKeyPresent:
+      Boolean(decision.request.ignoredWorkspaceWakeKey),
+    lagRecoveryObserved: decision.request.lagRecoveryObserved === true,
+    mailboxLagLaneCount: decision.demand.mailboxLag.length,
+    manualRunRequested: decision.request.manualRunRequested === true,
+    retryAtPresent:
+      decision.demand.kind === "blocked" && decision.demand.retryAt !== null,
+    runtimeResultWakeAtPresent: Boolean(decision.request.runtimeResultWakeAt),
+    runtimeResultWakeReason: describeHostedRuntimeWakeReasonForLog(
+      decision.request.runtimeResultWakeReason === undefined
+        ? null
+        : decision.request.runtimeResultWakeReason,
+    ),
+    usageGateRequired: decision.usageGateRequired,
+    usageGateStatus: decision.usageGateStatus,
+    userId: decision.request.userId,
+    workspaceNextWakeAtPresent:
+      decision.demand.workspace?.nextWakeAt !== null
+        && decision.demand.workspace?.nextWakeAt !== undefined,
+    workspaceNextWakeReason: describeHostedRuntimeWakeReasonForLog(
+      decision.demand.workspace?.nextWakeReason ?? null,
+    ),
+    workspacePresent: decision.demand.workspace !== null,
+  });
+}
+
+function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | null {
+  switch (reason) {
+    case null:
+      return null;
+    case "alarm":
+    case "assistant":
+    case "assistant_due":
+    case "device-sync.reconcile":
+    case "mailbox":
+    case "runtime.failed":
+      return reason;
+    default:
+      return "other";
+  }
 }
 
 function isHostedRuntimeModelCapableWorkspaceWakeReason(

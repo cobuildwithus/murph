@@ -7,7 +7,7 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
-import type { HostedRuntimeEnsureExecutionResponse } from "@murphai/hosted-execution/orchestration-control";
+import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -84,7 +84,7 @@ export interface HostedLocalFullStackScenario {
     userId: string,
   ): Promise<{
     append: HostedMailboxAppendForTestResponse;
-    wakeResult: HostedRuntimeEnsureExecutionResponse;
+    wakeResult: HostedRuntimeEnsureProcessingResponse;
   }>;
   enqueueWake(
     wake: HostedExecutionWake,
@@ -107,7 +107,7 @@ export interface HostedLocalFullStackScenario {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
-  waitForLatestPendingWake(userId: string): Promise<HostedRuntimeEnsureExecutionResponse>;
+  waitForLatestPendingWake(userId: string): Promise<HostedRuntimeEnsureProcessingResponse>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;

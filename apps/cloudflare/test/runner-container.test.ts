@@ -166,6 +166,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: "11",
       userId: "member_123",
     })).resolves.toEqual({
+      action: "woken",
       kind: "accepted",
     });
 
@@ -250,6 +251,67 @@ describe("RunnerContainer", () => {
     );
     expect(executeCalls).toHaveLength(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports already_running when the active child records a pending wake", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+              "x-runtime-wake-pending": "1",
+            },
+            status: 204,
+          });
+        }
+
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest(),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    await expect(container.ensureProcessing({
+      activeRuntime: {
+        attemptId: "attempt_evt_123",
+        leaseGeneration: "11",
+        userId: "member_123",
+      },
+      reason: "nudge",
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "already_running",
+      kind: "accepted",
+    });
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
   it("ensureProcessing starts work when no active child can be woken", async () => {
@@ -424,6 +486,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: "11",
       userId: "member_123",
     })).resolves.toEqual({
+      action: "woken",
       kind: "accepted",
     });
     expect(wakeResponse.bodyUsed).toBe(true);

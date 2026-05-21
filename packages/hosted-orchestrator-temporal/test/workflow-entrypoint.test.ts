@@ -11,13 +11,14 @@ const continueAsNew = vi.fn(async () => {
 });
 const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
 const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
+const patched = vi.fn(() => true);
 const setHandler = vi.fn();
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
 const workflowInfo = vi.fn(() => ({
   continueAsNewSuggested: false,
 }));
 const proxyActivities = vi.fn(() => ({
-  ensureCloudflareExecution,
+  ensureRuntimeProcessing,
   readRuntimeDemand,
 }));
 const readRuntimeDemand = vi.fn(async (): Promise<HostedRuntimeDemand> => ({
@@ -26,13 +27,14 @@ const readRuntimeDemand = vi.fn(async (): Promise<HostedRuntimeDemand> => ({
   nextWakeAt: null,
   workspace: null,
 }));
-const ensureCloudflareExecution = vi.fn();
+const ensureRuntimeProcessing = vi.fn();
 
 vi.mock("@temporalio/workflow", () => ({
   condition,
   continueAsNew,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -66,7 +68,7 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
       startToCloseTimeout: 10_000,
     }));
     expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
-      startToCloseTimeout: 660_000,
+      startToCloseTimeout: 15_000,
     }));
   });
 });

@@ -15,8 +15,9 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 import {
-  readHostedRuntimeEnsureCloudflareExecutionTimeouts,
+  readHostedRuntimeEnsureProcessingTimeouts,
 } from "@murphai/hosted-execution/temporal-env";
+import { log } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
@@ -36,7 +37,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export interface HostedOrchestratorTemporalActivityEnvironment {
   cloudflareHostedControlBaseUrl: string;
   cloudflareHostedControlSigning: HostedWebCallbackSigningEnvironment;
-  ensureCloudflareExecutionHttpTimeoutMs: number;
+  ensureRuntimeProcessingHttpTimeoutMs: number;
   hostedWebBaseUrl: string;
   hostedWebCallbackSigning: HostedWebCallbackSigningEnvironment;
   readRuntimeDemandTimeoutMs: number;
@@ -62,11 +63,18 @@ export interface HostedOrchestratorJsonRequest<TResponse> {
 
 const privateKeyCache = new Map<string, Promise<CryptoKey>>();
 
+export interface HostedTemporalActivityObservation {
+  activity: "readRuntimeDemand" | "ensureRuntimeProcessing";
+  orchestrationAttemptId?: string | null;
+  reason?: string | null;
+  userId: string;
+}
+
 export function readHostedOrchestratorTemporalActivityEnvironment(
   source: EnvSource = process.env,
 ): HostedOrchestratorTemporalActivityEnvironment {
   const ensureCloudflareExecutionTimeouts =
-    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
+    readHostedRuntimeEnsureProcessingTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -74,8 +82,8 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
-    ensureCloudflareExecutionHttpTimeoutMs:
-      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
+    ensureRuntimeProcessingHttpTimeoutMs:
+      ensureCloudflareExecutionTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
     hostedWebBaseUrl: requireWebOriginBaseUrl(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
@@ -96,10 +104,10 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
   HostedOrchestratorTemporalActivityEnvironment,
   | "cloudflareHostedControlBaseUrl"
   | "cloudflareHostedControlSigning"
-  | "ensureCloudflareExecutionHttpTimeoutMs"
+  | "ensureRuntimeProcessingHttpTimeoutMs"
 > {
   const ensureCloudflareExecutionTimeouts =
-    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
+    readHostedRuntimeEnsureProcessingTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -107,8 +115,8 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
-    ensureCloudflareExecutionHttpTimeoutMs:
-      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
+    ensureRuntimeProcessingHttpTimeoutMs:
+      ensureCloudflareExecutionTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
   };
 }
 
@@ -244,6 +252,57 @@ export async function requestHostedOrchestratorJson<TResponse>(
   }
 }
 
+export async function observeHostedTemporalActivity<TResponse>(
+  observation: HostedTemporalActivityObservation,
+  run: () => Promise<TResponse>,
+): Promise<TResponse> {
+  const startedAt = Date.now();
+  try {
+    const result = await run();
+    logHostedTemporalActivity("info", "Hosted Temporal activity completed.", {
+      activity: observation.activity,
+      component: "temporal.activity",
+      durationMs: Date.now() - startedAt,
+      orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
+      reason: observation.reason ?? null,
+      resultKind: readHostedTemporalActivityResultKind(result),
+      userId: observation.userId,
+    });
+    return result;
+  } catch (error) {
+    logHostedTemporalActivity("warn", "Hosted Temporal activity failed.", {
+      activity: observation.activity,
+      component: "temporal.activity",
+      durationMs: Date.now() - startedAt,
+      errorCode: readHostedTemporalActivityErrorCode(error),
+      nonRetryable: readHostedTemporalActivityNonRetryable(error),
+      orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
+      reason: observation.reason ?? null,
+      resultKind: null,
+      userId: observation.userId,
+    });
+    throw error;
+  }
+}
+
+function logHostedTemporalActivity(
+  level: "info" | "warn",
+  message: string,
+  metadata: Record<string, unknown>,
+): void {
+  try {
+    log[level](message, metadata);
+  } catch (error) {
+    if (
+      error instanceof Error
+      && error.message === "Activity context not initialized"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export function nonRetryableActivityError(
   type: string,
   message: string,
@@ -280,6 +339,80 @@ export class HostedOrchestratorHttpResponseError extends Error {
     this.code = input.code;
     this.status = input.status;
   }
+}
+
+function readHostedTemporalActivityResultKind(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const kind = (value as { kind?: unknown }).kind;
+  return typeof kind === "string" ? kind : null;
+}
+
+function readHostedTemporalActivityErrorCode(error: unknown): string {
+  const visited = new Set<unknown>();
+  let current: unknown = error;
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    if (current instanceof HostedOrchestratorHttpResponseError && current.code) {
+      const code = normalizeHostedTemporalActivityErrorCode(current.code);
+      if (code) {
+        return code;
+      }
+    }
+    if (current instanceof Error) {
+      const typed = current as Error & { code?: unknown; type?: unknown };
+      const code = normalizeHostedTemporalActivityErrorCode(typed.code);
+      if (code) {
+        return code;
+      }
+      const type = normalizeHostedTemporalActivityErrorCode(typed.type);
+      if (type) {
+        return type;
+      }
+      current = current.cause;
+      continue;
+    }
+    break;
+  }
+  const name = error instanceof Error
+    ? normalizeHostedTemporalActivityErrorCode(error.name)
+    : null;
+  return name
+    ? name
+    : "unknown";
+}
+
+function normalizeHostedTemporalActivityErrorCode(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return value.length > 0 && value.length <= 96 && /^[A-Za-z0-9._:-]+$/u.test(value)
+    ? value
+    : null;
+}
+
+function readHostedTemporalActivityNonRetryable(error: unknown): boolean {
+  const visited = new Set<unknown>();
+  let current: unknown = error;
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    if (
+      current instanceof ApplicationFailure
+      || current instanceof HostedOrchestratorHttpResponseError
+      || current instanceof HostedOrchestratorTransportError
+      || current instanceof Error
+    ) {
+      const nonRetryable = (current as { nonRetryable?: unknown }).nonRetryable;
+      if (typeof nonRetryable === "boolean") {
+        return nonRetryable;
+      }
+      current = current.cause;
+      continue;
+    }
+    break;
+  }
+  return false;
 }
 
 function isNonRetryableHostedOrchestratorHttpStatus(status: number): boolean {
@@ -405,7 +538,7 @@ async function readStructuredErrorCode(response: Response): Promise<string | und
   }
 
   const code = (body as Record<string, unknown>).code;
-  return typeof code === "string" && code.length > 0 ? code : undefined;
+  return normalizeHostedTemporalActivityErrorCode(code) ?? undefined;
 }
 
 function requireControlBaseUrl(

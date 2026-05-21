@@ -600,6 +600,9 @@ importers:
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../hosted-execution
+      '@temporalio/activity':
+        specifier: 1.16.2
+        version: 1.16.2
       '@temporalio/client':
         specifier: 1.16.2
         version: 1.16.2

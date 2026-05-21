@@ -53,7 +53,8 @@
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage",
-    "verify:package-boundary": "pnpm build && MURPH_INBOXD_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage"
+    "verify:package-boundary": "pnpm build && MURPH_INBOXD_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage",
+    "verify:package-boundary:prepared": "MURPH_INBOXD_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage"
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",

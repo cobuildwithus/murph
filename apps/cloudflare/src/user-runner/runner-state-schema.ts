@@ -1,6 +1,6 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 10;
+const RUNNER_STATE_SCHEMA_VERSION = 11;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -17,6 +17,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_attempt_id TEXT,
       active_generation INTEGER NOT NULL DEFAULT 0,
       active_kind TEXT,
+      active_reason TEXT,
       active_started_at TEXT,
       active_expires_at TEXT,
       active_workspace_version TEXT,
@@ -35,6 +36,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
     active_kind: "TEXT",
+    active_reason: "TEXT",
     active_started_at: "TEXT",
     active_expires_at: "TEXT",
     active_workspace_version: "TEXT",
@@ -59,6 +61,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_attempt_id",
       "active_generation",
       "active_kind",
+      "active_reason",
       "active_started_at",
       "active_expires_at",
       "active_workspace_version",
@@ -143,6 +146,9 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     const activeInvocationExpiresAt = columns.includes("active_invocation_expires_at")
       ? "active_invocation_expires_at"
       : "NULL";
+    const activeInvocationReason = columns.includes("active_invocation_reason")
+      ? "active_invocation_reason"
+      : "NULL";
     // Legacy active/inFlight projections kept for deploy skew only.
     // Delete after 2026-05-25; live state uses the write fence columns.
     sql.exec(`
@@ -155,6 +161,7 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
           WHEN active_invocation_id IS NOT NULL THEN 'runtime'
           ELSE NULL
         END,
+        active_reason = COALESCE(active_reason, ${activeInvocationReason}),
         active_started_at = COALESCE(active_started_at, ${activeInvocationStartedAt}),
         active_expires_at = COALESCE(active_expires_at, ${activeInvocationExpiresAt})
       WHERE singleton = 1

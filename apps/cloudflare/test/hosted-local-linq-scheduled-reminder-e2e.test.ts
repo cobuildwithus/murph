@@ -114,8 +114,8 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       workflowId: signal.workflowId,
     });
     expect(scheduledState.lastExecutionErrorCode).toBeNull();
-    expect(scheduledState.lastExecutionKind).toBe("runtime_completed");
-    expect(scheduledState.runtimeResultWakeAt).toBe(scheduledReminderTimes.dueAtIso);
+    expect(scheduledState.lastExecutionKind).toBe("runtime_processing_accepted");
+    expect(scheduledState.lastDemandNextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
 
     await sleepUntil(scheduledReminderTimes.dueAtIso);
     requireScenario().queueAssistantResponses([
@@ -260,7 +260,7 @@ async function waitForWorkflowNextWakeAt(input: {
         latestState = await handle.query<HostedRuntimeWorkflowState>(
           HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
         );
-        if (latestState.runtimeResultWakeAt === input.expectedNextWakeAt) {
+        if (latestState.lastDemandNextWakeAt === input.expectedNextWakeAt) {
           return latestState;
         }
       } catch (error) {

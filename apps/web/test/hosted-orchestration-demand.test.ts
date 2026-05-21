@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
 }));
@@ -37,6 +38,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
@@ -45,6 +47,7 @@ type DemandRoute = typeof import(
 );
 
 let demandRoute: DemandRoute;
+let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 
 describe("hosted orchestration demand", () => {
   beforeAll(async () => {
@@ -57,15 +60,18 @@ describe("hosted orchestration demand", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     vi.clearAllMocks();
+    consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
+    mocks.readHostedAiUsageGate.mockResolvedValue({ allowed: true });
     mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: true });
   });
 
   afterEach(() => {
+    consoleInfoSpy.mockRestore();
     vi.useRealTimers();
   });
 
@@ -130,6 +136,99 @@ describe("hosted orchestration demand", () => {
     expect(JSON.stringify(body)).not.toMatch(/payload|message|transcript/u);
   });
 
+  it("logs exactly one metadata-only demand decision record", async () => {
+    const response = await demandRoute.GET(
+      requestForDemand("?manualRunRequested=1"),
+      routeContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime demand decision.",
+      {
+        blockedReason: null,
+        browserVaultRefreshRequested: false,
+        component: "hosted.runtime.demand",
+        conversationLagPresent: false,
+        demandKind: "run",
+        demandReason: "manual",
+        demandSource: "manual",
+        deviceSyncRecoveryRequested: false,
+        ignoredWorkspaceWakeKeyPresent: false,
+        lagRecoveryObserved: false,
+        mailboxLagLaneCount: 2,
+        manualRunRequested: true,
+        retryAtPresent: false,
+        runtimeResultWakeAtPresent: false,
+        runtimeResultWakeReason: null,
+        usageGateRequired: true,
+        usageGateStatus: "allowed",
+        userId: MEMBER_ID,
+        workspaceNextWakeAtPresent: false,
+        workspaceNextWakeReason: null,
+        workspacePresent: true,
+      },
+    );
+    const loggedMetadata = consoleInfoSpy.mock.calls[0]?.[1];
+    expect(JSON.stringify(loggedMetadata)).not.toMatch(
+      /payload|body|prompt|message|transcript|redactedStatus/u,
+    );
+  });
+
+  it("does not log free-form wake reason strings", async () => {
+    const unsafeWakeReason = `${UNSAFE_SENTINEL} prompt payload transcript`;
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T12:05:00.000Z",
+      nextWakeReason: unsafeWakeReason,
+    }));
+
+    const response = await demandRoute.GET(
+      requestForDemand(
+        `?manualRunRequested=1&runtimeResultWakeAt=2026-05-20T12%3A00%3A00.000Z&runtimeResultWakeReason=${
+          encodeURIComponent(unsafeWakeReason)
+        }`,
+      ),
+      routeContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    const loggedMetadata = consoleInfoSpy.mock.calls[0]?.[1];
+    expect(loggedMetadata).toMatchObject({
+      runtimeResultWakeReason: "other",
+      workspaceNextWakeReason: "other",
+    });
+    expect(JSON.stringify(loggedMetadata)).not.toContain(UNSAFE_SENTINEL);
+    expect(JSON.stringify(loggedMetadata)).not.toMatch(
+      /payload|body|prompt|message|transcript|redactedStatus/u,
+    );
+  });
+
+  it("can evaluate demand with a read-only usage gate for status diagnostics", async () => {
+    const { readHostedRuntimeDemand } = await import(
+      "@/src/lib/hosted-orchestration/runtime-demand"
+    );
+    mocks.readHostedAiUsageGate.mockResolvedValue({ allowed: false });
+
+    const demand = await readHostedRuntimeDemand({
+      manualRunRequested: true,
+      now: FIXED_NOW,
+      usageGateMode: "read_only",
+      userId: MEMBER_ID,
+    });
+
+    expect(demand).toMatchObject({
+      kind: "blocked",
+      reason: "ai_usage_denied",
+    });
+    expect(mocks.readHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
   it("blocks demand for missing hosted users before reading runtime state", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(null);
 
@@ -151,6 +250,33 @@ describe("hosted orchestration demand", () => {
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime demand decision.",
+      {
+        blockedReason: "user_not_active",
+        browserVaultRefreshRequested: false,
+        component: "hosted.runtime.demand",
+        conversationLagPresent: false,
+        demandKind: "blocked",
+        demandReason: null,
+        demandSource: null,
+        deviceSyncRecoveryRequested: false,
+        ignoredWorkspaceWakeKeyPresent: false,
+        lagRecoveryObserved: false,
+        mailboxLagLaneCount: 0,
+        manualRunRequested: true,
+        retryAtPresent: false,
+        runtimeResultWakeAtPresent: true,
+        runtimeResultWakeReason: null,
+        usageGateRequired: false,
+        usageGateStatus: "not_required",
+        userId: MEMBER_ID,
+        workspaceNextWakeAtPresent: false,
+        workspaceNextWakeReason: null,
+        workspacePresent: false,
+      },
+    );
   });
 
   it("blocks demand for inactive hosted users instead of honoring stale wakes", async () => {

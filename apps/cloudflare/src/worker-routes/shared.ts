@@ -6,6 +6,8 @@ import type {
 import type {
   HostedRuntimeEnsureExecutionRequest,
   HostedRuntimeEnsureExecutionResponse,
+  HostedRuntimeEnsureProcessingRequest,
+  HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedCryptoDomain,
@@ -34,6 +36,9 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   ensureRuntimeExecutionForUser(
     input: HostedRuntimeEnsureExecutionRequest & { userId: string },
   ): Promise<HostedRuntimeEnsureExecutionResponse>;
+  ensureRuntimeProcessingForUser(
+    input: HostedRuntimeEnsureProcessingRequest & { userId: string },
+  ): Promise<HostedRuntimeEnsureProcessingResponse>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;

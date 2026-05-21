@@ -9,6 +9,8 @@ import {
 import type {
   HostedRuntimeEnsureExecutionRequest,
   HostedRuntimeEnsureExecutionResponse,
+  HostedRuntimeEnsureProcessingRequest,
+  HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -120,6 +122,16 @@ type RuntimeExecutionInput = HostedRuntimeEnsureExecutionRequest & {
   userId: string;
 };
 
+type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
+  userId: string;
+};
+
+type RuntimeInvocationInput = {
+  orchestrationAttemptId: string;
+  reason: HostedWorkspaceInvocationReason;
+  userId: string;
+};
+
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
   nextWakeAt: string | null;
@@ -149,6 +161,7 @@ export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private runnerStores: RunnerUserStores | null = null;
+  private readonly runtimeExecutionTasks = new Map<string, Promise<void>>();
   private runtimeCryptoContextLock: Promise<void> | null = null;
 
   constructor(
@@ -205,12 +218,16 @@ export class HostedUserRunner {
 
   async runnerStatus(input: { logLimit?: number } = {}): Promise<HostedRunnerStatusResponse> {
     const record = await this.stateStore.readState();
+    const activeWriteFence = await this.stateStore.readWriteFenceToken();
     const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId, {
       logLimit: input.logLimit,
     });
 
-    return {
+    const status: HostedRunnerStatusResponse & {
+      activeWriteFence: RunnerWriteFenceToken | null;
+    } = {
       ...webStatus,
+      activeWriteFence,
       inFlight: record.writeFence !== null,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
@@ -220,6 +237,7 @@ export class HostedUserRunner {
       userId: record.userId,
       workspace: webStatus.workspace,
     };
+    return status;
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
@@ -273,6 +291,17 @@ export class HostedUserRunner {
       return await this.ensureExistingRuntimeExecution(input, record);
     }
     return await this.startRuntimeExecution(input, "started");
+  }
+
+  async ensureRuntimeProcessingForUser(
+    input: RuntimeProcessingInput,
+  ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    await this.stateStore.bindUser(input.userId);
+    const record = await this.stateStore.readState();
+    if (record.writeFence) {
+      return await this.ensureExistingRuntimeProcessing(input, record);
+    }
+    return await this.startRuntimeProcessing(input, "started");
   }
 
   async validateRuntimeWriteFence(input: {
@@ -534,6 +563,15 @@ export class HostedUserRunner {
     }
 
     if (containerResult.kind === "start-required") {
+      if (!isRunnerWriteFenceExpired(activeFence)) {
+        await this.syncWatchdogAlarm(record);
+        return {
+          kind: "runtime_wake_sent",
+          recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+          runtimeAttemptId: activeFence.attemptId,
+        };
+      }
+
       const cleared = await this.stateStore.clearWriteFenceForReplacement({
         attemptId: activeFence.attemptId,
         finishedAt: new Date().toISOString(),
@@ -548,6 +586,70 @@ export class HostedUserRunner {
         );
       }
       return await this.startRuntimeExecution(input, "replaced");
+    }
+
+    await this.syncWatchdogAlarm(record);
+    throw new HostedRuntimeExecutionRetryableError(
+      "Hosted runtime active child wake could not be confirmed.",
+      containerResult.reason,
+    );
+  }
+
+  private async ensureExistingRuntimeProcessing(
+    input: RuntimeProcessingInput,
+    record: RunnerStateRecord,
+  ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    if (!record.writeFence) {
+      return await this.startRuntimeProcessing(input, "started");
+    }
+
+    const activeFence = record.writeFence;
+    const containerResult = await this.ensureActiveRuntimeProcessing({
+      activeRuntime: {
+        attemptId: activeFence.attemptId,
+        leaseGeneration: String(activeFence.generation),
+        userId: record.userId,
+      },
+      reason: input.reason,
+    });
+
+    if (containerResult.kind === "accepted") {
+      await this.syncWatchdogAlarm(record);
+      return {
+        action: containerResult.action === "already_running"
+          ? "already_running"
+          : "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+        runtimeAttemptId: activeFence.attemptId,
+      };
+    }
+
+    if (containerResult.kind === "start-required") {
+      if (!isRunnerWriteFenceExpired(activeFence)) {
+        await this.syncWatchdogAlarm(record);
+        return {
+          action: "already_running",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+          runtimeAttemptId: activeFence.attemptId,
+        };
+      }
+
+      const cleared = await this.stateStore.clearWriteFenceForReplacement({
+        attemptId: activeFence.attemptId,
+        finishedAt: new Date().toISOString(),
+        generation: String(activeFence.generation),
+        userId: record.userId,
+      });
+      await this.syncWatchdogAlarm(cleared.record);
+      if (!cleared.cleared) {
+        throw new HostedRuntimeExecutionRetryableError(
+          "Hosted runtime active write fence changed before replacement could start.",
+          "active-fence-replacement-stale",
+        );
+      }
+      return await this.startRuntimeProcessing(input, "replaced");
     }
 
     await this.syncWatchdogAlarm(record);
@@ -593,11 +695,113 @@ export class HostedUserRunner {
 
     await this.syncWatchdogAlarm(await this.stateStore.readState());
 
+    const result = await this.invokeRuntimeExecutionWithFence({
+      input,
+      runtimeWakeStartedAt,
+      token,
+    });
+
+    return {
+      action,
+      kind: "runtime_completed",
+      runtimeAttemptId: token.attemptId,
+      runtimeResultNextWakeAt: result.nextWakeAt ?? null,
+      runtimeResultNextWakeReason: result.nextWakeReason ?? null,
+      runtimeStatus: result.status,
+    };
+  }
+
+  private async startRuntimeProcessing(
+    input: RuntimeProcessingInput,
+    action: "started" | "replaced",
+  ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    const runtimeWakeStartedAt = Date.now();
+    const initialRecord = await this.stateStore.readState();
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...buildRunnerRecordTimingLogDetails(initialRecord),
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        runtimeReason: input.reason,
+      },
+      message: "Hosted runner runtime processing start requested.",
+      phase: "runtime.starting",
+      userId: input.userId,
+    });
+
+    let token: RunnerWriteFenceToken;
+    try {
+      token = await this.stateStore.beginWriteFence({
+        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
+        kind: "runtime",
+        reason: input.reason,
+        userId: input.userId,
+      });
+    } catch (error) {
+      if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
+        throw error;
+      }
+      await this.syncWatchdogAlarm(error.record);
+      return await this.ensureExistingRuntimeProcessing(input, error.record);
+    }
+
+    await this.syncWatchdogAlarm(await this.stateStore.readState());
+
+    const background = this.invokeRuntimeExecutionWithFence({
+      input,
+      runtimeWakeStartedAt,
+      token,
+    }).then(
+      () => undefined,
+      () => undefined,
+    );
+    this.trackRuntimeExecutionTask(token.attemptId, background);
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        runtimeProcessingAction: action,
+        workspaceAttemptId: token.attemptId,
+        workspaceReason: input.reason,
+      },
+      message: "Hosted runner runtime processing accepted.",
+      phase: "runtime.starting",
+      userId: input.userId,
+    });
+
+    return {
+      action,
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+      runtimeAttemptId: token.attemptId,
+    };
+  }
+
+  private trackRuntimeExecutionTask(
+    attemptId: string,
+    task: Promise<void>,
+  ): void {
+    this.runtimeExecutionTasks.set(attemptId, task);
+    void task.finally(() => {
+      if (this.runtimeExecutionTasks.get(attemptId) === task) {
+        this.runtimeExecutionTasks.delete(attemptId);
+      }
+    });
+  }
+
+  private async invokeRuntimeExecutionWithFence(input: {
+    input: RuntimeInvocationInput;
+    runtimeWakeStartedAt: number;
+    token: RunnerWriteFenceToken;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    const executionInput = input.input;
+    let token = input.token;
     let workspaceVersion: string | null = null;
     let result: HostedWorkspaceInvocationResult;
     try {
-      const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
-      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
+      const workspaceRead = await this.readHostedWorkspaceFromWeb(executionInput.userId);
+      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, executionInput.userId);
       workspaceVersion = workspaceRead.workspace?.version ?? "0";
       token = await this.stateStore.bindWriteFenceWorkspaceVersion({
         token,
@@ -606,8 +810,8 @@ export class HostedUserRunner {
 
       result = await this.invokeWorkspaceRunner({
         token,
-        reason: input.reason,
-        userId: input.userId,
+        reason: executionInput.reason,
+        userId: executionInput.userId,
         workspace: workspaceRead.workspace,
         workspaceVersion,
       });
@@ -622,27 +826,27 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptId: input.orchestrationAttemptId,
+          orchestrationAttemptId: executionInput.orchestrationAttemptId,
           transportFailureFenceCleared: failed.failed,
           workspaceAttemptId: token.attemptId,
-          workspaceReason: input.reason,
+          workspaceReason: executionInput.reason,
           workspaceVersion,
         },
         level: "warn",
         message: "Hosted runner runtime execution adapter failed.",
         phase: "failed",
-        userId: input.userId,
+        userId: executionInput.userId,
       });
       throw error;
     }
 
     const completion = await this.recordRuntimeCompletionAfterInvoke({
-      input,
+      input: executionInput,
       token,
       workspaceVersion,
     });
     await this.syncWatchdogAlarmAfterCompletion({
-      executionInput: input,
+      executionInput,
       record: completion.record,
       token,
       workspaceVersion,
@@ -651,8 +855,8 @@ export class HostedUserRunner {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        orchestrationAttemptId: input.orchestrationAttemptId,
-        runtimeExecutionDurationMs: Date.now() - runtimeWakeStartedAt,
+        orchestrationAttemptId: executionInput.orchestrationAttemptId,
+        runtimeExecutionDurationMs: Date.now() - input.runtimeWakeStartedAt,
         runtimeResultNextWakeAtPresent: result.nextWakeAt != null,
         runtimeResultNextWakeReasonPresent: result.nextWakeReason != null,
         workspaceAttemptId: token.attemptId,
@@ -661,21 +865,14 @@ export class HostedUserRunner {
       },
       message: "Hosted runner runtime execution adapter completed.",
       phase: "checkpoint",
-      userId: input.userId,
+      userId: executionInput.userId,
     });
 
-    return {
-      action,
-      kind: "runtime_completed",
-      runtimeAttemptId: token.attemptId,
-      runtimeResultNextWakeAt: result.nextWakeAt ?? null,
-      runtimeResultNextWakeReason: result.nextWakeReason ?? null,
-      runtimeStatus: result.status,
-    };
+    return result;
   }
 
   private async recordRuntimeCompletionAfterInvoke(input: {
-    input: RuntimeExecutionInput;
+    input: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     workspaceVersion: string | null;
   }): Promise<{ record: RunnerStateRecord | null }> {
@@ -724,7 +921,7 @@ export class HostedUserRunner {
   }
 
   private async readRunnerStateAfterCompletionRecordFailure(input: {
-    input: RuntimeExecutionInput;
+    input: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     workspaceVersion: string | null;
   }): Promise<RunnerStateRecord | null> {
@@ -750,7 +947,7 @@ export class HostedUserRunner {
   }
 
   private async syncWatchdogAlarmAfterCompletion(input: {
-    executionInput: RuntimeExecutionInput;
+    executionInput: RuntimeInvocationInput;
     record: RunnerStateRecord | null;
     token: RunnerWriteFenceToken;
     workspaceVersion: string | null;
@@ -852,7 +1049,7 @@ export class HostedUserRunner {
     try {
       const runtimeWake = normalizeRunnerRuntimeWakeResult(await container.wakeRuntime(input.activeRuntime));
       if (runtimeWake.kind === "accepted") {
-        return { action: "woken", kind: "accepted" };
+        return { action: runtimeWake.action, kind: "accepted" };
       }
       if (runtimeWake.kind === "not-wakeable") {
         return { kind: "start-required", reason: "no-active-child" };
@@ -1339,6 +1536,11 @@ function readWriteFenceWatchdogAlarmAt(record: RunnerStateRecord): string | null
   return record.writeFence?.expiresAt ?? null;
 }
 
+function isRunnerWriteFenceExpired(fence: { expiresAt: string }): boolean {
+  const expiresAtMs = Date.parse(fence.expiresAt);
+  return !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now();
+}
+
 function createTestCloudflareOrchestrationAttemptId(source: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `test-cloudflare-${source}-${crypto.randomUUID()}`;
@@ -1373,7 +1575,10 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResult {
   if (isObjectRecord(value)) {
     if (value.kind === "accepted") {
-      return { kind: "accepted" };
+      return {
+        action: value.action === "already_running" ? "already_running" : "woken",
+        kind: "accepted",
+      };
     }
     if (value.kind === "not-wakeable" && value.reason === "no-active-child") {
       return { kind: "not-wakeable", reason: "no-active-child" };

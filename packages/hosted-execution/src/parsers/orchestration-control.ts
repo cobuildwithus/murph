@@ -10,12 +10,16 @@ import {
   HOSTED_RUNTIME_DEMAND_KINDS,
   HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
   HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
+  HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
   type HostedRuntimeDemandWorkspaceProjection,
   type HostedRuntimeEnsureExecutionRequest,
   type HostedRuntimeEnsureExecutionResponse,
+  type HostedRuntimeEnsureProcessingRequest,
+  type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimeSignal,
 } from "../orchestration-control.ts";
 import {
@@ -301,6 +305,27 @@ export function parseHostedRuntimeEnsureExecutionRequest(
   };
 }
 
+export function parseHostedRuntimeEnsureProcessingRequest(
+  value: unknown,
+): HostedRuntimeEnsureProcessingRequest {
+  const record = requireObject(value, "Hosted runtime ensure-processing request");
+  assertExactKeys(record, "Hosted runtime ensure-processing request", [
+    "orchestrationAttemptId",
+    "reason",
+  ]);
+
+  return {
+    orchestrationAttemptId: requireOpaqueIdentifier(
+      record.orchestrationAttemptId,
+      "Hosted runtime ensure-processing request orchestrationAttemptId",
+    ),
+    reason: parseHostedWorkspaceInvocationReason(
+      record.reason,
+      "Hosted runtime ensure-processing request reason",
+    ),
+  };
+}
+
 export function parseHostedRuntimeEnsureExecutionResponse(
   value: unknown,
 ): HostedRuntimeEnsureExecutionResponse {
@@ -370,6 +395,51 @@ export function parseHostedRuntimeEnsureExecutionResponse(
       const exhaustive: never = kind;
       throw new TypeError(
         `Unsupported hosted runtime ensure-execution response kind: ${String(exhaustive)}.`,
+      );
+    }
+  }
+}
+
+export function parseHostedRuntimeEnsureProcessingResponse(
+  value: unknown,
+): HostedRuntimeEnsureProcessingResponse {
+  const record = requireObject(value, "Hosted runtime ensure-processing response");
+  const kind = parseAllowedString(
+    record.kind,
+    "Hosted runtime ensure-processing response kind",
+    HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
+  );
+
+  switch (kind) {
+    case "runtime_processing_accepted": {
+      assertExactKeys(record, "Hosted runtime processing-accepted response", [
+        "action",
+        "kind",
+        "recommendedRecheckAt",
+        "runtimeAttemptId",
+      ]);
+
+      return {
+        action: parseAllowedString(
+          record.action,
+          "Hosted runtime processing-accepted response action",
+          HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+        ),
+        kind,
+        recommendedRecheckAt: readRequiredNullableIsoTimestamp(
+          record.recommendedRecheckAt,
+          "Hosted runtime processing-accepted response recommendedRecheckAt",
+        ),
+        runtimeAttemptId: requireOpaqueIdentifier(
+          record.runtimeAttemptId,
+          "Hosted runtime processing-accepted response runtimeAttemptId",
+        ),
+      };
+    }
+    default: {
+      const exhaustive: never = kind;
+      throw new TypeError(
+        `Unsupported hosted runtime ensure-processing response kind: ${String(exhaustive)}.`,
       );
     }
   }

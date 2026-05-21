@@ -131,6 +131,9 @@ export interface HostedRuntimeEnsureExecutionRequest {
   reason: HostedWorkspaceInvocationReason;
 }
 
+export type HostedRuntimeEnsureProcessingRequest =
+  HostedRuntimeEnsureExecutionRequest;
+
 export const HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS = [
   "runtime_completed",
   "runtime_wake_sent",
@@ -154,25 +157,76 @@ export type HostedRuntimeEnsureExecutionResponse =
       runtimeAttemptId: string;
     };
 
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [
+  "runtime_processing_accepted",
+] as const;
+
+export type HostedRuntimeEnsureProcessingResponseKind =
+  (typeof HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS)[number];
+
+export const HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS = [
+  "started",
+  "replaced",
+  "woken",
+  "already_running",
+] as const;
+
+export type HostedRuntimeProcessingAcceptedAction =
+  (typeof HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS)[number];
+
+export interface HostedRuntimeEnsureProcessingResponse {
+  action: HostedRuntimeProcessingAcceptedAction;
+  kind: "runtime_processing_accepted";
+  recommendedRecheckAt: string | null;
+  runtimeAttemptId: string;
+}
+
+export const HOSTED_RUNTIME_CURRENT_WAIT_REASONS = [
+  "idle_next_wake",
+  "blocked_retry",
+  "demand_failure_retry",
+  "execution_failure_retry",
+  "runtime_wake_recheck",
+  "runtime_failed_recheck",
+  "non_retryable_signal_only",
+] as const;
+
+export type HostedRuntimeCurrentWaitReason =
+  | (typeof HOSTED_RUNTIME_CURRENT_WAIT_REASONS)[number]
+  | null;
+
+export type HostedRuntimeLastExecutionKind =
+  | HostedRuntimeEnsureExecutionResponseKind
+  | HostedRuntimeEnsureProcessingResponseKind
+  | "failed"
+  | null;
+
 export interface HostedRuntimeWorkflowState {
   browserVaultRefreshRequested: boolean;
+  currentWaitReason: HostedRuntimeCurrentWaitReason;
+  currentWaitUntil: string | null;
   deviceSyncRecoveryRequested: boolean;
   ignoredWorkspaceWakeKey: string | null;
   invalidSignalCount: number;
   lagRecoveryObserved: boolean;
+  lastOrchestrationAttemptId: string | null;
   lastInvalidSignalErrorCode: string | null;
   lastDemandKind: HostedRuntimeDemandKind | null;
   lastDemandNextWakeAt: string | null;
   lastDemandSource: string | null;
   lastExecutionAt: string | null;
   lastExecutionErrorCode: string | null;
-  lastExecutionKind: HostedRuntimeEnsureExecutionResponseKind | "failed" | null;
+  lastExecutionKind: HostedRuntimeLastExecutionKind;
   lastMailboxLagLaneCount: number;
+  lastRuntimeAttemptId: string | null;
+  lastRuntimeStatus: string | null;
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
   mailboxSignalCount: number;
   manualRunRequested: boolean;
+  runtimeFailedWithoutNextWakeCount: number;
   runtimeResultWakeAt: string | null;
   runtimeResultWakeReason: string | null;
+  sameRuntimeWakeSentCount: number;
   signalVersion: number;
   userId: string;
 }

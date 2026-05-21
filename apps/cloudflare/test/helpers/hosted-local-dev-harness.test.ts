@@ -264,7 +264,7 @@ it("nudges due scheduled recovery when the mailbox has no remaining lag", async 
   } satisfies HostedRunnerStatusResponse;
   const statuses = [recoverableErrorStatus, completedStatus];
   const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-    if (String(input).includes("/runtime/ensure-execution")) {
+    if (String(input).includes("/runtime/ensure-processing")) {
       return Response.json({ accepted: true });
     }
     return Response.json(statuses.shift() ?? completedStatus);
@@ -290,7 +290,7 @@ it("nudges due scheduled recovery when the mailbox has no remaining lag", async 
     });
 
     expect(fetch.mock.calls.some(([request, init]) =>
-      String(request) === "http://127.0.0.1:8787/internal/users/member_due_recovery/runtime/ensure-execution"
+      String(request) === "http://127.0.0.1:8787/internal/users/member_due_recovery/runtime/ensure-processing"
       && init?.method === "POST"
     )).toBe(true);
   } finally {
@@ -341,7 +341,7 @@ it("keeps nudging when a runner error still has mailbox lag", async () => {
   } satisfies HostedRunnerStatusResponse;
   const statuses = [laggedErrorStatus, completedStatus];
   const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-    if (String(input).includes("/runtime/ensure-execution")) {
+    if (String(input).includes("/runtime/ensure-processing")) {
       return Response.json({ accepted: true });
     }
     return Response.json(statuses.shift() ?? completedStatus);
@@ -367,7 +367,7 @@ it("keeps nudging when a runner error still has mailbox lag", async () => {
     });
 
     expect(fetch.mock.calls.some(([request, init]) =>
-      String(request) === "http://127.0.0.1:8787/internal/users/member_retryable_error/runtime/ensure-execution"
+      String(request) === "http://127.0.0.1:8787/internal/users/member_retryable_error/runtime/ensure-processing"
       && init?.method === "POST"
     )).toBe(true);
   } finally {
@@ -419,7 +419,7 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
   } satisfies HostedRunnerStatusResponse;
   const statuses = [laggedStatus, completedStatus];
   const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-    if (String(input).includes("/runtime/ensure-execution")) {
+    if (String(input).includes("/runtime/ensure-processing")) {
       return Response.json({ accepted: true });
     }
     return Response.json(statuses.shift() ?? completedStatus);
@@ -444,7 +444,7 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
     });
 
     expect(fetch.mock.calls.some(([request, init]) =>
-      String(request) === "http://127.0.0.1:8787/internal/users/member_fresh_lag/runtime/ensure-execution"
+      String(request) === "http://127.0.0.1:8787/internal/users/member_fresh_lag/runtime/ensure-processing"
       && init?.method === "POST"
     )).toBe(false);
   } finally {

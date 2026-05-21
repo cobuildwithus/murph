@@ -51,7 +51,7 @@ server without the dashboard.
 
 That scenario signals through the web Temporal client, queries the workflow, and
 expects the worker Activities to reach the hosted web demand endpoint and the
-Cloudflare ensure-execution adapter.
+Cloudflare ensure-processing adapter.
 
 For manual standalone Temporal development, start the server directly:
 
@@ -74,8 +74,7 @@ export HOSTED_WEB_CALLBACK_SIGNING_KEY_ID=local-dev
 export HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK='<P-256_PRIVATE_JWK_JSON>'
 
 export CLOUDFLARE_HOSTED_CONTROL_BASE_URL=http://localhost:8787
-export HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000
-export HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS=30000
+export HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS=10000
 
 pnpm temporal:worker
 ```
@@ -152,16 +151,14 @@ Activity HTTP targets:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`: non-secret signing key id.
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`: P-256 private JWK JSON.
 - `CLOUDFLARE_HOSTED_CONTROL_BASE_URL`: Cloudflare execution adapter base URL.
-- Cloudflare ensure-execution calls use the same hosted callback signing env as
+- Cloudflare ensure-processing calls use the same hosted callback signing env as
   web demand calls; Cloudflare must verify the corresponding signed internal
   callback key.
 - `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
-- `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`: runner invocation timeout.
-- `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: margin added to the
-  runner timeout for the ensure-execution internal HTTP request timeout. The
-  workflow Activity Start-To-Close timeout then adds a fixed 30 second
-  reporting slack over that HTTP timeout so the Activity can parse and return
-  the Cloudflare response before Temporal reaches the boundary.
+- `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`: short HTTP timeout for the
+  ensure-processing command, max 30000. The Workflow Activity
+  Start-To-Close timeout adds a small reporting slack over this value because
+  Cloudflare returns after start/wake acceptance, not after runtime idle.
 
 Worker shutdown:
 
@@ -175,16 +172,17 @@ Worker shutdown:
   grace value.
 - The checked-in defaults intentionally leave a small process-exit margin under
   the Render Blueprint's `maxShutdownDelaySeconds: 300` platform cap.
-  Ensure-execution calls that run longer than the platform window can still be
-  retried by Temporal after the current attempt is interrupted.
+  Ensure-processing calls are short-lived; long runtime execution continues
+  under Cloudflare runner write-fence ownership and is recovered by demand
+  rechecks and watchdogs.
 
 Worker concurrency:
 
 - `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS` /
   `TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS`: maximum
-  concurrent Activity executions, default `2`. Keep this aligned with Render
-  instance size and Cloudflare runner capacity because `ensureCloudflareExecution`
-  can hold a request for minutes.
+  concurrent Activity executions, default `2`. `ensureRuntimeProcessing` should
+  return within the short command timeout; Cloudflare owns the longer runtime
+  invocation after accepting the start or wake.
 - `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS` /
   `TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS`: maximum concurrent
   Activity task polls, default `2`, and must be no higher than the Activity

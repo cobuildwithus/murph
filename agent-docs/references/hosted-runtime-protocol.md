@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-13
+Last verified: 2026-05-21
 
 ## Decision
 
@@ -14,11 +14,11 @@ The live ownership split is:
 - `apps/web` owns hosted product/control-plane facts, encrypted mailbox rows,
   latest workspace checkpoint metadata, redacted runtime status, and bounded
   redacted runtime logs. For Linq and Telegram conversation webhooks, it verifies
-  and appends in web-owned code, then attempts to start a Vercel Workflow run
-  that durably retries runner nudge by opaque mailbox item pointer only.
+  and appends in web-owned code, then signals the per-user hosted Temporal
+  workflow by opaque mailbox item pointer only.
   Cloudflare Email ingress appends the same canonical mailbox item through a
-  signed web callback and uses a signed pointer-only web callback to start that
-  same durable nudge workflow.
+  signed web callback and uses a signed pointer-only web callback to signal that
+  same Temporal workflow.
   Device-sync webhook freshness is different: web records per-webhook
   trace/audit facts, upserts per-connection dirty resources/revisions,
   completes trace acceptance in the same transaction, and appends opaque wake
@@ -28,10 +28,10 @@ The live ownership split is:
   callback.
   Stripe webhook ingress verifies the raw Stripe request locally, records only
   minimal receipt state in Postgres, and may start a separate Vercel Workflow
-  with only the Stripe event id to retry reconciliation plus any activation
-  runner nudge.
-- `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
-  coalescing, container invocation, encrypted object plumbing, and signed
+  with only the Stripe event id to retry reconciliation. Any appended activation
+  work wakes the hosted runtime through the same Temporal signal path.
+- `apps/cloudflare` owns per-user runner coordination, lease/alarm/fence
+  coordination, container invocation, encrypted object plumbing, and signed
   callback transport.
   UserRunner holds one foreground runtime write fence for the whole hosted
   invocation, passes the fence expiry as `deadlineAt`, and passes the single
@@ -64,7 +64,7 @@ The final seam is:
 
 ```text
 append encrypted mailbox item or upsert device-sync dirty state
-nudge runner
+signal Temporal hosted orchestration
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 pull pending device-sync dirty rows
@@ -132,49 +132,45 @@ uses `HostedMailboxLaneCounter`.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
-drains any local non-mailbox side effects, and attempts to start a Vercel Workflow
-with only `{ mailboxItemId, source }` to retry the per-user Cloudflare runner
-nudge until the runner accepts the handoff.
+drains any local non-mailbox side effects, and signals the per-user hosted
+Temporal workflow with only `{ mailboxItemId, source }`.
 Cloudflare Email ingress verifies either a signed reply alias for an active
 member or the fixed public sender route plus a trusted authenticated-sender
 verdict, stores the encrypted raw message, appends the canonical encrypted
-mailbox item through web, and attempts to start the same pointer-only nudge
-workflow through a signed web callback. Signed reply aliases are private routing
+mailbox item through web, and attempts the same pointer-only Temporal signal
+through a signed web callback. Signed reply aliases are private routing
 capabilities; they do not prove SMTP sender identity. Web may derive the same
 deterministic per-member alias as Cloudflare so settings can show the reachable
 address, but settings should only present the alias after web has persisted the
 matching reply-alias lookup key for route resolution.
 Raw provider bodies, raw email messages, message content, verification headers,
-provider secrets, and decrypted mailbox payloads must not be Vercel Workflow
-inputs or outputs. The pointer workflow may wake the runner; it must not poll
-checkpoint progress, decrypt mailbox payloads, or perform provider-visible
-cleanup/read acknowledgement. Once the runner nudge is accepted, the workflow is
-complete. If the pointer workflow cannot be accepted after the mailbox row
-exists, the failure is logged as a post-commit best-effort handoff failure and
-does not make provider ingress fail. Web may still attempt a latency-only direct
-runner nudge on that failure path, but the durable handoff retry boundary remains
-runner nudge acceptance rather than workspace checkpoint publication. This avoids
-duplicate provider retries after the durable append. The minute
-hosted mailbox lag sweeper is the bounded recovery backstop for missed workflow
-starts and missed direct nudges: it compares mailbox high-water rows with
+provider secrets, and decrypted mailbox payloads must not be Temporal workflow
+inputs, outputs, or history payloads. The pointer signal only wakes durable
+orchestration; Temporal then re-reads web-owned demand and, if processing is
+needed, calls Cloudflare's short-lived `ensure-processing` adapter. There is no
+webhook-to-Cloudflare runner nudge path and no second wake authority. If the
+Temporal signal cannot be accepted after the mailbox row exists, the failure is
+logged as a post-commit best-effort handoff failure and does not make provider
+ingress fail. The minute hosted mailbox lag sweeper is the bounded recovery
+backstop for missed workflow signals: it compares mailbox high-water rows with
 checkpointed import status, finds the oldest uncheckpointed row for each lagged
-lane, and nudges lagged runners by opaque user/work pointer only after a
-freshness grace period so normal workflow-driven imports can reach their quiet
-checkpoint. Redacted runtime logs remain diagnostic evidence only; they must not
-be merged into checkpointed import status for workflow completion, status
-projection, or sweeper decisions. A DB-backed pending-handoff reconciler remains
-future hardening for exact workflow-start failure journaling.
+lane, and signals Temporal by opaque user/work pointer only after a freshness
+grace period so normal signal-driven imports can reach their quiet checkpoint.
+Redacted runtime logs remain diagnostic evidence only; they must not be merged
+into checkpointed import status for workflow completion, status projection, or
+sweeper decisions. A DB-backed pending-handoff reconciler remains future
+hardening for exact workflow-signal failure journaling.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
-workflow attempts are safe because mailbox append dedupes by event id and runner
-nudges only coalesce pending work.
+workflow attempts are safe because mailbox append dedupes by event id and
+Temporal signals only coalesce pending work.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty
 resource/window map, completes the trace in the same transaction, and appends an
 opaque `device-sync.wake` mailbox pointer only when the dirty row transitions
-from clean to dirty. The pointer workflow may retry the runner nudge by mailbox
-item id; it must not carry provider payloads or become the device-sync queue.
+from clean to dirty. The pointer signal may wake hosted Temporal by mailbox item
+id; it must not carry provider payloads or become the device-sync queue.
 The dirty sweeper is the bounded recovery backstop for dirty rows that remain
 pending after a missed, denied, or insufficient wake: each sweep attempt for a
 still-dirty revision appends a fresh opaque wake pointer so an already-imported
@@ -190,44 +186,27 @@ the route/service verification path only. After verification, web stores the
 minimal `HostedStripeEvent` receipt and starts a Stripe-specific Vercel Workflow
 with `{ eventId }`. The workflow uses one event-id step to re-fetch the Stripe
 event through the existing Stripe API reconciliation path, apply billing and
-activation mailbox facts behind the hosted Stripe receipt claim, and retry the
-Cloudflare runner nudge when activation appended runtime work. Step inputs and
-outputs stay pointer-only; any member or activation ids needed for retry are
-re-derived inside the step from web-owned Postgres and Stripe. Raw Stripe
+activation mailbox facts behind the hosted Stripe receipt claim, and signal
+Temporal when activation appended runtime work. Step inputs and outputs stay
+pointer-only; any member or activation ids needed for retry are re-derived
+inside the step from web-owned Postgres and Stripe. Raw Stripe
 payloads, signatures, customer objects, invoice objects, provider headers, and
 mailbox payloads must not be Workflow inputs or step outputs. The minute cron
 drain remains a receipt retry fallback for due Stripe rows.
 
-Cloudflare does not acquire a web run row. A runner nudge only asks the
-per-user Durable Object to invoke the container if needed. The Durable Object
-keeps lease, in-flight invocation, alarm, and short-lived coordination metadata
-only. It does not persist queue history, per-message completion, outbox truth,
-assistant channel enablement state, or checkpoint recovery truth.
-When the Durable Object receives a nudge or alarm, it reconciles durable demand:
-mailbox high-water rows ahead of checkpointed import watermarks, or a
-runtime-scheduled retry/wake. If no durable demand exists, the runner stays
-idle. When demand exists and no write fence is active, the Durable Object starts
-the runner drive and keeps an alarm as recovery. When a write-fenced invocation
-exists, the write fence is commit authority only, not proof that useful runtime
-progress is still possible. The Durable Object asks the container to ensure
-processing for the exact active child and mailbox target. A successful exact
-wake may coalesce with the active invocation; an explicit `not-wakeable` result
-clears the old fence by identity and starts replacement processing immediately,
-except for the bounded startup window after this Durable Object just began a
-local replacement drive and the container child has not registered yet. That
-startup window schedules a short retry only; it is not an `already running`
-result. Unknown wake results schedule a short retry and keep the fence until
-the retry or hard timeout resolves ambiguity. Local Durable Object promises are
-allowed to coalesce work, but they are not liveness authority. The hosted
-runner retry cap stops the fast loop only: capped failures keep a slow
-30-minute Durable Object alarm so a due probe can read web-owned durable demand
-again instead of permanently deleting the alarm. New mailbox backlog is allowed
-to outrank stale retry state only when the web-owned lane high-water timestamp
-is newer than the runner's last failure; that freshness proof clears the retry
-counter and starts normal processing immediately. Existing backlog that already
-failed stays behind retry/backoff, and a due capped probe that finds no durable
-demand clears the capped retry state and stays idle. The hosted runtime owns the
-foreground
+Cloudflare does not acquire a web run row and does not reconcile durable demand.
+Only Temporal decides when Cloudflare should process. The short-lived
+`ensure-processing` command asks the per-user Durable Object to make processing
+active by starting a runner, replacing an expired write fence, waking a ready
+child, or recording a pending wake while the child is still starting. The
+Durable Object keeps lease, in-flight invocation, alarm, and short-lived
+coordination metadata only. It does not persist queue history, per-message
+completion, outbox truth, assistant channel enablement state, or checkpoint
+recovery truth. When a write-fenced invocation exists, the write fence is commit
+authority only, not proof that useful runtime progress is still possible. Local
+Durable Object promises are allowed to coalesce work, but they are not liveness
+authority. The alarm remains the active write-fence watchdog, not semantic wake
+or mailbox-demand scheduling. The hosted runtime owns the foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
 assistant-engine active-turn controller. The alarm remains the durable backstop
@@ -448,12 +427,12 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 
 - per-user Durable Object routing
 - lease/fencing generation
-- alarm/nudge coalescing
+- alarm/fence coordination
 - container invocation
-- optional signed web allow-decision payload compatibility on foreground
-  nudges; Cloudflare does not validate it as runner-start authority and missing,
-  stale, mismatched, or invalid decisions never trigger a live web usage-gate
-  callback before the hot reply path starts
+- optional signed web allow-decision payload compatibility on legacy foreground
+  requests; Cloudflare does not validate it as runner-start authority and
+  missing, stale, mismatched, or invalid decisions never trigger a live web
+  usage-gate callback before the hot reply path starts
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
@@ -464,19 +443,30 @@ Cloudflare does not own product facts, mailbox state, mailbox import progress,
 hosted AI usage spend, assistant channel enablement state, outbox truth, or
 durable queue history.
 
+### Temporal Hosted Orchestration Owns
+
+- per-user hosted runtime workflow state
+- pointer-only mailbox, manual, browser-vault, runtime-result, and device-sync
+  signals
+- reading web-owned demand and deciding when Cloudflare should process
+- short-lived Cloudflare `ensure-processing` activity calls
+- signal-interruptible waits, retries, and scalar workflow status diagnostics
+
+Temporal does not own raw webhook payloads, provider verification headers,
+provider secrets, mailbox payload content, product facts, workspace checkpoint
+truth, or runner coordination. Treat workflow state as durable execution state,
+not as queryable product truth.
+
 ### Vercel Workflow Owns
 
-- accepted pointer-only nudge workflow run state for Linq, Telegram, and Cloudflare Email ingress handoff
 - Stripe event-id reconciliation workflow run state after local Stripe signature verification and receipt recording
-- workflow event logs for opaque mailbox item ids, Stripe event ids, channel/source labels, retry status, and step errors
-- runner nudge handoff and retry state after web-owned verification and mailbox append have committed and the workflow start is accepted; accepted runner nudges complete the pointer workflow
+- workflow event logs for Stripe event ids, retry status, and step errors
 
 Vercel Workflow does not own raw webhook payloads, provider verification
 headers, Stripe request bodies, provider secrets, canonical product facts,
 mailbox payload content, mailbox state after Postgres commit, workspace
-checkpoint progress, message-processing completion, outbox truth, or per-user
-runner coordination. Treat workflow state as durable execution state, not as
-queryable product truth.
+checkpoint progress, runtime processing handoff, message-processing completion,
+outbox truth, or per-user runner coordination.
 
 ## Runtime Timers
 

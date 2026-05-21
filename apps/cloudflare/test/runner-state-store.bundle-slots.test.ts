@@ -17,6 +17,7 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "active_attempt_id",
   "active_generation",
   "active_kind",
+  "active_reason",
   "active_started_at",
   "active_expires_at",
   "active_workspace_version",
@@ -201,7 +202,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaColumns(db)).not.toContain("active_invocation_id");
     expect(readRunnerMetaColumns(db)).not.toContain("pending_nudge");
     expect(readRunnerMetaColumns(db)).not.toContain("alarm_kind");
-    expect(readRunnerStateSchemaVersion(db)).toBe(10);
+    expect(readRunnerStateSchemaVersion(db)).toBe(11);
     await expect(store.readState()).resolves.toMatchObject({
       schema: "murph.hosted-runner.v3",
       userId: "user-current",
@@ -255,7 +256,7 @@ describe("RunnerStateStore schema guard", () => {
           'user-existing',
           'workspace-invocation-1',
           '2030-04-27T00:01:00.000Z',
-          'idle_shutdown_checkpoint',
+          'manual',
           '2030-04-27T00:00:00.000Z',
           '42',
           3,
@@ -269,11 +270,11 @@ describe("RunnerStateStore schema guard", () => {
     const { db, store } = createRunnerStateStoreHarness(setupLegacyRunnerSchema);
 
     expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerStateSchemaVersion(db)).toBe(10);
+    expect(readRunnerStateSchemaVersion(db)).toBe(11);
     await expect(store.readState()).resolves.toMatchObject({
       active: {
         attemptId: "workspace-invocation-1",
-        reason: "runtime",
+        reason: "manual",
         workspaceVersion: "42",
       },
       leaseGeneration: 3,

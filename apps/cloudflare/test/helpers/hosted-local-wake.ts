@@ -2,11 +2,14 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
-import type { HostedRuntimeEnsureExecutionResponse } from "@murphai/hosted-execution/orchestration-control";
+import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import {
-  parseHostedRuntimeEnsureExecutionRequest,
-  parseHostedRuntimeEnsureExecutionResponse,
+  parseHostedRuntimeEnsureProcessingRequest,
+  parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
+import {
+  buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+} from "@murphai/cloudflare-hosted-control/routes";
 import {
   appendHostedExecutionWakeForTest,
   type HostedMailboxAppendForTestResponse,
@@ -30,7 +33,7 @@ export async function appendHostedWakeAndWakeWorker(input: {
   userId: string;
 }): Promise<{
   append: HostedMailboxAppendForTestResponse;
-  wakeResult: HostedRuntimeEnsureExecutionResponse;
+  wakeResult: HostedRuntimeEnsureProcessingResponse;
 }> {
   const append = await appendHostedWake(input);
   const wakeResult = await wakeHostedWorker({
@@ -60,10 +63,10 @@ export async function appendHostedWake(input: {
 export async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
   userId: string;
-}): Promise<HostedRuntimeEnsureExecutionResponse> {
-  const path = `/internal/users/${encodeURIComponent(input.userId)}/runtime/ensure-execution`;
+}): Promise<HostedRuntimeEnsureProcessingResponse> {
+  const path = buildCloudflareHostedControlRuntimeEnsureProcessingPath(input.userId);
   const url = new URL(path, `${input.harness.workerBaseUrl}/`);
-  const requestBody = JSON.stringify(parseHostedRuntimeEnsureExecutionRequest({
+  const requestBody = JSON.stringify(parseHostedRuntimeEnsureProcessingRequest({
     orchestrationAttemptId: `hosted-local-wake:${input.userId}`,
     reason: "nudge",
   }));
@@ -93,14 +96,14 @@ export async function wakeHostedWorker(input: {
     signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
   });
 
-  return parseHostedRuntimeEnsureExecutionResponse(await response.json());
+  return parseHostedRuntimeEnsureProcessingResponse(await response.json());
 }
 
 export async function wakeHostedWorkerForLatestPendingWake(input: {
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
   userId: string;
-}): Promise<HostedRuntimeEnsureExecutionResponse> {
+}): Promise<HostedRuntimeEnsureProcessingResponse> {
   void input.timeoutMs;
   return await wakeHostedWorker({
     harness: input.harness,

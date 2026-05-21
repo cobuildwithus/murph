@@ -59,12 +59,13 @@ Temporal per-user workflow
   - carries runtimeResultWakeReason back to web demand for usage gating
   - retries execution adapter calls
         |
-        | ensure-execution request
+        | ensure-processing request
         v
 apps/cloudflare Durable Object
   - validates control request
   - acquires or validates active write fence
-  - invokes or wakes the container
+  - starts, wakes, or accepts pending runtime processing
+  - returns after processing is accepted
   - authorizes runtime callbacks
         |
         v
@@ -236,37 +237,29 @@ hot-loop. The key is cleared when the workspace version or wake projection
 changes, mailbox lag appears, any explicit signal arrives, or runtime-result
 wake metadata becomes due.
 
-Execution responses are limited to:
+The normal execution command response is `runtime_processing_accepted` with an
+`action` of `started`, `replaced`, `woken`, or `already_running`, plus
+`runtimeAttemptId` and `recommendedRecheckAt`. This response is command
+acknowledgement only. It does not report runtime completion, status, mailbox
+lag, or next assistant wake facts.
 
-- `runtime_completed` with `action: "started" | "replaced"`,
-  `runtimeAttemptId`, `runtimeStatus`, `runtimeResultNextWakeAt`, and
-  `runtimeResultNextWakeReason`
-- `runtime_wake_sent` with `runtimeAttemptId` and `recommendedRecheckAt`
-
-The workflow stores `runtimeResultWakeAt` and `runtimeResultWakeReason` from
-`runtimeResultNextWakeAt` and `runtimeResultNextWakeReason`, then waits on the
-earlier of that value and the web workspace wake projection.
-When Cloudflare returns `runtime_completed` with `runtimeStatus: "failed"` and
-no runtime-provided next wake, the workflow records a bounded
-`runtime.failed` retry wake and waits signal-interruptibly before re-reading
-demand. That is orchestration backoff only; runtime/provider logic remains the
-owner of business recovery and spend enforcement.
-Cloudflare should set `recommendedRecheckAt` from execution policy, such as the
-idle checkpoint delay plus a small margin, so Temporal does not send repeated
-one-second active-wake probes while the runtime is legitimately waiting for its
-idle checkpoint window.
+Temporal observes completion by re-reading web-owned demand/status after the
+recommended recheck or any newer signal. Runtime wake and retry facts that matter
+to product behavior must be reflected in durable web/runtime state, not returned
+as the command result. Legacy `runtime_completed` and `runtime_wake_sent`
+responses remain replay/deploy-skew compatibility only.
 
 ## Cloudflare Execution Adapter Contract
 
-Temporal calls a single Cloudflare execution adapter:
+Temporal calls a single Cloudflare processing adapter:
 
 ```text
-POST /internal/users/:userId/runtime/ensure-execution
+POST /internal/users/:userId/runtime/ensure-processing
 ```
 
 Temporal signs this request with the hosted internal callback key and includes
 the bound hosted user header in the signature input. Cloudflare accepts only
-that signed form for the runtime execution adapter; Vercel OIDC remains for
+that signed form for the runtime processing adapter; Vercel OIDC remains for
 browser-vault, status, and deletion control clients. Do not introduce a static
 shared bearer token for this adapter.
 
@@ -284,16 +277,12 @@ Temporal execution path.
 
 Response summary:
 
-- `runtime_completed`: Cloudflare acquired or replaced a write fence, invoked
-  the container, and the runtime attempt returned. It includes only the runtime
-  status enum plus `runtimeResultNextWakeAt` and
-  `runtimeResultNextWakeReason`, not the full invocation result.
-- `runtime_wake_sent`: Cloudflare found an active write-fenced runtime and sent
-  a payloadless wake to that exact active child. It includes
-  `recommendedRecheckAt` so Temporal waits through the expected idle checkpoint
-  window before re-reading demand.
+- `runtime_processing_accepted`: Cloudflare accepted responsibility for making
+  the runtime process now or soon. `action` explains whether the command started
+  a new attempt, replaced an expired attempt, woke a ready child, or recorded
+  that the current attempt is already running/startup-pending.
 
-The adapter must not return `caught-up`, `mailboxLag`, `nextAlarmAt`, or
+The adapter must not return `caught-up`, `mailboxLag`, `nextAlarmAt`, or runtime
 completion status. Those belong to web demand/status plus the Temporal loop.
 Transport failures are Activity exceptions, not workflow success unions. After
 the Activity retry policy is exhausted, the per-user workflow records compact
@@ -398,7 +387,7 @@ The hard-cut architecture is accepted when:
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code
   into workflow code.
-- Cloudflare exposes an ensure-execution adapter and no longer computes
+- Cloudflare exposes an ensure-processing adapter and no longer computes
   mailbox, assistant, browser-vault, or device-sync demand.
 - Cloudflare alarms are write-fence watchdogs only.
 - Murph runtime code does not know about Temporal.
@@ -425,7 +414,7 @@ The hard-cut architecture is accepted when:
   idles only after web/runtime demand is idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
   scenario that starts managed local Temporal, signals through web, queries the
-  workflow, and proves the worker reaches Cloudflare ensure-execution. Heavier
+  workflow, and proves the worker reaches Cloudflare ensure-processing. Heavier
   continuity/stress cases remain opt-in.
 
 ## Related References

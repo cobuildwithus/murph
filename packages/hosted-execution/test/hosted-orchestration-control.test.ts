@@ -19,6 +19,8 @@ import {
   parseHostedRuntimeDemandRequest,
   parseHostedRuntimeEnsureExecutionRequest,
   parseHostedRuntimeEnsureExecutionResponse,
+  parseHostedRuntimeEnsureProcessingRequest,
+  parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimeSignal,
 } from "../src/parsers.ts";
 
@@ -295,6 +297,35 @@ describe("hosted orchestration control contracts", () => {
     );
   });
 
+  it("parses ensure-processing request and accepted response variants", () => {
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "manual",
+    })).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "manual",
+    });
+
+    for (const action of [
+      "started",
+      "replaced",
+      "woken",
+      "already_running",
+    ] as const) {
+      expect(parseHostedRuntimeEnsureProcessingResponse({
+        action,
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-05-20T12:03:00.000Z",
+        runtimeAttemptId: "runtime_attempt_test",
+      })).toEqual({
+        action,
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-05-20T12:03:00.000Z",
+        runtimeAttemptId: "runtime_attempt_test",
+      });
+    }
+  });
+
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-execution contracts", () => {
     expect(() => parseHostedRuntimeEnsureExecutionRequest({
       aiUsageAllowDecision: createAiUsageAllowDecision(),
@@ -341,6 +372,30 @@ describe("hosted orchestration control contracts", () => {
       runtimeResultNextWakeReason: null,
       runtimeStatus: "idle",
     })).toThrow("Hosted runtime completed response must not include redactedStatus.");
+
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      aiUsageAllowDecision: createAiUsageAllowDecision(),
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+    })).toThrow(
+      "Hosted runtime ensure-processing request must not include aiUsageAllowDecision.",
+    );
+
+    expect(() => parseHostedRuntimeEnsureProcessingResponse({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: "runtime_attempt_test",
+    })).toThrow(
+      "Hosted runtime processing-accepted response recommendedRecheckAt must be a string or null.",
+    );
+
+    expect(() => parseHostedRuntimeEnsureProcessingResponse({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      mailboxLag: [],
+      recommendedRecheckAt: null,
+      runtimeAttemptId: "runtime_attempt_test",
+    })).toThrow("Hosted runtime processing-accepted response must not include mailboxLag.");
   });
 });
 

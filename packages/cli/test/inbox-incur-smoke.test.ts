@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, test } from 'vitest'
 import { runRawCli } from './cli-test-helpers.js'
+import { createVaultCli } from '../src/vault-cli.js'
 
 let isolatedHome = ''
 
@@ -20,7 +21,7 @@ afterAll(async () => {
 })
 
 test('root help exposes the inbox command group', async () => {
-  const help = await runInboxRawCli(['--help'])
+  const help = await runInboxRawInProcessCli(['--help'])
 
   assert.match(help, /inbox\s+Inbox runtime setup, diagnostics/u)
 })
@@ -221,4 +222,23 @@ async function runInboxRawCli(args: string[]): Promise<string> {
       VAULT: undefined,
     },
   })
+}
+
+async function runInboxRawInProcessCli(args: string[]): Promise<string> {
+  const cli = createVaultCli()
+  const output: string[] = []
+
+  await cli.serve(args, {
+    env: {
+      ...process.env,
+      HOME: isolatedHome,
+      VAULT: undefined,
+    },
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return output.join('').trim()
 }

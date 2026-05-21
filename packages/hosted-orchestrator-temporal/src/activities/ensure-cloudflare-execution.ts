@@ -46,7 +46,7 @@ export async function ensureCloudflareExecution(
       parse: parseHostedRuntimeEnsureExecutionResponse,
       path: buildCloudflareRuntimeEnsureExecutionPath(parsedRequest.userId),
       signing: cloudflareEnvironment.cloudflareHostedControlSigning,
-      timeoutMs: cloudflareEnvironment.ensureCloudflareExecutionHttpTimeoutMs,
+      timeoutMs: cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
     },
   );
 }

@@ -6,7 +6,7 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## What This App Owns
 
-- callback-signed Temporal ensure-execution requests plus Vercel OIDC-authenticated
+- callback-signed Temporal ensure-processing requests plus Vercel OIDC-authenticated
   browser/session/status/deletion control requests from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
@@ -27,9 +27,12 @@ Public routes:
 
 Internal control routes:
 
-- `POST /internal/users/:userId/runtime/ensure-execution` is the
-  callback-signed Temporal execution adapter; it invokes or wakes only the bound
-  user's runtime and does not accept the OIDC browser/control path
+- `POST /internal/users/:userId/runtime/ensure-processing` is the
+  callback-signed Temporal processing adapter; it starts, wakes, or accepts a
+  pending runtime wake for only the bound user's runtime and returns after that
+  start/wake intent is accepted, not after the runtime reaches idle
+- `POST /internal/users/:userId/runtime/ensure-execution` is legacy
+  compatibility for older callers during migration
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API

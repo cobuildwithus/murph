@@ -21,6 +21,8 @@ import {
 import type {
   HostedRuntimeEnsureExecutionRequest,
   HostedRuntimeEnsureExecutionResponse,
+  HostedRuntimeEnsureProcessingRequest,
+  HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
@@ -31,6 +33,7 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedRuntimeEnsureExecutionRequest,
+  parseHostedRuntimeEnsureProcessingRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -267,6 +270,20 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     name: "runtime-ensure-execution",
     wrongMethodResponse: "method-not-allowed",
   },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "web-callback-signature",
+    beforeMethod(context, params) {
+      return requireBoundInternalRouteUser(context, params, "runtime-ensure-processing");
+    },
+    async handle(context, params) {
+      return handleRuntimeEnsureProcessingRoute(context, params.userId);
+    },
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeEnsureProcessing.method],
+    name: "runtime-ensure-processing",
+    wrongMethodResponse: "method-not-allowed",
+  },
 
   {
     authorizeBeforeMethod: true,
@@ -377,6 +394,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     input: HostedRuntimeEnsureExecutionRequest & { userId: string },
   ): Promise<HostedRuntimeEnsureExecutionResponse> {
     return this.runner.ensureRuntimeExecutionForUser(input);
+  }
+
+  async ensureRuntimeProcessingForUser(
+    input: HostedRuntimeEnsureProcessingRequest & { userId: string },
+  ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    return this.runner.ensureRuntimeProcessingForUser(input);
   }
 
   async validateRuntimeWriteFence(input: {
@@ -1455,6 +1478,42 @@ async function handleRuntimeEnsureExecutionRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId);
   return json(await stub.ensureRuntimeExecutionForUser({
+    ...ensureRequest,
+    userId,
+  }));
+}
+
+async function handleRuntimeEnsureProcessingRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  let ensureRequest: HostedRuntimeEnsureProcessingRequest;
+  try {
+    const payload = await readCachedRequestText(context, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
+    ensureRequest = parseHostedRuntimeEnsureProcessingRequest(
+      requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
+    );
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-ensure-processing-request-body-invalid",
+        routeName: "runtime-ensure-processing",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker runtime ensure-processing route rejected an invalid request body.",
+      phase: "failed",
+      userId,
+    });
+    throw error;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId);
+  return json(await stub.ensureRuntimeProcessingForUser({
     ...ensureRequest,
     userId,
   }));

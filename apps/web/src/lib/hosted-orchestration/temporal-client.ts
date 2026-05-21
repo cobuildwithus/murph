@@ -20,6 +20,9 @@ export type {
 
 export interface HostedRuntimeTemporalSignalClient {
   workflow: {
+    getHandle?(workflowId: string): {
+      query(queryName: string): Promise<unknown>;
+    };
     signalWithStart(
       workflowType: string,
       options: {
