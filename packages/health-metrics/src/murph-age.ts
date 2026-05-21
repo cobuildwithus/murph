@@ -1176,7 +1176,6 @@ export interface MurphAgeResearchLocalRunEvidenceItem {
 export interface MurphAgeResearchModelStatusView {
   blockers: Array<
     | "biomarker-transport-not-confirmed"
-    | "function-sidecar-parameter-pack-missing"
     | "product-use-not-authorized"
     | "wearable-increment-not-validated"
   >;
@@ -1186,12 +1185,12 @@ export interface MurphAgeResearchModelStatusView {
     anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered";
     currentScoringMode: "single-selected-research-card";
     labBodyStatus: "selected-card-score-not-additive-increment";
-    nextArchitectureStep: "fit-function-sidecar-before-layered-scoring";
+    nextArchitectureStep: "parameterize-function-sidecar-for-layered-scoring";
     wearableStatus: "context-only-zero-product-multiplier";
   };
   functionDisability: {
-    currentUse: "bounded-research-sidecar-supported-pending-parameter-pack";
-    nextAction: "fit-bounded-function-parameter-pack-then-validate-fresh-source";
+    currentUse: "hardened-research-lead-sidecar-not-product-age";
+    nextAction: "parameterize-function-sidecar-for-layered-scoring-then-fresh-validation";
     scoreBearing: false;
   };
   labBody: {
@@ -7503,7 +7502,6 @@ function buildMurphAgeResearchModelStatusView(input: {
   return {
     blockers: [
       "biomarker-transport-not-confirmed",
-      "function-sidecar-parameter-pack-missing",
       "wearable-increment-not-validated",
       "product-use-not-authorized",
     ],
@@ -7513,12 +7511,12 @@ function buildMurphAgeResearchModelStatusView(input: {
       anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered",
       currentScoringMode: "single-selected-research-card",
       labBodyStatus: "selected-card-score-not-additive-increment",
-      nextArchitectureStep: "fit-function-sidecar-before-layered-scoring",
+      nextArchitectureStep: "parameterize-function-sidecar-for-layered-scoring",
       wearableStatus: "context-only-zero-product-multiplier",
     },
     functionDisability: {
-      currentUse: "bounded-research-sidecar-supported-pending-parameter-pack",
-      nextAction: "fit-bounded-function-parameter-pack-then-validate-fresh-source",
+      currentUse: "hardened-research-lead-sidecar-not-product-age",
+      nextAction: "parameterize-function-sidecar-for-layered-scoring-then-fresh-validation",
       scoreBearing: false,
     },
     labBody: {
@@ -7575,7 +7573,7 @@ function buildMurphAgeResearchModelStatusView(input: {
         scoringMathChanged: false,
         signal: "supported",
         sourceRouteId: "mhas-harmonized-aging",
-        summary: "MHAS panel extension and deep residual diagnostics support a bounded function/mobility research sidecar, pending fitted parameters and fresh validation.",
+        summary: "MHAS panel extension, anchor-increment, and deep residual diagnostics support function/mobility as the hardened research lead sidecar, still requiring layered parameterization and fresh validation before product use.",
         supportedMetricKeys: [
           "adl-limitation-count",
           "iadl-limitation-count",

@@ -1050,10 +1050,13 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.product.riskDisplayReady, false)
     assert.equal(
       view.model.blockers.join('|'),
-      'biomarker-transport-not-confirmed|function-sidecar-parameter-pack-missing|wearable-increment-not-validated|product-use-not-authorized',
+      'biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized',
     )
-    assert.equal(view.model.functionDisability.currentUse, 'bounded-research-sidecar-supported-pending-parameter-pack')
-    assert.equal(view.model.functionDisability.nextAction, 'fit-bounded-function-parameter-pack-then-validate-fresh-source')
+    assert.equal(view.model.functionDisability.currentUse, 'hardened-research-lead-sidecar-not-product-age')
+    assert.equal(
+      view.model.functionDisability.nextAction,
+      'parameterize-function-sidecar-for-layered-scoring-then-fresh-validation',
+    )
     assert.equal(view.model.functionDisability.scoreBearing, false)
     assert.equal(view.model.labBody.currentUse, 'score-bearing-research-when-selected')
     assert.equal(view.model.labBody.nextAction, 'validate-transport-before-product-use')
