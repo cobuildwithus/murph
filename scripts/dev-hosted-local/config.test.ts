@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseLinqWebhookTunnelMode,
   parsePort,
+  parseTemporalMode,
   parseWorkerProtocol,
   printHelp,
   resolveHostedLocalDevConfig,
@@ -24,6 +25,13 @@ describe("resolveHostedLocalDevConfig", () => {
       skipStripeListen: false,
       skipWeb: false,
       skipVercelPull: false,
+      temporal: {
+        host: "127.0.0.1",
+        mode: "disabled",
+        namespace: "default",
+        port: 7233,
+        taskQueue: "murph-hosted-runtime",
+      },
       useVercelDatabaseUrl: false,
       webHost: "localhost",
       webPort: 3000,
@@ -48,9 +56,14 @@ describe("resolveHostedLocalDevConfig", () => {
         MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
         MURPH_DEV_SKIP_RUNNER_SMOKE: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_TEMPORAL: "external",
+        MURPH_DEV_TEMPORAL_HOST: "localhost",
+        MURPH_DEV_TEMPORAL_PORT: "7243",
         MURPH_DEV_SKIP_WEB: "1",
         MURPH_DEV_SKIP_VERCEL_PULL: "1",
         MURPH_DEV_USE_VERCEL_DATABASE_URL: "1",
+        TEMPORAL_NAMESPACE: "hosted-test",
+        TEMPORAL_TASK_QUEUE: "hosted-test-queue",
         MURPH_DEV_WEB_HOST: "0.0.0.0",
         MURPH_DEV_WEB_PORT: "3015",
         MURPH_DEV_WORKER_HOST: "localhost",
@@ -72,6 +85,13 @@ describe("resolveHostedLocalDevConfig", () => {
       skipStripeListen: true,
       skipWeb: true,
       skipVercelPull: true,
+      temporal: {
+        host: "localhost",
+        mode: "external",
+        namespace: "hosted-test",
+        port: 7243,
+        taskQueue: "hosted-test-queue",
+      },
       useVercelDatabaseUrl: true,
       webHost: "0.0.0.0",
       webPort: 3015,
@@ -131,6 +151,9 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
     expect(output).toContain("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...");
     expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
+    expect(output).toContain("MURPH_DEV_TEMPORAL=disabled");
+    expect(output).toContain("MURPH_DEV_TEMPORAL_PORT=7233");
+    expect(output).toContain("TEMPORAL_TASK_QUEUE=murph-hosted-runtime");
     expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
     expect(output).toContain("stripe listen");
   });
@@ -149,6 +172,24 @@ describe("parseLinqWebhookTunnelMode", () => {
   it("rejects invalid values", () => {
     expect(() => parseLinqWebhookTunnelMode("maybe")).toThrow(
       "MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be auto, required, 1, or 0.",
+    );
+  });
+});
+
+describe("parseTemporalMode", () => {
+  it("uses the fallback when the override is missing", () => {
+    expect(parseTemporalMode(undefined, "managed")).toBe("managed");
+  });
+
+  it("normalizes managed, external, and disabled values", () => {
+    expect(parseTemporalMode("on")).toBe("managed");
+    expect(parseTemporalMode("external")).toBe("external");
+    expect(parseTemporalMode("off")).toBe("disabled");
+  });
+
+  it("rejects invalid values", () => {
+    expect(() => parseTemporalMode("maybe")).toThrow(
+      "MURPH_DEV_TEMPORAL must be managed, external, disabled, 1, or 0.",
     );
   });
 });

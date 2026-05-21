@@ -72,6 +72,11 @@ import {
   HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
   writeHostedLocalStripeCheckoutDiagnostics,
 } from "./stripe.ts";
+import {
+  buildHostedLocalTemporalRuntimeEnv,
+  startHostedLocalTemporalRuntime,
+  type HostedLocalTemporalRuntime,
+} from "./temporal.ts";
 import type {
   BufferedNamedChildProcess,
   HostedExecutionOidcIdentity,
@@ -106,6 +111,8 @@ export interface HostedLocalDevStack {
     linqTunnel: BufferedNamedChildProcess | null;
     minio: BufferedNamedChildProcess | null;
     stripe: BufferedNamedChildProcess | null;
+    temporalServer: BufferedNamedChildProcess | null;
+    temporalWorker: BufferedNamedChildProcess | null;
     web: BufferedNamedChildProcess | null;
   };
   ready: Promise<void>;
@@ -208,6 +215,7 @@ export async function startHostedLocalDevStack(input: {
   let minioServer: HostedLocalMinioServer | null = null;
   let minioProcess: BufferedNamedChildProcess | null = null;
   let stripeListener: BufferedNamedChildProcess | null = null;
+  let temporalRuntime: HostedLocalTemporalRuntime | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let workerProcessEnv: NodeJS.ProcessEnv | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -317,6 +325,13 @@ export async function startHostedLocalDevStack(input: {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
       ...localOverrides,
+      ...buildHostedLocalTemporalRuntimeEnv({
+        config,
+        env: {
+          ...vercelEnv,
+          ...localOverrides,
+        },
+      }),
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
       VERCEL_OIDC_TOKEN: oidcToken,
       ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
@@ -623,6 +638,22 @@ export async function startHostedLocalDevStack(input: {
     }
 
     const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
+    temporalRuntime = await startHostedLocalTemporalRuntime({
+      cloudflareHostedControlBaseUrl: workerBaseUrl,
+      config,
+      env: runtimeEnv,
+      hostedWebBaseUrl: webBaseUrl,
+      pipeOutput: input.pipeOutput,
+      stderrTarget: input.stderrTarget,
+      stdoutTarget: input.stdoutTarget,
+    });
+    if (temporalRuntime?.serverProcess) {
+      children.push(temporalRuntime.serverProcess);
+    }
+    if (temporalRuntime?.workerProcess) {
+      children.push(temporalRuntime.workerProcess);
+    }
+
     const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
       for (const { child } of children) {
         terminateChildProcess(child, signal);
@@ -779,6 +810,8 @@ export async function startHostedLocalDevStack(input: {
         linqTunnel: linqTunnelProcess,
         minio: minioProcess,
         stripe: stripeListener,
+        temporalServer: temporalRuntime?.serverProcess ?? null,
+        temporalWorker: temporalRuntime?.workerProcess ?? null,
         web: webProcess,
       },
       ready,

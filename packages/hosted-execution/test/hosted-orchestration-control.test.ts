@@ -153,14 +153,12 @@ describe("hosted orchestration control contracts", () => {
       kind: "run",
       mailboxLag,
       reason: "nudge",
-      requiresAiUsageDecision: true,
       source: "mailbox_backlog",
       workspace,
     })).toEqual({
       kind: "run",
       mailboxLag,
       reason: "nudge",
-      requiresAiUsageDecision: true,
       source: "mailbox_backlog",
       workspace,
     });
@@ -168,14 +166,12 @@ describe("hosted orchestration control contracts", () => {
       kind: "run",
       mailboxLag,
       reason: "retry",
-      requiresAiUsageDecision: false,
       source: "runtime_result_wake",
       workspace: null,
     })).toEqual({
       kind: "run",
       mailboxLag,
       reason: "retry",
-      requiresAiUsageDecision: false,
       source: "runtime_result_wake",
       workspace: null,
     });
@@ -223,7 +219,6 @@ describe("hosted orchestration control contracts", () => {
       kind: "run",
       mailboxLag: [],
       reason: "nudge",
-      requiresAiUsageDecision: false,
       source: "mailbox_backlog",
       workspace: null,
     })).not.toThrow();
@@ -231,9 +226,17 @@ describe("hosted orchestration control contracts", () => {
     expect(() => parseHostedRuntimeDemand({
       kind: "run",
       mailboxLag: [],
-      rawPayload: true,
       reason: "nudge",
       requiresAiUsageDecision: false,
+      source: "mailbox_backlog",
+      workspace: null,
+    })).toThrow("Hosted runtime run demand must not include requiresAiUsageDecision.");
+
+    expect(() => parseHostedRuntimeDemand({
+      kind: "run",
+      mailboxLag: [],
+      rawPayload: true,
+      reason: "nudge",
       source: "mailbox_backlog",
       workspace: null,
     })).toThrow("Hosted runtime run demand must not include rawPayload.");
@@ -243,7 +246,6 @@ describe("hosted orchestration control contracts", () => {
       kind: "run",
       mailboxLag: [],
       reason: "nudge",
-      requiresAiUsageDecision: true,
       source: "mailbox_backlog",
       workspace: null,
     })).toThrow("Hosted runtime run demand must not include aiUsageAllowDecision.");

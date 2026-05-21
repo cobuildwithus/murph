@@ -189,6 +189,7 @@ export async function startHostedLocalFullStackScenario(input: {
         : {};
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
+    const temporalPort = await reserveLocalTcpPort();
     const runnerBundleCacheKey = buildHostedLocalRunnerBundleCacheKey({
       ...baseEnvironment,
       ...(input.additionalEnv ?? {}),
@@ -206,6 +207,8 @@ export async function startHostedLocalFullStackScenario(input: {
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+      MURPH_DEV_TEMPORAL: "managed",
+      MURPH_DEV_TEMPORAL_PORT: String(temporalPort),
       ...(input.additionalEnv ?? {}),
       ...assistantProviderRecorderEnv,
       DATABASE_URL: localDatabaseUrl,

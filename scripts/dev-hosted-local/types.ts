@@ -12,6 +12,7 @@ export interface HostedLocalDevConfig {
   skipStripeListen: boolean;
   skipWeb: boolean;
   skipVercelPull: boolean;
+  temporal: HostedLocalTemporalConfig;
   useVercelDatabaseUrl: boolean;
   webHost: string;
   webPort: number;
@@ -21,12 +22,24 @@ export interface HostedLocalDevConfig {
   workerProtocol: "http" | "https";
 }
 
+export type HostedLocalTemporalMode = "disabled" | "external" | "managed";
+
+export interface HostedLocalTemporalConfig {
+  host: string;
+  mode: HostedLocalTemporalMode;
+  namespace: string;
+  port: number;
+  taskQueue: string;
+}
+
 export type HostedLocalChildProcessName =
   | "cloudflare"
   | "health-commons"
   | "linq-tunnel"
   | "minio"
   | "stripe"
+  | "temporal-server"
+  | "temporal-worker"
   | "web";
 
 export interface HostedExecutionOidcIdentity {

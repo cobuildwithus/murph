@@ -87,7 +87,6 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      requiresAiUsageDecision: true,
       source: "mailbox_backlog",
       workspace: {
         nextWakeAt: null,
@@ -225,7 +224,6 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      requiresAiUsageDecision: false,
       source: "workspace_wake",
       workspace: {
         nextWakeAt,
@@ -247,7 +245,6 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      requiresAiUsageDecision: false,
       source: "device_sync_recovery",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
@@ -263,7 +260,6 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "browser_vault_refresh",
-      requiresAiUsageDecision: false,
       source: "browser_vault_refresh",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
@@ -312,7 +308,6 @@ describe("hosted orchestration demand", () => {
 
     expect(lagDemand).toMatchObject({
       kind: "run",
-      requiresAiUsageDecision: false,
       source: "lag_recovery",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
@@ -333,7 +328,6 @@ describe("hosted orchestration demand", () => {
 
     expect(runtimeResultDemand).toMatchObject({
       kind: "run",
-      requiresAiUsageDecision: false,
       source: "runtime_result_wake",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
@@ -350,7 +344,6 @@ describe("hosted orchestration demand", () => {
 
     expect(workspaceDemand).toMatchObject({
       kind: "run",
-      requiresAiUsageDecision: false,
       source: "workspace_wake",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
@@ -430,7 +423,6 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      requiresAiUsageDecision: false,
       source: "mailbox_backlog",
     });
     expect(demand.mailboxLag).toContainEqual({

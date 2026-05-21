@@ -20,8 +20,11 @@ export interface HostedRuntimeTemporalEnvironment {
   apiKey: string | null;
   namespace: string;
   taskQueue: string;
-  tls: boolean;
+  tls: HostedRuntimeTemporalTls;
 }
+
+export type HostedRuntimeTemporalTls =
+  Exclude<ConnectionOptions["tls"], null | undefined>;
 
 export interface HostedRuntimeTemporalWorkflowOptions {
   ensureCloudflareExecutionStartToCloseTimeoutMs: number;
@@ -55,19 +58,6 @@ export function readHostedRuntimeTemporalEnvironment(
     "HOSTED_TEMPORAL_API_KEY",
     "TEMPORAL_API_KEY",
   );
-  const tls =
-    readOptionalBooleanEnv(
-      source,
-      "HOSTED_TEMPORAL_TLS_ENABLED",
-      "TEMPORAL_TLS_ENABLED",
-    )
-    ?? Boolean(apiKey);
-  if (apiKey && tls === false) {
-    throw new TypeError(
-      "HOSTED_TEMPORAL_TLS_ENABLED cannot be false when HOSTED_TEMPORAL_API_KEY is configured.",
-    );
-  }
-
   return {
     address: readOptionalEnv(source, "HOSTED_TEMPORAL_ADDRESS", "TEMPORAL_ADDRESS"),
     apiKey,
@@ -77,7 +67,7 @@ export function readHostedRuntimeTemporalEnvironment(
     taskQueue:
       readOptionalEnv(source, "HOSTED_TEMPORAL_TASK_QUEUE", "TEMPORAL_TASK_QUEUE")
       ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
-    tls,
+    tls: readTemporalTlsConfig(source, apiKey !== null),
   };
 }
 
@@ -178,6 +168,114 @@ function readOptionalBooleanEnv(
     return false;
   }
   throw new TypeError(`${keys[0]} must be true or false.`);
+}
+
+function readTemporalTlsConfig(
+  source: NodeJS.ProcessEnv,
+  hasApiKey: boolean,
+): HostedRuntimeTemporalTls {
+  const tlsEnabled = readOptionalBooleanEnv(
+    source,
+    "HOSTED_TEMPORAL_TLS_ENABLED",
+    "TEMPORAL_TLS_ENABLED",
+  );
+  const clientCert = readOptionalPemBuffer({
+    base64Keys: [
+      "HOSTED_TEMPORAL_CLIENT_CERT_BASE64",
+      "TEMPORAL_CLIENT_CERT_BASE64",
+    ],
+    label: "TEMPORAL_CLIENT_CERT",
+    pemKeys: [
+      "HOSTED_TEMPORAL_CLIENT_CERT_PEM",
+      "TEMPORAL_CLIENT_CERT_PEM",
+    ],
+    source,
+  });
+  const clientKey = readOptionalPemBuffer({
+    base64Keys: [
+      "HOSTED_TEMPORAL_CLIENT_KEY_BASE64",
+      "TEMPORAL_CLIENT_KEY_BASE64",
+    ],
+    label: "TEMPORAL_CLIENT_KEY",
+    pemKeys: [
+      "HOSTED_TEMPORAL_CLIENT_KEY_PEM",
+      "TEMPORAL_CLIENT_KEY_PEM",
+    ],
+    source,
+  });
+  const serverRootCa = readOptionalPemBuffer({
+    base64Keys: [
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+      "TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+    ],
+    label: "TEMPORAL_SERVER_ROOT_CA_CERT",
+    pemKeys: [
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
+      "TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
+    ],
+    source,
+  });
+  const serverNameOverride = readOptionalEnv(
+    source,
+    "HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE",
+    "TEMPORAL_TLS_SERVER_NAME_OVERRIDE",
+  );
+  const hasTlsMaterial =
+    clientCert !== null
+    || clientKey !== null
+    || serverRootCa !== null
+    || serverNameOverride !== null;
+
+  if (tlsEnabled === false && (hasApiKey || hasTlsMaterial)) {
+    throw new TypeError(
+      "HOSTED_TEMPORAL_TLS_ENABLED cannot be false when Temporal credentials or TLS material are configured.",
+    );
+  }
+  if ((clientCert === null) !== (clientKey === null)) {
+    throw new TypeError(
+      "TEMPORAL_CLIENT_CERT and TEMPORAL_CLIENT_KEY must be configured together.",
+    );
+  }
+  if (hasTlsMaterial) {
+    return {
+      ...(clientCert !== null && clientKey !== null
+        ? {
+            clientCertPair: {
+              crt: clientCert,
+              key: clientKey,
+            },
+          }
+        : {}),
+      ...(serverRootCa !== null ? { serverRootCACertificate: serverRootCa } : {}),
+      ...(serverNameOverride !== null ? { serverNameOverride } : {}),
+    };
+  }
+  if (hasApiKey) {
+    return true;
+  }
+  return tlsEnabled ?? false;
+}
+
+function readOptionalPemBuffer(input: {
+  base64Keys: readonly string[];
+  label: string;
+  pemKeys: readonly string[];
+  source: NodeJS.ProcessEnv;
+}): Buffer | null {
+  const pem = readOptionalEnv(input.source, ...input.pemKeys);
+  const base64 = readOptionalEnv(input.source, ...input.base64Keys);
+  if (pem !== null && base64 !== null) {
+    throw new TypeError(
+      `${input.label}_PEM and ${input.label}_BASE64 are mutually exclusive.`,
+    );
+  }
+  if (pem !== null) {
+    return Buffer.from(pem, "utf8");
+  }
+  if (base64 !== null) {
+    return Buffer.from(base64, "base64");
+  }
+  return null;
 }
 
 function parsePositiveInteger(

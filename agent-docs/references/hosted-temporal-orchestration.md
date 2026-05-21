@@ -172,7 +172,8 @@ Demand responses include only slim state:
 
 - `HostedRuntimeDemandWorkspaceProjection` with `nextWakeAt`,
   `nextWakeReason`, and `version`
-- `requiresAiUsageDecision` on run demand instead of a signed decision body
+- `run`, `idle`, or `blocked` state with mailbox lag, demand source/reason, and
+  workspace projection only
 - `runtime_result_wake` as a demand source before `workspace_wake`
 
 Demand priority is mailbox lag, manual run, browser-vault refresh, device-sync
@@ -353,8 +354,8 @@ The hard-cut architecture is accepted when:
   metadata only and should not force a workspace checkpoint.
 - Temporal stores no full `HostedWorkspaceState`, no full
   `HostedWorkspaceInvocationResult`, and no signed usage decision.
-- Demand returns `requiresAiUsageDecision` as gating metadata only. The
-  execution Activity does not fetch or forward signed usage decisions.
+- Demand returns `blocked` for usage denial or gate unavailability. It does not
+  return signed usage decisions or usage-gating metadata.
 - Workflow flag clearing is version-gated across awaited demand/execution calls.
 - Active-wake rechecks use `recommendedRecheckAt` or an env-derived idle
   checkpoint delay, not a one-second loop.
@@ -364,9 +365,10 @@ The hard-cut architecture is accepted when:
   or hard-disabled for production.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after web/runtime demand is idle.
-- The remaining local E2E harness gap for mailbox append to Temporal to
-  Cloudflare execution to runtime checkpoint to Temporal idle is tracked in
-  `agent-docs/references/testing-ci-map.md`.
+- The hosted-local E2E harness includes a non-manual Temporal orchestration
+  scenario that starts managed local Temporal, signals through web, queries the
+  workflow, and proves the worker reaches Cloudflare ensure-execution. Heavier
+  continuity/stress cases remain opt-in.
 
 ## Related References
 

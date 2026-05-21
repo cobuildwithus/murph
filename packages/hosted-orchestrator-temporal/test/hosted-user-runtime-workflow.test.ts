@@ -102,6 +102,44 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.demandRequests[1].manualRunRequested).toBe(false);
   });
 
+  it("keeps due runtime-result wake state across runtime_wake_sent until completion clears it", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    const runtimeResultWakeAt = isoAfter(-1);
+    runtime.demands.push((request) => {
+      expect(request.runtimeResultWakeAt).toBe(runtimeResultWakeAt);
+      return runDemand({ source: "runtime_result_wake" });
+    });
+    runtime.executions.push(runtimeWakeSent(isoAfter(45_000)));
+    runtime.demands.push((request) => {
+      expect(request.runtimeResultWakeAt).toBe(runtimeResultWakeAt);
+      return runDemand({ source: "runtime_result_wake" });
+    });
+    runtime.executions.push(runtimeCompleted({
+      runtimeResultNextWakeAt: null,
+    }));
+    runtime.demands.push(idleDemand(null));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 3 },
+      state: {
+        ...emptyCarryForwardState(),
+        runtimeResultWakeAt,
+        runtimeResultWakeReason: "assistant",
+      },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000, null]);
+    expect(runtime.executionRequests).toHaveLength(2);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: "idle",
+      runtimeResultWakeAt: null,
+      runtimeResultWakeReason: null,
+    });
+  });
+
   it("lets a signal interrupt runtime_wake_sent recheck wait", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
@@ -171,10 +209,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
   it("does not pass usage decisions into execution", async () => {
     const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({
-      requiresAiUsageDecision: true,
-      source: "manual",
-    }));
+    runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(runtimeCompleted());
 
     const machine = createMachine(runtime, {
@@ -421,6 +456,32 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("records demand read errors and keeps the workflow alive for retry", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(() => {
+      const error = new Error("web unavailable") as Error & { code: string };
+      error.code = "demand_transport_unavailable";
+      throw error;
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(runtime.waits).toEqual([30_000]);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: null,
+      lastDemandNextWakeAt: null,
+      lastDemandSource: "demand_read_failed",
+      lastExecutionErrorCode: "demand_transport_unavailable",
+    });
+  });
+
   it("does not sleep when runtime_wake_sent recheck is already due or malformed", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
@@ -628,7 +689,6 @@ function mailboxLag() {
 
 function runDemand(input: {
   mailboxLag?: RunDemand["mailboxLag"];
-  requiresAiUsageDecision?: boolean;
   source: RunDemand["source"];
   workspace?: HostedRuntimeDemandWorkspaceProjection | null;
 }): HostedRuntimeDemand {
@@ -640,7 +700,6 @@ function runDemand(input: {
       : input.source === "manual"
         ? "manual"
         : "nudge",
-    requiresAiUsageDecision: input.requiresAiUsageDecision ?? false,
     source: input.source,
     workspace: input.workspace ?? null,
   };

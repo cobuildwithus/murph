@@ -43,6 +43,7 @@ const controlledEnvKeys = [
   "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
   "MURPH_DEV_LINQ_WEBHOOK_TUNNEL",
   "MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER",
+  "MURPH_DEV_TEMPORAL",
   "MURPH_HOSTED_LOCAL_RUN_ID",
   "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID",
 ] as const;
@@ -229,6 +230,7 @@ function expectVitestSpawnCall(): void {
     "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
+    "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
@@ -249,6 +251,7 @@ function expectVitestSpawnCall(): void {
   expect(options?.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_BUNDLE).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE).toBe("1");
+  expect(options?.env.MURPH_DEV_TEMPORAL).toBe("managed");
   expect(options?.stdio).toBe("inherit");
 }
 

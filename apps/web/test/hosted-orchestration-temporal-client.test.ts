@@ -92,6 +92,49 @@ describe("hosted web Temporal signal client", () => {
     expect(client).toBeInstanceOf(mocks.clientConstructor);
   });
 
+  it("passes Temporal TLS material into the signal client connection", async () => {
+    const clientCert = "-----BEGIN CERTIFICATE-----\nCLIENT\n-----END CERTIFICATE-----";
+    const clientKey = "-----BEGIN PRIVATE KEY-----\nCLIENT\n-----END PRIVATE KEY-----";
+    const rootCa = "-----BEGIN CERTIFICATE-----\nROOT\n-----END CERTIFICATE-----";
+    vi.stubEnv("HOSTED_TEMPORAL_ADDRESS", "hosted-temporal.example.test:7233");
+    vi.stubEnv("HOSTED_TEMPORAL_CLIENT_CERT_PEM", clientCert);
+    vi.stubEnv("HOSTED_TEMPORAL_CLIENT_KEY_PEM", clientKey);
+    vi.stubEnv(
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+      Buffer.from(rootCa).toString("base64"),
+    );
+    vi.stubEnv("HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE", "temporal.example.test");
+
+    expect(readHostedRuntimeTemporalEnvironment()).toEqual({
+      address: "hosted-temporal.example.test:7233",
+      apiKey: null,
+      namespace: "default",
+      taskQueue: HOSTED_USER_RUNTIME_TASK_QUEUE,
+      tls: {
+        clientCertPair: {
+          crt: Buffer.from(clientCert, "utf8"),
+          key: Buffer.from(clientKey, "utf8"),
+        },
+        serverNameOverride: "temporal.example.test",
+        serverRootCACertificate: Buffer.from(rootCa, "utf8"),
+      },
+    });
+
+    await readHostedRuntimeTemporalSignalClientIfConfigured();
+
+    expect(mocks.connect).toHaveBeenCalledWith({
+      address: "hosted-temporal.example.test:7233",
+      tls: {
+        clientCertPair: {
+          crt: Buffer.from(clientCert, "utf8"),
+          key: Buffer.from(clientKey, "utf8"),
+        },
+        serverNameOverride: "temporal.example.test",
+        serverRootCACertificate: Buffer.from(rootCa, "utf8"),
+      },
+    });
+  });
+
   it("uses unprefixed Temporal env names as compatibility fallback", () => {
     expect(readHostedRuntimeTemporalEnvironment(buildProcessEnv({
       TEMPORAL_ADDRESS: "temporal.example.test:7233",
@@ -134,7 +177,23 @@ describe("hosted web Temporal signal client", () => {
       HOSTED_TEMPORAL_API_KEY: "hosted-temporal-api-key",
       HOSTED_TEMPORAL_TLS_ENABLED: "false",
     }))).toThrow(
-      "HOSTED_TEMPORAL_TLS_ENABLED cannot be false when HOSTED_TEMPORAL_API_KEY is configured.",
+      "HOSTED_TEMPORAL_TLS_ENABLED cannot be false when Temporal credentials or TLS material are configured.",
+    );
+  });
+
+  it("rejects partial or ambiguous Temporal TLS material", () => {
+    expect(() => readHostedRuntimeTemporalEnvironment(buildProcessEnv({
+      HOSTED_TEMPORAL_CLIENT_CERT_PEM: "cert",
+    }))).toThrow(
+      "TEMPORAL_CLIENT_CERT and TEMPORAL_CLIENT_KEY must be configured together.",
+    );
+
+    expect(() => readHostedRuntimeTemporalEnvironment(buildProcessEnv({
+      HOSTED_TEMPORAL_CLIENT_CERT_BASE64: Buffer.from("cert").toString("base64"),
+      HOSTED_TEMPORAL_CLIENT_CERT_PEM: "cert",
+      HOSTED_TEMPORAL_CLIENT_KEY_PEM: "key",
+    }))).toThrow(
+      "TEMPORAL_CLIENT_CERT_PEM and TEMPORAL_CLIENT_CERT_BASE64 are mutually exclusive.",
     );
   });
 

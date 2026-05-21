@@ -35,6 +35,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
       "Hosted-local E2E with deterministic local stubs and no live assistant provider, Stripe listener, or Vercel pull.",
     envDefaults: {
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
+      MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -51,6 +52,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
       "Hosted-local E2E using explicit live/test provider credentials supplied by the caller.",
     envDefaults: {
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
+      MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
