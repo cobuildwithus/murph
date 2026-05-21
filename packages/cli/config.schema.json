@@ -3334,6 +3334,7 @@
                           "description": "Explicit research card override for local research model-card artifacts.",
                           "type": "string",
                           "enum": [
+                            "l1_tiny_glycemia_10y_acm_research",
                             "lab5_bp_bmi_transport_research",
                             "lab9_bp_body_10y_acm_research",
                             "r399_nhis_proxy_10y_acm_research"

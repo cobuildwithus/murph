@@ -2605,6 +2605,7 @@ test("exposes submitted Murph Age input bundle specs for calculator integration"
   assert.deepEqual(specs.map((spec) => spec.bundleId), [
     "lab9-bp-body",
     "lab5-bp-bmi",
+    "l1-glycemia",
     "r399-nhis-proxy-anchor",
     "wearable-context",
     "function-context",
@@ -2640,6 +2641,14 @@ test("exposes submitted Murph Age input bundle specs for calculator integration"
   ]);
   assert.equal(lab5.featureSpecs.find((feature) => feature.featureKey === "bmi")?.requiredForCompletion, false);
 
+  const l1Glycemia = assertDefined(byId.get("l1-glycemia"), "l1 glycemia submitted input bundle spec");
+  assert.equal(l1Glycemia.completion.rule, "one-or-more-glycemia-features");
+  assert.equal(l1Glycemia.completion.minReadyFeatureCount, 1);
+  assert.deepEqual(l1Glycemia.completion.requiredFeatureKeys, ["glycemia"]);
+  assert.equal(l1Glycemia.cardId, "l1_tiny_glycemia_10y_acm_research");
+  assert.equal(l1Glycemia.researchAgeEstimateEligible, true);
+  assert.equal(l1Glycemia.scoreBearing, true);
+
   const r399 = assertDefined(byId.get("r399-nhis-proxy-anchor"), "r399 submitted input bundle spec");
   assert.equal(r399.completion.rule, "one-or-more-proxy-features");
   assert.equal(r399.completion.minReadyFeatureCount, 1);
@@ -2673,6 +2682,7 @@ test("keeps Murph Age card metrics reachable while wearable research signals sta
   const bundleMetricKeysById = new Map<string, Set<string>>([
     ["lab9-bp-body", assessedBundleMetricKeys("lab9-bp-body", completeLab9BpBodyPolicyPoints())],
     ["lab5-bp-bmi", assessedBundleMetricKeys("lab5-bp-bmi", completeLab5BpBmiPolicyPoints())],
+    ["l1-glycemia", new Set(["hba1c", "glucose"])],
     ["r399-nhis-proxy-anchor", assessedR399ProxyAnchorMetricKeys()],
     ["function-context", assessedBundleMetricKeys("function-context", completeFunctionContextPoints())],
     ["wearable-context", bundleMetricKeys],
@@ -5004,7 +5014,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
   assert.equal(JSON.stringify(publicResearchReport.wearableResidualLayer).includes("metric-point:"), false);
   assert.equal(JSON.stringify(publicResearchReport.wearableResidualLayer).includes("10000"), false);
-  assert.equal(publicResearchReport.researchCandidateCards.length, 3);
+  assert.equal(publicResearchReport.researchCandidateCards.length, 4);
   const publicLab9Candidate = publicResearchReport.researchCandidateCards.find((candidate) =>
     candidate.cardId === "lab9_bp_body_10y_acm_research"
   );
@@ -6032,11 +6042,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.selectedCardId, "lab5_bp_bmi_transport_research");
   assert.equal(
     submittedLab5ResearchView.arbiter.strategy,
-    "r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context",
+    "r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context",
   );
   assert.equal(
     submittedLab5ResearchView.arbiter.labConflictPolicy,
-    "lab9-primary-lab5-transport-guard-r399-anchor-fallback",
+    "lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback",
   );
   assert.equal(submittedLab5ResearchView.arbiter.wearableScorePolicy, "context-only-not-score-bearing");
   assert.equal(submittedLab5ResearchView.arbiter.selectedCardRole, "transport-fallback-and-discordance-guard");
@@ -6048,6 +6058,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchArbiterCandidate.role, "transport-fallback-and-discordance-guard");
   assert.equal(submittedLab5ResearchArbiterCandidate.readyForResearchRun, true);
   assert.equal(submittedLab5ResearchArbiterCandidate.selected, true);
+
   const contaminatedSubmittedLab5Report = structuredClone(submittedLab5Report);
   Object.assign(contaminatedSubmittedLab5Report.researchCandidateCards[1] ?? {}, {
     coefficient: 1.23,
@@ -6959,7 +6970,7 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
 
   const publicReport = toPublicMurphAgeCalculatorReport(research);
   assert.equal(publicReport.inputReadiness.bundle.bundleId, "r399-nhis-proxy-anchor");
-  assert.equal(publicReport.researchCandidateCards.length, 3);
+  assert.equal(publicReport.researchCandidateCards.length, 4);
   const publicR399Candidate = publicReport.researchCandidateCards.find((candidate) =>
     candidate.cardId === "r399_nhis_proxy_10y_acm_research"
   );
