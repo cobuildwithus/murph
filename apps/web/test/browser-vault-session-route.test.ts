@@ -140,7 +140,6 @@ describe("browser vault session route", () => {
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-      source: "browser-vault-session",
       userId: "member_123",
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -627,7 +626,6 @@ describe("browser vault session route", () => {
 
     await vi.waitFor(() => {
       expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-        source: "browser-vault-session",
         userId: "member_123",
       });
     });
@@ -681,7 +679,6 @@ describe("browser vault session route", () => {
 
     await vi.waitFor(() => {
       expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-        source: "browser-vault-session",
         userId: "member_123",
       });
     });
@@ -790,7 +787,6 @@ describe("browser vault session route", () => {
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-      source: "browser-vault-session",
       userId: "member_123",
     });
     releaseSchedule();
@@ -1089,7 +1085,6 @@ describe("browser vault session route", () => {
       state: "empty",
     });
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-      source: "browser-vault-session",
       userId: "member_123",
     });
   });

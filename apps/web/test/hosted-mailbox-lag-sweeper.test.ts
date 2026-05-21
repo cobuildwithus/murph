@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,12 +110,7 @@ describe("hosted mailbox lag sweeper", () => {
     expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
       signal: {
-        eventId: expectedLagEventId(
-          "member_lag_1",
-          new Date("1970-01-01T00:00:00.000Z"),
-        ),
         kind: "mailbox_lag_observed",
-        source: "lag-sweeper",
       },
       userId: "member_lag_1",
     });
@@ -201,12 +195,7 @@ describe("hosted mailbox lag sweeper", () => {
     expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         signal: {
-          eventId: expectedLagEventId(
-            "member_lag_2",
-            new Date("1970-01-01T00:01:00.000Z"),
-          ),
           kind: "mailbox_lag_observed",
-          source: "lag-sweeper",
         },
         userId: "member_lag_2",
       }),
@@ -430,18 +419,13 @@ describe("hosted mailbox lag sweeper", () => {
 
     expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
       signal: {
-        eventId: expectedLagEventId(
-          "member_capped_lag",
-          new Date("2026-05-02T00:21:00.000Z"),
-        ),
         kind: "mailbox_lag_observed",
-        source: "lag-sweeper",
       },
       userId: "member_capped_lag",
     });
     const signal = mocks.signalHostedUserRuntimeWorkflow.mock.calls[0]?.[0]
       ?.signal as Record<string, unknown>;
-    expect(Object.keys(signal).sort()).toEqual(["eventId", "kind", "source"]);
+    expect(Object.keys(signal).sort()).toEqual(["kind"]);
     expect(result).toMatchObject({
       signalAccepted: 1,
       signalAttempted: 1,
@@ -479,12 +463,7 @@ describe("hosted mailbox lag sweeper", () => {
 
     expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
       signal: {
-        eventId: expectedLagEventId(
-          "member_capped_mixed_lag",
-          new Date("2026-05-02T00:21:00.000Z"),
-        ),
         kind: "mailbox_lag_observed",
-        source: "lag-sweeper",
       },
       userId: "member_capped_mixed_lag",
     });
@@ -581,14 +560,4 @@ function buildLogger() {
     info: vi.fn(),
     warn: vi.fn(),
   };
-}
-
-function expectedLagEventId(userId: string, now: Date): string {
-  const minute = Math.floor(now.getTime() / 60_000);
-  const fingerprint = createHash("sha256")
-    .update(`mailbox-lag:${userId}:${minute}`)
-    .digest("hex")
-    .slice(0, 24);
-
-  return `mailbox-lag:${minute}:${fingerprint}`;
 }

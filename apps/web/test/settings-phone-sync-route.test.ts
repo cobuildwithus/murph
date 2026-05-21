@@ -136,8 +136,6 @@ describe("settings phone sync route", () => {
       sourceType: "settings.phone.sync",
     });
     expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      eventSource: "settings.phone.sync",
-      source: "user",
       userId: "member_123",
     });
     expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");

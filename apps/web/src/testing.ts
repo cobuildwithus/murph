@@ -9,9 +9,6 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedRuntimeManualSignalSource,
-} from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 const hostedMailboxStoreModuleSpecifier = new URL(
@@ -341,9 +338,6 @@ export async function listHostedRuntimeLogsForTest(input: {
 
 export async function signalHostedManualRunRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
-  eventId?: string | null;
-  eventSource?: string | null;
-  source: HostedRuntimeManualSignalSource;
   userId: string;
 }): Promise<{
   signalAccepted: true;
@@ -355,9 +349,6 @@ export async function signalHostedManualRunRuntimeForTest(input: {
   const signalModule = await import("./lib/hosted-orchestration/signal-runtime");
 
   return await signalModule.signalHostedManualRunRuntime({
-    ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
-    ...(input.eventSource !== undefined ? { eventSource: input.eventSource } : {}),
-    source: input.source,
     userId: input.userId,
   });
 }

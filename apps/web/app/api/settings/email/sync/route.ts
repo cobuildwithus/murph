@@ -109,7 +109,6 @@ export const POST = withJsonError(async (request: Request) => {
   });
   if (channelsUpdated) {
     await signalHostedManualRunBestEffort({
-      eventSource: "settings.email.sync",
       userId: auth.member.id,
     });
   }
@@ -123,13 +122,10 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function signalHostedManualRunBestEffort(input: {
-  eventSource: string;
   userId: string;
 }): Promise<void> {
   try {
     await signalHostedManualRunRuntime({
-      eventSource: input.eventSource,
-      source: "user",
       userId: input.userId,
     });
   } catch {

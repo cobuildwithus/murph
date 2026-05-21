@@ -143,6 +143,13 @@ Forbidden Temporal state:
 Temporal may remember that demand exists. It must not become the place where
 Murph decides what demand means.
 
+Manual, browser-vault refresh, device-sync recovery, and lag-recovery signals
+are intentionally kind-only at-least-once wake hints. They carry no event id,
+source label, device reason, or dedupe key; durable web state owns command
+identity, source attribution, and idempotency. Future command surfaces that need
+accepted/duplicate/rejected response semantics should use a durable web command
+ledger or Temporal Updates instead of expanding wake signals.
+
 Workflow implementations must version-gate flag clearing around awaited demand
 and execution calls. If a signal arrives while an Activity is running, the loop
 must keep the existing flags and re-read demand instead of clearing state derived
@@ -164,6 +171,31 @@ client certificate/key, server root CA, and server-name override settings so
 Mailbox signal `source` is a bounded safe string, not a provider enum. Parsers
 should enforce a non-empty trimmed value with a small max length and safe
 characters.
+
+## Workflow Replay And Versioning
+
+`packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts`
+is a long-lived per-user Temporal Workflow. Any change that adds, removes, or
+reorders awaited command-producing Temporal APIs requires an explicit replay
+compatibility plan before deployment. This includes Activity proxy calls,
+durable timers or `condition()` timeouts, `continueAsNew`, child Workflow
+commands if introduced later, and branch changes that alter whether an existing
+history reaches those commands in the same order.
+
+Command-ordering changes must use at least one of these disciplines:
+
+- Worker Versioning or another deployment pinning strategy that keeps existing
+  Workflow histories on compatible worker code until they drain.
+- TypeScript Workflow patching with `patched()` / `deprecatePatch()` around the
+  changed command sequence, with a documented removal condition.
+- A Temporal replay test against captured histories that cover pre-change
+  executions through the affected paths.
+
+Pure state-machine tests, Activity mocks, and local signal/timer unit tests are
+useful but not sufficient replay proof for old histories. Captured replay
+fixtures must be redacted or synthetic: do not commit raw mailbox payloads,
+prompts, transcripts, provider responses, secrets, local paths, or direct user
+identifiers just to prove replay.
 
 ## Final Minimal Contract
 
@@ -294,9 +326,13 @@ Cloudflare must not:
   retry/wake state.
 
 Activity timeouts must be config-derived. Demand reads use a short timeout.
-Ensure-execution uses the Cloudflare runner timeout plus a safety margin so
-Temporal does not retry while a valid runtime invocation is still inside its
-own timeout window.
+Ensure-execution uses two explicit budgets: the internal HTTP timeout is the
+Cloudflare runner timeout plus `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`,
+and the Temporal Activity Start-To-Close timeout adds a fixed 30 second
+reporting slack over that HTTP timeout. This keeps Temporal from retrying while
+a valid runtime invocation is still inside its own timeout window, while also
+leaving room for response parsing and Activity completion before the
+Start-To-Close boundary.
 
 ## Runtime Status And Completion
 

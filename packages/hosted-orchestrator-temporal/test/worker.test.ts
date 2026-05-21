@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const connection = { kind: "connection" };
 const connect = vi.fn(async (options: unknown) => connection);
@@ -16,10 +20,31 @@ vi.mock("@temporalio/worker", () => ({
 }));
 
 describe("hosted runtime Temporal worker", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalShutdownGraceMs =
+    process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS;
+  const originalShutdownForceMs =
+    process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS;
+
   beforeEach(() => {
     connect.mockClear();
     create.mockClear();
     run.mockClear();
+    process.env.NODE_ENV = "test";
+    delete process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS;
+    delete process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS;
+  });
+
+  afterEach(() => {
+    restoreEnv("NODE_ENV", originalNodeEnv);
+    restoreEnv(
+      "HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS",
+      originalShutdownGraceMs,
+    );
+    restoreEnv(
+      "HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS",
+      originalShutdownForceMs,
+    );
   });
 
   it("creates a worker with explicit local Temporal options", async () => {
@@ -46,12 +71,83 @@ describe("hosted runtime Temporal worker", () => {
       namespace: "hosted-local",
       taskQueue: "hosted-runtime-local",
     }));
-    const workerOptions = create.mock.calls[0]?.[0] as {
-      workflowsPath?: unknown;
-    };
+    const workerOptions = readCreatedWorkerOptions();
     expect(String(workerOptions.workflowsPath)).toMatch(
       /workflows\/hosted-user-runtime\.(?:js|ts)$/u,
     );
+    expect(workerOptions.workflowBundle).toBeUndefined();
+    expect(workerOptions.shutdownGraceTime).toBeUndefined();
+    expect(workerOptions.shutdownForceTime).toBeUndefined();
+  });
+
+  it("uses the prebuilt workflow bundle and shutdown policy when NODE_ENV is production", async () => {
+    const {
+      createHostedUserRuntimeWorker,
+    } = await import("../src/worker.js");
+    const bundleDir = await mkdtemp(join(tmpdir(), "murph-temporal-worker-"));
+    const bundlePath = join(bundleDir, "workflow-bundle.js");
+
+    try {
+      await writeFile(bundlePath, "module.exports = {};");
+      process.env.NODE_ENV = "production";
+
+      await createHostedUserRuntimeWorker({
+        connection: { kind: "injected" } as never,
+        workflowBundlePath: bundlePath,
+      });
+
+      const workerOptions = readCreatedWorkerOptions();
+      expect(workerOptions.workflowBundle).toEqual({
+        codePath: bundlePath,
+      });
+      expect(workerOptions.workflowsPath).toBeUndefined();
+      expect(workerOptions.shutdownGraceTime).toBe(270_000);
+      expect(workerOptions.shutdownForceTime).toBe(295_000);
+    } finally {
+      await rm(bundleDir, { force: true, recursive: true });
+    }
+  });
+
+  it("uses shutdown env overrides when configured", async () => {
+    process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS = "120000";
+    process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS = "150000";
+    const {
+      createHostedUserRuntimeWorker,
+      readHostedUserRuntimeWorkerShutdownOptions,
+    } = await import("../src/worker.js");
+
+    await createHostedUserRuntimeWorker({
+      connection: { kind: "injected" } as never,
+      namespace: "hosted-local",
+    });
+
+    const workerOptions = readCreatedWorkerOptions();
+    expect(workerOptions.shutdownGraceTime).toBe(120_000);
+    expect(workerOptions.shutdownForceTime).toBe(150_000);
+    expect(readHostedUserRuntimeWorkerShutdownOptions({
+      HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS: "45000",
+      HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS: "30000",
+    })).toEqual({
+      shutdownForceTimeMs: 45_000,
+      shutdownGraceTimeMs: 30_000,
+    });
+    expect(() => readHostedUserRuntimeWorkerShutdownOptions({
+      HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS: "10000",
+      HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS: "30000",
+    })).toThrow(/greater than or equal/u);
+  });
+
+  it("fails production startup when the workflow bundle is missing", async () => {
+    const {
+      createHostedUserRuntimeWorker,
+    } = await import("../src/worker.js");
+
+    await expect(createHostedUserRuntimeWorker({
+      connection: { kind: "injected" } as never,
+      production: true,
+      workflowBundlePath: join(tmpdir(), "missing-murph-workflow-bundle.js"),
+    })).rejects.toThrow(/workflow bundle is missing/u);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("uses an injected connection and the default task queue", async () => {
@@ -86,3 +182,26 @@ describe("hosted runtime Temporal worker", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 });
+
+interface CreatedWorkerOptions {
+  shutdownForceTime?: unknown;
+  shutdownGraceTime?: unknown;
+  workflowBundle?: unknown;
+  workflowsPath?: unknown;
+}
+
+function readCreatedWorkerOptions(): CreatedWorkerOptions {
+  const call = create.mock.calls[0];
+  if (call === undefined) {
+    throw new Error("Worker.create was not called.");
+  }
+  return call[0] as CreatedWorkerOptions;
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}

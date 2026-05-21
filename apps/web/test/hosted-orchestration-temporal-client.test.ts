@@ -208,7 +208,7 @@ describe("hosted web Temporal signal client", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions(buildProcessEnv({
       HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
     }))).toEqual({
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 660_000,
       readRuntimeDemandStartToCloseTimeoutMs: 10_000,
       runtimeCompletedFailureRecheckDelayMs: 45_000,
     });

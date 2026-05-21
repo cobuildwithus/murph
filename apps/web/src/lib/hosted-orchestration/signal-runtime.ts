@@ -4,8 +4,6 @@ import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-  type HostedRuntimeDeviceSyncRecoveryReason,
-  type HostedRuntimeManualSignalSource,
   type HostedRuntimeSignal,
 } from "@murphai/hosted-execution";
 import {
@@ -48,24 +46,16 @@ export interface SignalHostedMailboxAppendInput {
 
 export interface SignalHostedDeviceSyncRecoveryInput {
   client?: HostedRuntimeTemporalSignalClient | null;
-  connectionId?: string | null;
-  eventId: string;
-  reason: HostedRuntimeDeviceSyncRecoveryReason;
   userId: string;
 }
 
 export interface SignalHostedBrowserVaultRefreshInput {
   client?: HostedRuntimeTemporalSignalClient | null;
-  eventId?: string | null;
-  source?: string | null;
   userId: string;
 }
 
 export interface SignalHostedManualRunInput {
   client?: HostedRuntimeTemporalSignalClient | null;
-  eventId?: string | null;
-  eventSource?: string | null;
-  source: HostedRuntimeManualSignalSource;
   userId: string;
 }
 
@@ -123,10 +113,7 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
     client: input.client,
     ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
-      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      eventId: input.eventId,
       kind: "device_sync_recovery_requested",
-      reason: input.reason,
     }),
     userId: input.userId,
   });
@@ -139,12 +126,6 @@ export async function signalHostedBrowserVaultRefreshRuntime(
     client: input.client,
     ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
-      eventId: input.eventId?.trim()
-        || buildHostedRuntimeSignalEventId(
-          "browser-vault-refresh",
-          input.source ?? "browser-vault-session",
-          input.userId,
-        ),
       kind: "browser_vault_refresh_requested",
     }),
     userId: input.userId,
@@ -158,15 +139,7 @@ export async function signalHostedManualRunRuntime(
     client: input.client,
     ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
-      eventId: input.eventId?.trim()
-        || buildHostedRuntimeSignalEventId(
-          "manual-run",
-          input.source,
-          input.eventSource ?? "manual",
-          input.userId,
-        ),
       kind: "manual_run_requested",
-      source: input.source,
     }),
     userId: input.userId,
   });
@@ -183,18 +156,12 @@ export async function signalHostedDeviceSyncMailboxRuntime(
     throw new Error("Hosted device-sync mailbox item is missing for runtime signal.");
   }
 
-  const recoveryReason = resolveHostedDeviceSyncRecoveryReason(
+  const shouldSignalRecovery = shouldSignalHostedDeviceSyncRecovery(
     input.recoveryIntent ?? null,
   );
-  if (recoveryReason) {
+  if (shouldSignalRecovery) {
     return signalHostedDeviceSyncRecoveryRuntime({
       client: input.client,
-      eventId: [
-        "device-sync-recovery",
-        recoveryReason,
-        mailboxItem.id,
-      ].join(":"),
-      reason: recoveryReason,
       userId: mailboxItem.userId,
     });
   }
@@ -263,23 +230,6 @@ export function sanitizeHostedRuntimeSignalSource(source: string): string {
   return safe || "unknown";
 }
 
-export function buildHostedRuntimeSignalEventId(
-  prefix: string,
-  ...parts: Array<string | null | undefined>
-): string {
-  const normalizedPrefix = sanitizeHostedRuntimeSignalSource(prefix);
-  const normalizedParts = parts.map((part) =>
-    sanitizeHostedRuntimeSignalSource(part ?? "unknown")
-  );
-  const eventId = [normalizedPrefix, ...normalizedParts]
-    .join(":")
-    .slice(0, 192)
-    .replace(/[^A-Za-z0-9._:-]+/gu, "-")
-    .replace(/[^A-Za-z0-9]+$/u, "");
-
-  return eventId || normalizedPrefix || "event";
-}
-
 function assertExpectedHostedMailboxOwner(input: {
   expectedUserId: string | null;
   mailboxItem: HostedMailboxItemCheckpointRecord;
@@ -293,16 +243,15 @@ function assertExpectedHostedMailboxOwner(input: {
   }
 }
 
-function resolveHostedDeviceSyncRecoveryReason(
+function shouldSignalHostedDeviceSyncRecovery(
   intent: HostedDeviceSyncRecoverySignalIntent | null,
-): HostedRuntimeDeviceSyncRecoveryReason | null {
+): boolean {
   switch (intent) {
     case "device-sync-dirty-recovery":
-      return "dirty";
     case "device-sync-reconcile-recovery":
-      return "reconcile";
+      return true;
     case null:
-      return null;
+      return false;
     default: {
       const exhaustive: never = intent;
       throw new Error(`Unsupported hosted device-sync recovery intent: ${String(exhaustive)}`);

@@ -63,8 +63,6 @@ describe("hosted local Temporal orchestration e2e", () => {
 
     const signal = await signalHostedManualRunRuntimeForTest({
       environment: activeScenario.runtimeEnv,
-      eventSource: "hosted-local-temporal-orchestration",
-      source: "test",
       userId,
     });
 

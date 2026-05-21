@@ -186,8 +186,6 @@ export async function nudgeHostedStripeWebhookActivationRunner(input: {
     },
   );
   const result = await signalHostedRuntimeManualWakeBestEffortResult({
-    eventSource: "stripe.webhook:workflow",
-    source: "admin",
     timeoutMs: input.timeoutMs,
     userId: hostedExecutionMemberId,
   });

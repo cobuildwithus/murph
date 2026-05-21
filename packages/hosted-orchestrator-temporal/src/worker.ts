@@ -6,6 +6,7 @@ import {
   NativeConnection,
   Worker,
   type NativeConnectionOptions,
+  type WorkerOptions,
 } from "@temporalio/worker";
 
 import * as activities from "./activities/index.js";
@@ -17,18 +18,39 @@ import {
 
 const require = createRequire(import.meta.url);
 
+export const HOSTED_TEMPORAL_WORKER_DEFAULT_SHUTDOWN_GRACE_MS = 270_000;
+export const HOSTED_TEMPORAL_WORKER_DEFAULT_SHUTDOWN_FORCE_MS = 295_000;
+
+type HostedUserRuntimeWorkerEnvSource =
+  Readonly<Record<string, string | undefined>>;
+
 export interface HostedUserRuntimeWorkerOptions {
   address?: string;
   apiKey?: string;
   connection?: NativeConnection;
   namespace?: string;
+  production?: boolean;
+  shutdownForceTimeMs?: number;
+  shutdownGraceTimeMs?: number;
   taskQueue?: string;
   tls?: HostedRuntimeTemporalTls;
+  workflowBundlePath?: string;
 }
 
 export async function createHostedUserRuntimeWorker(
   options: HostedUserRuntimeWorkerOptions = {},
 ): Promise<Worker> {
+  const production = options.production ?? process.env.NODE_ENV === "production";
+  const workflowCodeOptions = resolveHostedUserRuntimeWorkflowCodeOptions({
+    production,
+    workflowBundlePath: options.workflowBundlePath,
+  });
+  const workerShutdownOptions = resolveHostedUserRuntimeWorkerShutdownOptions({
+    production,
+    shutdownForceTimeMs: options.shutdownForceTimeMs,
+    shutdownGraceTimeMs: options.shutdownGraceTimeMs,
+    source: process.env,
+  });
   const connection =
     options.connection ??
     (await NativeConnection.connect(buildNativeConnectionOptions(options)));
@@ -38,7 +60,8 @@ export async function createHostedUserRuntimeWorker(
     connection,
     namespace: options.namespace ?? "default",
     taskQueue: options.taskQueue ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
-    workflowsPath: resolveHostedUserRuntimeWorkflowsPath(),
+    ...workflowCodeOptions,
+    ...workerShutdownOptions,
   });
 }
 
@@ -78,4 +101,177 @@ function resolveHostedUserRuntimeWorkflowsPath(): string {
     return sourcePath;
   }
   return require.resolve("./workflows/hosted-user-runtime.js");
+}
+
+function resolveHostedUserRuntimeWorkflowBundlePath(
+  explicitPath?: string,
+): string {
+  const bundlePath = explicitPath
+    ?? fileURLToPath(new URL("./workflow-bundle.js", import.meta.url));
+  if (!existsSync(bundlePath)) {
+    throw new Error(
+      "Hosted Temporal workflow bundle is missing. Run the hosted-orchestrator-temporal build before starting the production worker.",
+    );
+  }
+  return bundlePath;
+}
+
+function resolveHostedUserRuntimeWorkflowCodeOptions(input: {
+  production: boolean;
+  workflowBundlePath?: string;
+}): Pick<WorkerOptions, "workflowBundle" | "workflowsPath"> {
+  if (input.production) {
+    return {
+      workflowBundle: {
+        codePath: resolveHostedUserRuntimeWorkflowBundlePath(
+          input.workflowBundlePath,
+        ),
+      },
+    };
+  }
+
+  return {
+    workflowsPath: resolveHostedUserRuntimeWorkflowsPath(),
+  };
+}
+
+export interface HostedUserRuntimeWorkerShutdownOptions {
+  shutdownForceTimeMs: number;
+  shutdownGraceTimeMs: number;
+}
+
+export function readHostedUserRuntimeWorkerShutdownOptions(
+  source: HostedUserRuntimeWorkerEnvSource = process.env,
+): HostedUserRuntimeWorkerShutdownOptions {
+  const entries = readHostedUserRuntimeWorkerShutdownEnvEntries(source);
+  return parseHostedUserRuntimeWorkerShutdownOptions(entries);
+}
+
+function resolveHostedUserRuntimeWorkerShutdownOptions(input: {
+  production: boolean;
+  shutdownForceTimeMs?: number;
+  shutdownGraceTimeMs?: number;
+  source: HostedUserRuntimeWorkerEnvSource;
+}): Pick<WorkerOptions, "shutdownForceTime" | "shutdownGraceTime"> {
+  const entries = readHostedUserRuntimeWorkerShutdownEnvEntries(input.source);
+  if (
+    !input.production
+    && input.shutdownForceTimeMs === undefined
+    && input.shutdownGraceTimeMs === undefined
+    && !entries.hasPolicy
+  ) {
+    return {};
+  }
+
+  const envOptions = parseHostedUserRuntimeWorkerShutdownOptions(entries);
+  const shutdownGraceTimeMs =
+    input.shutdownGraceTimeMs ?? envOptions.shutdownGraceTimeMs;
+  const shutdownForceTimeMs =
+    input.shutdownForceTimeMs ?? envOptions.shutdownForceTimeMs;
+
+  assertPositiveInteger(shutdownGraceTimeMs, "shutdownGraceTimeMs");
+  assertPositiveInteger(shutdownForceTimeMs, "shutdownForceTimeMs");
+  assertShutdownForceCoversGrace({
+    shutdownForceTimeMs,
+    shutdownGraceTimeMs,
+  });
+
+  return {
+    shutdownForceTime: shutdownForceTimeMs,
+    shutdownGraceTime: shutdownGraceTimeMs,
+  };
+}
+
+interface HostedUserRuntimeWorkerShutdownEnvEntries {
+  hasPolicy: boolean;
+  shutdownForceEntry: { key: string; value: string } | null;
+  shutdownGraceEntry: { key: string; value: string } | null;
+}
+
+function readHostedUserRuntimeWorkerShutdownEnvEntries(
+  source: HostedUserRuntimeWorkerEnvSource,
+): HostedUserRuntimeWorkerShutdownEnvEntries {
+  const shutdownGraceEntry = readOptionalEnvEntry(
+    source,
+    "HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS",
+    "TEMPORAL_WORKER_SHUTDOWN_GRACE_MS",
+  );
+  const shutdownForceEntry = readOptionalEnvEntry(
+    source,
+    "HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS",
+    "TEMPORAL_WORKER_SHUTDOWN_FORCE_MS",
+  );
+  return {
+    hasPolicy: shutdownGraceEntry !== null || shutdownForceEntry !== null,
+    shutdownForceEntry,
+    shutdownGraceEntry,
+  };
+}
+
+function parseHostedUserRuntimeWorkerShutdownOptions(
+  entries: HostedUserRuntimeWorkerShutdownEnvEntries,
+): HostedUserRuntimeWorkerShutdownOptions {
+  const shutdownGraceTimeMs = parsePositiveIntegerEnvEntry(
+    entries.shutdownGraceEntry,
+    HOSTED_TEMPORAL_WORKER_DEFAULT_SHUTDOWN_GRACE_MS,
+  );
+  const shutdownForceTimeMs = parsePositiveIntegerEnvEntry(
+    entries.shutdownForceEntry,
+    HOSTED_TEMPORAL_WORKER_DEFAULT_SHUTDOWN_FORCE_MS,
+  );
+
+  assertShutdownForceCoversGrace({
+    shutdownForceTimeMs,
+    shutdownGraceTimeMs,
+  });
+
+  return {
+    shutdownForceTimeMs,
+    shutdownGraceTimeMs,
+  };
+}
+
+function readOptionalEnvEntry(
+  source: HostedUserRuntimeWorkerEnvSource,
+  ...keys: readonly string[]
+): { key: string; value: string } | null {
+  for (const key of keys) {
+    const value = source[key]?.trim();
+    if (value) {
+      return { key, value };
+    }
+  }
+  return null;
+}
+
+function parsePositiveIntegerEnvEntry(
+  entry: { key: string; value: string } | null,
+  fallback: number,
+): number {
+  if (entry === null) {
+    return fallback;
+  }
+  if (!/^[0-9]+$/u.test(entry.value)) {
+    throw new TypeError(`${entry.key} must be a positive integer.`);
+  }
+  const parsed = Number(entry.value);
+  assertPositiveInteger(parsed, entry.key);
+  return parsed;
+}
+
+function assertPositiveInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+}
+
+function assertShutdownForceCoversGrace(input: {
+  shutdownForceTimeMs: number;
+  shutdownGraceTimeMs: number;
+}): void {
+  if (input.shutdownForceTimeMs < input.shutdownGraceTimeMs) {
+    throw new TypeError(
+      "HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS must be greater than or equal to HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS.",
+    );
+  }
 }

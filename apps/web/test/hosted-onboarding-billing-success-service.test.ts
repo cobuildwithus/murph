@@ -251,8 +251,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     }));
 
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
-      eventSource: "stripe.checkout-success",
-      source: "user",
       userId: "member_123",
     });
   });

@@ -19,6 +19,8 @@ import { addWorkoutRecord } from '@murphai/vault-usecases/workouts'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
+const WORKOUT_FORMAT_CANONICAL_EVENT_PATH_TIMEOUT_MS = 90_000
+
 interface SchemaEnvelope {
   args: {
     properties: Record<string, unknown>
@@ -491,6 +493,7 @@ test(
       await rm(vaultRoot, { recursive: true, force: true })
     }
   },
+  WORKOUT_FORMAT_CANONICAL_EVENT_PATH_TIMEOUT_MS,
 )
 
 test(

@@ -40,58 +40,27 @@ describe("hosted orchestration control contracts", () => {
         source: "email:agentmail",
       },
       {
-        eventId: "manual_event_test",
         kind: "manual_run_requested",
-        source: "admin:console",
       },
       {
-        eventId: "browser_vault_event_test",
         kind: "browser_vault_refresh_requested",
       },
       {
-        connectionId: "connection_test",
-        eventId: "device_sync_event_test",
         kind: "device_sync_recovery_requested",
-        reason: "dirty",
       },
       {
-        eventId: "lag_event_test",
         kind: "mailbox_lag_observed",
-        source: "lag-sweeper:minute",
       },
     ];
 
     for (const signal of signals) {
       expect(parseHostedRuntimeSignal(signal)).toEqual(signal);
     }
-
-    expect(parseHostedRuntimeSignal({
-      eventId: "device_sync_event_without_connection_test",
-      kind: "device_sync_recovery_requested",
-      reason: "reconcile",
-    })).toEqual({
-      eventId: "device_sync_event_without_connection_test",
-      kind: "device_sync_recovery_requested",
-      reason: "reconcile",
-    });
-    expect(parseHostedRuntimeSignal({
-      connectionId: null,
-      eventId: "device_sync_event_null_connection_test",
-      kind: "device_sync_recovery_requested",
-      reason: "wake",
-    })).toEqual({
-      connectionId: null,
-      eventId: "device_sync_event_null_connection_test",
-      kind: "device_sync_recovery_requested",
-      reason: "wake",
-    });
   });
 
   it("rejects raw payload-shaped fields in runtime signals", () => {
     const baseSignal = {
-      eventId: "manual_event_test",
       kind: "manual_run_requested",
-      source: "test",
     };
 
     for (const field of [
@@ -110,11 +79,6 @@ describe("hosted orchestration control contracts", () => {
     }
 
     expect(() => parseHostedRuntimeSignal({
-      ...baseSignal,
-      eventId: "event with spaces",
-    })).toThrow(/bounded opaque identifier/u);
-
-    expect(() => parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: "conversation",
       laneSeq: "42",
@@ -128,18 +92,6 @@ describe("hosted orchestration control contracts", () => {
       laneSeq: "42",
       mailboxItemId: "mailbox_item_test",
       source: " ".repeat(1),
-    })).toThrow(/safe source string/u);
-
-    expect(() => parseHostedRuntimeSignal({
-      eventId: "manual_event_test",
-      kind: "manual_run_requested",
-      source: "Admin",
-    })).toThrow(/safe source string/u);
-
-    expect(() => parseHostedRuntimeSignal({
-      eventId: "lag_event_test",
-      kind: "mailbox_lag_observed",
-      source: "lag sweeper",
     })).toThrow(/safe source string/u);
   });
 

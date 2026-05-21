@@ -140,8 +140,6 @@ describe("settings telegram sync route", () => {
       sourceType: "settings.telegram.sync",
     });
     expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      eventSource: "settings.telegram.sync",
-      source: "user",
       userId: "member_123",
     });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");

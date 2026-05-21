@@ -9,6 +9,8 @@ const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
 const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS = 600_000;
 const DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS = 30_000;
+const MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
+export const HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS = 30_000;
 const DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
 const MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 3_600_000;
 
@@ -46,6 +48,11 @@ export interface HostedRuntimeTemporalWorkflowOptions {
   runtimeCompletedFailureRecheckDelayMs: number;
 }
 
+export interface HostedRuntimeEnsureCloudflareExecutionTimeouts {
+  ensureCloudflareExecutionHttpTimeoutMs: number;
+  ensureCloudflareExecutionStartToCloseTimeoutMs: number;
+}
+
 export function readHostedRuntimeTemporalEnvironment(
   source: HostedRuntimeTemporalEnvSource = process.env,
   options: HostedRuntimeTemporalEnvironmentOptions = {},
@@ -76,20 +83,12 @@ export function readHostedRuntimeTemporalEnvironment(
 export function readHostedRuntimeTemporalWorkflowOptions(
   source: HostedRuntimeTemporalEnvSource = process.env,
 ): HostedRuntimeTemporalWorkflowOptions {
-  const runnerTimeoutMs = parsePositiveInteger(
-    readOptionalEnv(source, "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS"),
-    DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS,
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-  );
-  const ensureExecutionTimeoutMarginMs = parsePositiveInteger(
-    readOptionalEnv(source, "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS"),
-    DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
-    "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS",
-  );
+  const ensureCloudflareExecutionTimeouts =
+    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     ensureCloudflareExecutionStartToCloseTimeoutMs:
-      runnerTimeoutMs + ensureExecutionTimeoutMarginMs,
+      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionStartToCloseTimeoutMs,
     readRuntimeDemandStartToCloseTimeoutMs: parseBoundedPositiveInteger(
       readOptionalEnv(source, "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS"),
       DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
@@ -105,6 +104,41 @@ export function readHostedRuntimeTemporalWorkflowOptions(
       MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
       "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS",
     ),
+  };
+}
+
+export function readHostedRuntimeEnsureCloudflareExecutionTimeouts(
+  source: HostedRuntimeTemporalEnvSource = process.env,
+): HostedRuntimeEnsureCloudflareExecutionTimeouts {
+  const runnerTimeoutMs = parsePositiveInteger(
+    readOptionalEnv(source, "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS"),
+    DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS,
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+  );
+  const ensureExecutionTimeoutMarginMs = parsePositiveInteger(
+    readOptionalEnv(source, "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS"),
+    DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
+    "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS",
+  );
+  const ensureCloudflareExecutionHttpTimeoutMs =
+    runnerTimeoutMs + ensureExecutionTimeoutMarginMs;
+  const ensureCloudflareExecutionStartToCloseTimeoutMs =
+    ensureCloudflareExecutionHttpTimeoutMs
+    + HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS;
+  if (
+    !Number.isSafeInteger(ensureCloudflareExecutionHttpTimeoutMs)
+    || !Number.isSafeInteger(ensureCloudflareExecutionStartToCloseTimeoutMs)
+    || ensureCloudflareExecutionStartToCloseTimeoutMs
+      > MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS plus HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS plus Temporal reporting slack must be less than or equal to 3600000.",
+    );
+  }
+
+  return {
+    ensureCloudflareExecutionHttpTimeoutMs,
+    ensureCloudflareExecutionStartToCloseTimeoutMs,
   };
 }
 
@@ -138,39 +172,27 @@ function readTemporalTlsConfig(
     "TEMPORAL_TLS_ENABLED",
   );
   const clientCert = readOptionalPemBuffer({
-    base64Keys: [
-      "HOSTED_TEMPORAL_CLIENT_CERT_BASE64",
-      "TEMPORAL_CLIENT_CERT_BASE64",
-    ],
+    hostedBase64Key: "HOSTED_TEMPORAL_CLIENT_CERT_BASE64",
+    hostedPemKey: "HOSTED_TEMPORAL_CLIENT_CERT_PEM",
     label: "TEMPORAL_CLIENT_CERT",
-    pemKeys: [
-      "HOSTED_TEMPORAL_CLIENT_CERT_PEM",
-      "TEMPORAL_CLIENT_CERT_PEM",
-    ],
+    legacyBase64Key: "TEMPORAL_CLIENT_CERT_BASE64",
+    legacyPemKey: "TEMPORAL_CLIENT_CERT_PEM",
     source,
   });
   const clientKey = readOptionalPemBuffer({
-    base64Keys: [
-      "HOSTED_TEMPORAL_CLIENT_KEY_BASE64",
-      "TEMPORAL_CLIENT_KEY_BASE64",
-    ],
+    hostedBase64Key: "HOSTED_TEMPORAL_CLIENT_KEY_BASE64",
+    hostedPemKey: "HOSTED_TEMPORAL_CLIENT_KEY_PEM",
     label: "TEMPORAL_CLIENT_KEY",
-    pemKeys: [
-      "HOSTED_TEMPORAL_CLIENT_KEY_PEM",
-      "TEMPORAL_CLIENT_KEY_PEM",
-    ],
+    legacyBase64Key: "TEMPORAL_CLIENT_KEY_BASE64",
+    legacyPemKey: "TEMPORAL_CLIENT_KEY_PEM",
     source,
   });
   const serverRootCa = readOptionalPemBuffer({
-    base64Keys: [
-      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
-      "TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
-    ],
+    hostedBase64Key: "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+    hostedPemKey: "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
     label: "TEMPORAL_SERVER_ROOT_CA_CERT",
-    pemKeys: [
-      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
-      "TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
-    ],
+    legacyBase64Key: "TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+    legacyPemKey: "TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
     source,
   });
   const serverNameOverride = readOptionalEnv(
@@ -241,23 +263,39 @@ function readOptionalBooleanEnv(
 }
 
 function readOptionalPemBuffer(input: {
-  base64Keys: readonly string[];
+  hostedBase64Key: string;
+  hostedPemKey: string;
   label: string;
-  pemKeys: readonly string[];
+  legacyBase64Key: string;
+  legacyPemKey: string;
   source: HostedRuntimeTemporalEnvSource;
 }): Buffer | null {
-  const pem = readOptionalEnv(input.source, ...input.pemKeys);
-  const base64 = readOptionalEnv(input.source, ...input.base64Keys);
-  if (pem !== null && base64 !== null) {
+  const hostedPem = readOptionalEnv(input.source, input.hostedPemKey);
+  const hostedBase64 = readOptionalEnv(input.source, input.hostedBase64Key);
+  if (hostedPem !== null && hostedBase64 !== null) {
     throw new TypeError(
       `${input.label}_PEM and ${input.label}_BASE64 are mutually exclusive.`,
     );
   }
-  if (pem !== null) {
-    return Buffer.from(pem, "utf8");
+  if (hostedPem !== null) {
+    return Buffer.from(hostedPem, "utf8");
   }
-  if (base64 !== null) {
-    return Buffer.from(base64, "base64");
+  if (hostedBase64 !== null) {
+    return Buffer.from(hostedBase64, "base64");
+  }
+
+  const legacyPem = readOptionalEnv(input.source, input.legacyPemKey);
+  const legacyBase64 = readOptionalEnv(input.source, input.legacyBase64Key);
+  if (legacyPem !== null && legacyBase64 !== null) {
+    throw new TypeError(
+      `${input.label}_PEM and ${input.label}_BASE64 are mutually exclusive.`,
+    );
+  }
+  if (legacyPem !== null) {
+    return Buffer.from(legacyPem, "utf8");
+  }
+  if (legacyBase64 !== null) {
+    return Buffer.from(legacyBase64, "base64");
   }
   return null;
 }

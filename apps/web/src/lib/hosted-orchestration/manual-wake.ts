@@ -1,7 +1,3 @@
-import type {
-  HostedRuntimeManualSignalSource,
-} from "@murphai/hosted-execution";
-
 import {
   formatHostedExecutionSafeLogError,
 } from "../hosted-execution/logging";
@@ -19,16 +15,12 @@ export interface HostedRuntimeManualWakeBestEffortResult {
 }
 
 export async function signalHostedRuntimeManualWakeBestEffort(input: {
-  eventSource: string;
-  source: HostedRuntimeManualSignalSource;
   userId: string;
 }): Promise<void> {
   await signalHostedRuntimeManualWakeBestEffortResult(input);
 }
 
 export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
-  eventSource: string;
-  source: HostedRuntimeManualSignalSource;
   timeoutMs?: number;
   userId: string;
 }): Promise<HostedRuntimeManualWakeBestEffortResult> {
@@ -36,8 +28,6 @@ export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
 
   try {
     const signal = await signalHostedManualRunRuntime({
-      eventSource: input.eventSource,
-      source: input.source,
       userId: input.userId,
     });
 

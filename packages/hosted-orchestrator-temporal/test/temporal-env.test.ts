@@ -142,7 +142,7 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
 describe("readHostedUserRuntimeWorkflowOptions", () => {
   it("includes an explicit failed-runtime completion recheck delay", () => {
     expect(readHostedUserRuntimeWorkflowOptions({})).toEqual({
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 660_000,
       readRuntimeDemandStartToCloseTimeoutMs: 10_000,
       runtimeCompletedFailureRecheckDelayMs: 30_000,
     });

@@ -14,13 +14,14 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
+import {
+  readHostedRuntimeEnsureCloudflareExecutionTimeouts,
+} from "@murphai/hosted-execution/temporal-env";
 import { ApplicationFailure } from "@temporalio/common";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
 const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
 const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
-const DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS = 600_000;
-const DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS = 30_000;
 const HOSTED_WEB_CALLBACK_SIGNING_IMPORT_ALGORITHM: EcKeyImportParams = {
   name: "ECDSA",
   namedCurve: "P-256",
@@ -35,7 +36,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export interface HostedOrchestratorTemporalActivityEnvironment {
   cloudflareHostedControlBaseUrl: string;
   cloudflareHostedControlSigning: HostedWebCallbackSigningEnvironment;
-  ensureCloudflareExecutionTimeoutMs: number;
+  ensureCloudflareExecutionHttpTimeoutMs: number;
   hostedWebBaseUrl: string;
   hostedWebCallbackSigning: HostedWebCallbackSigningEnvironment;
   readRuntimeDemandTimeoutMs: number;
@@ -64,16 +65,8 @@ const privateKeyCache = new Map<string, Promise<CryptoKey>>();
 export function readHostedOrchestratorTemporalActivityEnvironment(
   source: EnvSource = process.env,
 ): HostedOrchestratorTemporalActivityEnvironment {
-  const runnerTimeoutMs = parsePositiveInteger(
-    normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
-    DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS,
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-  );
-  const ensureExecutionTimeoutMarginMs = parsePositiveInteger(
-    normalizeHostedExecutionString(source.HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS),
-    DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
-    "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS",
-  );
+  const ensureCloudflareExecutionTimeouts =
+    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -81,8 +74,8 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
-    ensureCloudflareExecutionTimeoutMs:
-      runnerTimeoutMs + ensureExecutionTimeoutMarginMs,
+    ensureCloudflareExecutionHttpTimeoutMs:
+      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
     hostedWebBaseUrl: requireWebOriginBaseUrl(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
@@ -103,18 +96,10 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
   HostedOrchestratorTemporalActivityEnvironment,
   | "cloudflareHostedControlBaseUrl"
   | "cloudflareHostedControlSigning"
-  | "ensureCloudflareExecutionTimeoutMs"
+  | "ensureCloudflareExecutionHttpTimeoutMs"
 > {
-  const runnerTimeoutMs = parsePositiveInteger(
-    normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
-    DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS,
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-  );
-  const ensureExecutionTimeoutMarginMs = parsePositiveInteger(
-    normalizeHostedExecutionString(source.HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS),
-    DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
-    "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS",
-  );
+  const ensureCloudflareExecutionTimeouts =
+    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -122,8 +107,8 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
-    ensureCloudflareExecutionTimeoutMs:
-      runnerTimeoutMs + ensureExecutionTimeoutMarginMs,
+    ensureCloudflareExecutionHttpTimeoutMs:
+      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
   };
 }
 

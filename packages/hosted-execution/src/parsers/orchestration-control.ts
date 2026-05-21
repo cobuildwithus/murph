@@ -9,7 +9,6 @@ import {
   HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS,
   HOSTED_RUNTIME_DEMAND_KINDS,
   HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
-  HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS,
   HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeDemand,
@@ -67,81 +66,38 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
     }
     case "manual_run_requested": {
       assertExactKeys(record, "Hosted runtime manual-run signal", [
-        "eventId",
         "kind",
-        "source",
       ]);
 
       return {
-        eventId: requireOpaqueIdentifier(
-          record.eventId,
-          "Hosted runtime manual-run signal eventId",
-        ),
         kind,
-        source: requireSafeRuntimeSignalSource(
-          record.source,
-          "Hosted runtime manual-run signal source",
-        ),
       };
     }
     case "browser_vault_refresh_requested": {
       assertExactKeys(record, "Hosted runtime browser-vault refresh signal", [
-        "eventId",
         "kind",
       ]);
 
       return {
-        eventId: requireOpaqueIdentifier(
-          record.eventId,
-          "Hosted runtime browser-vault refresh signal eventId",
-        ),
         kind,
       };
     }
     case "device_sync_recovery_requested": {
       assertExactKeys(record, "Hosted runtime device-sync recovery signal", [
-        "connectionId",
-        "eventId",
         "kind",
-        "reason",
       ]);
 
-      const connectionId = readOptionalNullableOpaqueIdentifier(
-        record.connectionId,
-        "Hosted runtime device-sync recovery signal connectionId",
-      );
-
       return {
-        ...(connectionId === undefined ? {} : { connectionId }),
-        eventId: requireOpaqueIdentifier(
-          record.eventId,
-          "Hosted runtime device-sync recovery signal eventId",
-        ),
         kind,
-        reason: parseAllowedString(
-          record.reason,
-          "Hosted runtime device-sync recovery signal reason",
-          HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS,
-        ),
       };
     }
     case "mailbox_lag_observed": {
       assertExactKeys(record, "Hosted runtime mailbox-lag signal", [
-        "eventId",
         "kind",
-        "source",
       ]);
 
       return {
-        eventId: requireOpaqueIdentifier(
-          record.eventId,
-          "Hosted runtime mailbox-lag signal eventId",
-        ),
         kind,
-        source: requireSafeRuntimeSignalSource(
-          record.source,
-          "Hosted runtime mailbox-lag signal source",
-        ),
       };
     }
     default: {
@@ -491,19 +447,6 @@ function parseHostedWorkspaceInvocationStatus(
   label: string,
 ): HostedWorkspaceInvocationStatus {
   return parseAllowedString(value, label, HOSTED_WORKSPACE_INVOCATION_STATUSES);
-}
-
-function readOptionalNullableOpaqueIdentifier(
-  value: unknown,
-  label: string,
-): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  return requireOpaqueIdentifier(value, label);
 }
 
 function requireOpaqueIdentifier(value: unknown, label: string): string {

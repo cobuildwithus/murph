@@ -109,8 +109,6 @@ async function nudgeHostedCheckoutSuccessActivationRunner(input: {
   }
 
   await signalHostedRuntimeManualWakeBestEffort({
-    eventSource: "stripe.checkout-success",
-    source: "user",
     userId: input.activatedMemberId,
   });
 }

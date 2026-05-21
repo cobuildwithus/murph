@@ -21,6 +21,7 @@ describe("ensureCloudflareExecution", () => {
 
   it("posts a parsed Cloudflare ensure-execution request without usage fields when not required", async () => {
     await stubCloudflareEnvironment();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
     const response: HostedRuntimeEnsureExecutionResponse = {
       kind: "runtime_wake_sent",
@@ -57,6 +58,7 @@ describe("ensureCloudflareExecution", () => {
     });
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
+    expect(timeoutSpy).toHaveBeenCalledWith(125_000);
   });
 
   it("posts only the minimal Cloudflare ensure-execution request", async () => {

@@ -681,6 +681,25 @@ Updated: 2026-04-24
     expect(workspaceVerify).toContain(
       'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"',
     )
+    expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE')
+    expect(workspaceVerify).toContain(
+      'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
+    )
+    expect(workspaceVerify).toContain(
+      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
+    )
+    expect(workspaceVerify).toContain(
+      'run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1',
+    )
+    expect(
+      workspaceVerify.indexOf(
+        'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
+      ),
+    ).toBeLessThan(
+      workspaceVerify.indexOf(
+        'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
+      ),
+    )
   })
 
   it('runs release checks directly instead of through an env-overridable shell command', () => {

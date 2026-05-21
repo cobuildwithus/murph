@@ -155,8 +155,6 @@ export async function upgradeHostedBillingPlan(input: {
       targetPlanCode,
     });
     await signalHostedRuntimeManualWakeBestEffort({
-      eventSource: "billing.plan-upgrade",
-      source: "user",
       userId: input.memberId,
     });
 
@@ -222,8 +220,6 @@ export async function upgradeHostedBillingPlan(input: {
     targetPlanCode,
   });
   await signalHostedRuntimeManualWakeBestEffort({
-    eventSource: "billing.plan-upgrade",
-    source: "user",
     userId: input.memberId,
   });
 
