@@ -11,8 +11,6 @@ import {
   HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
   HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS,
   HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
-  HOSTED_RUNTIME_LAG_SIGNAL_SOURCES,
-  HOSTED_RUNTIME_MANUAL_SIGNAL_SOURCES,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
@@ -61,7 +59,7 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
           record.mailboxItemId,
           "Hosted runtime mailbox signal mailboxItemId",
         ),
-        source: requireSafeMailboxSignalSource(
+        source: requireSafeRuntimeSignalSource(
           record.source,
           "Hosted runtime mailbox signal source",
         ),
@@ -80,10 +78,9 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
           "Hosted runtime manual-run signal eventId",
         ),
         kind,
-        source: parseAllowedString(
+        source: requireSafeRuntimeSignalSource(
           record.source,
           "Hosted runtime manual-run signal source",
-          HOSTED_RUNTIME_MANUAL_SIGNAL_SOURCES,
         ),
       };
     }
@@ -141,10 +138,9 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
           "Hosted runtime mailbox-lag signal eventId",
         ),
         kind,
-        source: parseAllowedString(
+        source: requireSafeRuntimeSignalSource(
           record.source,
           "Hosted runtime mailbox-lag signal source",
-          HOSTED_RUNTIME_LAG_SIGNAL_SOURCES,
         ),
       };
     }
@@ -385,12 +381,10 @@ export function parseHostedRuntimeEnsureExecutionResponse(
           record.runtimeResultNextWakeAt,
           "Hosted runtime completed response runtimeResultNextWakeAt",
         ),
-        runtimeResultNextWakeReason: record.runtimeResultNextWakeReason === undefined
-          ? null
-          : readRequiredNullableBoundedString(
-              record.runtimeResultNextWakeReason,
-              "Hosted runtime completed response runtimeResultNextWakeReason",
-            ),
+        runtimeResultNextWakeReason: readRequiredNullableBoundedString(
+          record.runtimeResultNextWakeReason,
+          "Hosted runtime completed response runtimeResultNextWakeReason",
+        ),
         runtimeStatus: parseHostedWorkspaceInvocationStatus(
           record.runtimeStatus,
           "Hosted runtime completed response runtimeStatus",
@@ -522,7 +516,7 @@ function requireOpaqueIdentifier(value: unknown, label: string): string {
   return text;
 }
 
-function requireSafeMailboxSignalSource(value: unknown, label: string): string {
+function requireSafeRuntimeSignalSource(value: unknown, label: string): string {
   const text = requireString(value, label);
 
   if (

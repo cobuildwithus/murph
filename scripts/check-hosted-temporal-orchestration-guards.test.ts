@@ -19,6 +19,28 @@ describe("check-hosted-temporal-orchestration-guards", () => {
     ]);
   });
 
+  it("flags legacy Cloudflare local ensure loop state in production source", () => {
+    for (const token of [
+      "localEnsureInFlight",
+      "retiredEnsurePromises",
+      "retireCurrentEnsurePromise",
+    ]) {
+      expect(
+        findHostedTemporalGuardFindings(
+          "apps/cloudflare/src/user-runner.ts",
+          `private ${token}: Promise<unknown> | null = null;`,
+        ),
+      ).toEqual([
+        {
+          filePath: "apps/cloudflare/src/user-runner.ts",
+          label: "legacy Cloudflare local ensure loop state",
+          line: 1,
+          token,
+        },
+      ]);
+    }
+  });
+
   it("flags legacy Vercel hosted nudge workflow helpers in web source", () => {
     expect(
       findHostedTemporalGuardFindings(

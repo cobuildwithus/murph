@@ -192,6 +192,11 @@ non-model maintenance reasons can run ungated when they are not masking a due
 model-capable workspace wake, while unknown or model-capable reasons are gated
 before execution.
 
+Usage and product policy blocks are successful demand reads with
+`kind: "blocked"`, never Temporal activity failures. Transport, auth, parser,
+and availability failures remain activity exceptions and keep the normal
+Temporal retry/error semantics.
+
 The demand endpoint owns stale workspace wake suppression. If the supplied
 `ignoredWorkspaceWakeKey` matches the current workspace wake projection and no
 mailbox lag or explicit signal requires work, demand should idle rather than

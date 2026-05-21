@@ -42,7 +42,7 @@ describe("hosted orchestration control contracts", () => {
       {
         eventId: "manual_event_test",
         kind: "manual_run_requested",
-        source: "admin",
+        source: "admin:console",
       },
       {
         eventId: "browser_vault_event_test",
@@ -57,7 +57,7 @@ describe("hosted orchestration control contracts", () => {
       {
         eventId: "lag_event_test",
         kind: "mailbox_lag_observed",
-        source: "lag-sweeper",
+        source: "lag-sweeper:minute",
       },
     ];
 
@@ -128,6 +128,18 @@ describe("hosted orchestration control contracts", () => {
       laneSeq: "42",
       mailboxItemId: "mailbox_item_test",
       source: " ".repeat(1),
+    })).toThrow(/safe source string/u);
+
+    expect(() => parseHostedRuntimeSignal({
+      eventId: "manual_event_test",
+      kind: "manual_run_requested",
+      source: "Admin",
+    })).toThrow(/safe source string/u);
+
+    expect(() => parseHostedRuntimeSignal({
+      eventId: "lag_event_test",
+      kind: "mailbox_lag_observed",
+      source: "lag sweeper",
     })).toThrow(/safe source string/u);
   });
 
@@ -310,20 +322,15 @@ describe("hosted orchestration control contracts", () => {
       runtimeResultNextWakeReason: null,
       runtimeStatus: "scheduled",
     });
-    expect(parseHostedRuntimeEnsureExecutionResponse({
+    expect(() => parseHostedRuntimeEnsureExecutionResponse({
       action: "started",
       kind: "runtime_completed",
       runtimeAttemptId: "runtime_attempt_missing_reason_test",
       runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
       runtimeStatus: "idle",
-    })).toEqual({
-      action: "started",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_missing_reason_test",
-      runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
-    });
+    })).toThrow(
+      "Hosted runtime completed response runtimeResultNextWakeReason must be a string or null.",
+    );
   });
 
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-execution contracts", () => {
