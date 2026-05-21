@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { Cli } from 'incur'
 import { z } from 'zod'
 
@@ -16,8 +17,9 @@ export interface VaultOverrideParseResult {
 
 const DEFAULT_MISSING_VAULT_MESSAGE =
   'No vault was provided. Pass --vault <path> or select a default vault before running this command.'
+const FETCH_VAULT_HEADER = 'x-murph-vault'
 
-const vaultContextRunWrapped = Symbol('murph.vaultContextRunWrapped')
+const invocationStorage = new AsyncLocalStorage<VaultCliInvocationContext>()
 
 type CommandMap = ReadonlyMap<string, unknown>
 type CommandRun = (context: CommandRunContext) => unknown
@@ -40,7 +42,11 @@ interface CommandDefinitionEntry {
   options?: z.ZodObject<z.ZodRawShape>
   run: CommandRun
   usage?: unknown
-  [vaultContextRunWrapped]?: true
+}
+
+interface VaultCliInvocationContext {
+  missingVaultMessage: string | null
+  vault: string | null
 }
 
 export function createVaultCliVaultContext(
@@ -64,15 +70,20 @@ export function installVaultCliVaultContext(
   const serve = cli.serve.bind(cli)
   cli.serve = async (argv = process.argv.slice(2), options = {}) => {
     const parsed = extractVaultOverride(argv)
-    const previousVault = context.current
-    if (parsed.explicit) {
-      context.current = parsed.vault
-    }
+    await invocationStorage.run(
+      resolveInvocationContext(context, parsed.vault),
+      () => serve(parsed.argv, options),
+    )
+  }
 
-    try {
-      await serve(parsed.argv, options)
-    } finally {
-      context.current = previousVault
+  if (typeof cli.fetch === 'function') {
+    const fetch = cli.fetch.bind(cli)
+    cli.fetch = async (request) => {
+      const parsed = extractFetchVaultOverride(request)
+      return await invocationStorage.run(
+        resolveInvocationContext(context, parsed.vault),
+        () => fetch(parsed.request),
+      )
     }
   }
 }
@@ -164,17 +175,16 @@ function installVaultContextOnCommands(
     entry.examples = stripVaultFromExamples(entry.examples)
     entry.usage = stripVaultFromExamples(entry.usage)
 
-    if (entry[vaultContextRunWrapped]) {
-      continue
-    }
-
     const run = entry.run
     entry.run = (runContext) => {
-      const vault = context.current
+      const invocationContext = invocationStorage.getStore()
+      const vault = invocationContext?.vault ?? context.current
       if (vault === null || vault.length === 0) {
         throw new VaultCliError(
           'missing_vault',
-          context.missingVaultMessage ?? DEFAULT_MISSING_VAULT_MESSAGE,
+          invocationContext?.missingVaultMessage ??
+            context.missingVaultMessage ??
+            DEFAULT_MISSING_VAULT_MESSAGE,
         )
       }
 
@@ -186,7 +196,55 @@ function installVaultContextOnCommands(
         },
       })
     }
-    entry[vaultContextRunWrapped] = true
+  }
+}
+
+function resolveInvocationContext(
+  context: VaultCliVaultContext,
+  vaultOverride: string | null,
+): VaultCliInvocationContext {
+  return {
+    missingVaultMessage: context.missingVaultMessage,
+    vault: vaultOverride ?? context.current,
+  }
+}
+
+function extractFetchVaultOverride(request: Request): {
+  request: Request
+  vault: string | null
+} {
+  const headerVault = request.headers.get(FETCH_VAULT_HEADER)
+  const url = new URL(request.url)
+  const queryVaults = url.searchParams.getAll('vault')
+  let vault: string | null = null
+
+  for (const value of [headerVault, ...queryVaults]) {
+    if (value === null) {
+      continue
+    }
+
+    if (vault !== null) {
+      throw new VaultCliError('invalid_option', 'Pass vault only once.')
+    }
+
+    if (value.length === 0) {
+      throw new VaultCliError('invalid_option', 'Missing value for vault.')
+    }
+
+    vault = value
+  }
+
+  if (queryVaults.length === 0) {
+    return {
+      request,
+      vault,
+    }
+  }
+
+  url.searchParams.delete('vault')
+  return {
+    request: new Request(url, request),
+    vault,
   }
 }
 

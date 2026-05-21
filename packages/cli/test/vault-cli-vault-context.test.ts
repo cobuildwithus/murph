@@ -3,11 +3,17 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import { Cli } from 'incur'
 import { initializeVault } from '@murphai/core'
 import { afterEach, test } from 'vitest'
+import { z } from 'zod'
 
 import { createVaultCli } from '../src/vault-cli.js'
-import { extractVaultOverride } from '../src/vault-cli-vault-context.js'
+import {
+  createVaultCliVaultContext,
+  extractVaultOverride,
+  installVaultCliVaultContext,
+} from '../src/vault-cli-vault-context.js'
 import { runInProcessJsonCli } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -57,6 +63,80 @@ test('vault context hides vault from command schemas and injects it at execution
   ])
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
+})
+
+test('vault context injects vault for fetch transport without command-level vault schema', async () => {
+  const { parentRoot, vaultRoot } = await createInitializedVault('murph-vault-fetch-')
+  cleanupPaths.push(parentRoot)
+  const cli = createVaultCli()
+
+  const response = await cli.fetch(
+    new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`),
+  )
+  assert.equal(response.status, 200)
+
+  const envelope = await response.json() as unknown
+  assert.ok(isRecord(envelope))
+  assert.equal(envelope.ok, true)
+
+  const data = getRecord(envelope, 'data')
+  assert.equal(data.vault, vaultRoot)
+})
+
+test('vault context keeps overlapping serve invocations isolated', async () => {
+  const cli = Cli.create('test-cli')
+  const firstMiddlewarePaused = createDeferred()
+  const firstMiddlewareGate = createDeferred()
+  let middlewareEntrances = 0
+
+  cli.use(async (_context, next) => {
+    middlewareEntrances += 1
+    if (middlewareEntrances === 1) {
+      firstMiddlewarePaused.resolve()
+      await firstMiddlewareGate.promise
+    }
+    await next()
+  })
+
+  cli.command('read-vault', {
+    options: z.object({
+      vault: z.string().min(1),
+    }),
+    output: z.object({
+      vault: z.string(),
+    }),
+    run(context) {
+      return {
+        vault: context.options.vault,
+      }
+    },
+  })
+
+  installVaultCliVaultContext(cli, createVaultCliVaultContext())
+
+  const first = captureJson(cli, [
+    'read-vault',
+    '--vault',
+    '/vaults/first',
+    '--format',
+    'json',
+  ])
+  await firstMiddlewarePaused.promise
+
+  const second = await captureJson(cli, [
+    'read-vault',
+    '--vault',
+    '/vaults/second',
+    '--format',
+    'json',
+  ])
+  assert.ok(isRecord(second))
+  assert.equal(second.vault, '/vaults/second')
+
+  firstMiddlewareGate.resolve()
+  const firstResult = await first
+  assert.ok(isRecord(firstResult))
+  assert.equal(firstResult.vault, '/vaults/first')
 })
 
 test('vault override parsing is a single boundary option, not a command option', () => {
@@ -174,7 +254,7 @@ async function createInitializedVault(prefix: string): Promise<{
   }
 }
 
-async function captureJson(cli: ReturnType<typeof createVaultCli>, argv: string[]): Promise<unknown> {
+async function captureJson(cli: Cli.Cli, argv: string[]): Promise<unknown> {
   const output: string[] = []
   let exitCode: number | null = null
 
@@ -189,6 +269,26 @@ async function captureJson(cli: ReturnType<typeof createVaultCli>, argv: string[
 
   assert.equal(exitCode, null)
   return JSON.parse(output.join('').trim()) as unknown
+}
+
+function createDeferred(): {
+  promise: Promise<void>
+  resolve: () => void
+} {
+  let resolvePromise: (() => void) | null = null
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve
+  })
+
+  return {
+    promise,
+    resolve() {
+      if (resolvePromise === null) {
+        assert.fail('Deferred promise was not initialized.')
+      }
+      resolvePromise()
+    },
+  }
 }
 
 function getRecord(source: unknown, key: string): Record<string, unknown> {
