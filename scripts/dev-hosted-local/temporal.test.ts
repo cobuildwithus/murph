@@ -189,13 +189,13 @@ describe("hosted-local Temporal lifecycle", () => {
         "bash",
         ["scripts/temporal-dev-server.sh"],
         expect.objectContaining({
-          TEMPORAL_DEV_HEADLESS: "1",
           TEMPORAL_DEV_IP: "127.0.0.1",
           TEMPORAL_DEV_PORT: String(port),
           TEMPORAL_NAMESPACE: "hosted-managed",
         }),
         expect.any(Object),
       );
+      expect(serverCall?.[3]).not.toHaveProperty("TEMPORAL_DEV_HEADLESS");
       expect(spawnChildProcessMock).toHaveBeenCalledWith(
         "temporal-worker",
         "pnpm",
@@ -213,6 +213,52 @@ describe("hosted-local Temporal lifecycle", () => {
 
       await runtime?.stop();
       expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("passes the explicit managed-server headless escape hatch through", async () => {
+    const port = await reserveLocalTcpPort();
+    const server = net.createServer();
+    spawnChildProcessMock.mockImplementation((name) => {
+      if (name === "temporal-server") {
+        server.listen(port, "127.0.0.1");
+      }
+
+      return createBufferedChild({
+        exitCode: null,
+        name,
+        pid: name === "temporal-server" ? 211 : 212,
+      });
+    });
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    try {
+      const runtime = await startHostedLocalTemporalRuntime({
+        cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",
+        config: {
+          ...baseConfig,
+          temporal: {
+            host: "127.0.0.1",
+            mode: "managed",
+            namespace: "hosted-managed",
+            port,
+            taskQueue: "hosted-managed-queue",
+          },
+        },
+        env: {
+          TEMPORAL_DEV_HEADLESS: "1",
+        },
+        hostedWebBaseUrl: "http://localhost:3000",
+      });
+
+      const serverCall = spawnChildProcessMock.mock.calls.find(([name]) => name === "temporal-server");
+      expect(serverCall?.[3]).toMatchObject({
+        TEMPORAL_DEV_HEADLESS: "1",
+      });
+
+      await runtime?.stop();
     } finally {
       await closeServer(server);
     }

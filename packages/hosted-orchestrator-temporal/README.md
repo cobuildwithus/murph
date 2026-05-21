@@ -26,6 +26,12 @@ hosted-local stack:
 pnpm hosted-local e2e temporal-orchestration --profile e2e:stub
 ```
 
+Interactive `pnpm dev` exposes the managed Temporal Web UI at
+`http://127.0.0.1:8233` by default. If you override `MURPH_DEV_TEMPORAL_PORT`,
+the UI uses that port plus `1000`, matching Temporal CLI defaults. Set
+`TEMPORAL_DEV_HEADLESS=1` only when you intentionally want the managed local
+server without the dashboard.
+
 That scenario signals through the web Temporal client, queries the workflow, and
 expects the worker Activities to reach the hosted web demand endpoint and the
 Cloudflare ensure-execution adapter.
