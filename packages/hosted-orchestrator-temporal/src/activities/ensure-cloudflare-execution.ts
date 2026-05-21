@@ -27,6 +27,11 @@ const CLOUDFLARE_RUNTIME_ENSURE_EXECUTION_PATH_PREFIX = "/internal/users/";
 const CLOUDFLARE_RUNTIME_ENSURE_EXECUTION_PATH_SUFFIX =
   "/runtime/ensure-execution";
 
+/**
+ * @deprecated Legacy replay/deploy-skew Activity. Normal orchestration uses
+ * `ensureRuntimeProcessing`. Target removal: 2026-06-04 after old hosted user
+ * runtime histories drain.
+ */
 export async function ensureCloudflareExecution(
   request: EnsureCloudflareExecutionInput,
 ): Promise<HostedRuntimeEnsureExecutionResponse> {

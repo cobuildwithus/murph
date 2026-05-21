@@ -226,9 +226,9 @@ Important schedule rules:
 - While a switch is pending, the first version should reject additional in-app plan changes rather than trying to merge intents.
 - Treat the initial request as scheduling only. It must not call the subscription
   event reconciler or update current entitlement, current plan, usage allowance,
-  usage period, or runner state. Entitlement changes, usage allowance reduction,
-  and runner nudges happen only after subscription reconciliation observes
-  Stripe's applied Pulse prices.
+  usage period, or runtime state. Entitlement changes, usage allowance reduction,
+  and Temporal runtime signals happen only after subscription reconciliation
+  observes Stripe's applied Pulse prices.
 
 First version supports only canonical hosted subscriptions with exactly the known hosted plan items:
 
@@ -294,7 +294,8 @@ When the scheduled phase starts and Stripe updates the subscription to Pulse:
 - subscription reconciliation updates `currentBillingPlanCode` to `launch_monthly`
 - pending schedule fields are cleared
 - usage allowance resolves to Pulse
-- runner nudges happen after committed entitlement change, not during the initial schedule request
+- Temporal runtime signals happen after committed entitlement change, not during
+  the initial schedule request
 
 Do not create local pending state from a schedule webhook based only on Stripe metadata.
 

@@ -163,7 +163,8 @@ Activity HTTP targets:
   `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: legacy
   ensure-execution timeout inputs retained only for replay/deploy-skew
   compatibility. Normal hosted runtime processing uses
-  `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`.
+  `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`. Target removal is 2026-06-04 after
+  legacy hosted user runtime histories drain.
 
 Worker shutdown:
 

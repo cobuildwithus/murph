@@ -246,7 +246,9 @@ Temporal observes completion by re-reading web-owned demand/status after the
 recommended recheck or any newer signal. Runtime wake and retry facts that matter
 to product behavior must be reflected in durable web/runtime state, not returned
 as the command result. Legacy `runtime_completed` and `runtime_wake_sent`
-responses remain replay/deploy-skew compatibility only.
+responses remain replay/deploy-skew compatibility only. Target removal is
+2026-06-04, after Temporal visibility confirms no open hosted user runtime
+histories still depend on the legacy `ensure-execution` branch.
 
 ## Cloudflare Execution Adapter Contract
 
