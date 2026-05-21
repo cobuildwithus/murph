@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v11" as const;
+  "murph.age.research-calculator-view.v12" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v3" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
@@ -1294,6 +1294,25 @@ export interface MurphAgeResearchArbiterView {
   wearableScorePolicy: "context-only-not-score-bearing";
 }
 
+export type MurphAgeResearchLayeredAgeEstimateStatus =
+  | "selected-card-only"
+  | "wearable-shadow-applied";
+
+export interface MurphAgeResearchLayeredAgeEstimateView {
+  ageDeltaYears: number | null;
+  appliedLayerIds: MurphAgeResearchLayerId[];
+  basis: "selected-card-risk-age" | "wearable-shadow-risk-age";
+  biologicalAgeYears: number | null;
+  chronologicalAgeYears: number;
+  intervalYears: { high: number; low: number } | null;
+  productAuthorized: false;
+  residualDeltaYears: number | null;
+  residualScoreContributionAuthorized: false;
+  riskProbability: number | null;
+  status: MurphAgeResearchLayeredAgeEstimateStatus;
+  uncertaintyStatus: "not-reestimated-for-shadow" | "selected-card-interval";
+}
+
 export interface MurphAgeResearchCalculatorView {
   ageEstimate: MurphAgePublicAgeEstimateView | null;
   arbiter: MurphAgeResearchArbiterView;
@@ -1306,6 +1325,7 @@ export interface MurphAgeResearchCalculatorView {
   missingFeatureKeys: string[];
   mode: MurphAgeCalculatorMode;
   model: MurphAgeResearchModelStatusView;
+  layeredAgeEstimate: MurphAgeResearchLayeredAgeEstimateView | null;
   product: {
     ageDisplayReady: boolean;
     promotionBlockers: MurphAgeProductPromotionBlocker[];
@@ -7311,6 +7331,11 @@ export function buildMurphAgeResearchCalculatorView(
     missingFeatureKeys: [...summary.missingFeatureKeys],
     mode: report.mode,
     model: modelStatus,
+    layeredAgeEstimate: buildMurphAgeResearchLayeredAgeEstimateView({
+      modelStatus,
+      report,
+      result,
+    }),
     product: {
       ageDisplayReady: summary.productAgeDisplayReady,
       productUseAuthorized: false,
@@ -7410,6 +7435,53 @@ function buildMurphAgePublicWearableCalculatorView(
     scorePolicy: summarizeMurphAgeWearableScoreBearingStrategy(),
     secondPriorityIncompleteFeatureKeys: [...summary.wearableBridge.secondPriorityIncompleteFeatureKeys],
     secondPriorityReadyFeatureKeys: [...summary.wearableBridge.secondPriorityReadyFeatureKeys],
+  };
+}
+
+function buildMurphAgeResearchLayeredAgeEstimateView(input: {
+  modelStatus: MurphAgeResearchModelStatusView;
+  report: MurphAgePublicCalculatorReport;
+  result: MurphAgePublicResult | null;
+}): MurphAgeResearchLayeredAgeEstimateView | null {
+  if (!input.result) return null;
+  const wearableShadow = input.report.wearableResidualLayer;
+  if (
+    wearableShadow?.status === "research-parameterized-shadow-delta"
+    && wearableShadow.finalRiskAgeEquivalentYears !== null
+    && wearableShadow.finalRiskProbability !== null
+  ) {
+    return {
+      ageDeltaYears: roundYears(wearableShadow.finalRiskAgeEquivalentYears - input.result.chronologicalAgeYears),
+      appliedLayerIds: [
+        ...input.modelStatus.layeredResearchPath.activeResearchScoreLayerIds,
+        "wearable-activity-residual",
+      ],
+      basis: "wearable-shadow-risk-age",
+      biologicalAgeYears: wearableShadow.finalRiskAgeEquivalentYears,
+      chronologicalAgeYears: input.result.chronologicalAgeYears,
+      intervalYears: null,
+      productAuthorized: false,
+      residualDeltaYears: wearableShadow.residualDeltaYears,
+      residualScoreContributionAuthorized: false,
+      riskProbability: wearableShadow.finalRiskProbability,
+      status: "wearable-shadow-applied",
+      uncertaintyStatus: "not-reestimated-for-shadow",
+    };
+  }
+
+  return {
+    ageDeltaYears: input.result.ageDeltaYears,
+    appliedLayerIds: [...input.modelStatus.layeredResearchPath.activeResearchScoreLayerIds],
+    basis: "selected-card-risk-age",
+    biologicalAgeYears: input.result.biologicalAgeYears,
+    chronologicalAgeYears: input.result.chronologicalAgeYears,
+    intervalYears: input.result.intervalYears ? { ...input.result.intervalYears } : null,
+    productAuthorized: false,
+    residualDeltaYears: null,
+    residualScoreContributionAuthorized: false,
+    riskProbability: input.result.risk?.probability ?? null,
+    status: "selected-card-only",
+    uncertaintyStatus: "selected-card-interval",
   };
 }
 
