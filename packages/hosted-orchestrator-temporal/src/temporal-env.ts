@@ -17,25 +17,39 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export interface HostedRuntimeTemporalEnvironment {
   address: string;
+  apiKey?: string;
   namespace: string;
   taskQueue: string;
-  tls: boolean;
+  tls: HostedRuntimeTemporalTls;
+}
+
+export type HostedRuntimeTemporalTls = boolean | HostedRuntimeTemporalTlsConfig;
+
+export interface HostedRuntimeTemporalTlsConfig {
+  clientCertPair?: {
+    crt: Buffer;
+    key: Buffer;
+  };
+  serverNameOverride?: string;
+  serverRootCACertificate?: Buffer;
 }
 
 export function readHostedRuntimeTemporalEnvironment(
   source: EnvSource = process.env,
 ): HostedRuntimeTemporalEnvironment {
+  const apiKey = readOptionalTrimmedString(source.TEMPORAL_API_KEY) ?? undefined;
   return {
     address:
       readOptionalTrimmedString(source.TEMPORAL_ADDRESS)
       ?? DEFAULT_TEMPORAL_ADDRESS,
+    ...(apiKey ? { apiKey } : {}),
     namespace:
       readOptionalTrimmedString(source.TEMPORAL_NAMESPACE)
       ?? DEFAULT_TEMPORAL_NAMESPACE,
     taskQueue:
       readOptionalTrimmedString(source.TEMPORAL_TASK_QUEUE)
       ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
-    tls: readBooleanEnv(source.TEMPORAL_TLS_ENABLED, "TEMPORAL_TLS_ENABLED"),
+    tls: readTemporalTlsConfig(source, apiKey !== undefined),
   };
 }
 
@@ -70,10 +84,77 @@ function readOptionalTrimmedString(value: string | undefined): string | null {
   return normalized ? normalized : null;
 }
 
-function readBooleanEnv(value: string | undefined, label: string): boolean {
+function readTemporalTlsConfig(
+  source: EnvSource,
+  hasApiKey: boolean,
+): HostedRuntimeTemporalTls {
+  const tlsEnabled = readOptionalBooleanEnv(
+    source.TEMPORAL_TLS_ENABLED,
+    "TEMPORAL_TLS_ENABLED",
+  );
+  const clientCert = readOptionalPemBuffer(
+    source.TEMPORAL_CLIENT_CERT_PEM,
+    source.TEMPORAL_CLIENT_CERT_BASE64,
+    "TEMPORAL_CLIENT_CERT",
+  );
+  const clientKey = readOptionalPemBuffer(
+    source.TEMPORAL_CLIENT_KEY_PEM,
+    source.TEMPORAL_CLIENT_KEY_BASE64,
+    "TEMPORAL_CLIENT_KEY",
+  );
+  const serverRootCa = readOptionalPemBuffer(
+    source.TEMPORAL_SERVER_ROOT_CA_CERT_PEM,
+    source.TEMPORAL_SERVER_ROOT_CA_CERT_BASE64,
+    "TEMPORAL_SERVER_ROOT_CA_CERT",
+  );
+  const serverNameOverride = readOptionalTrimmedString(
+    source.TEMPORAL_TLS_SERVER_NAME_OVERRIDE,
+  );
+  const hasTlsMaterial =
+    clientCert !== null
+    || clientKey !== null
+    || serverRootCa !== null
+    || serverNameOverride !== null;
+
+  if (tlsEnabled === false && (hasTlsMaterial || hasApiKey)) {
+    throw new TypeError(
+      "TEMPORAL_TLS_ENABLED cannot be false when Temporal credentials or TLS material are configured.",
+    );
+  }
+  if ((clientCert === null) !== (clientKey === null)) {
+    throw new TypeError(
+      "TEMPORAL_CLIENT_CERT and TEMPORAL_CLIENT_KEY must be configured together.",
+    );
+  }
+  if (hasTlsMaterial) {
+    const tls: HostedRuntimeTemporalTlsConfig = {};
+    if (clientCert !== null && clientKey !== null) {
+      tls.clientCertPair = {
+        crt: clientCert,
+        key: clientKey,
+      };
+    }
+    if (serverRootCa !== null) {
+      tls.serverRootCACertificate = serverRootCa;
+    }
+    if (serverNameOverride !== null) {
+      tls.serverNameOverride = serverNameOverride;
+    }
+    return tls;
+  }
+  if (hasApiKey) {
+    return true;
+  }
+  return tlsEnabled ?? false;
+}
+
+function readOptionalBooleanEnv(
+  value: string | undefined,
+  label: string,
+): boolean | null {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) {
-    return false;
+    return null;
   }
   if (["1", "true", "yes"].includes(normalized)) {
     return true;
@@ -82,6 +163,25 @@ function readBooleanEnv(value: string | undefined, label: string): boolean {
     return false;
   }
   throw new TypeError(`${label} must be true or false.`);
+}
+
+function readOptionalPemBuffer(
+  pemValue: string | undefined,
+  base64Value: string | undefined,
+  label: string,
+): Buffer | null {
+  const pem = readOptionalTrimmedString(pemValue);
+  const base64 = readOptionalTrimmedString(base64Value);
+  if (pem !== null && base64 !== null) {
+    throw new TypeError(`${label}_PEM and ${label}_BASE64 are mutually exclusive.`);
+  }
+  if (pem !== null) {
+    return Buffer.from(pem, "utf8");
+  }
+  if (base64 !== null) {
+    return Buffer.from(base64, "base64");
+  }
+  return null;
 }
 
 function parsePositiveInteger(

@@ -29,6 +29,7 @@ describe("hosted runtime Temporal worker", () => {
 
     const worker = await createHostedUserRuntimeWorker({
       address: "temporal.example.test:7233",
+      apiKey: "temporal_test_api_key",
       namespace: "hosted-local",
       taskQueue: "hosted-runtime-local",
       tls: true,
@@ -37,6 +38,7 @@ describe("hosted runtime Temporal worker", () => {
     expect(worker).toBe(createdWorker);
     expect(connect).toHaveBeenCalledWith({
       address: "temporal.example.test:7233",
+      apiKey: "temporal_test_api_key",
       tls: true,
     });
     expect(create).toHaveBeenCalledWith(expect.objectContaining({

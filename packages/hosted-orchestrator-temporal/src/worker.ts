@@ -10,16 +10,20 @@ import {
 
 import * as activities from "./activities/index.js";
 import { HOSTED_USER_RUNTIME_TASK_QUEUE } from "./index.js";
-import { readHostedRuntimeTemporalEnvironment } from "./temporal-env.js";
+import {
+  readHostedRuntimeTemporalEnvironment,
+  type HostedRuntimeTemporalTls,
+} from "./temporal-env.js";
 
 const require = createRequire(import.meta.url);
 
 export interface HostedUserRuntimeWorkerOptions {
   address?: string;
+  apiKey?: string;
   connection?: NativeConnection;
   namespace?: string;
   taskQueue?: string;
-  tls?: boolean;
+  tls?: HostedRuntimeTemporalTls;
 }
 
 export async function createHostedUserRuntimeWorker(
@@ -49,6 +53,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const environment = readHostedRuntimeTemporalEnvironment();
   await runHostedUserRuntimeWorker({
     address: environment.address,
+    apiKey: environment.apiKey,
     namespace: environment.namespace,
     taskQueue: environment.taskQueue,
     tls: environment.tls,
@@ -60,7 +65,8 @@ function buildNativeConnectionOptions(
 ): NativeConnectionOptions {
   return {
     ...(options.address ? { address: options.address } : {}),
-    tls: options.tls === true,
+    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    tls: options.tls ?? false,
   };
 }
 

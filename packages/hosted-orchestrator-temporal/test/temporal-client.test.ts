@@ -26,12 +26,14 @@ describe("createHostedRuntimeTemporalClient", () => {
 
     const client = await createHostedRuntimeTemporalClient({
       address: "temporal.example.test:7233",
+      apiKey: "temporal_test_api_key",
       namespace: "hosted-local",
       tls: true,
     });
 
     expect(connect).toHaveBeenCalledWith({
       address: "temporal.example.test:7233",
+      apiKey: "temporal_test_api_key",
       tls: true,
     });
     expect(clientConstructor).toHaveBeenCalledWith({
@@ -65,14 +67,15 @@ describe("createHostedRuntimeTemporalClient", () => {
     } = await import("../src/client/temporal-client.js");
 
     await createHostedRuntimeTemporalClientFromEnv({
+      TEMPORAL_API_KEY: "temporal_test_api_key",
       TEMPORAL_ADDRESS: "temporal.example.test:7233",
       TEMPORAL_NAMESPACE: "hosted-local",
-      TEMPORAL_TLS_ENABLED: "false",
     });
 
     expect(connect).toHaveBeenCalledWith({
       address: "temporal.example.test:7233",
-      tls: false,
+      apiKey: "temporal_test_api_key",
+      tls: true,
     });
     expect(clientConstructor).toHaveBeenCalledWith({
       connection,
