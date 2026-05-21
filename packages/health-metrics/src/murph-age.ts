@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v10" as const;
+  "murph.age.research-calculator-view.v11" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v3" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
@@ -1173,6 +1173,53 @@ export interface MurphAgeResearchLocalRunEvidenceItem {
   supportedMetricKeys: string[];
 }
 
+export type MurphAgeResearchLayerId =
+  | "function-disability-sidecar"
+  | "r399-outcome-risk-anchor"
+  | "selected-lab-body-card"
+  | "wearable-activity-residual";
+
+export type MurphAgeResearchLayerRole =
+  | "base-outcome-risk"
+  | "function-mobility-residual"
+  | "lab-body-risk-adjuster"
+  | "wearable-activity-residual";
+
+export type MurphAgeResearchLayerStatus =
+  | "active-research-score"
+  | "available-as-anchor"
+  | "available-research-candidate"
+  | "parameter-pack-available-shadow-only"
+  | "parameter-pack-needed"
+  | "validation-receipt-needed";
+
+export interface MurphAgeResearchLayerContractItem {
+  combinationScale: "risk-logit" | "risk-logit-residual";
+  layerId: MurphAgeResearchLayerId;
+  metricKeys: string[];
+  parameterPackAvailable: boolean;
+  parameterPackRequired: boolean;
+  productAuthorized: false;
+  role: MurphAgeResearchLayerRole;
+  scoreBearingNow: boolean;
+  scoreContributionAuthorized: false;
+  selected: boolean;
+  sourceEvidenceIds: Array<MurphAgeResearchLocalRunEvidenceItem["evidenceId"]>;
+  status: MurphAgeResearchLayerStatus;
+  validationStillNeeded: boolean;
+}
+
+export interface MurphAgeResearchLayeredPathStatus {
+  activeResearchScoreLayerIds: MurphAgeResearchLayerId[];
+  architecturePattern: "frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals";
+  currentExecutableMode: "single-card-research-score-layer-contracts-only";
+  layerOrder: MurphAgeResearchLayerId[];
+  layers: MurphAgeResearchLayerContractItem[];
+  parameterPackBlockedLayerIds: MurphAgeResearchLayerId[];
+  productAuthorized: false;
+  scoreCombinationScale: "risk-logit-residual";
+}
+
 export interface MurphAgeResearchModelStatusView {
   blockers: Array<
     | "biomarker-transport-not-confirmed"
@@ -1200,6 +1247,7 @@ export interface MurphAgeResearchModelStatusView {
   };
   latestLocalRunEvidence: MurphAgeResearchLocalRunEvidenceItem[];
   latestLocalRunEvidenceStatus: "mixed-research-only-no-product-promotion";
+  layeredResearchPath: MurphAgeResearchLayeredPathStatus;
   productUseAuthorized: false;
   scoreBearingFeatureKeys: string[];
   scoreBearingMetricKeys: string[];
@@ -7236,6 +7284,7 @@ export function buildMurphAgeResearchCalculatorView(
     selectedResearchCardId: result ? report.authorization.cardId : null,
     selectedScoreBearingFeatureKeys,
     selectedScoreBearingMetricKeys,
+    wearableResidualLayer: report.wearableResidualLayer,
   });
   const featureContributions = result
     ? result.featureAttributions.map(buildMurphAgePublicFeatureContributionView)
@@ -7492,11 +7541,125 @@ function resolveMurphAgeResearchArbiterSelectionReason(
   }
 }
 
+function buildMurphAgeResearchLayeredPathStatus(input: {
+  selectedResearchCardId: MurphAgePublicAuthorization["cardId"];
+  selectedScoreBearingMetricKeys: readonly string[];
+  wearableResidualLayer: MurphAgePublicWearableResidualLayerView | null;
+}): MurphAgeResearchLayeredPathStatus {
+  const wearableContract = summarizeMurphAgeWearableResidualLayerContract();
+  const selectedCardId = input.selectedResearchCardId;
+  const wearableParameterPackAvailable = input.wearableResidualLayer?.parameterizationAvailable === true;
+  const r399Selected = selectedCardId === "r399_nhis_proxy_10y_acm_research";
+  const labBodySelected = selectedCardId !== null
+    && selectedCardId !== "r399_nhis_proxy_10y_acm_research"
+    && selectedCardId !== "function_context_no_risk"
+    && selectedCardId !== "wearable_context_no_risk";
+  const activeResearchScoreLayerIds: MurphAgeResearchLayerId[] = r399Selected
+    ? ["r399-outcome-risk-anchor"]
+    : labBodySelected
+    ? ["selected-lab-body-card"]
+    : [];
+  const parameterPackBlockedLayerIds: MurphAgeResearchLayerId[] = [
+    "function-disability-sidecar",
+  ];
+  if (!wearableParameterPackAvailable) {
+    parameterPackBlockedLayerIds.push("wearable-activity-residual");
+  }
+
+  return {
+    activeResearchScoreLayerIds,
+    architecturePattern: "frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals",
+    currentExecutableMode: "single-card-research-score-layer-contracts-only",
+    layerOrder: [
+      "r399-outcome-risk-anchor",
+      "selected-lab-body-card",
+      "function-disability-sidecar",
+      "wearable-activity-residual",
+    ],
+    layers: [
+      {
+        combinationScale: "risk-logit",
+        layerId: "r399-outcome-risk-anchor",
+        metricKeys: MURPH_AGE_R399_PROXY_FEATURES.flatMap((feature) => feature.metricKeys),
+        parameterPackAvailable: true,
+        parameterPackRequired: false,
+        productAuthorized: false,
+        role: "base-outcome-risk",
+        scoreBearingNow: r399Selected,
+        scoreContributionAuthorized: false,
+        selected: r399Selected,
+        sourceEvidenceIds: [],
+        status: r399Selected ? "active-research-score" : "available-as-anchor",
+        validationStillNeeded: true,
+      },
+      {
+        combinationScale: "risk-logit",
+        layerId: "selected-lab-body-card",
+        metricKeys: [...input.selectedScoreBearingMetricKeys],
+        parameterPackAvailable: labBodySelected,
+        parameterPackRequired: false,
+        productAuthorized: false,
+        role: "lab-body-risk-adjuster",
+        scoreBearingNow: labBodySelected,
+        scoreContributionAuthorized: false,
+        selected: labBodySelected,
+        sourceEvidenceIds: [
+          "midus-lab-lift-local-run",
+          "creles-glycemia-transport-local-run",
+          "haalsi-glucose-transport-local-run",
+          "nshap-hba1c-transport-local-run",
+        ],
+        status: labBodySelected ? "active-research-score" : "available-research-candidate",
+        validationStillNeeded: true,
+      },
+      {
+        combinationScale: "risk-logit-residual",
+        layerId: "function-disability-sidecar",
+        metricKeys: [
+          "adl-limitation-count",
+          "iadl-limitation-count",
+          "mobility-limitation-count",
+          "frailty-symptom-count",
+        ],
+        parameterPackAvailable: false,
+        parameterPackRequired: true,
+        productAuthorized: false,
+        role: "function-mobility-residual",
+        scoreBearingNow: false,
+        scoreContributionAuthorized: false,
+        selected: false,
+        sourceEvidenceIds: ["mhas-function-mobility-sidecar-local-run"],
+        status: "parameter-pack-needed",
+        validationStillNeeded: true,
+      },
+      {
+        combinationScale: "risk-logit-residual",
+        layerId: "wearable-activity-residual",
+        metricKeys: [...wearableContract.signalMetricKeys],
+        parameterPackAvailable: wearableParameterPackAvailable,
+        parameterPackRequired: true,
+        productAuthorized: false,
+        role: "wearable-activity-residual",
+        scoreBearingNow: false,
+        scoreContributionAuthorized: false,
+        selected: false,
+        sourceEvidenceIds: ["wearables-context-only-local-run"],
+        status: wearableParameterPackAvailable ? "parameter-pack-available-shadow-only" : "validation-receipt-needed",
+        validationStillNeeded: true,
+      },
+    ],
+    parameterPackBlockedLayerIds,
+    productAuthorized: false,
+    scoreCombinationScale: "risk-logit-residual",
+  };
+}
+
 function buildMurphAgeResearchModelStatusView(input: {
   contextOnlyMetricKeys: readonly string[];
   selectedResearchCardId: MurphAgePublicAuthorization["cardId"];
   selectedScoreBearingFeatureKeys: readonly string[];
   selectedScoreBearingMetricKeys: readonly string[];
+  wearableResidualLayer: MurphAgePublicWearableResidualLayerView | null;
 }): MurphAgeResearchModelStatusView {
   const shadowEvidence = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
   return {
@@ -7593,6 +7756,11 @@ function buildMurphAgeResearchModelStatusView(input: {
       },
     ],
     latestLocalRunEvidenceStatus: "mixed-research-only-no-product-promotion",
+    layeredResearchPath: buildMurphAgeResearchLayeredPathStatus({
+      selectedResearchCardId: input.selectedResearchCardId,
+      selectedScoreBearingMetricKeys: input.selectedScoreBearingMetricKeys,
+      wearableResidualLayer: input.wearableResidualLayer,
+    }),
     productUseAuthorized: false,
     scoreBearingFeatureKeys: [...input.selectedScoreBearingFeatureKeys],
     scoreBearingMetricKeys: [...input.selectedScoreBearingMetricKeys],
