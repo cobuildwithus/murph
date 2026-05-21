@@ -35,7 +35,6 @@ import { describe, test } from "vitest";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
-  writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import type {
   HostedRuntimePlatform,
@@ -602,7 +601,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("skips unchanged base snapshot restore when warm local roots already contain it", async () => {
+  test("cold-restores unchanged legacy snapshots instead of reusing dirty local roots", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-cache-"));
 
     try {
@@ -708,7 +707,7 @@ describe("hosted workspace restore Codex continuity", () => {
         }),
       });
 
-      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.deepEqual(artifactGetCalls, [baseHash, secondHotHash]);
       await assert.rejects(
         readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
       );
@@ -725,10 +724,6 @@ describe("hosted workspace restore Codex continuity", () => {
       );
       assert.deepEqual(flattenLogEntries(logRequests), []);
 
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef: secondSnapshotRef,
-        vaultRoot: restoredVaultRoot,
-      });
       const rolloutRelativePath = secondHotSnapshot.resumeState.rolloutRelativePath;
       assert.ok(rolloutRelativePath);
       await writeFile(
@@ -747,10 +742,9 @@ describe("hosted workspace restore Codex continuity", () => {
         }),
       });
 
-      assert.deepEqual(artifactGetCalls, []);
-      assert.equal(
-        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
-        "sandbox_mode = \"danger-full-access\"\n",
+      assert.deepEqual(artifactGetCalls, [baseHash, secondHotHash]);
+      await assert.rejects(
+        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
       );
       assert.equal(
         await readFile(
@@ -772,10 +766,6 @@ describe("hosted workspace restore Codex continuity", () => {
         ),
         { force: true },
       );
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef: secondSnapshotRef,
-        vaultRoot: restoredVaultRoot,
-      });
       artifactGetCalls.length = 0;
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
@@ -785,7 +775,7 @@ describe("hosted workspace restore Codex continuity", () => {
           snapshotRef: secondSnapshotRef,
         }),
       });
-      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.deepEqual(artifactGetCalls, [baseHash, secondHotHash]);
       assert.equal(
         await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
         JSON.stringify({ session: "second" }) + "\n",
@@ -820,10 +810,6 @@ describe("hosted workspace restore Codex continuity", () => {
         }) + "\n",
         "utf8",
       );
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef: secondSnapshotRef,
-        vaultRoot: restoredVaultRoot,
-      });
       artifactGetCalls.length = 0;
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
@@ -833,7 +819,7 @@ describe("hosted workspace restore Codex continuity", () => {
           snapshotRef: secondSnapshotRef,
         }),
       });
-      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.deepEqual(artifactGetCalls, [baseHash, secondHotHash]);
 
       const secondRolloutJson = JSON.stringify({ session: "second" }) + "\n";
       await writeFile(
@@ -861,10 +847,6 @@ describe("hosted workspace restore Codex continuity", () => {
         "{\"session\":\"corrupted\"}\n",
         "utf8",
       );
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef: secondSnapshotRef,
-        vaultRoot: restoredVaultRoot,
-      });
       artifactGetCalls.length = 0;
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
@@ -874,7 +856,7 @@ describe("hosted workspace restore Codex continuity", () => {
           snapshotRef: secondSnapshotRef,
         }),
       });
-      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.deepEqual(artifactGetCalls, [baseHash, secondHotHash]);
       assert.equal(
         await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
         secondRolloutJson,
@@ -884,7 +866,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("falls back to bundle restore when base restore cache Codex continuity is stale", async () => {
+  test("cold-restores legacy base snapshots when local Codex continuity is stale", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-cache-stale-"));
 
     try {
@@ -1040,7 +1022,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("falls back to bundle restore when hot restore cache Codex manifest is missing", async () => {
+  test("cold-restores legacy hot snapshots from durable bundles", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-cache-missing-"));
 
     try {
@@ -1093,10 +1075,6 @@ describe("hosted workspace restore Codex continuity", () => {
           snapshotRef,
         }),
       });
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef,
-        vaultRoot: restoredVaultRoot,
-      });
       artifactGetCalls.length = 0;
 
       const restoredOperatorHomeRoot = path.join(
@@ -1115,7 +1093,7 @@ describe("hosted workspace restore Codex continuity", () => {
           snapshotRef,
         }),
       });
-      assert.deepEqual(artifactGetCalls, [hotHash]);
+      assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
       const rolloutRelativePath = hotSnapshot.resumeState.rolloutRelativePath;
       assert.ok(rolloutRelativePath);
       assert.equal(
@@ -1127,7 +1105,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("keeps live foreground state for an unchanged restored snapshot", async () => {
+  test("does not keep dirty live foreground state for an unchanged legacy snapshot", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-live-state-"));
 
     try {
@@ -1224,8 +1202,10 @@ describe("hosted workspace restore Codex continuity", () => {
         }),
       });
 
-      assert.deepEqual(artifactGetCalls, []);
-      assert.equal(await readFile(path.join(restoredVaultRoot, "live-mailbox-state.txt"), "utf8"), "seq=467\n");
+      assert.deepEqual(artifactGetCalls, [baseHash]);
+      await assert.rejects(readFile(path.join(restoredVaultRoot, "live-mailbox-state.txt"), "utf8"), {
+        code: "ENOENT",
+      });
       const lazyMaterialized = await liveRestored.materializeWorkspaceArtifacts([
         lazyRelativePath,
         lazyProviderRelativePath,

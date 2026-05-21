@@ -14,11 +14,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -42,11 +37,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -73,11 +63,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -96,11 +81,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -119,11 +99,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -152,11 +127,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -187,11 +157,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -298,11 +263,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -400,11 +360,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -458,11 +413,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -606,11 +556,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -641,11 +586,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -669,11 +609,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -700,11 +635,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -723,11 +653,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -755,11 +680,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -790,11 +710,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -813,11 +728,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -844,11 +754,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -946,11 +851,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -990,11 +890,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -1025,11 +920,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -1053,11 +943,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -1084,11 +969,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1107,11 +987,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1232,11 +1107,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1255,11 +1125,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1301,11 +1166,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1340,11 +1200,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1363,11 +1218,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1687,11 +1537,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1710,11 +1555,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1756,11 +1596,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1783,11 +1618,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1806,11 +1636,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1829,11 +1654,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1864,11 +1684,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1887,11 +1702,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1951,11 +1761,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -1993,11 +1798,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2103,11 +1903,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2217,11 +2012,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2240,11 +2030,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2306,11 +2091,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2525,11 +2305,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2584,11 +2359,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2607,11 +2377,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2640,11 +2405,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2663,11 +2423,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2776,11 +2531,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2811,11 +2561,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -2856,11 +2601,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -2896,11 +2636,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -2934,11 +2669,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -2962,11 +2692,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -2990,11 +2715,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -3030,11 +2750,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -3058,11 +2773,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -3086,11 +2796,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -3124,20 +2829,7 @@
               "properties": {
                 "show": {
                   "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root."
-                        }
-                      }
-                    }
-                  }
+                  "additionalProperties": false
                 },
                 "upsert": {
                   "type": "object",
@@ -3147,11 +2839,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root."
-                        },
                         "section": {
                           "type": "string",
                           "enum": [
@@ -3174,11 +2861,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root."
-                        },
                         "section": {
                           "description": "Optional replacement memory section. Defaults to the current section.",
                           "type": "string",
@@ -3195,20 +2877,7 @@
                 },
                 "forget": {
                   "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root."
-                        }
-                      }
-                    }
-                  }
+                  "additionalProperties": false
                 }
               }
             }
@@ -3290,11 +2959,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3459,11 +3123,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3488,11 +3147,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3637,11 +3291,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3762,11 +3411,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3785,11 +3429,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3825,11 +3464,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3848,11 +3482,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -3977,11 +3606,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4010,11 +3634,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4192,11 +3811,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4227,11 +3841,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4353,11 +3962,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4427,11 +4031,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4450,11 +4049,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4490,11 +4084,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4525,11 +4114,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4678,11 +4262,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4770,11 +4349,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4793,11 +4367,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4833,11 +4402,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -4856,11 +4420,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5064,11 +4623,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5095,11 +4649,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5118,11 +4667,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5174,11 +4718,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5209,11 +4748,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5260,11 +4794,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5367,11 +4896,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5394,11 +4918,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5417,11 +4936,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5446,11 +4960,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -5538,11 +5047,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5618,11 +5122,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5756,11 +5255,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5791,11 +5285,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5814,11 +5303,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5841,11 +5325,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5864,11 +5343,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5898,11 +5372,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -5986,11 +5455,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6107,11 +5571,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6142,11 +5601,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6165,11 +5619,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6192,11 +5641,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6215,11 +5659,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6253,11 +5692,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6447,11 +5881,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6470,11 +5899,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6619,11 +6043,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6642,11 +6061,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6669,11 +6083,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6692,11 +6101,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6729,11 +6133,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6906,11 +6305,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6940,11 +6334,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -6979,11 +6368,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7002,11 +6386,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7232,11 +6611,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7267,11 +6641,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7307,11 +6676,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7334,11 +6698,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7357,11 +6716,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7415,11 +6769,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7533,11 +6882,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -7564,11 +6908,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -7663,11 +7002,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -7760,11 +7094,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -7863,11 +7192,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -7963,11 +7287,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8045,11 +7364,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8145,11 +7459,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8241,11 +7550,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8339,11 +7643,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8441,11 +7740,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -8580,11 +7874,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -8607,11 +7896,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -8682,11 +7966,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8772,11 +8051,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -8843,11 +8117,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -8902,11 +8171,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -8925,11 +8189,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -8980,11 +8239,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9003,11 +8257,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9062,11 +8311,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -9108,11 +8352,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -9139,11 +8378,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -9200,11 +8434,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9253,11 +8482,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9318,11 +8542,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9383,11 +8602,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9448,11 +8662,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9513,11 +8722,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9578,11 +8782,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -9647,11 +8846,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -9906,11 +9100,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -9929,11 +9118,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -9970,11 +9154,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10320,11 +9499,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10358,11 +9532,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10391,11 +9560,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10427,11 +9591,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10556,11 +9715,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10587,11 +9741,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10622,11 +9771,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10729,11 +9873,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10757,11 +9896,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10797,11 +9931,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -10849,11 +9978,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10872,11 +9996,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10895,11 +10014,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10935,11 +10049,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -10963,11 +10072,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11002,11 +10106,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11045,11 +10144,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -11068,11 +10162,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -11154,11 +10243,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11256,11 +10340,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11279,11 +10358,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11310,11 +10384,6 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "vault": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Vault root to operate against."
-                },
                 "requestId": {
                   "description": "Optional caller-supplied request id for audit correlation.",
                   "type": "string",
@@ -11387,11 +10456,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11466,11 +10530,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11499,11 +10558,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11538,11 +10592,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11561,11 +10610,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11592,11 +10636,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11633,11 +10672,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11680,11 +10714,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11723,11 +10752,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11746,11 +10770,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11790,11 +10809,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11818,11 +10832,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -11857,11 +10866,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11916,11 +10920,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11939,11 +10938,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -11978,11 +10972,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12001,11 +10990,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12024,11 +11008,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12059,11 +11038,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12086,11 +11060,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12132,11 +11101,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12178,11 +11142,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12251,11 +11210,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12280,11 +11234,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12307,11 +11256,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12330,11 +11274,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12364,11 +11303,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12406,11 +11340,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12444,11 +11373,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12467,11 +11391,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12490,11 +11409,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12513,11 +11427,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12548,11 +11457,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12571,11 +11475,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12619,11 +11518,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12648,11 +11542,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12671,11 +11560,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12694,11 +11578,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12717,11 +11596,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12740,11 +11614,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12763,11 +11632,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12786,11 +11650,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12821,11 +11680,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12844,11 +11698,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12867,11 +11716,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12890,11 +11734,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12925,11 +11764,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -12968,11 +11802,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -12991,11 +11820,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13018,11 +11842,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13041,11 +11860,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13076,11 +11890,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13186,11 +11995,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13209,11 +12013,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13236,11 +12035,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13259,11 +12053,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13294,11 +12083,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13407,11 +12191,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13430,11 +12209,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13457,11 +12231,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13480,11 +12249,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13515,11 +12279,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13609,11 +12368,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13632,11 +12386,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13659,11 +12408,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13682,11 +12426,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13727,11 +12466,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13908,11 +12642,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13931,11 +12660,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13958,11 +12682,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -13981,11 +12700,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14011,11 +12725,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14087,11 +12796,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14110,11 +12814,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14137,11 +12836,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14160,11 +12854,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14195,11 +12884,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14286,11 +12970,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14321,11 +13000,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14344,11 +13018,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14372,11 +13041,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14537,11 +13201,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -14572,11 +13231,6 @@
                               "type": "object",
                               "additionalProperties": false,
                               "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
                                 "requestId": {
                                   "description": "Optional caller-supplied request id for audit correlation.",
                                   "type": "string",
@@ -14616,11 +13270,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14639,11 +13288,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14673,11 +13317,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14696,11 +13335,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14723,11 +13357,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14890,11 +13519,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14930,11 +13554,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14957,11 +13576,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",
@@ -14996,11 +13610,6 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
                         "requestId": {
                           "description": "Optional caller-supplied request id for audit correlation.",
                           "type": "string",

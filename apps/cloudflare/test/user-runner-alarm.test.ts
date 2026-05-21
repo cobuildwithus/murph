@@ -310,6 +310,61 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("clears expired write fences before accepting processing ownership", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:01:01.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-expired",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:02:01.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
+    });
+
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token?.attemptId ?? ""),
+      active_expires_at: "2026-04-27T00:02:01.000Z",
+      failure_count: 1,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        failure_count: 0,
+        last_invocation_at: expect.any(String),
+      })
+    );
+  });
+
   it("accepts a fresh starting write fence when no active child is wakeable yet", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -532,6 +587,30 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(alarms.at(-1)).toBe("deleted");
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
+  });
+
+  it("rethrows watchdog alarm maintenance failures so Cloudflare can retry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerHarness({
+      alarmDeleteError: new Error("alarm delete failed"),
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    await runner.startStuckInvocationForTest({
+      userId: TEST_USER_ID,
+    });
+
+    await expect(runner.alarm()).rejects.toThrow("alarm delete failed");
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+    });
+    expect(alarms).toEqual(["2000-01-01T00:00:00.000Z"]);
   });
 
   it("reports active write-fence expiry in status instead of semantic workspace wakes", async () => {
@@ -877,6 +956,7 @@ describe("HostedUserRunner execution coordination", () => {
 });
 
 function createRunnerHarness(input: {
+  alarmDeleteError?: Error;
   bucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
@@ -887,7 +967,9 @@ function createRunnerHarness(input: {
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
-  const durable = createDurableObjectState();
+  const durable = createDurableObjectState({
+    alarmDeleteError: input.alarmDeleteError,
+  });
   const invocationResults = [...(input.invocationResults ?? [])];
   const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
     async () => {
@@ -995,7 +1077,9 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
   }
 }
 
-function createDurableObjectState(): {
+function createDurableObjectState(input: {
+  alarmDeleteError?: Error;
+} = {}): {
   alarms: string[];
   state: DurableObjectStateLike;
   waitUntilPromises: Promise<unknown>[];
@@ -1008,6 +1092,9 @@ function createDurableObjectState(): {
   const storage: DurableObjectStorageLike = {
     delete: async (key) => values.delete(key),
     deleteAlarm: async () => {
+      if (input.alarmDeleteError) {
+        throw input.alarmDeleteError;
+      }
       alarms.push("deleted");
     },
     get: async <T>(key: string): Promise<T | undefined> => values.get(key) as T | undefined,

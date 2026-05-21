@@ -113,9 +113,9 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
       }
     }
 
-    assert.equal('vault' in schema.options.properties, true)
+    assert.equal('vault' in schema.options.properties, false)
     assert.equal('baseUrl' in schema.options.properties, true)
-    assert.deepEqual(schema.options.required, ['vault'])
+    assert.deepEqual(schema.options.required ?? [], [])
 
     const connectSchema = JSON.parse(
       await runSourceDeviceCliRaw([

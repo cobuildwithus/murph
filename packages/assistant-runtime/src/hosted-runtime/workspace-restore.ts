@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -26,7 +26,6 @@ import {
   createHostedPortableWorkspaceManifestFromBundle,
   hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
   readHostedPortableWorkspaceManifestFromBundle,
-  restoredWorkspaceRequiresHostedCodexProviderContinuity,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
   restoreHostedWorkspaceWorkingDelta,
@@ -63,11 +62,8 @@ const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
 // Legacy restore-only compatibility for pre-v2 workspace refs. Production v2
 // checkpoints no longer create base, hot, working, bundle, or delta refs; these
 // caches and paths are deletable after the v2 migration window.
-const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-base-restore-cache.v2";
 const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
-const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-hot-restore-cache.v2";
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
-const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-working-restore-cache.v1";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
 const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
 
@@ -99,32 +95,6 @@ export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
     this.name = "HostedWorkspaceRuntimeSnapshotRestoreError";
     this.snapshotHash = snapshotHash;
   }
-}
-
-interface HostedWorkspaceBaseRestoreCache {
-  baseProvidesCodexProviderContinuity: boolean;
-  baseSnapshotHash: string;
-  baseSnapshotSize: number;
-  schema: typeof HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA;
-  vaultRootName: string;
-}
-
-interface HostedWorkspaceHotRestoreCache {
-  baseSnapshotHash: string;
-  baseSnapshotSize: number;
-  hotSnapshotHash: string;
-  hotSnapshotSize: number;
-  schema: typeof HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA;
-  vaultRootName: string;
-}
-
-interface HostedWorkspaceWorkingRestoreCache {
-  baseSnapshotHash: string;
-  baseSnapshotSize: number;
-  deltaSnapshotHash: string;
-  deltaSnapshotSize: number;
-  schema: typeof HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA;
-  vaultRootName: string;
 }
 
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
@@ -206,178 +176,41 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     };
   }
 
-  // Legacy restore-only compatibility for working `{base, delta}` refs produced
-  // before v2 direct snapshots. Delete with the legacy cache helpers after the
-  // v2 migration window.
-  if (baseSnapshotRef && deltaSnapshotRef && !hotSnapshotRef) {
-    const cachedWorkingRestore = await readHostedWorkspaceWorkingRestoreCache(restored.vaultRoot);
-    if (
-      cachedWorkingRestore
-      && isHostedWorkspaceWorkingRestoreCacheHit({
-        baseRef: baseSnapshotRef,
-        cache: cachedWorkingRestore,
-        deltaRef: deltaSnapshotRef,
-        vaultRoot: restored.vaultRoot,
-      })
-    ) {
-      try {
-        await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
-          assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
-        });
-        materializerBundles.push(
-          () => readHostedWorkspaceRuntimeBundle({
-            platform: input.platform,
-            ref: baseSnapshotRef,
-          }),
-          () => readHostedWorkspaceRuntimeBundle({
-            platform: input.platform,
-            ref: deltaSnapshotRef,
-          }),
-        );
-        await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
-          platform: input.platform,
-          status: input.workspace?.redactedStatus ?? null,
-          vaultRoot: restored.vaultRoot,
-        });
-        return {
-          ...restored,
-          materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-            materializedArtifactPaths,
-            platform: input.platform,
-            restored,
-            readBundles: materializerBundles,
-          }),
-          materializedArtifactPaths,
-          mode: "snapshot",
-          restoreWasCold: false,
-        };
-      } catch {
-        await clearHostedWorkspaceWorkingRestoreCacheBestEffort(restored.vaultRoot);
-      }
-    }
-  }
+  // Legacy refs still restore from durable truth. Reusing local bundle restore
+  // caches would preserve cross-lease dirty state, so every pre-v2 restore starts
+  // from clean roots just like the v2 snapshot path.
+  await clearHostedWorkspaceRuntimeLocalRoots(restored);
+  await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
 
-  let baseRestoreCacheHit = false;
   let restoreWasCold = false;
   // Legacy restore-only compatibility for old base bundle refs. This branch is
   // not on the v2 production checkpoint path and can be removed after migration.
   if (baseSnapshotRef) {
-    const cachedBaseRestore = await readHostedWorkspaceBaseRestoreCache(restored.vaultRoot);
-    let useCachedBaseRestore = false;
-    const canUseCachedBaseRestore = !deltaSnapshotRef;
-
-    if (canUseCachedBaseRestore && cachedBaseRestore && isHostedWorkspaceBaseRestoreCacheHit({
-      cache: cachedBaseRestore,
+    restoreWasCold = true;
+    const baseBundle = await readHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
       ref: baseSnapshotRef,
-      vaultRoot: restored.vaultRoot,
-    })) {
-      try {
-        if (cachedBaseRestore.baseProvidesCodexProviderContinuity) {
-          await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
-            allowUnmanifestedCodexHomeFiles: true,
-            assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
-            requireManifest: true,
-          });
-        }
-        useCachedBaseRestore = true;
-      } catch {
-        await clearHostedWorkspaceBaseRestoreCacheBestEffort(restored.vaultRoot);
-      }
-    }
-
-    if (useCachedBaseRestore) {
-      baseRestoreCacheHit = true;
-      materializerBundles.push(() => readHostedWorkspaceRuntimeBundle({
-        platform: input.platform,
-        ref: baseSnapshotRef,
-      }));
-    } else {
-      restoreWasCold = true;
-      const baseBundle = await readHostedWorkspaceRuntimeBundle({
-        platform: input.platform,
-        ref: baseSnapshotRef,
-      });
-      materializerBundles.push(async () => baseBundle);
-      await clearHostedWorkspaceRuntimeLocalRoots(restored);
-      await restoreHostedWorkspaceRuntimeBundle({
-        bundle: baseBundle,
-        platform: input.platform,
-        ref: baseSnapshotRef,
-        restored,
-        trackSkippedInlineFiles: true,
-      });
-      const baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-        bundle: baseBundle,
-      });
-      await writeHostedWorkspaceBaseRestoreCacheBestEffort({
-        cache: {
-          baseProvidesCodexProviderContinuity,
-          baseSnapshotHash: baseSnapshotRef.hash,
-          baseSnapshotSize: baseSnapshotRef.size,
-          schema: HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA,
-          vaultRootName: readHostedWorkspaceRestoreCacheVaultRootName(restored.vaultRoot),
-        },
-        vaultRoot: restored.vaultRoot,
-      });
-    }
+    });
+    materializerBundles.push(async () => baseBundle);
+    await restoreHostedWorkspaceRuntimeBundle({
+      bundle: baseBundle,
+      platform: input.platform,
+      ref: baseSnapshotRef,
+      restored,
+      trackSkippedInlineFiles: true,
+    });
   }
 
   // Legacy restore-only compatibility for old hot-layer bundle refs. This
   // restores the authoritative hot state only for pre-v2 snapshots.
   if (hotSnapshotRef) {
-    const cachedHotRestore = baseSnapshotRef && baseRestoreCacheHit
-      ? await readHostedWorkspaceHotRestoreCache(restored.vaultRoot)
-      : null;
-    if (
-      baseSnapshotRef
-      && cachedHotRestore
-      && isHostedWorkspaceHotRestoreCacheHit({
-        baseRef: baseSnapshotRef,
-        cache: cachedHotRestore,
-        hotRef: hotSnapshotRef,
-        vaultRoot: restored.vaultRoot,
-      })
-    ) {
-      try {
-        await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
-          allowUnmanifestedCodexHomeFiles: true,
-          assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
-          requireManifest: await restoredWorkspaceRequiresHostedCodexProviderContinuity({
-            vaultRoot: restored.vaultRoot,
-          }),
-        });
-        materializerBundles.push(() => readHostedWorkspaceRuntimeBundle({
-          platform: input.platform,
-          ref: hotSnapshotRef,
-        }));
-      } catch {
-        await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
-        restoreWasCold = true;
-        const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
-          hotSnapshotRef,
-          input,
-          restored,
-        });
-        await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-          snapshotRef: input.workspace?.snapshotRef ?? null,
-          vaultRoot: restored.vaultRoot,
-        });
-        materializerBundles.push(async () => restoredHotBundle);
-      }
-    } else {
-      await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
-      restoreWasCold = true;
-      const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
-        hotSnapshotRef,
-        input,
-        restored,
-      });
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef: input.workspace?.snapshotRef ?? null,
-        vaultRoot: restored.vaultRoot,
-      });
-      materializerBundles.push(async () => restoredHotBundle);
-    }
+    restoreWasCold = true;
+    const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
+      hotSnapshotRef,
+      input,
+      restored,
+    });
+    materializerBundles.push(async () => restoredHotBundle);
   }
 
   // Legacy restore-only compatibility for old working deltas. New v2 snapshots
@@ -426,13 +259,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
     });
-    if (!hotSnapshotRef) {
-      await writeHostedWorkspaceWorkingRestoreCacheBestEffort({
-        baseRef: baseSnapshotRef,
-        deltaRef: deltaSnapshotRef,
-        vaultRoot: restored.vaultRoot,
-      });
-    }
   }
 
   await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
@@ -746,76 +572,13 @@ function isMissingPathError(error: unknown): boolean {
   return isPlainObject(error) && error.code === "ENOENT";
 }
 
-// Legacy base/hot/working restore cache helpers. These are local performance
-// markers for restore-only compatibility and are deletable with the pre-v2
-// bundle/delta restore paths after the v2 migration window.
-async function readHostedWorkspaceBaseRestoreCache(
-  vaultRoot: string,
-): Promise<HostedWorkspaceBaseRestoreCache | null> {
-  try {
-    const contents = await readFile(resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot), "utf8");
-    const parsed: unknown = JSON.parse(contents);
-    return parseHostedWorkspaceBaseRestoreCache(parsed);
-  } catch {
-    return null;
-  }
-}
-
-async function writeHostedWorkspaceBaseRestoreCacheBestEffort(input: {
-  cache: HostedWorkspaceBaseRestoreCache;
-  vaultRoot: string;
-}): Promise<void> {
-  try {
-    await writeFile(
-      resolveHostedWorkspaceBaseRestoreCachePath(input.vaultRoot),
-      JSON.stringify(input.cache) + "\n",
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
-    );
-  } catch {
-    // Restore remains correct without the local cache marker; the next run will cold-restore base.
-  }
-}
-
+// Legacy restore cache cleanup helpers. The cache-hit restore paths are disabled
+// so pre-v2 refs cannot reuse cross-lease dirty local state.
 async function clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
   try {
     await rm(resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot), { force: true });
   } catch {
     // A stale base cache marker should not block cold restore from the source bundle.
-  }
-}
-
-export async function writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort(input: {
-  snapshotRef: HostedWorkspaceState["snapshotRef"];
-  vaultRoot: string;
-}): Promise<void> {
-  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef ?? null);
-  const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef ?? null);
-  if (!baseSnapshotRef || !hotSnapshotRef) {
-    await clearHostedWorkspaceHotRestoreCacheBestEffort(input.vaultRoot);
-    return;
-  }
-
-  try {
-    await writeFile(
-      resolveHostedWorkspaceHotRestoreCachePath(input.vaultRoot),
-      JSON.stringify({
-        baseSnapshotHash: baseSnapshotRef.hash,
-        baseSnapshotSize: baseSnapshotRef.size,
-        hotSnapshotHash: hotSnapshotRef.hash,
-        hotSnapshotSize: hotSnapshotRef.size,
-        schema: HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA,
-        vaultRootName: readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot),
-      } satisfies HostedWorkspaceHotRestoreCache) + "\n",
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
-    );
-  } catch {
-    // Restore remains correct without the hot marker; the next run will rematerialize hot state.
   }
 }
 
@@ -837,61 +600,11 @@ async function clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot: string)
   }
 }
 
-async function readHostedWorkspaceHotRestoreCache(
-  vaultRoot: string,
-): Promise<HostedWorkspaceHotRestoreCache | null> {
-  try {
-    const contents = await readFile(resolveHostedWorkspaceHotRestoreCachePath(vaultRoot), "utf8");
-    const parsed: unknown = JSON.parse(contents);
-    return parseHostedWorkspaceHotRestoreCache(parsed);
-  } catch {
-    return null;
-  }
-}
-
 async function clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
   try {
     await rm(resolveHostedWorkspaceHotRestoreCachePath(vaultRoot), { force: true });
   } catch {
     // A stale or missing cache marker only affects performance, not correctness.
-  }
-}
-
-async function readHostedWorkspaceWorkingRestoreCache(
-  vaultRoot: string,
-): Promise<HostedWorkspaceWorkingRestoreCache | null> {
-  try {
-    const contents = await readFile(resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot), "utf8");
-    const parsed: unknown = JSON.parse(contents);
-    return parseHostedWorkspaceWorkingRestoreCache(parsed);
-  } catch {
-    return null;
-  }
-}
-
-async function writeHostedWorkspaceWorkingRestoreCacheBestEffort(input: {
-  baseRef: HostedExecutionBundleRef;
-  deltaRef: HostedExecutionBundleRef;
-  vaultRoot: string;
-}): Promise<void> {
-  try {
-    await writeFile(
-      resolveHostedWorkspaceWorkingRestoreCachePath(input.vaultRoot),
-      JSON.stringify({
-        baseSnapshotHash: input.baseRef.hash,
-        baseSnapshotSize: input.baseRef.size,
-        deltaSnapshotHash: input.deltaRef.hash,
-        deltaSnapshotSize: input.deltaRef.size,
-        schema: HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA,
-        vaultRootName: readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot),
-      } satisfies HostedWorkspaceWorkingRestoreCache) + "\n",
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
-    );
-  } catch {
-    // Restore remains correct without the local working marker; the next run will cold-restore the delta.
   }
 }
 
@@ -901,153 +614,6 @@ async function clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot: stri
   } catch {
     // A stale or missing cache marker only affects performance, not correctness.
   }
-}
-
-function isHostedWorkspaceBaseRestoreCacheHit(input: {
-  cache: HostedWorkspaceBaseRestoreCache;
-  ref: HostedExecutionBundleRef;
-  vaultRoot: string;
-}): boolean {
-  return (
-    input.cache.baseSnapshotHash === input.ref.hash
-    && input.cache.baseSnapshotSize === input.ref.size
-    && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
-  );
-}
-
-function isHostedWorkspaceHotRestoreCacheHit(input: {
-  baseRef: HostedExecutionBundleRef;
-  cache: HostedWorkspaceHotRestoreCache;
-  hotRef: HostedExecutionBundleRef;
-  vaultRoot: string;
-}): boolean {
-  return (
-    input.cache.baseSnapshotHash === input.baseRef.hash
-    && input.cache.baseSnapshotSize === input.baseRef.size
-    && input.cache.hotSnapshotHash === input.hotRef.hash
-    && input.cache.hotSnapshotSize === input.hotRef.size
-    && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
-  );
-}
-
-function isHostedWorkspaceWorkingRestoreCacheHit(input: {
-  baseRef: HostedExecutionBundleRef;
-  cache: HostedWorkspaceWorkingRestoreCache;
-  deltaRef: HostedExecutionBundleRef;
-  vaultRoot: string;
-}): boolean {
-  return (
-    input.cache.baseSnapshotHash === input.baseRef.hash
-    && input.cache.baseSnapshotSize === input.baseRef.size
-    && input.cache.deltaSnapshotHash === input.deltaRef.hash
-    && input.cache.deltaSnapshotSize === input.deltaRef.size
-    && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
-  );
-}
-
-function parseHostedWorkspaceBaseRestoreCache(
-  value: unknown,
-): HostedWorkspaceBaseRestoreCache | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (value.schema !== HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA) {
-    return null;
-  }
-  if (typeof value.baseSnapshotHash !== "string") {
-    return null;
-  }
-  if (typeof value.baseSnapshotSize !== "number") {
-    return null;
-  }
-  if (typeof value.baseProvidesCodexProviderContinuity !== "boolean") {
-    return null;
-  }
-  if (typeof value.vaultRootName !== "string") {
-    return null;
-  }
-
-  return {
-    baseProvidesCodexProviderContinuity: value.baseProvidesCodexProviderContinuity,
-    baseSnapshotHash: value.baseSnapshotHash,
-    baseSnapshotSize: value.baseSnapshotSize,
-    schema: HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA,
-    vaultRootName: value.vaultRootName,
-  };
-}
-
-function parseHostedWorkspaceHotRestoreCache(
-  value: unknown,
-): HostedWorkspaceHotRestoreCache | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (value.schema !== HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA) {
-    return null;
-  }
-  if (typeof value.baseSnapshotHash !== "string") {
-    return null;
-  }
-  if (typeof value.baseSnapshotSize !== "number") {
-    return null;
-  }
-  if (typeof value.hotSnapshotHash !== "string") {
-    return null;
-  }
-  if (typeof value.hotSnapshotSize !== "number") {
-    return null;
-  }
-  if (typeof value.vaultRootName !== "string") {
-    return null;
-  }
-
-  return {
-    baseSnapshotHash: value.baseSnapshotHash,
-    baseSnapshotSize: value.baseSnapshotSize,
-    hotSnapshotHash: value.hotSnapshotHash,
-    hotSnapshotSize: value.hotSnapshotSize,
-    schema: HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA,
-    vaultRootName: value.vaultRootName,
-  };
-}
-
-function parseHostedWorkspaceWorkingRestoreCache(
-  value: unknown,
-): HostedWorkspaceWorkingRestoreCache | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (value.schema !== HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA) {
-    return null;
-  }
-  if (typeof value.baseSnapshotHash !== "string") {
-    return null;
-  }
-  if (typeof value.baseSnapshotSize !== "number") {
-    return null;
-  }
-  if (typeof value.deltaSnapshotHash !== "string") {
-    return null;
-  }
-  if (typeof value.deltaSnapshotSize !== "number") {
-    return null;
-  }
-  if (typeof value.vaultRootName !== "string") {
-    return null;
-  }
-
-  return {
-    baseSnapshotHash: value.baseSnapshotHash,
-    baseSnapshotSize: value.baseSnapshotSize,
-    deltaSnapshotHash: value.deltaSnapshotHash,
-    deltaSnapshotSize: value.deltaSnapshotSize,
-    schema: HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA,
-    vaultRootName: value.vaultRootName,
-  };
-}
-
-function readHostedWorkspaceRestoreCacheVaultRootName(vaultRoot: string): string {
-  return path.basename(path.resolve(vaultRoot));
 }
 
 function resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot: string): string {
@@ -1076,10 +642,6 @@ function resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot: string): string {
     path.dirname(path.resolve(vaultRoot)),
     HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME,
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // Legacy bundle restore helper for pre-v2 snapshot refs. The current v2 path

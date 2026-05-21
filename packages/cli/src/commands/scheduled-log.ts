@@ -37,6 +37,7 @@ import {
 import {
   loadJsonInputObject,
   normalizeRepeatableFlagOption,
+  normalizeRepeatableTextFlagOption,
   textInputOptionSchema,
 } from "@murphai/vault-usecases";
 
@@ -216,7 +217,7 @@ function parseMeasurementNoteEntries(
   value: readonly string[] | undefined,
   measurementCount: number,
 ): Map<number, string> {
-  const entries = normalizeRepeatableFlagOption(value, "measurement-note");
+  const entries = normalizeRepeatableTextFlagOption(value);
   const notes = new Map<number, string>();
   if (!entries) return notes;
 

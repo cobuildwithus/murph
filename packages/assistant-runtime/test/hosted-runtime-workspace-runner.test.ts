@@ -307,7 +307,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("marks deferred foreground mailbox imports as live for same-snapshot restore", async () => {
+  test("does not preserve deferred foreground mailbox imports across a new restore", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-live-"));
 
     try {
@@ -401,8 +401,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         workspace: createWorkspaceState({ snapshotRef }),
       });
 
-      assert.deepEqual(artifactGetCalls, []);
-      assert.equal(await readFile(path.join(vaultRoot, "live-mailbox-state.txt"), "utf8"), "seq=1\n");
+      assert.deepEqual(artifactGetCalls, [baseHash]);
+      await assert.rejects(readFile(path.join(vaultRoot, "live-mailbox-state.txt"), "utf8"), {
+        code: "ENOENT",
+      });
     } finally {
       await rm(workspaceRoot, {
         force: true,

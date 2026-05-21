@@ -87,15 +87,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
 Hosted runner progress reconciliation treats the write fence as the active owner
 of execution and commit authority rather than mailbox-demand truth. Exact
-accepted wakes may coalesce; durable mailbox lag starts or recovers execution
-only when no active owner is expected; accepted processing returns an
-owner-watchdog recheck instead of a short durable-lag polling loop; a confirmed
-non-wakeable child is replaced by identity; ambiguous wake failures return
-retry_later; capped repeated failures switch to a slow recovery probe rather
-than permanent alarm deletion; mailbox rows newer than the last runner failure
-are fresh demand and clear stale retry state before scheduling. New v2 foreground
-leases restore from durable workspace snapshots and do not trust dirty warm
-local runtime markers across leases. The detailed contract lives in
+accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag
+remains recovery truth but duplicate execution is prevented by the write fence;
+accepted processing returns an owner-watchdog recheck instead of a short
+durable-lag polling loop; a confirmed non-wakeable child is replaced by identity;
+ambiguous wake failures return `retry_later`; watchdog alarm maintenance
+failures are rethrown so the platform can retry instead of permanently deleting
+the alarm. New v2 foreground leases restore from durable workspace snapshots and
+legacy refs also cold-restore from durable bundles instead of trusting dirty
+warm local runtime markers across leases. The detailed contract lives in
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 The hosted Temporal hard-cut target is documented in

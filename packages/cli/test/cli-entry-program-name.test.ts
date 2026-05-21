@@ -4,12 +4,6 @@ const serve = vi.fn(async () => undefined)
 const createVaultCliWithOptions = vi.fn(() => ({
   serve,
 }))
-const applyDefaultVaultToArgs = vi.fn((argv: string[], defaultVault: string | null) =>
-  defaultVault ? [...argv, '--vault', defaultVault] : argv,
-)
-const hasExplicitVaultOption = vi.fn((argv: readonly string[]) =>
-  argv.includes('--vault'),
-)
 const resolveDefaultVault = vi.fn(async (): Promise<string | null> => '/vaults/default')
 const resolveOperatorHomeDirectory = vi.fn(() => '/home/operator')
 const detectSetupProgramName = vi.fn((argv0: string | undefined) =>
@@ -23,10 +17,7 @@ vi.mock('../src/vault-cli.js', () => ({
 }))
 
 vi.mock('@murphai/operator-config/operator-config', () => ({
-  applyDefaultVaultToArgs,
-  commandNeedsVaultForExecution: vi.fn(() => true),
   expandConfiguredVaultPath: vi.fn((vault: string) => vault),
-  hasExplicitVaultOption,
   resolveConfiguredDefaultVault: vi.fn(async () => '/vaults/default'),
   resolveEffectiveTopLevelToken: vi.fn(
     (argv: readonly string[]) => argv.find((token) => !token.startsWith('-')) ?? null,
@@ -67,9 +58,12 @@ test('murph launcher keeps the primary command name on the shared CLI surface', 
 
   expect(createVaultCliWithOptions).toHaveBeenCalledWith({
     commandName: 'murph',
+    vaultContext: expect.objectContaining({
+      current: '/vaults/default',
+    }),
   })
   expect(serve).toHaveBeenCalledWith(
-    ['status', '--vault', '/vaults/default'],
+    ['status'],
     expect.objectContaining({
       env: process.env,
     }),
@@ -83,21 +77,31 @@ test('vault-cli launcher keeps the secondary alias on the shared CLI surface', a
 
   expect(createVaultCliWithOptions).toHaveBeenCalledWith({
     commandName: 'vault-cli',
+    vaultContext: expect.objectContaining({
+      current: '/vaults/default',
+    }),
   })
 })
 
-test('vault-cli launcher reports a typed missing-vault error without a default vault', async () => {
+test('vault-cli launcher lets the command context report a missing vault at execution time', async () => {
   resolveDefaultVault.mockResolvedValueOnce(null)
 
-  await expect(
-    runMurphCliAction(['status'], {
-      argv0: '/usr/local/bin/vault-cli',
-    }),
-  ).rejects.toMatchObject({
-    code: 'missing_vault',
+  await runMurphCliAction(['status'], {
+    argv0: '/usr/local/bin/vault-cli',
   })
 
-  expect(serve).not.toHaveBeenCalled()
+  expect(createVaultCliWithOptions).toHaveBeenCalledWith({
+    commandName: 'vault-cli',
+    vaultContext: expect.objectContaining({
+      current: null,
+    }),
+  })
+  expect(serve).toHaveBeenCalledWith(
+    ['status'],
+    expect.objectContaining({
+      env: process.env,
+    }),
+  )
 })
 
 test('vault-cli launcher honors explicit vaults without a default vault', async () => {
@@ -107,8 +111,14 @@ test('vault-cli launcher honors explicit vaults without a default vault', async 
     argv0: '/usr/local/bin/vault-cli',
   })
 
+  expect(createVaultCliWithOptions).toHaveBeenCalledWith({
+    commandName: 'vault-cli',
+    vaultContext: expect.objectContaining({
+      current: '/vaults/explicit',
+    }),
+  })
   expect(serve).toHaveBeenCalledWith(
-    ['status', '--vault', '/vaults/explicit'],
+    ['status'],
     expect.objectContaining({
       env: process.env,
     }),

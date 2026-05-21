@@ -221,8 +221,9 @@ authority and active ownership truth for orchestration; useful runtime progress
 is still proven only by the later durable checkpoint. Local Durable Object
 promises are allowed to coalesce work, but they are not durable demand truth. The
 alarm remains the active write-fence watchdog, not semantic wake or mailbox-demand
-scheduling. Durable mailbox lag is a start/recovery signal when no active owner
-exists, not a reason to repeatedly wake an already owned hot run. The hosted
+scheduling. Durable mailbox lag is durable recovery truth; when it is observed
+while Cloudflare still owns an active write fence, Cloudflare may coalesce it
+into the active runner instead of starting duplicate execution. The hosted
 runtime owns the foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
@@ -340,10 +341,10 @@ cache/tmp, and rebuildable projections. Codex provider continuity is the exact
 active rollout JSONL referenced by live assistant session resume state, not the
 whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
 by `objectKey`, decrypts the encrypted `tar.zst`, and extracts into a fresh durable
-root. For legacy refs, restore applies the base bundle when present, then
-applies either the working delta or the legacy hot bundle according to the
-snapshot ref shape, and treats any local restore cache as a performance cache
-only. Legacy working `{base, delta}` and layered `{base, hot}` refs remain
+root. For legacy refs, restore clears local roots and legacy cache markers, then
+applies the base bundle when present and either the working delta or legacy hot
+bundle according to the snapshot ref shape. Legacy working `{base, delta}` and
+layered `{base, hot}` refs remain
 restorable during migration, but new bridge snapshots are idle-shutdown direct
 R2 v2 refs only.
 

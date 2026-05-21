@@ -14,6 +14,7 @@ import {
   inputFileOptionSchema,
   normalizeInputFileOption,
   normalizeRepeatableFlagOption,
+  normalizeRepeatableTextFlagOption,
 } from '@murphai/vault-usecases'
 import {
   addMeasurementRecord,
@@ -81,7 +82,7 @@ function parseMeasurementNoteEntries(
   value: readonly string[] | undefined,
   measurementCount: number,
 ): Array<string | undefined> {
-  const entries = normalizeRepeatedMeasurementText(value, 'measurement-note')
+  const entries = normalizeRepeatableTextFlagOption(value)
   const notes = Array<string | undefined>(measurementCount)
   if (!entries) {
     return notes
