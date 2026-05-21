@@ -4511,7 +4511,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("preserves deferred mailbox watermarks across warm foreground restores", async () => {
+  test("preserves checkpointed mailbox watermarks across clean warm foreground restores", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
     const sourceHotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-hot-"));
@@ -4652,8 +4652,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await runOnce(2);
       assert.deepEqual(importedSeqs, ["1"]);
       assert.equal(checkpointRequests.length, 1);
-      assert.equal(artifactGetCalls.length, 2);
-      assert.equal(artifactGetCalls[0], baseHash);
+      assert.deepEqual(artifactGetCalls, []);
       const secondFetch = fetchRequests.at(-1);
       assert.ok(secondFetch);
       assert.equal(
