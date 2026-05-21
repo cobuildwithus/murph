@@ -159,6 +159,7 @@ export type HostedRuntimeEnsureExecutionResponse =
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [
   "runtime_processing_accepted",
+  "retry_later",
 ] as const;
 
 export type HostedRuntimeEnsureProcessingResponseKind =
@@ -174,12 +175,30 @@ export const HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS = [
 export type HostedRuntimeProcessingAcceptedAction =
   (typeof HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS)[number];
 
-export interface HostedRuntimeEnsureProcessingResponse {
-  action: HostedRuntimeProcessingAcceptedAction;
-  kind: "runtime_processing_accepted";
-  recommendedRecheckAt: string | null;
-  runtimeAttemptId: string;
-}
+export const HOSTED_RUNTIME_PROCESSING_RETRY_REASONS = [
+  "active_child_rejected",
+  "container_rpc_error",
+  "container_rpc_timeout",
+  "missing_container_binding",
+  "stale_fence_replacement_race",
+  "start_not_confirmed",
+] as const;
+
+export type HostedRuntimeProcessingRetryReason =
+  (typeof HOSTED_RUNTIME_PROCESSING_RETRY_REASONS)[number];
+
+export type HostedRuntimeEnsureProcessingResponse =
+  | {
+      action: HostedRuntimeProcessingAcceptedAction;
+      kind: "runtime_processing_accepted";
+      recommendedRecheckAt: string | null;
+      runtimeAttemptId: string;
+    }
+  | {
+      kind: "retry_later";
+      reason: HostedRuntimeProcessingRetryReason;
+      retryAt: string;
+    };
 
 export const HOSTED_RUNTIME_CURRENT_WAIT_REASONS = [
   "idle_next_wake",

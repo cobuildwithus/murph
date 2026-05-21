@@ -11,6 +11,7 @@ import type {
   HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimeProcessingRetryReason,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -644,18 +645,16 @@ export class HostedUserRunner {
       });
       await this.syncWatchdogAlarm(cleared.record);
       if (!cleared.cleared) {
-        throw new HostedRuntimeExecutionRetryableError(
-          "Hosted runtime active write fence changed before replacement could start.",
-          "active-fence-replacement-stale",
+        return this.createRuntimeProcessingRetryLater(
+          "stale_fence_replacement_race",
         );
       }
       return await this.startRuntimeProcessing(input, "replaced");
     }
 
     await this.syncWatchdogAlarm(record);
-    throw new HostedRuntimeExecutionRetryableError(
-      "Hosted runtime active child wake could not be confirmed.",
-      containerResult.reason,
+    return this.createRuntimeProcessingRetryLater(
+      mapRunnerProcessingRetryReason(containerResult.reason),
     );
   }
 
@@ -729,6 +728,10 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
+    if (!this.runnerContainerNamespace) {
+      return this.createRuntimeProcessingRetryLater("missing_container_binding");
+    }
+
     let token: RunnerWriteFenceToken;
     try {
       token = await this.stateStore.beginWriteFence({
@@ -775,6 +778,16 @@ export class HostedUserRunner {
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
       runtimeAttemptId: token.attemptId,
+    };
+  }
+
+  private createRuntimeProcessingRetryLater(
+    reason: HostedRuntimeProcessingRetryReason,
+  ): HostedRuntimeEnsureProcessingResponse {
+    return {
+      kind: "retry_later",
+      reason,
+      retryAt: this.computeActiveRuntimeWakeRecheckAt(),
     };
   }
 
@@ -1739,6 +1752,27 @@ function readHostedWorkspaceV2SnapshotObjectKey(
     record,
     "Hosted workspace snapshot orphan cleanup current snapshotRef",
   ).objectKey;
+}
+
+function mapRunnerProcessingRetryReason(
+  reason: Extract<
+    RunnerContainerEnsureProcessingResult,
+    { kind: "retry-scheduled" }
+  >["reason"],
+): HostedRuntimeProcessingRetryReason {
+  switch (reason) {
+    case "active-child-rejected":
+      return "active_child_rejected";
+    case "container-rpc-error":
+      return "container_rpc_error";
+    case "container-rpc-timeout":
+      return "container_rpc_timeout";
+    case "missing-container-binding":
+      return "missing_container_binding";
+    case "legacy-wake-result":
+    case "missing-wake-method":
+      return "container_rpc_error";
+  }
 }
 
 function readObjectRecord(value: unknown): Record<string, unknown> | null {

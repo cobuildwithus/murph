@@ -362,6 +362,22 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
+      if (execution.kind === "retry_later") {
+        state.lastRuntimeAttemptId = null;
+        state.lastRuntimeStatus = "retry_later";
+        if (signalArrivedDuringExecution) {
+          continue;
+        }
+        await waitUntilTimestampOrSignal(
+          runtime,
+          execution.retryAt,
+          state.signalVersion,
+          state,
+          "execution_failure_retry",
+        );
+        continue;
+      }
+
       if (execution.kind === "runtime_completed") {
         const failureRetryAt = recordLegacyRuntimeCompletionWake(
           runtime,
