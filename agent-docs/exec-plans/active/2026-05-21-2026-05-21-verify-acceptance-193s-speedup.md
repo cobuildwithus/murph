@@ -77,7 +77,7 @@ Updated: 2026-05-21
 - Added prepared contracts and package-boundary variants so acceptance can reuse
   already-built artifacts without rebuilding shared `dist` outputs in the
   package-coverage tail.
-- Made package coverage CLI-aware: local fanout drops to 3 while CLI coverage is
+- Made package coverage CLI-aware: local fanout drops to 4 while CLI coverage is
   active, non-prepared contracts waits until CLI exits, and child coverage jobs
   write status from an `EXIT` trap.
 - Started hosted-web `next build` immediately in the local parallel app verify
@@ -108,4 +108,4 @@ Updated: 2026-05-21
 - A clean full acceptance retry then got app verification to the target window
   but failed Cloudflare app verify on a stale helper test that still expected the
   legacy ensure-execution response. The same run showed CLI coverage remained
-  the package tail at 148s, so the CLI-active fanout default is now 3.
+  the package tail at 148s, so the CLI-active fanout default is back to 4 after splitting the long CLI smoke bucket.

@@ -696,7 +696,7 @@ Updated: 2026-04-24
       'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
     )
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 3)"',
+      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"',
     )
     expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
     expect(workspaceVerify).toContain('current_package_coverage_concurrency()')
@@ -737,7 +737,14 @@ Updated: 2026-04-24
     expect(cliWorkspace).toContain('patterns: ["device-cli.test.ts"]')
     expect(cliWorkspace).toContain('name: "cli-release-smoke"')
     expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
+    expect(cliWorkspace).toContain('name: "cli-incur-smoke"')
+    expect(cliWorkspace).toContain('patterns: ["incur-smoke.test.ts"]')
+    expect(cliWorkspace).toContain('name: "cli-inbox-incur-smoke"')
+    expect(cliWorkspace).toContain('patterns: ["inbox-incur-smoke.test.ts"]')
     expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
+      cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
+    )
+    expect(cliWorkspace.indexOf('name: "cli-incur-smoke"')).toBeLessThan(
       cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
     )
   })

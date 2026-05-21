@@ -12,6 +12,7 @@ import {
   HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+  HOSTED_RUNTIME_PROCESSING_RETRY_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
@@ -436,6 +437,26 @@ export function parseHostedRuntimeEnsureProcessingResponse(
         ),
       };
     }
+    case "retry_later": {
+      assertExactKeys(record, "Hosted runtime processing retry-later response", [
+        "kind",
+        "reason",
+        "retryAt",
+      ]);
+
+      return {
+        kind,
+        reason: parseAllowedString(
+          record.reason,
+          "Hosted runtime processing retry-later response reason",
+          HOSTED_RUNTIME_PROCESSING_RETRY_REASONS,
+        ),
+        retryAt: readRequiredIsoTimestamp(
+          record.retryAt,
+          "Hosted runtime processing retry-later response retryAt",
+        ),
+      };
+    }
     default: {
       const exhaustive: never = kind;
       throw new TypeError(
@@ -587,6 +608,14 @@ function readRequiredNullableIsoTimestamp(value: unknown, label: string): string
   }
 
   return readNullableIsoTimestamp(value, label);
+}
+
+function readRequiredIsoTimestamp(value: unknown, label: string): string {
+  const timestamp = readRequiredNullableIsoTimestamp(value, label);
+  if (timestamp === null) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return timestamp;
 }
 
 function readOptionalNullableWorkspaceWakeKey(
