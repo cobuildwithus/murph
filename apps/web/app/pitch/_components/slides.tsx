@@ -315,6 +315,8 @@ export function WhyNowSlide() {
         AI understands.
         <br />
         Friends motivate.
+        <br />
+        Murph runs the experiment.
       </SlideHeading>
       <p className="mt-5 max-w-[62ch] text-base leading-[1.7] text-[#635a48]">
         Millions of people now have health data, and they are already
@@ -342,7 +344,7 @@ export function WhyNowSlide() {
       <p className="mt-8 max-w-[64ch] text-[15px] leading-[1.6] text-[#736a58]">
         The data exists. The social surface exists.{" "}
         <span className="font-medium text-[#2d3436]">
-          The agent can now run the experiment.
+          AI is finally good enough to run the rest.
         </span>
       </p>
     </Slide>
