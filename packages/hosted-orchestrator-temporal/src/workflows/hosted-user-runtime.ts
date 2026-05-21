@@ -31,11 +31,14 @@ export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVE_WAKE_RECHECK_DELAY_MS = 5_000;
 export const HOSTED_USER_RUNTIME_MAX_ACTIVE_WAKE_RECHECK_DELAY_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 30_000;
+export const HOSTED_USER_RUNTIME_MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 3_600_000;
+export const HOSTED_USER_RUNTIME_MIN_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 1_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
@@ -119,6 +122,7 @@ interface NormalizedWorkflowOptions {
   continueAsNewAfterIterations: number;
   ensureCloudflareExecutionStartToCloseTimeoutMs: number;
   readRuntimeDemandStartToCloseTimeoutMs: number;
+  runtimeCompletedFailureRecheckDelayMs: number;
 }
 
 export function createHostedUserRuntimeWorkflowMachine(
@@ -278,12 +282,13 @@ export function createHostedUserRuntimeWorkflowMachine(
           runtime,
           state,
           execution,
+          options.runtimeCompletedFailureRecheckDelayMs,
         );
-        if (demand.source === "workspace_wake") {
-          state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
-        }
 
         if (state.signalVersion === versionBeforeExecution) {
+          if (demand.source === "workspace_wake") {
+            state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
+          }
           clearConsumedFlagsAfterRun(state, demand.source);
           if (failureRetryAt !== null) {
             await waitUntilTimestampOrSignal(
@@ -343,13 +348,14 @@ function recordRuntimeCompletionWake(
     HostedRuntimeEnsureExecutionResponse,
     { kind: "runtime_completed" }
   >,
+  runtimeCompletedFailureRecheckDelayMs: number,
 ): string | null {
   if (
     execution.runtimeStatus === "failed"
     && execution.runtimeResultNextWakeAt === null
   ) {
     const retryAt = new Date(
-      runtime.nowMs() + HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+      runtime.nowMs() + runtimeCompletedFailureRecheckDelayMs,
     ).toISOString();
     state.runtimeResultWakeAt = retryAt;
     state.runtimeResultWakeReason = "runtime.failed";
@@ -418,6 +424,12 @@ function normalizeWorkflowOptions(
       max: HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
       value: options?.readRuntimeDemandStartToCloseTimeoutMs,
+    }),
+    runtimeCompletedFailureRecheckDelayMs: normalizePositiveIntegerOption({
+      fallback: HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+      max: HOSTED_USER_RUNTIME_MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+      min: HOSTED_USER_RUNTIME_MIN_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+      value: options?.runtimeCompletedFailureRecheckDelayMs,
     }),
   };
 }

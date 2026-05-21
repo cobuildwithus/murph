@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  readHostedUserRuntimeWorkflowOptions,
   readHostedRuntimeTemporalEnvironment,
 } from "../src/temporal-env.js";
 
@@ -135,5 +136,23 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     expect(readHostedRuntimeTemporalEnvironment({
       TEMPORAL_TLS_ENABLED: "no",
     }).tls).toBe(false);
+  });
+});
+
+describe("readHostedUserRuntimeWorkflowOptions", () => {
+  it("includes an explicit failed-runtime completion recheck delay", () => {
+    expect(readHostedUserRuntimeWorkflowOptions({})).toEqual({
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+      readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+      runtimeCompletedFailureRecheckDelayMs: 30_000,
+    });
+  });
+
+  it("reads the failed-runtime completion recheck delay from env", () => {
+    expect(readHostedUserRuntimeWorkflowOptions({
+      HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
+    })).toMatchObject({
+      runtimeCompletedFailureRecheckDelayMs: 45_000,
+    });
   });
 });
