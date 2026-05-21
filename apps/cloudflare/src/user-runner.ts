@@ -292,6 +292,11 @@ export class HostedUserRunner {
     };
   }
 
+  /**
+   * @deprecated Legacy replay/deploy-skew adapter. Normal orchestration uses
+   * `ensureRuntimeProcessingForUser`. Target removal: 2026-06-04 after old
+   * hosted user runtime histories drain.
+   */
   async ensureRuntimeExecutionForUser(
     input: RuntimeExecutionInput,
   ): Promise<HostedRuntimeEnsureExecutionResponse> {
