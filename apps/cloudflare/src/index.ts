@@ -19,10 +19,6 @@ import {
   HOSTED_WORKSPACE_INVOCATION_REASONS,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedRunnerNudgeRequest,
-  HostedRunnerNudgeResult,
-} from "@murphai/hosted-execution/runtime-control";
-import type {
   HostedRuntimeEnsureExecutionRequest,
   HostedRuntimeEnsureExecutionResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -377,31 +373,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.runnerStatus(input);
   }
 
-  async nudgeHostedRunner(input?: HostedRunnerNudgeRequest): Promise<HostedRunnerNudgeResult> {
-    return this.runner.nudgeHostedRunner(input);
-  }
-
-  async nudgeHostedRunnerForUser(
-    userId: string,
-    input?: HostedRunnerNudgeRequest,
-  ): Promise<HostedRunnerNudgeResult> {
-    return this.runner.nudgeHostedRunnerForUser(userId, input);
-  }
-
   async ensureRuntimeExecutionForUser(
     input: HostedRuntimeEnsureExecutionRequest & { userId: string },
   ): Promise<HostedRuntimeEnsureExecutionResponse> {
     return this.runner.ensureRuntimeExecutionForUser(input);
-  }
-
-  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
-    return this.runner.scheduleBrowserVaultRefreshForUser(input);
-  }
-
-  async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
-    // Legacy Durable Object method for deploy skew. Browser-vault refresh
-    // scheduling is Temporal-owned, so this compatibility surface is a no-op.
-    return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
   async validateRuntimeWriteFence(input: {
@@ -449,12 +424,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     userId: string;
   }): ReturnType<HostedUserRunner["finishRuntimeWriteFenceForSmoke"]> {
     return this.runner.finishRuntimeWriteFenceForSmoke(input);
-  }
-
-  async runUntilIdleOrBudget(input: {
-    reason: HostedWorkspaceInvocationReason;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    return this.runner.runUntilIdleOrBudget(input);
   }
 
   async runUntilIdleForTest(input: {

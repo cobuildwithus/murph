@@ -746,6 +746,7 @@ run_typecheck_preflight() {
   run_timed_step "Dependency policy" run_dependency_policy_check
   run_timed_step "Workspace boundary checks" run_workspace_boundary_check
   run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
+  run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
@@ -779,6 +780,11 @@ run_typecheck_overlapped() {
   local hosted_run_guard_pid="$!"
   pids+=("$hosted_run_guard_pid")
   register_background_pid "$hosted_run_guard_pid"
+
+  run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard &
+  local hosted_temporal_guard_pid="$!"
+  pids+=("$hosted_temporal_guard_pid")
+  register_background_pid "$hosted_temporal_guard_pid"
 
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard &
   local hosted_crypto_guard_pid="$!"
@@ -915,6 +921,7 @@ run_diff_repo_internal_fast_path() {
   run_timed_step "Shell syntax" check_shell_syntax
   run_timed_step "Node syntax" check_node_syntax
   run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
+  run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
 }
@@ -959,6 +966,7 @@ run_test_diff() {
   if [[ "$diff_global_root_change" == "1" || "$diff_run_verify_cli" == "1" || "${#typecheck_dirs[@]}" -gt 0 || "${#test_dirs[@]}" -gt 0 || "${#affected_app_dirs[@]}" -gt 0 ]]; then
     run_timed_step "Workspace boundary checks" run_workspace_boundary_check
     run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
+    run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
     run_timed_step "Raw health log payload guard" pnpm logs:guard
   fi
 

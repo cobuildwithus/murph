@@ -24,11 +24,9 @@ import {
 const mocks = vi.hoisted(() => ({
   appendHostedEmailIngressWakeInWeb: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
-  nudgeHostedRunner: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
   resolveHostedExecutionUserCryptoContext: vi.fn(),
   resolveUserRunnerStub: vi.fn(),
-  runUntilIdleOrBudget: vi.fn(),
 }));
 
 vi.mock("../src/env.ts", () => ({
@@ -149,21 +147,7 @@ describe("hosted email worker ingress", () => {
         userId: "user_123",
       },
     });
-    mocks.nudgeHostedRunner.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: true,
-      kind: "processing-ensured",
-      inFlight: false,
-      nextAlarmAt: null,
-    });
-    mocks.runUntilIdleOrBudget.mockResolvedValue({
-      nextWakeAt: null,
-      status: "idle",
-    });
-    mocks.resolveUserRunnerStub.mockResolvedValue({
-      nudgeHostedRunner: mocks.nudgeHostedRunner,
-      runUntilIdleOrBudget: mocks.runUntilIdleOrBudget,
-    });
+    mocks.resolveUserRunnerStub.mockResolvedValue({});
   });
 
   it("rejects alias ingress when the web-owned alias lookup misses before raw-message persistence and dispatch", async () => {
@@ -355,8 +339,7 @@ describe("hosted email worker ingress", () => {
       boundUserId: "user_123",
       timeoutMs: 30_000,
     });
-    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
@@ -539,8 +522,7 @@ describe("hosted email worker ingress", () => {
       }),
       boundUserId: "user_456",
     }));
-    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
@@ -570,8 +552,6 @@ describe("hosted email worker ingress", () => {
     }, env);
 
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
@@ -601,9 +581,7 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, env);
 
-    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
@@ -634,7 +612,6 @@ describe("hosted email worker ingress", () => {
     }, env);
 
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 

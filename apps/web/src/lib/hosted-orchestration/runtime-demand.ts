@@ -200,7 +200,7 @@ function selectHostedRuntimeRunDemand(input: {
   reason: HostedWorkspaceInvocationReason;
   source: HostedRuntimeDemandRunSource;
 } | null {
-  if (hasHostedMailboxLag(input.mailboxLag, "conversation")) {
+  if (hasHostedMailboxLag(input.mailboxLag)) {
     return {
       reason: "nudge",
       source: "mailbox_backlog",
@@ -211,13 +211,6 @@ function selectHostedRuntimeRunDemand(input: {
     return {
       reason: "manual",
       source: "manual",
-    };
-  }
-
-  if (hasHostedMailboxLag(input.mailboxLag)) {
-    return {
-      reason: "nudge",
-      source: "mailbox_backlog",
     };
   }
 

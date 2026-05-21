@@ -1,6 +1,4 @@
 import {
-  type HostedRunnerNudgeResult,
-  type HostedRunnerNudgeRequest,
   type HostedRunnerStatusResponse,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
@@ -112,21 +110,10 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
-export interface HostedBrowserVaultRefreshScheduleResult {
-  accepted: true;
-  removed: true;
-  scheduled: false;
-  userId: string;
-}
-
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
   runnerSecrets: RunnerSecretsService;
   userId: string;
-}
-
-interface LegacyRunnerExecutionInput {
-  reason: HostedWorkspaceInvocationReason;
 }
 
 type RuntimeExecutionInput = HostedRuntimeEnsureExecutionRequest & {
@@ -279,39 +266,6 @@ export class HostedUserRunner {
     };
   }
 
-  async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
-    const record = await this.stateStore.readState();
-    const execution = await this.ensureRuntimeExecutionForUser({
-      orchestrationAttemptId: createLegacyCloudflareOrchestrationAttemptId("nudge"),
-      reason: "nudge",
-      userId: record.userId,
-    });
-    const updatedRecord = await this.stateStore.readState();
-    const result = this.toHostedRunnerNudgeResult(execution, updatedRecord);
-
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        runtimeExecutionKind: execution.kind,
-        runtimeAttemptId: execution.runtimeAttemptId,
-        ...buildRunnerRecordTimingLogDetails(updatedRecord),
-      },
-      message: "Hosted runner legacy nudge translated to runtime execution.",
-      phase: "scheduled",
-      userId: updatedRecord.userId,
-    });
-
-    return result;
-  }
-
-  async nudgeHostedRunnerForUser(
-    userId: string,
-    input: HostedRunnerNudgeRequest = {},
-  ): Promise<HostedRunnerNudgeResult> {
-    await this.stateStore.bindUser(userId);
-    return this.nudgeHostedRunner(input);
-  }
-
   async ensureRuntimeExecutionForUser(
     input: RuntimeExecutionInput,
   ): Promise<HostedRuntimeEnsureExecutionResponse> {
@@ -321,24 +275,6 @@ export class HostedUserRunner {
       return await this.ensureExistingRuntimeExecution(input, record);
     }
     return await this.startRuntimeExecution(input, "started");
-  }
-
-  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        removed: true,
-      },
-      message: "Hosted runner legacy browser-vault refresh scheduling is disabled.",
-      phase: "scheduled",
-      userId: input.userId,
-    });
-    return {
-      accepted: true,
-      removed: true,
-      scheduled: false,
-      userId: input.userId,
-    };
   }
 
   async validateRuntimeWriteFence(input: {
@@ -570,16 +506,6 @@ export class HostedUserRunner {
       await this.syncWatchdogAlarm(await this.stateStore.readState());
     }
     return { completed: result.completed };
-  }
-
-  async runUntilIdleOrBudget(input: LegacyRunnerExecutionInput): Promise<HostedWorkspaceInvocationResult> {
-    const record = await this.stateStore.readState();
-    const execution = await this.ensureRuntimeExecutionForUser({
-      orchestrationAttemptId: createLegacyCloudflareOrchestrationAttemptId("run-until-idle"),
-      reason: input.reason,
-      userId: record.userId,
-    });
-    return this.toLegacyWorkspaceInvocationResult(execution);
   }
 
   private async ensureExistingRuntimeExecution(
@@ -857,21 +783,6 @@ export class HostedUserRunner {
     }
   }
 
-  private toHostedRunnerNudgeResult(
-    execution: HostedRuntimeEnsureExecutionResponse,
-    record: RunnerStateRecord,
-  ): HostedRunnerNudgeResult {
-    const watchdogAlarmAt = readWriteFenceWatchdogAlarmAt(record);
-    return {
-      accepted: true,
-      alarmScheduled: watchdogAlarmAt !== null,
-      kind: "processing-ensured",
-      immediateDriveStarted: execution.kind === "runtime_completed",
-      inFlight: record.writeFence !== null || execution.kind === "runtime_wake_sent",
-      nextAlarmAt: watchdogAlarmAt,
-    };
-  }
-
   private toLegacyWorkspaceInvocationResult(
     execution: HostedRuntimeEnsureExecutionResponse,
   ): HostedWorkspaceInvocationResult {
@@ -969,9 +880,12 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult> {
     await this.stateStore.bindUser(input.userId);
-    return await this.runUntilIdleOrBudget({
+    const execution = await this.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: createTestCloudflareOrchestrationAttemptId("run-until-idle"),
       reason: input.reason,
+      userId: input.userId,
     });
+    return this.toLegacyWorkspaceInvocationResult(execution);
   }
 
   async startStuckInvocationForTest(input: {
@@ -1437,12 +1351,12 @@ function readWriteFenceWatchdogAlarmAt(record: RunnerStateRecord): string | null
   return record.writeFence?.expiresAt ?? null;
 }
 
-function createLegacyCloudflareOrchestrationAttemptId(source: string): string {
+function createTestCloudflareOrchestrationAttemptId(source: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `legacy-cloudflare-${source}-${crypto.randomUUID()}`;
+    return `test-cloudflare-${source}-${crypto.randomUUID()}`;
   }
 
-  return `legacy-cloudflare-${source}-${Date.now().toString(36)}`;
+  return `test-cloudflare-${source}-${Date.now().toString(36)}`;
 }
 
 function safeCleanupErrorCode(error: unknown): string {

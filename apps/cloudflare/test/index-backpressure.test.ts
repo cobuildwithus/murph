@@ -54,24 +54,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
     const stub = {
       bindUser: vi.fn(async (userId: string) => ({ userId })),
-      nudgeHostedRunner: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: false,
-        kind: "processing-ensured",
-        inFlight: false,
-        nextAlarmAt: null,
-      })),
-      nudgeHostedRunnerForUser: vi.fn(async (_userId: string) => ({
-        accepted: true,
-        alarmScheduled: false,
-        kind: "processing-ensured",
-        inFlight: false,
-        nextAlarmAt: null,
-      })),
-      runUntilIdleOrBudget: vi.fn(async () => ({
-        nextWakeAt: null,
-        status: "idle" as const,
-      })),
+      ensureRuntimeExecutionForUser: vi.fn(),
       runnerStatus: vi.fn(),
     };
     const env = {
@@ -94,9 +77,7 @@ describe("cloudflare worker queue backpressure routes", () => {
 
     expect(runResponse.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
   });
 
   it("exposes runtime write-fence methods for deploy smoke on the user runner durable object", async () => {

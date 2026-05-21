@@ -17,6 +17,9 @@ import {
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
+  ensureHostedWorkspace,
+} from "../hosted-workspace/store";
+import {
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
   readHostedRuntimeTemporalSignalClientIfConfigured,
@@ -30,6 +33,7 @@ export interface HostedRuntimeSignalResult {
 
 export interface SignalHostedUserRuntimeWorkflowInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  ensureWorkspace?: boolean;
   signal: HostedRuntimeSignal;
   taskQueue?: string | null;
   userId: string;
@@ -117,6 +121,7 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
       eventId: input.eventId,
@@ -132,6 +137,7 @@ export async function signalHostedBrowserVaultRefreshRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
       eventId: input.eventId?.trim()
         || buildHostedRuntimeSignalEventId(
@@ -150,6 +156,7 @@ export async function signalHostedManualRunRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
       eventId: input.eventId?.trim()
         || buildHostedRuntimeSignalEventId(
@@ -214,6 +221,10 @@ export async function signalHostedUserRuntimeWorkflow(
       : input.client;
   if (!client) {
     throw new Error("Hosted runtime Temporal client is not configured.");
+  }
+
+  if (input.ensureWorkspace === true) {
+    await ensureHostedWorkspace({ userId: input.userId });
   }
 
   const workflowId = hostedUserRuntimeWorkflowId(input.userId);
