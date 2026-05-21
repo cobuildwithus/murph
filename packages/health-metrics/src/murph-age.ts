@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v9" as const;
+  "murph.age.research-calculator-view.v10" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v1" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION =
@@ -1102,10 +1102,11 @@ export type MurphAgeResearchLocalRunEvidenceSignal =
 
 export interface MurphAgeResearchLocalRunEvidenceItem {
   bundleId?: MurphAgeInputBundleId;
-  cohortLabel: "CRELES" | "HAALSI" | "MIDUS" | "NSHAP" | "wearables";
+  cohortLabel: "CRELES" | "HAALSI" | "MHAS" | "MIDUS" | "NSHAP" | "wearables";
   evidenceId:
     | "creles-glycemia-transport-local-run"
     | "haalsi-glucose-transport-local-run"
+    | "mhas-function-mobility-sidecar-local-run"
     | "midus-lab-lift-local-run"
     | "nshap-hba1c-transport-local-run"
     | "wearables-context-only-local-run";
@@ -1120,6 +1121,7 @@ export interface MurphAgeResearchLocalRunEvidenceItem {
 export interface MurphAgeResearchModelStatusView {
   blockers: Array<
     | "biomarker-transport-not-confirmed"
+    | "function-sidecar-parameter-pack-missing"
     | "product-use-not-authorized"
     | "wearable-increment-not-validated"
   >;
@@ -1129,12 +1131,12 @@ export interface MurphAgeResearchModelStatusView {
     anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered";
     currentScoringMode: "single-selected-research-card";
     labBodyStatus: "selected-card-score-not-additive-increment";
-    nextArchitectureStep: "validate-anchor-plus-increment-before-layered-scoring";
+    nextArchitectureStep: "fit-function-sidecar-before-layered-scoring";
     wearableStatus: "context-only-zero-product-multiplier";
   };
   functionDisability: {
-    currentUse: "context-only-diagnostic-sidecar";
-    nextAction: "fresh-source-feasibility-before-promotion";
+    currentUse: "bounded-research-sidecar-supported-pending-parameter-pack";
+    nextAction: "fit-bounded-function-parameter-pack-then-validate-fresh-source";
     scoreBearing: false;
   };
   labBody: {
@@ -1184,7 +1186,7 @@ export interface MurphAgeResearchArbiterView {
   labConflictPolicy: "lab9-primary-lab5-transport-guard-r399-anchor-fallback";
   selectedCardRole: MurphAgeResearchCardRole | null;
   selectionReason: MurphAgeResearchArbiterSelectionReason;
-  strategy: "r399-anchor-lab9-primary-lab5-transport-wearables-context";
+  strategy: "r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context";
   wearableScorePolicy: "context-only-not-score-bearing";
 }
 
@@ -2750,7 +2752,7 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
     acceptedBundleIds: ["function-context"],
     cardId: "function_context_no_risk",
     evidenceClass: "context-only",
-    evidenceSummary: "Function limitation and disability inputs may be shown as context, but they are not yet product-authorized as a Murph Age score-bearing sidecar.",
+    evidenceSummary: "Function limitation and disability inputs are the lead bounded research sidecar candidate, but they are not product-authorized and have no fitted score contribution yet.",
     outcome: {
       ageEstimateBasis: "none",
       horizonYears: null,
@@ -2766,7 +2768,7 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
       evidenceTiers: [],
       productPromotionEvidence: false,
       status: "blocked",
-      summary: "Function context card is not a score-bearing Murph Age product model.",
+      summary: "Function sidecar evidence is supportive for research direction only; fitted parameters and fresh validation are still required before scoring.",
     },
     wearableScoreBearingAuthorized: false,
   },
@@ -4146,9 +4148,9 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
       ],
     }),
     architectureLayerFromPolicies({
-      blockedUntil: "Function and cognition stay context-only until fresh cross-source falsification supports a score-bearing sidecar.",
+      blockedUntil: "Keep out of product and scoring math until a bounded parameter pack plus fresh validation support a score-bearing sidecar.",
       contextMetricKeys: [...MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS],
-      currentUse: "Lead diagnostic sidecar candidate and explanation context, not a score-bearing product model.",
+      currentUse: "Lead bounded research sidecar candidate and explanation context, with scoring pending parameterization.",
       layerId: "function-cognition-context",
       mode: "context-only",
       modelCardIds: ["function_context_no_risk"],
@@ -7153,7 +7155,7 @@ function buildMurphAgeResearchArbiterView(
       ? resolveMurphAgeResearchCardRole(selectedCandidateCardId)
       : null,
     selectionReason: resolveMurphAgeResearchArbiterSelectionReason(selectedCandidateCardId),
-    strategy: "r399-anchor-lab9-primary-lab5-transport-wearables-context",
+    strategy: "r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context",
     wearableScorePolicy: "context-only-not-score-bearing",
   };
 }
@@ -7196,6 +7198,7 @@ function buildMurphAgeResearchModelStatusView(input: {
   return {
     blockers: [
       "biomarker-transport-not-confirmed",
+      "function-sidecar-parameter-pack-missing",
       "wearable-increment-not-validated",
       "product-use-not-authorized",
     ],
@@ -7205,12 +7208,12 @@ function buildMurphAgeResearchModelStatusView(input: {
       anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered",
       currentScoringMode: "single-selected-research-card",
       labBodyStatus: "selected-card-score-not-additive-increment",
-      nextArchitectureStep: "validate-anchor-plus-increment-before-layered-scoring",
+      nextArchitectureStep: "fit-function-sidecar-before-layered-scoring",
       wearableStatus: "context-only-zero-product-multiplier",
     },
     functionDisability: {
-      currentUse: "context-only-diagnostic-sidecar",
-      nextAction: "fresh-source-feasibility-before-promotion",
+      currentUse: "bounded-research-sidecar-supported-pending-parameter-pack",
+      nextAction: "fit-bounded-function-parameter-pack-then-validate-fresh-source",
       scoreBearing: false,
     },
     labBody: {
@@ -7258,6 +7261,22 @@ function buildMurphAgeResearchModelStatusView(input: {
         sourceRouteId: "nshap-integrated-aging",
         summary: "NSHAP HbA1c replication is directionally useful but partial because controls compete in one wave.",
         supportedMetricKeys: ["hba1c"],
+      },
+      {
+        bundleId: "function-context",
+        cohortLabel: "MHAS",
+        evidenceId: "mhas-function-mobility-sidecar-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "supported",
+        sourceRouteId: "mhas-harmonized-aging",
+        summary: "MHAS panel extension and deep residual diagnostics support a bounded function/mobility research sidecar, pending fitted parameters and fresh validation.",
+        supportedMetricKeys: [
+          "adl-limitation-count",
+          "iadl-limitation-count",
+          "mobility-limitation-count",
+          "frailty-symptom-count",
+        ],
       },
       {
         bundleId: "wearable-context",
@@ -8042,7 +8061,7 @@ function assessMurphAgeFunctionContext(
       status: "context-only",
       warnings: [{
         code: "CONTEXT_NOT_SCORE_BEARING",
-        message: "Function limitation inputs are available as context, but current Murph Age product cards do not score them.",
+        message: "Function limitation inputs are available as a bounded research sidecar candidate, but current Murph Age product cards do not score them.",
       }],
     });
   }

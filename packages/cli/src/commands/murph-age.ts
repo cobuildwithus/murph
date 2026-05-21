@@ -316,7 +316,7 @@ const murphAgeResearchArbiterViewSchema = z.object({
     'primary-lab-card-selected',
     'transport-fallback-selected',
   ]),
-  strategy: z.literal('r399-anchor-lab9-primary-lab5-transport-wearables-context'),
+  strategy: z.literal('r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context'),
   wearableScorePolicy: z.literal('context-only-not-score-bearing'),
 })
 const murphAgeInputScoreReadinessStatusSchema = z.enum([
@@ -875,10 +875,11 @@ const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
     'r399-nhis-proxy-anchor',
     'wearable-context',
   ]).optional(),
-  cohortLabel: z.enum(['CRELES', 'HAALSI', 'MIDUS', 'NSHAP', 'wearables']),
+  cohortLabel: z.enum(['CRELES', 'HAALSI', 'MHAS', 'MIDUS', 'NSHAP', 'wearables']),
   evidenceId: z.enum([
     'creles-glycemia-transport-local-run',
     'haalsi-glucose-transport-local-run',
+    'mhas-function-mobility-sidecar-local-run',
     'midus-lab-lift-local-run',
     'nshap-hba1c-transport-local-run',
     'wearables-context-only-local-run',
@@ -900,6 +901,7 @@ const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
 const murphAgeResearchModelStatusViewSchema = z.object({
   blockers: z.array(z.enum([
     'biomarker-transport-not-confirmed',
+    'function-sidecar-parameter-pack-missing',
     'product-use-not-authorized',
     'wearable-increment-not-validated',
   ])),
@@ -909,12 +911,12 @@ const murphAgeResearchModelStatusViewSchema = z.object({
     anchorLayerStatus: z.literal('available-as-research-anchor-and-fallback-not-layered'),
     currentScoringMode: z.literal('single-selected-research-card'),
     labBodyStatus: z.literal('selected-card-score-not-additive-increment'),
-    nextArchitectureStep: z.literal('validate-anchor-plus-increment-before-layered-scoring'),
+    nextArchitectureStep: z.literal('fit-function-sidecar-before-layered-scoring'),
     wearableStatus: z.literal('context-only-zero-product-multiplier'),
   }),
   functionDisability: z.object({
-    currentUse: z.literal('context-only-diagnostic-sidecar'),
-    nextAction: z.literal('fresh-source-feasibility-before-promotion'),
+    currentUse: z.literal('bounded-research-sidecar-supported-pending-parameter-pack'),
+    nextAction: z.literal('fit-bounded-function-parameter-pack-then-validate-fresh-source'),
     scoreBearing: z.literal(false),
   }),
   labBody: z.object({

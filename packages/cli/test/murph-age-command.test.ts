@@ -971,14 +971,14 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v9')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v10')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
     assert.equal(view.mode, 'research')
     assert.equal(view.displayStatus, 'research-only')
     assert.equal(view.selectedCardId, 'lab5_bp_bmi_transport_research')
-    assert.equal(view.arbiter.strategy, 'r399-anchor-lab9-primary-lab5-transport-wearables-context')
+    assert.equal(view.arbiter.strategy, 'r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context')
     assert.equal(view.arbiter.labConflictPolicy, 'lab9-primary-lab5-transport-guard-r399-anchor-fallback')
     assert.equal(view.arbiter.wearableScorePolicy, 'context-only-not-score-bearing')
     assert.equal(view.arbiter.selectedCardRole, 'transport-fallback-and-discordance-guard')
@@ -1038,10 +1038,10 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.product.riskDisplayReady, false)
     assert.equal(
       view.model.blockers.join('|'),
-      'biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized',
+      'biomarker-transport-not-confirmed|function-sidecar-parameter-pack-missing|wearable-increment-not-validated|product-use-not-authorized',
     )
-    assert.equal(view.model.functionDisability.currentUse, 'context-only-diagnostic-sidecar')
-    assert.equal(view.model.functionDisability.nextAction, 'fresh-source-feasibility-before-promotion')
+    assert.equal(view.model.functionDisability.currentUse, 'bounded-research-sidecar-supported-pending-parameter-pack')
+    assert.equal(view.model.functionDisability.nextAction, 'fit-bounded-function-parameter-pack-then-validate-fresh-source')
     assert.equal(view.model.functionDisability.scoreBearing, false)
     assert.equal(view.model.labBody.currentUse, 'score-bearing-research-when-selected')
     assert.equal(view.model.labBody.nextAction, 'validate-transport-before-product-use')
@@ -1049,7 +1049,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.latestLocalRunEvidenceStatus, 'mixed-research-only-no-product-promotion')
     assert.equal(
       view.model.latestLocalRunEvidence.map((item) => item.evidenceId).join('|'),
-      'midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|wearables-context-only-local-run',
+      'midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|mhas-function-mobility-sidecar-local-run|wearables-context-only-local-run',
     )
     assert.equal(
       view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'midus-lab-lift-local-run')?.signal,
@@ -1074,6 +1074,20 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(
       view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'nshap-hba1c-transport-local-run')?.supportedMetricKeys.join('|'),
       'hba1c',
+    )
+    const mhasFunctionSidecarEvidence = view.model.latestLocalRunEvidence.find((item) =>
+      item.evidenceId === 'mhas-function-mobility-sidecar-local-run'
+    )
+    assert.ok(mhasFunctionSidecarEvidence)
+    assert.equal(mhasFunctionSidecarEvidence.cohortLabel, 'MHAS')
+    assert.equal(mhasFunctionSidecarEvidence.bundleId, 'function-context')
+    assert.equal(mhasFunctionSidecarEvidence.sourceRouteId, 'mhas-harmonized-aging')
+    assert.equal(mhasFunctionSidecarEvidence.signal, 'supported')
+    assert.equal(mhasFunctionSidecarEvidence.scoringMathChanged, false)
+    assert.equal(mhasFunctionSidecarEvidence.productAuthorizationChanged, false)
+    assert.equal(
+      mhasFunctionSidecarEvidence.supportedMetricKeys.join('|'),
+      'adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count',
     )
     assert.equal(view.model.latestLocalRunEvidence.every((item) => item.scoringMathChanged === false), true)
     assert.equal(view.model.latestLocalRunEvidence.every((item) => item.productAuthorizationChanged === false), true)
@@ -1248,7 +1262,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
-    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v9')
+    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v10')
     assert.equal(researchCalculatorView.researchOnly, true)
     assert.equal(researchCalculatorView.mode, 'research')
     assert.equal(researchCalculatorView.status, 'ready')
