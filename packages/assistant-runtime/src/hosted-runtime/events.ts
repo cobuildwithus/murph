@@ -389,6 +389,14 @@ async function executeHostedSystemWake(input: {
           : {}),
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
       });
+    case "runtime.manual-requested":
+    case "runtime.browser-vault-refresh-requested":
+    case "runtime.device-sync-recovery-requested":
+    case "runtime.mailbox-lag-observed":
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+      });
   }
 
   const exhaustiveWake: never = input.wake;

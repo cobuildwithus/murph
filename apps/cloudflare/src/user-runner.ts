@@ -821,8 +821,19 @@ export class HostedUserRunner {
     });
     return {
       kind: "retry_later",
-      retryAt: this.computeStartupRuntimeRecheckAt(),
+      retryAt: this.computeRuntimeProcessingRetryAt(input.reason),
     };
+  }
+
+  private computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
+    const delayMs =
+      reason === "stale_fence_replacement_race" ? 5_000 :
+      reason === "container_rpc_timeout" ? 10_000 :
+      reason === "container_rpc_error" ? 30_000 :
+      reason === "missing_container_binding" ? 60_000 :
+      15_000;
+
+    return new Date(Date.now() + delayMs).toISOString();
   }
 
   private trackRuntimeExecutionTask(

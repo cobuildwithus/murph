@@ -148,7 +148,8 @@ export type HostedMailboxLane =
   | "conversation-message"
   | "device-sync"
   | "member-activated"
-  | "member-channels-updated";
+  | "member-channels-updated"
+  | "runtime-control";
 
 export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
   bootstrapResult: HostedBootstrapResult | null;

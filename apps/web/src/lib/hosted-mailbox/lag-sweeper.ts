@@ -6,7 +6,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { PrismaClient } from "@prisma/client";
 
-import { signalHostedUserRuntimeWorkflow } from "../hosted-orchestration/signal-runtime";
+import { signalHostedMailboxLagObservedRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
   computeHostedMailboxLaneLag,
@@ -188,10 +188,7 @@ export async function runHostedMailboxLagSweeper(input: {
       });
 
       try {
-        await signalHostedUserRuntimeWorkflow({
-          signal: {
-            kind: "mailbox_lag_observed",
-          },
+        await signalHostedMailboxLagObservedRuntime({
           userId,
         });
         signalAccepted += 1;

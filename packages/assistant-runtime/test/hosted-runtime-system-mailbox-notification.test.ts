@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
   VAULT_LAYOUT,
@@ -283,6 +284,50 @@ describe("hosted system mailbox notification execution context", () => {
       await workspace.cleanup();
     }
   });
+
+  it("imports runtime control requests as durable no-op system work", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:manual",
+      kind: "runtime.manual-requested",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+
+    try {
+      assert.deepEqual(
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedRuntimeControlItem(),
+          vaultRoot: workspace.vaultRoot,
+          wake,
+        }),
+        {
+          reasonCode: "system_mailbox.queued",
+          status: "imported",
+        },
+      );
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceMailboxItemId: "mailbox_item_system_runtime_control",
+          wake: expect.objectContaining({
+            kind: "runtime.manual-requested",
+          }),
+        }),
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
 });
 
 function createRuntime(
@@ -386,6 +431,47 @@ function createResolvedActivationItem(): HostedMailboxResolvedImportItem {
     },
     route: {
       action: "apply-member-activation",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createResolvedRuntimeControlItem(): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: FIXED_NOW,
+    dedupeKey: "runtime-control:manual",
+    expiresAt: null,
+    id: "mailbox_item_system_runtime_control",
+    kind: "runtime.manual-requested",
+    lane: "system",
+    laneSeq: "1",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_123",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: null,
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-runtime-control-request",
       advanceProgress: true,
       itemRef: {
         id: item.id,

@@ -12,9 +12,15 @@ import {
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   ensureHostedWorkspace: vi.fn(),
   getPrisma: vi.fn(),
-  prisma: { kind: "prisma" },
+  prisma: {
+    $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
+      await callback({ kind: "tx" })
+    ),
+    kind: "prisma",
+  },
   readHostedMailboxItemCheckpointById: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   signalWithStart: vi.fn(),
@@ -27,6 +33,7 @@ const defaultWorkflowOptions = {
 };
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemCheckpointById:
     mocks.readHostedMailboxItemCheckpointById,
 }));
@@ -57,6 +64,18 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.signalWithStart.mockResolvedValue(undefined);
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => ({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: {
+        id: `mailbox_${input.envelope.kind}`,
+        kind: input.envelope.kind,
+        lane: "system",
+        laneSeq: "77",
+        userId: input.envelope.userId,
+      },
+    }));
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValue({
       id: "mailbox_123",
       lane: "conversation",
@@ -154,18 +173,29 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("uses device-sync recovery signals for recovery handoff semantics", async () => {
+  it("persists device-sync recovery as durable control demand before signaling", async () => {
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
       recoveryIntent: "device-sync-dirty-recovery",
     });
 
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.device-sync-recovery-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "device_sync_recovery_requested",
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.device-sync-recovery-requested",
+          source: "device-sync-recovery",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -180,17 +210,28 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
-  it("signals browser-vault refresh as a pointer-only wake hint", async () => {
+  it("persists browser-vault refresh as durable control demand before signaling", async () => {
     await signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),
       userId: "member_123",
     });
 
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.browser-vault-refresh-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "browser_vault_refresh_requested",
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+          source: "browser-vault-refresh",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -208,17 +249,28 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("signals manual runs as pointer-only wake hints", async () => {
+  it("persists manual runs as durable control demand before signaling", async () => {
     await signalHostedManualRunRuntime({
       client: buildClient(),
       userId: "member_123",
     });
 
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.manual-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "manual_run_requested",
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.manual-requested",
+          source: "manual",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),

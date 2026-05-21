@@ -6,6 +6,18 @@ import {
 } from "../src/parsers.ts";
 
 describe("parseHostedExecutionEvent", () => {
+  it("parses runtime control events", () => {
+    expect(
+      parseHostedExecutionEvent({
+        kind: "runtime.browser-vault-refresh-requested",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      kind: "runtime.browser-vault-refresh-requested",
+      userId: "user-1",
+    });
+  });
+
   it("parses explicit member channel sync events", () => {
     expect(
       parseHostedExecutionEvent({
@@ -255,6 +267,22 @@ describe("parseHostedExecutionEvent", () => {
 });
 
 describe("parseHostedExecutionWake", () => {
+  it("parses runtime control wakes", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "evt_runtime_control",
+        kind: "runtime.manual-requested",
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      eventId: "evt_runtime_control",
+      kind: "runtime.manual-requested",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "user-1",
+    });
+  });
+
   it("parses WhatsApp conversation wakes", () => {
     expect(
       parseHostedExecutionWake({

@@ -16,6 +16,9 @@ import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
 } from "./contracts.ts";
+import {
+  HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
+} from "./contracts.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",
@@ -30,9 +33,16 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
 export type HostedMailboxKind = (typeof HOSTED_MAILBOX_KINDS)[number];
+
+export const HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS =
+  HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS;
+
+export type HostedRuntimeControlMailboxKind =
+  (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-5.4-mini",

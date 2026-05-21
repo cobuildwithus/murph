@@ -98,6 +98,10 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
+      "runtime.manual-requested",
+      "runtime.browser-vault-refresh-requested",
+      "runtime.device-sync-recovery-requested",
+      "runtime.mailbox-lag-observed",
     ]);
     expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
       "import",
@@ -144,6 +148,7 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxLane("conversation")).toBe(true);
     expect(isHostedMailboxLane("global")).toBe(false);
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
+    expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
   });
 

@@ -9,6 +9,7 @@ import type {
   HostedRuntimeDemandWorkspaceProjection,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
+  HostedMailboxKind,
   HostedMailboxLaneLag,
   HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
@@ -24,6 +25,7 @@ import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
 import {
+  readHostedMailboxFirstPendingSystemKind,
   readHostedMailboxMaxSeqByLane,
 } from "../hosted-mailbox/store";
 import {
@@ -94,10 +96,18 @@ export async function readHostedRuntimeDemand(
       redactedStatusJson: redactedStatus,
     })
   );
+  const pendingSystemMailboxKind = hasHostedMailboxLag(mailboxLag, "system")
+    ? await readHostedMailboxFirstPendingSystemKind({
+        afterSeq: readHostedMailboxLaneImportedSeq(mailboxLag, "system"),
+        prisma,
+        userId: input.userId,
+      })
+    : null;
 
   const decision = await buildHostedRuntimeDemandDecision({
     ...input,
     mailboxLag,
+    pendingSystemMailboxKind,
     workspace,
   });
   emitHostedRuntimeDemandDecision({
@@ -112,6 +122,7 @@ export async function readHostedRuntimeDemand(
 export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest & {
   mailboxLag: HostedMailboxLaneLag[];
   now?: Date | string;
+  pendingSystemMailboxKind?: HostedMailboxKind | null;
   usageGateMode?: HostedRuntimeDemandUsageGateMode;
   workspace: HostedWorkspaceRecord | null;
 }): Promise<HostedRuntimeDemand> {
@@ -121,6 +132,7 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
 async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandRequest & {
   mailboxLag: HostedMailboxLaneLag[];
   now?: Date | string;
+  pendingSystemMailboxKind?: HostedMailboxKind | null;
   usageGateMode?: HostedRuntimeDemandUsageGateMode;
   workspace: HostedWorkspaceRecord | null;
 }): Promise<{
@@ -138,6 +150,7 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
     mailboxLag: input.mailboxLag,
     manualRunRequested: input.manualRunRequested === true,
     now,
+    pendingSystemMailboxKind: input.pendingSystemMailboxKind ?? null,
     runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
     workspace,
   });
@@ -317,17 +330,26 @@ function selectHostedRuntimeRunDemand(input: {
   mailboxLag: HostedMailboxLaneLag[];
   manualRunRequested: boolean;
   now: Date;
+  pendingSystemMailboxKind: HostedMailboxKind | null;
   runtimeResultWakeAt: string | null;
   workspace: HostedRuntimeDemandWorkspaceProjection | null;
 }): {
   reason: HostedWorkspaceInvocationReason;
   source: HostedRuntimeDemandRunSource;
 } | null {
-  if (hasHostedMailboxLag(input.mailboxLag)) {
+  if (hasHostedMailboxLag(input.mailboxLag, "conversation")) {
     return {
       reason: "nudge",
       source: "mailbox_backlog",
     };
+  }
+
+  if (hasHostedMailboxLag(input.mailboxLag, "system")) {
+    return selectHostedRuntimeControlRunDemand(input.pendingSystemMailboxKind)
+      ?? {
+        reason: "nudge",
+        source: "mailbox_backlog",
+      };
   }
 
   if (input.manualRunRequested) {
@@ -379,6 +401,38 @@ function selectHostedRuntimeRunDemand(input: {
   return null;
 }
 
+function selectHostedRuntimeControlRunDemand(
+  kind: HostedMailboxKind | null,
+): {
+  reason: HostedWorkspaceInvocationReason;
+  source: HostedRuntimeDemandRunSource;
+} | null {
+  switch (kind) {
+    case "runtime.manual-requested":
+      return {
+        reason: "manual",
+        source: "manual",
+      };
+    case "runtime.browser-vault-refresh-requested":
+      return {
+        reason: "browser_vault_refresh",
+        source: "browser_vault_refresh",
+      };
+    case "runtime.device-sync-recovery-requested":
+      return {
+        reason: "nudge",
+        source: "device_sync_recovery",
+      };
+    case "runtime.mailbox-lag-observed":
+      return {
+        reason: "nudge",
+        source: "lag_recovery",
+      };
+    default:
+      return null;
+  }
+}
+
 function readEarliestFutureWakeAt(input: {
   now: Date;
   runtimeResultWakeAt: string | null;
@@ -414,6 +468,13 @@ function hasHostedMailboxLag(
       return false;
     }
   });
+}
+
+function readHostedMailboxLaneImportedSeq(
+  mailboxLag: readonly HostedMailboxLaneLag[],
+  lane: HostedMailboxLaneLag["lane"],
+): string {
+  return mailboxLag.find((laneLag) => laneLag.lane === lane)?.importedSeq ?? "0";
 }
 
 function emitHostedRuntimeDemandDecision(decision: {

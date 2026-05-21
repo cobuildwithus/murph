@@ -164,6 +164,13 @@ Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
 
+Non-conversation control wakes follow the same durable-demand rule. Manual
+runs, browser-vault refreshes, device-sync recovery handoffs, and mailbox-lag
+recovery observations append system-mailbox control rows before Temporal is
+signaled. Temporal signals are wake hints; the demand endpoint reads the pending
+mailbox control row to recover the run source/reason, and the runtime clears the
+request only by importing the row and advancing mailbox watermarks.
+
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty

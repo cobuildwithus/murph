@@ -14,6 +14,8 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
   HostedExecutionRuntimeTimerWake,
+  HostedExecutionRuntimeControlWake,
+  HostedExecutionRuntimeControlWakeKind,
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramConversationMessagePayload,
   HostedExecutionWhatsAppMessage,
@@ -344,6 +346,20 @@ export function buildHostedExecutionRuntimeTimerWake(input: {
     kind: "runtime.timer",
     occurredAt: input.occurredAt,
     triggerKind: input.triggerKind,
+    userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionRuntimeControlWake(input: {
+  eventId: string;
+  kind: HostedExecutionRuntimeControlWakeKind;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionRuntimeControlWake {
+  return {
+    eventId: input.eventId,
+    kind: input.kind,
+    occurredAt: input.occurredAt,
     userId: input.userId,
   };
 }

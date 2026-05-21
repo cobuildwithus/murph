@@ -220,7 +220,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.000Z",
+      retryAt: "2026-04-27T00:01:00.000Z",
     });
 
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -395,7 +395,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.000Z",
+      retryAt: "2026-04-27T00:00:10.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();

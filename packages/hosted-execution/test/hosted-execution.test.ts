@@ -383,6 +383,10 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
+      "runtime.manual-requested",
+      "runtime.browser-vault-refresh-requested",
+      "runtime.device-sync-recovery-requested",
+      "runtime.mailbox-lag-observed",
     ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
       "Hosted execution wake handling is not configured.",
