@@ -393,7 +393,8 @@ function inferWearableShadowAnchorCardId(
 }
 
 function isWearableShadowAnchorCardId(value: MurphAgeModelCardId | "none"): value is MurphAgeScoreBearingCardId {
-  return value === "lab5_bp_bmi_transport_research"
+  return value === "l1_tiny_glycemia_10y_acm_research"
+    || value === "lab5_bp_bmi_transport_research"
     || value === "lab9_bp_body_10y_acm_research";
 }
 
