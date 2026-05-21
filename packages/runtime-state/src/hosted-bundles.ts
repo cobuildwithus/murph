@@ -126,6 +126,28 @@ export interface HostedWorkspaceSnapshotSizeDiagnostics {
   workspaceSnapshotMaxFileClass: string | null;
 }
 
+export interface HostedWorkspaceSnapshotArchiveEntry {
+  absolutePath: string;
+  archivePath: string;
+  kind: "directory" | "file";
+  relativePath: string;
+  root: "operator-home" | "vault";
+  size: number | null;
+}
+
+export interface HostedWorkspaceSnapshotArchivePlan {
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  directoryCount: number;
+  entries: HostedWorkspaceSnapshotArchiveEntry[];
+  fileCount: number;
+  totalPlainBytes: number;
+}
+
+export interface HostedWorkspaceSnapshotArchiveExtraPath {
+  path: string;
+  root: "operator-home" | "vault";
+}
+
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
   ref: HostedBundleArtifactRef;
 }
@@ -1807,6 +1829,7 @@ export async function verifyRestoredHostedCodexContinuityManifest(
   options?: {
     allowUnmanifestedCodexHomeFiles?: boolean;
     assistantStateRoot?: string;
+    missingManifest?: "clear" | "preserve" | "reject";
     requireManifest?: boolean;
   },
 ): Promise<void> {
@@ -1824,10 +1847,21 @@ export async function verifyRestoredHostedCodexContinuityManifest(
     );
   } catch (error) {
     if (isMissingPathError(error)) {
-      if (requireManifest) {
+      const missingManifestAction =
+        options?.missingManifest ?? (requireManifest ? "reject" : "clear");
+      if (missingManifestAction === "reject") {
         throw new Error("Hosted Codex continuity manifest is missing after restore.");
       }
-      await removeHostedCodexHomeFiles(operatorHomeRoot);
+      if (missingManifestAction === "preserve") {
+        await assertRestoredHostedCodexContinuityRequirementFilesPresent({
+          operatorHomeRoot,
+          requirements: requiredContinuity,
+        });
+        return;
+      }
+      if (missingManifestAction === "clear") {
+        await removeHostedCodexHomeFiles(operatorHomeRoot);
+      }
       return;
     }
     throw error;
@@ -1982,6 +2016,34 @@ function assertHostedCodexContinuityManifestCoversAssistantSessions(input: {
       throw new Error(
         "Hosted Codex continuity manifest is missing a restored session rollout.",
       );
+    }
+  }
+}
+
+async function assertRestoredHostedCodexContinuityRequirementFilesPresent(input: {
+  operatorHomeRoot: string;
+  requirements: ReadonlyArray<{
+    codexRolloutRelativePath: string | null;
+    providerSessionId: string;
+  }>;
+}): Promise<void> {
+  const codexHomeRoot = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
+  for (const requirement of input.requirements) {
+    const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
+      providerSessionId: requirement.providerSessionId,
+      value: requirement.codexRolloutRelativePath,
+    });
+    if (normalizedPath.reason !== null) {
+      throw new Error(
+        "Hosted Codex continuity manifest is missing restored session rollout state.",
+      );
+    }
+    const rolloutFile = await inspectHostedCodexRolloutFile({
+      codexHomeRoot,
+      relativePath: normalizedPath.relativePath,
+    });
+    if (!rolloutFile) {
+      throw new Error("Hosted Codex continuity rollout was not restored as a regular file.");
     }
   }
 }
@@ -2232,6 +2294,343 @@ function measureHostedAssistantRuntimeHotStateBundle(bundle: Uint8Array): {
     fileCount: archive.files.length,
     inlineBytes,
   };
+}
+
+export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
+  codexHomeSnapshotHashSecret?: string | null;
+  durableRoot: string;
+  extraFiles?: readonly HostedWorkspaceSnapshotArchiveExtraPath[];
+  operatorHomeRoot?: string | null;
+  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
+  vaultRoot: string;
+}): Promise<HostedWorkspaceSnapshotArchivePlan> {
+  const durableRoot = path.resolve(input.durableRoot);
+  const vaultRoot = path.resolve(input.vaultRoot);
+  if (!isSameOrDescendantWorkspaceSnapshotPath(vaultRoot, durableRoot)) {
+    throw new Error("Hosted workspace snapshot vault root must be inside durableRoot.");
+  }
+
+  const entries: HostedWorkspaceSnapshotArchiveEntry[] = [];
+  let codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null = null;
+  const explicitVaultFiles = createHostedWorkspaceSnapshotExtraFileSet({
+    entries: input.extraFiles ?? [],
+    root: "vault",
+  });
+  const explicitOperatorHomeFiles = createHostedWorkspaceSnapshotExtraFileSet({
+    entries: input.extraFiles ?? [],
+    root: "operator-home",
+  });
+
+  await collectHostedWorkspaceRootArchiveEntries({
+    durableRoot,
+    entries,
+    explicitRelativePaths: explicitVaultFiles,
+    includeRelativePath: (relativePath) =>
+      shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath),
+    root: "vault",
+    rootPath: vaultRoot,
+  });
+
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
+  if (operatorHomeRoot && isSameOrDescendantWorkspaceSnapshotPath(operatorHomeRoot, durableRoot)) {
+    const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const preparedCodexContinuity = await prepareHostedCodexContinuitySnapshot({
+      assistantStateRoot,
+      prepareCodexContinuitySnapshot: input.prepareCodexContinuitySnapshot,
+    });
+    const codexContinuityCollection = await collectHostedCodexContinuity({
+      assistantStateRoot,
+      hashSecret: input.codexHomeSnapshotHashSecret,
+      operatorHomeRoot,
+      preparedThreads: preparedCodexContinuity.preparedThreads,
+    });
+    codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
+      collection: codexContinuityCollection,
+      hashSecret: input.codexHomeSnapshotHashSecret,
+    });
+    assertHostedCodexContinuityComplete(
+      codexContinuityCollection,
+      codexHomeSnapshotDiagnostics,
+    );
+
+    if (codexContinuityCollection.entries.length > 0) {
+      explicitOperatorHomeFiles.add(HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH);
+      for (const relativePath of createHostedCodexContinuitySnapshotExplicitFiles(
+        codexContinuityCollection,
+      )) {
+        explicitOperatorHomeFiles.add(relativePath);
+      }
+      await writeHostedCodexContinuitySnapshotManifest({
+        codexHomeSnapshotDiagnostics,
+        collection: codexContinuityCollection,
+        operatorHomeRoot,
+        vaultArchiveEntries: entries,
+      });
+    }
+
+  } else {
+    const missingCodexContinuity = await collectMissingHostedCodexContinuity(
+      resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    );
+    codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
+      collection: missingCodexContinuity,
+      hashSecret: input.codexHomeSnapshotHashSecret,
+    });
+    assertHostedCodexContinuityComplete(
+      missingCodexContinuity,
+      codexHomeSnapshotDiagnostics,
+    );
+  }
+
+  if (explicitOperatorHomeFiles.size > 0) {
+    if (!operatorHomeRoot || !isSameOrDescendantWorkspaceSnapshotPath(operatorHomeRoot, durableRoot)) {
+      throw new Error("Hosted workspace snapshot operator home root must be inside durableRoot.");
+    }
+    await collectHostedWorkspaceRootArchiveEntries({
+      durableRoot,
+      entries,
+      explicitRelativePaths: explicitOperatorHomeFiles,
+      includeRelativePath: () => false,
+      root: "operator-home",
+      rootPath: operatorHomeRoot,
+    });
+  }
+
+  entries.sort((left, right) => left.archivePath.localeCompare(right.archivePath));
+  return {
+    codexHomeSnapshotDiagnostics,
+    directoryCount: entries.filter((entry) => entry.kind === "directory").length,
+    entries,
+    fileCount: entries.filter((entry) => entry.kind === "file").length,
+    totalPlainBytes: entries.reduce(
+      (total, entry) => total + (entry.kind === "file" ? entry.size ?? 0 : 0),
+      0,
+    ),
+  };
+}
+
+function createHostedWorkspaceSnapshotExtraFileSet(input: {
+  entries: readonly HostedWorkspaceSnapshotArchiveExtraPath[];
+  root: "operator-home" | "vault";
+}): Set<string> {
+  const included = new Set<string>();
+  for (const entry of input.entries) {
+    if (entry.root !== input.root) {
+      continue;
+    }
+    const relativePath = normalizeWorkspaceSnapshotRelativePath(entry.path);
+    if (input.root === "vault") {
+      if (shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath)) {
+        included.add(relativePath);
+      }
+    }
+  }
+  return included;
+}
+
+async function writeHostedCodexContinuitySnapshotManifest(input: {
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  collection: HostedCodexContinuityCollection;
+  operatorHomeRoot: string;
+  vaultArchiveEntries: readonly HostedWorkspaceSnapshotArchiveEntry[];
+}): Promise<void> {
+  const manifestPath = path.join(
+    input.operatorHomeRoot,
+    HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
+  );
+  const manifest = await createHostedCodexContinuityManifestFromArchivePlanEntries({
+    codexHomeSnapshotDiagnostics: input.codexHomeSnapshotDiagnostics,
+    collection: input.collection,
+    vaultArchiveEntries: input.vaultArchiveEntries,
+  });
+  await mkdir(path.dirname(manifestPath), { mode: 0o700, recursive: true });
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(manifest)}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+}
+
+async function createHostedCodexContinuityManifestFromArchivePlanEntries(input: {
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  collection: HostedCodexContinuityCollection;
+  vaultArchiveEntries: readonly HostedWorkspaceSnapshotArchiveEntry[];
+}): Promise<ReturnType<typeof createHostedCodexContinuityManifest>> {
+  const files: HostedBundleArchiveFile[] = [];
+  for (const entry of input.vaultArchiveEntries) {
+    if (
+      entry.kind !== "file"
+      || entry.root !== "vault"
+      || !hasWorkspaceSnapshotPathPrefix(
+        normalizeWorkspaceSnapshotRelativePath(entry.relativePath),
+        `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
+      )
+    ) {
+      continue;
+    }
+    files.push({
+      contentsBase64: (await readFile(entry.absolutePath)).toString("base64"),
+      path: entry.relativePath,
+      root: "vault",
+    });
+  }
+  for (const entry of input.collection.entries) {
+    files.push({
+      contentsBase64: (await readFile(entry.absolutePath)).toString("base64"),
+      path: `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`,
+      root: WORKSPACE_OPERATOR_HOME_ROOT,
+    });
+  }
+  return createHostedCodexContinuityManifestFromArchiveFiles({
+    codexHomeSnapshotDiagnostics: input.codexHomeSnapshotDiagnostics,
+    entries: input.collection.entries,
+    files,
+  });
+}
+
+async function collectHostedWorkspaceRootArchiveEntries(input: {
+  durableRoot: string;
+  entries: HostedWorkspaceSnapshotArchiveEntry[];
+  explicitRelativePaths?: ReadonlySet<string>;
+  includeRelativePath(relativePath: string): boolean;
+  root: "operator-home" | "vault";
+  rootPath: string;
+}): Promise<void> {
+  const rootPath = path.resolve(input.rootPath);
+  const rootArchivePrefix = normalizeWorkspaceSnapshotRelativePath(
+    path.relative(input.durableRoot, rootPath).split(path.sep).join(path.posix.sep),
+  );
+  if (
+    rootArchivePrefix === ".."
+    || rootArchivePrefix.startsWith(`..${path.posix.sep}`)
+    || path.posix.isAbsolute(rootArchivePrefix)
+  ) {
+    throw new Error("Hosted workspace snapshot root escaped durableRoot.");
+  }
+
+  const explicitRelativePaths = input.explicitRelativePaths ?? new Set<string>();
+
+  function hasExplicitDescendant(relativePath: string): boolean {
+    return [...explicitRelativePaths].some((explicitPath) =>
+      relativePath.length === 0
+      || explicitPath === relativePath
+      || explicitPath.startsWith(`${relativePath}${path.posix.sep}`)
+    );
+  }
+
+  async function visit(currentPath: string): Promise<void> {
+    const stats = await lstat(currentPath);
+    const relativePath = normalizeWorkspaceSnapshotRelativePath(
+      path.relative(rootPath, currentPath).split(path.sep).join(path.posix.sep),
+    );
+    assertHostedWorkspaceSnapshotRelativePathSafe(relativePath);
+    const policyIncluded = relativePath.length > 0 && input.includeRelativePath(relativePath);
+    const explicitIncluded = explicitRelativePaths.has(relativePath);
+    const explicitDescendant = hasExplicitDescendant(relativePath);
+    const archivePath = joinHostedWorkspaceArchivePath(rootArchivePrefix, relativePath);
+    if (relativePath.length > 0 && !policyIncluded && !explicitIncluded && !explicitDescendant) {
+      return;
+    }
+    if (stats.isSymbolicLink()) {
+      throw new Error("Hosted workspace snapshot durable root contains symlinks.");
+    }
+    if (stats.isSocket() || stats.isFIFO() || stats.isBlockDevice() || stats.isCharacterDevice()) {
+      throw new Error("Hosted workspace snapshot durable root contains unsupported special files.");
+    }
+
+    if (stats.isFile()) {
+      if (!policyIncluded && !explicitIncluded) {
+        return;
+      }
+      if (stats.nlink > 1) {
+        throw new Error("Hosted workspace snapshot durable root contains hardlinks.");
+      }
+      input.entries.push({
+        absolutePath: currentPath,
+        archivePath,
+        kind: "file",
+        relativePath,
+        root: input.root,
+        size: stats.size,
+      });
+      return;
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error("Hosted workspace snapshot durable root contains unsupported entries.");
+    }
+
+    if (archivePath.length > 0 && (policyIncluded || explicitDescendant || relativePath.length === 0)) {
+      input.entries.push({
+        absolutePath: currentPath,
+        archivePath,
+        kind: "directory",
+        relativePath,
+        root: input.root,
+        size: null,
+      });
+    }
+
+    if (relativePath.length > 0 && !policyIncluded && !explicitDescendant) {
+      return;
+    }
+
+    let children;
+    try {
+      children = await readdir(currentPath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+      throw error;
+    }
+    for (const child of children.sort((left, right) => left.localeCompare(right))) {
+      await visit(path.join(currentPath, child));
+    }
+  }
+
+  try {
+    await visit(rootPath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function joinHostedWorkspaceArchivePath(prefix: string, relativePath: string): string {
+  const normalizedPrefix = normalizeWorkspaceSnapshotRelativePath(prefix);
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  if (normalizedPrefix.length === 0) {
+    return normalizedRelativePath;
+  }
+  if (normalizedRelativePath.length === 0) {
+    return normalizedPrefix;
+  }
+  return `${normalizedPrefix}/${normalizedRelativePath}`;
+}
+
+function isSameOrDescendantWorkspaceSnapshotPath(candidate: string, root: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function assertHostedWorkspaceSnapshotRelativePathSafe(relativePath: string): void {
+  if (
+    relativePath.includes("\u0000")
+    || /[\u0001-\u001f\u007f]/u.test(relativePath)
+    || path.posix.isAbsolute(relativePath)
+    || relativePath === ".."
+    || relativePath.startsWith("../")
+    || relativePath.includes("/../")
+    || relativePath.endsWith("/..")
+  ) {
+    throw new Error("Hosted workspace snapshot path is unsafe.");
+  }
 }
 
 interface HostedWorkspaceSnapshotClassMetrics {

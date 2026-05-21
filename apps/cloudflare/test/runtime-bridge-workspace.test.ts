@@ -341,7 +341,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(uploaded).toBeDefined();
     const entries = listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef);
     expect(entries).toContain("vault/note.md");
-    expect(entries).toContain("home/.codex-hosted/cache/runtime-cache.txt");
+    expect(entries).not.toContain("home/.codex-hosted/cache/runtime-cache.txt");
     expect(entries).not.toContain("home/.codex-hosted/cache/runtime-cache-link");
     await expect(lstat(runtimeSymlinkPath)).rejects.toThrow();
     expect(putArtifact).not.toHaveBeenCalled();
@@ -356,6 +356,115 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         }),
       }),
     );
+  });
+
+  it("archives only portable v2 workspace state and explicit Codex continuity", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+    const providerSessionId = "00000000-0000-4000-8000-000000000041";
+    const rolloutRelativePath =
+      `sessions/2026/05/20/rollout-2026-05-20T01-02-03-${providerSessionId}.jsonl`;
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+      recursive: true,
+    });
+    await mkdir(path.join(vaultRoot, ".runtime", "projections"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "cache"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "tmp"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".git"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", path.dirname(rolloutRelativePath)), {
+      recursive: true,
+    });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId,
+          resumeRouteId: "route-ready",
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
+    await writeFile(path.join(vaultRoot, ".runtime", "cache", "cache.txt"), "cache\n", "utf8");
+    await writeFile(path.join(vaultRoot, ".runtime", "tmp", "temp.txt"), "tmp\n", "utf8");
+    await writeFile(path.join(vaultRoot, ".git", "config"), "git config\n", "utf8");
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      "{\"type\":\"session\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "cache", "runtime-cache.txt"),
+      "runtime cache\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(
+        operatorHomeRoot,
+        ".codex-hosted",
+        "sessions",
+        "2026",
+        "05",
+        "20",
+        "rollout-2026-05-20T01-02-03-00000000-0000-4000-8000-000000000042.jsonl",
+      ),
+      "{\"type\":\"unreferenced\"}\n",
+      "utf8",
+    );
+
+    const putArtifact = vi.fn(async () => {});
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotUploads,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    const uploaded = workspaceSnapshotUploads.get(snapshotRef.objectKey);
+
+    expect(uploaded).toBeDefined();
+    const entries = listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef);
+    expect(entries).toContain("vault/note.md");
+    expect(entries).toContain("vault/.runtime/operations/assistant/sessions/session.json");
+    expect(entries).toContain("home/.murph/hosted-codex-continuity.json");
+    expect(entries).toContain(`home/.codex-hosted/${rolloutRelativePath}`);
+    expect(entries).not.toContain("vault/.runtime/projections/query.sqlite");
+    expect(entries).not.toContain("vault/.runtime/cache/cache.txt");
+    expect(entries).not.toContain("vault/.runtime/tmp/temp.txt");
+    expect(entries).not.toContain("vault/.git/config");
+    expect(entries).not.toContain("home/.codex-hosted/cache/runtime-cache.txt");
+    expect(entries).not.toContain(
+      "home/.codex-hosted/sessions/2026/05/20/rollout-2026-05-20T01-02-03-00000000-0000-4000-8000-000000000042.jsonl",
+    );
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
   it("rejects user-vault symlinks instead of silently dropping workspace state", async () => {
@@ -424,7 +533,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     );
   });
 
-  it("does not prune non-Codex operator-home symlinks", async () => {
+  it("does not archive non-Codex operator-home symlinks", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(workspaceRoot);
     const durableRoot = path.join(workspaceRoot, "durable");
@@ -467,17 +576,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toThrow("Hosted workspace snapshot durable root contains symlinks.");
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    const uploaded = workspaceSnapshotUploads.get(snapshotRef.objectKey);
 
     expect((await lstat(operatorHomeSymlinkPath)).isSymbolicLink()).toBe(true);
-    expect(workspaceSnapshotUploads.size).toBe(0);
-    expect(workspaceSnapshotDirectPuts).not.toHaveBeenCalled();
-    expect(workspaceSnapshotAborts).toEqual([
-      expect.objectContaining({
-        snapshotId: expect.stringMatching(/^snapshot_test_/u),
-      }),
-    ]);
+    expect(uploaded).toBeDefined();
+    expect(listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef))
+      .not.toContain("home/runtime-cache-link");
+    expect(workspaceSnapshotDirectPuts).toHaveBeenCalledOnce();
+    expect(workspaceSnapshotAborts).toEqual([]);
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
@@ -612,13 +720,29 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const durableRoot = path.join(workspaceRoot, "durable");
     const vaultRoot = path.join(durableRoot, "vault");
     const operatorHomeRoot = path.join(durableRoot, "home");
-    const preservedPath = ".codex-hosted/sessions/preserved.jsonl";
+    const preservedProviderSessionId = "00000000-0000-4000-8000-000000000061";
+    const preservedPath =
+      `.codex-hosted/sessions/2026/05/20/rollout-2026-05-20T01-02-03-${preservedProviderSessionId}.jsonl`;
     const preservedBytes = Buffer.from("{\"preserved\":true}\n");
     const preservedHash = sha256HostedBundleHex(preservedBytes);
     const preservedTargetPath = path.join(operatorHomeRoot, ...preservedPath.split("/"));
     await mkdir(vaultRoot, { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+      recursive: true,
+    });
     await mkdir(path.dirname(preservedTargetPath), { recursive: true });
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: preservedPath.slice(".codex-hosted/".length),
+          providerSessionId: preservedProviderSessionId,
+          resumeRouteId: "route-ready",
+        },
+      }),
+      "utf8",
+    );
     await writeFile(path.join(workspaceRoot, "old-runtime-target.jsonl"), "{\"old\":true}\n");
     await symlink(path.join(workspaceRoot, "old-runtime-target.jsonl"), preservedTargetPath);
     await writeHostedWorkspaceSkippedInlineFiles({
@@ -687,7 +811,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(await readFile(preservedTargetPath, "utf8")).toBe(preservedBytes.toString("utf8"));
     expect((await lstat(preservedTargetPath)).isSymbolicLink()).toBe(false);
     expect(listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef))
-      .toContain("home/.codex-hosted/sessions/preserved.jsonl");
+      .toContain(`home/${preservedPath}`);
     expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
       expect.objectContaining({
         eventCode: "checkpoint.snapshot_finished",
@@ -1053,15 +1177,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted Codex continuity snapshot is missing required rollout state.");
 
     expect(putArtifact).not.toHaveBeenCalled();
-    expect(snapshotRef.schema).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
     expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
       expect.objectContaining({
-        eventCode: "checkpoint.snapshot_finished",
+        eventCode: "checkpoint.snapshot_failed",
         redactedJson: expect.objectContaining({
+          safeErrorDetail: "Hosted Codex continuity snapshot is missing required rollout state.",
           snapshotMode: "workspace_snapshot_v2",
         }),
       }),
@@ -1407,10 +1531,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   });
 
   it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
-    cleanupPaths.push(vaultRoot, baseVaultRoot);
-    const operatorHomeRoot = `${vaultRoot}-operator-home`;
+    cleanupPaths.push(workspaceRoot, baseVaultRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
     const threadId = "00000000-0000-4000-8000-000000000004";
     const rolloutRelativePath =
       `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
