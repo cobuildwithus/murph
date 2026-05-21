@@ -5,6 +5,7 @@ import {
   assessMurphAgeWearableShadowIncrements,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  isMurphAgeWearableShadowAnchorCardId,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
   normalizeMetricValue,
@@ -16,7 +17,6 @@ import {
   type MurphAgeContextBundleAssessment,
   type MurphAgeInputBundleAssessment,
   type MurphAgeInputBundleId,
-  type MurphAgeModelCardId,
   type MurphAgeProductPromotionBlocker,
   type MurphAgeScoreBearingCardId,
   type MurphAgeSubmittedCalculatorInputBundleSpec,
@@ -387,15 +387,9 @@ function inferWearableShadowAnchorCardId(
   assessment: MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
 ): MurphAgeScoreBearingCardId | null {
   if (assessment.status !== "ready") return null;
-  return isWearableShadowAnchorCardId(assessment.recommendedCardId)
+  return isMurphAgeWearableShadowAnchorCardId(assessment.recommendedCardId)
     ? assessment.recommendedCardId
     : null;
-}
-
-function isWearableShadowAnchorCardId(value: MurphAgeModelCardId | "none"): value is MurphAgeScoreBearingCardId {
-  return value === "l1_tiny_glycemia_10y_acm_research"
-    || value === "lab5_bp_bmi_transport_research"
-    || value === "lab9_bp_body_10y_acm_research";
 }
 
 function wearableFamiliesByStatus(

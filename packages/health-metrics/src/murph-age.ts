@@ -2529,6 +2529,14 @@ const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
   "l1_tiny_glycemia_10y_acm_research",
 ] satisfies readonly MurphAgeScoreBearingCardId[];
 
+export function listMurphAgeWearableShadowAnchorCardIds(): MurphAgeScoreBearingCardId[] {
+  return [...MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS];
+}
+
+export function isMurphAgeWearableShadowAnchorCardId(value: string): value is MurphAgeScoreBearingCardId {
+  return (MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS as readonly string[]).includes(value);
+}
+
 const MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS = [
   "activity-summary",
   "sleep-summary",
@@ -3568,11 +3576,7 @@ export function summarizeMurphAgeWearableParameterPackContract(): MurphAgeWearab
 
 export function summarizeMurphAgeWearableResidualLayerContract(): MurphAgeWearableResidualLayerContract {
   return {
-    anchorCardIds: [
-      "lab9_bp_body_10y_acm_research",
-      "lab5_bp_bmi_transport_research",
-      "l1_tiny_glycemia_10y_acm_research",
-    ],
+    anchorCardIds: listMurphAgeWearableShadowAnchorCardIds(),
     parameterPackContract: summarizeMurphAgeWearableParameterPackContract(),
     combinationScale: "logit-residual",
     coverageScoringPolicy: "gate-and-control-only-not-age-contribution",
