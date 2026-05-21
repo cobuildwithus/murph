@@ -827,8 +827,13 @@ describe("hostedRunnerIntercept", () => {
       },
       type: "function_call_output",
     };
-    const unmatchedOutput = {
+    const exactNameOutput = {
       call_id: "call_private_3",
+      output: "exact-name synthetic output",
+      type: "function_call_output",
+    };
+    const unmatchedOutput = {
+      call_id: "call_private_4",
       output: "orphan synthetic output",
       type: "function_call_output",
     };
@@ -847,6 +852,13 @@ describe("hostedRunnerIntercept", () => {
         type: "function_call",
       },
       unsafeNameOutput,
+      {
+        arguments: "synthetic-exact-function-arguments",
+        call_id: "call_private_3",
+        name: "mcp__dbhub_query",
+        type: "function_call",
+      },
+      exactNameOutput,
       unmatchedOutput,
       {
         content: "synthetic-private-message",
@@ -867,26 +879,30 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnostic).toEqual(expect.objectContaining({
       inputFunctionCallBytes: [
         testJsonByteLength(input[0]),
+        testJsonByteLength(input[4]),
         testJsonByteLength(input[2]),
       ],
-      inputFunctionCallNameCounts: [1, 1],
-      inputFunctionCallNameKinds: ["local_shell", "other"],
+      inputFunctionCallNameCounts: [1, 1, 1],
+      inputFunctionCallNameKinds: ["local_shell", "mcp__dbhub_query", "other"],
       inputFunctionOutputBytes: [
         testJsonByteLength(matchedOutput.output),
+        testJsonByteLength(exactNameOutput.output),
         testJsonByteLength(unsafeNameOutput.output),
         testJsonByteLength(unmatchedOutput.output),
       ],
-      inputFunctionOutputNameCounts: [1, 1, 1],
-      inputFunctionOutputNameKinds: ["local_shell", "other", "unknown"],
+      inputFunctionOutputNameCounts: [1, 1, 1, 1],
+      inputFunctionOutputNameKinds: ["local_shell", "mcp__dbhub_query", "other", "unknown"],
       inputLargestFunctionOutputBytes: testJsonByteLength(matchedOutput.output),
       inputLargestFunctionOutputIndex: 1,
       inputLargestFunctionOutputNameKind: "local_shell",
-      inputLargestFunctionOutputReverseIndex: 4,
+      inputLargestFunctionOutputReverseIndex: 6,
       inputTailItemFunctionNameKinds: [
         "local_shell",
         "local_shell",
         "other",
         "other",
+        "mcp__dbhub_query",
+        "mcp__dbhub_query",
         "unknown",
         "none",
       ],
@@ -898,6 +914,7 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnosticJson).not.toContain("synthetic-sensitive-tool-output");
     expect(diagnosticJson).not.toContain("synthetic-sensitive-function-arguments");
     expect(diagnosticJson).not.toContain("synthetic-unsafe-function-arguments");
+    expect(diagnosticJson).not.toContain("synthetic-exact-function-arguments");
     expect(diagnosticJson).not.toContain("synthetic-private-message");
     expect(diagnosticJson).not.toContain("private/tool-name");
   });
