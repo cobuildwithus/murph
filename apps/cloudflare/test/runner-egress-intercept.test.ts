@@ -558,6 +558,7 @@ describe("hostedRunnerIntercept", () => {
       inputItemRoleCounts: [1],
       inputItemRoleKinds: ["user"],
       inputItemTypeCounts: [1],
+      inputItemTypeBytes: [testJsonByteLength(requestBody.input[0])],
       inputItemTypeKinds: ["missing"],
       inputLargestItemIndex: 0,
       inputLargestItemKinds: ["type:missing", "role:user"],
@@ -602,7 +603,7 @@ describe("hostedRunnerIntercept", () => {
         + testByteLength("input_text")
         + testByteLength("user"),
     ]);
-    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(60);
+    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(64);
     expect(entry?.redactedJson?.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
     expect(entry?.redactedJson?.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
     expect(entry?.redactedJson?.requestPrefixFingerprints).toEqual(
@@ -730,7 +731,15 @@ describe("hostedRunnerIntercept", () => {
       inputItemRoleCounts: [1, 2, 1, 1],
       inputItemRoleKinds: ["assistant", "missing", "other", "user"],
       inputItemTypeCounts: [1, 1, 2, 1],
+      inputItemTypeBytes: [
+        testJsonByteLength(input[1]),
+        testJsonByteLength(input[0]),
+        testJsonByteLength(input[3]) + testJsonByteLength(input[4]),
+        testJsonByteLength(input[2]),
+      ],
       inputItemTypeKinds: ["function_call", "message", "missing", "other"],
+      inputFunctionCallNameCounts: [1],
+      inputFunctionCallNameKinds: ["unknown"],
       inputLargestItemBytes: testJsonByteLength(input[0]),
       inputLargestItemIndex: 0,
       inputLargestItemKinds: ["type:message", "role:user"],
@@ -766,6 +775,7 @@ describe("hostedRunnerIntercept", () => {
       ],
       inputTailItemCount: 5,
       inputTailItemFingerprintPresent: false,
+      inputTailItemFunctionNameKinds: ["none", "unknown", "none", "none", "none"],
       inputTailItemIndexes: [0, 1, 2, 3, 4],
       inputTailItemOutputBytes: [
         0,
@@ -801,6 +811,90 @@ describe("hostedRunnerIntercept", () => {
       ],
       inputTailItemTypeKinds: ["message", "function_call", "other", "missing", "missing"],
     }));
+  });
+
+  it("attributes OpenAI function-call-output bytes without raw output or call IDs", async () => {
+    const matchedOutput = {
+      call_id: "call_private_1",
+      output: "synthetic-sensitive-tool-output ".repeat(20),
+      type: "function_call_output",
+    };
+    const unsafeNameOutput = {
+      call_id: "call_private_2",
+      output: {
+        rows: ["small synthetic row"],
+      },
+      type: "function_call_output",
+    };
+    const unmatchedOutput = {
+      call_id: "call_private_3",
+      output: "orphan synthetic output",
+      type: "function_call_output",
+    };
+    const input = [
+      {
+        arguments: "synthetic-sensitive-function-arguments",
+        call_id: "call_private_1",
+        name: "local_shell",
+        type: "function_call",
+      },
+      matchedOutput,
+      {
+        arguments: "synthetic-unsafe-function-arguments",
+        call_id: "call_private_2",
+        name: "private/tool-name",
+        type: "function_call",
+      },
+      unsafeNameOutput,
+      unmatchedOutput,
+      {
+        content: "synthetic-private-message",
+        role: "user",
+        type: "message",
+      },
+    ] as const;
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.5",
+      })),
+    });
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      inputFunctionCallNameCounts: [1, 1],
+      inputFunctionCallNameKinds: ["local_shell", "other"],
+      inputFunctionOutputBytes: [
+        testJsonByteLength(matchedOutput.output),
+        testJsonByteLength(unsafeNameOutput.output),
+        testJsonByteLength(unmatchedOutput.output),
+      ],
+      inputFunctionOutputNameCounts: [1, 1, 1],
+      inputFunctionOutputNameKinds: ["local_shell", "other", "unknown"],
+      inputLargestFunctionOutputBytes: testJsonByteLength(matchedOutput.output),
+      inputLargestFunctionOutputIndex: 1,
+      inputLargestFunctionOutputNameKind: "local_shell",
+      inputLargestFunctionOutputReverseIndex: 4,
+      inputTailItemFunctionNameKinds: [
+        "local_shell",
+        "local_shell",
+        "other",
+        "other",
+        "unknown",
+        "none",
+      ],
+    }));
+    parseDiagnosticRuntimeLog(diagnostic);
+
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain("call_private");
+    expect(diagnosticJson).not.toContain("synthetic-sensitive-tool-output");
+    expect(diagnosticJson).not.toContain("synthetic-sensitive-function-arguments");
+    expect(diagnosticJson).not.toContain("synthetic-unsafe-function-arguments");
+    expect(diagnosticJson).not.toContain("synthetic-private-message");
+    expect(diagnosticJson).not.toContain("private/tool-name");
   });
 
   it("bounds OpenAI input tail diagnostics to the last eight items", async () => {
