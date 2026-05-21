@@ -12,6 +12,7 @@ import {
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
+  ensureHostedWorkspace: vi.fn(),
   readHostedMailboxItemCheckpointById: vi.fn(),
   signalWithStart: vi.fn(),
 }));
@@ -24,6 +25,10 @@ const defaultWorkflowOptions = {
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxItemCheckpointById:
     mocks.readHostedMailboxItemCheckpointById,
+}));
+
+vi.mock("@/src/lib/hosted-workspace/store", () => ({
+  ensureHostedWorkspace: mocks.ensureHostedWorkspace,
 }));
 
 import {
@@ -76,6 +81,7 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       },
     );
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
     const signal = mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0];
     expect(Object.keys(signal as Record<string, unknown>).sort()).toEqual([
       "kind",
@@ -144,6 +150,9 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
   });
 
   it("signals browser-vault refresh with a deterministic pointer-only event id", async () => {
@@ -163,6 +172,9 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
     expect(JSON.stringify(mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0])).not.toMatch(
       /prompt|headers|payload|message/u,
     );
@@ -187,6 +199,9 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
   });
 
   it("bounds generated runtime signal event ids", () => {

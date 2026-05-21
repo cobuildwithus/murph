@@ -1499,10 +1499,7 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("passes the test run-until-idle reason to the Durable Object", async () => {
@@ -1606,8 +1603,6 @@ describe("cloudflare worker routes", () => {
         reason: "nudge",
         userId: "test-user",
       });
-      expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
-      expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
     });
 
     it("rejects OIDC-only runtime ensure-execution route calls", async () => {
@@ -2021,15 +2016,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("does not expose the removed browser-vault refresh route", async () => {
-    const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
-        userId: string;
-      }) => ({
-        accepted: true,
-        scheduled: true as const,
-        userId: input.userId,
-      })),
-    });
+    const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
@@ -2045,10 +2032,7 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.scheduleBrowserVaultRefreshForUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("deletes hosted runner user data without queuing a new invocation", async () => {
@@ -2098,8 +2082,7 @@ describe("cloudflare worker routes", () => {
       userId: "member_123",
     });
     expect(stub.deleteHostedUserData).toHaveBeenCalledWith("member_123");
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
   });
 
   it("rejects user-data deletion route/user mismatches before touching the Durable Object", async () => {
@@ -2156,8 +2139,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -2833,17 +2815,6 @@ async function resolveHostedUserCryptoContextForTest(
 }
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
-  const defaultNudgeResult = {
-    accepted: true,
-    alarmScheduled: true,
-    kind: "processing-ensured",
-    inFlight: false,
-    nextAlarmAt: null,
-  };
-  const nudgeHostedRunner = (overrides.nudgeHostedRunner ??
-    vi.fn(async () => defaultNudgeResult)) as UserRunnerDurableObjectStubLike["nudgeHostedRunner"];
-  const nudgeHostedRunnerForUser = (overrides.nudgeHostedRunnerForUser ??
-    vi.fn(async () => defaultNudgeResult)) as UserRunnerDurableObjectStubLike["nudgeHostedRunnerForUser"];
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
     beginRuntimeWriteFenceForSmoke: vi.fn(async (input: {
@@ -2871,16 +2842,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       },
       userId,
     })),
-    nudgeHostedRunner,
-    nudgeHostedRunnerForUser,
     ensureRuntimeExecutionForUser: vi.fn(async () => ({
       kind: "runtime_wake_sent" as const,
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
-    })),
-    runUntilIdleOrBudget: vi.fn(async () => ({
-      nextWakeAt: null,
-      status: "idle" as const,
     })),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,
@@ -2899,14 +2864,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recentLogs: [],
       userId: "member_123",
       workspace: null,
-    })),
-    scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
-      userId: string;
-    }) => ({
-      accepted: true as const,
-      removed: true,
-      scheduled: false,
-      userId: input.userId,
     })),
     finishRuntimeWriteFenceForSmoke: vi.fn(async () => ({ completed: true })),
     validateRuntimeWriteFence: vi.fn(async () => true),

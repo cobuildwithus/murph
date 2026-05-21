@@ -434,7 +434,7 @@ describe("hosted orchestration demand", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("does not let system-only mailbox backlog mask explicit manual demand gating", async () => {
+  it("lets system-only mailbox backlog outrank manual demand without usage gating", async () => {
     mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -460,14 +460,11 @@ describe("hosted orchestration demand", () => {
     const demand = parseHostedRuntimeDemand(await response.json());
 
     expect(demand).toMatchObject({
-      kind: "blocked",
-      reason: "ai_usage_denied",
-      retryAt: null,
+      kind: "run",
+      reason: "nudge",
+      source: "mailbox_backlog",
     });
-    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("returns the earliest future runtime or workspace wake while idle", async () => {

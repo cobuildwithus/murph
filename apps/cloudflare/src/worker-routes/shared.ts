@@ -1,6 +1,4 @@
 import type {
-  HostedRunnerNudgeRequest,
-  HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
@@ -33,24 +31,9 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
-  nudgeHostedRunner(input?: HostedRunnerNudgeRequest): Promise<HostedRunnerNudgeResult>;
-  nudgeHostedRunnerForUser(
-    userId: string,
-    input?: HostedRunnerNudgeRequest,
-  ): Promise<HostedRunnerNudgeResult>;
   ensureRuntimeExecutionForUser(
     input: HostedRuntimeEnsureExecutionRequest & { userId: string },
   ): Promise<HostedRuntimeEnsureExecutionResponse>;
-  /**
-   * @deprecated Compatibility-only no-op; Temporal owns browser-vault refresh
-   * scheduling.
-   */
-  scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<unknown>;
-  /**
-   * @deprecated Compatibility-only no-op; Temporal owns browser-vault refresh
-   * scheduling.
-   */
-  scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<unknown>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
@@ -70,7 +53,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   recordHostedWorkspaceSnapshotOrphanCandidate?(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
-  runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runUntilIdleForTest?(input: {
     reason: HostedWorkspaceInvocationReason;
     userId: string;

@@ -22,10 +22,12 @@ import {
   parseHostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 import type {
-  HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRuntimeEnsureExecutionResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -42,6 +44,9 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+import {
+  wakeHostedWorker,
+} from "./helpers/hosted-local-wake.js";
 import {
   buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
@@ -1261,7 +1266,7 @@ async function runHostedAlarmWithRuntimeWakeProbesForTest(
   userId: string,
 ): Promise<{
   probeCount: number;
-  probes: HostedRunnerNudgeResult[];
+  probes: HostedRuntimeEnsureExecutionResponse[];
   result: HostedWorkspaceInvocationResult;
 }> {
   const alarmAbortController = new AbortController();
@@ -1281,7 +1286,7 @@ async function runHostedAlarmWithRuntimeWakeProbesForTest(
 
   const deadlineMs = Date.now() + 2_750;
   let probeCount = 0;
-  const probes: HostedRunnerNudgeResult[] = [];
+  const probes: HostedRuntimeEnsureExecutionResponse[] = [];
   let alarmSettled = false;
   void alarmOutcomePromise.then(
     () => {
@@ -1345,19 +1350,11 @@ function resolveHostedAlarmProbeOutcome(
 
 async function sendRuntimeWakeProbeForTest(
   userId: string,
-): Promise<HostedRunnerNudgeResult> {
-  return await requireScenario().harness.requestJson<HostedRunnerNudgeResult>(
-    `/internal/users/${encodeURIComponent(userId)}/nudge`,
-    {
-      body: "{}",
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(2_000),
-    },
-  );
+): Promise<HostedRuntimeEnsureExecutionResponse> {
+  return await wakeHostedWorker({
+    harness: requireScenario().harness,
+    userId,
+  });
 }
 
 async function readHostedRunnerStatusWithLogLimit(

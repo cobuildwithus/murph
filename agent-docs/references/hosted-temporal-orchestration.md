@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-05-20
+Last verified: 2026-05-21
 
 ## Decision
 
@@ -181,13 +181,16 @@ Demand responses include only slim state:
   workspace projection only
 - `runtime_result_wake` as a demand source before `workspace_wake`
 
-Demand priority is mailbox lag, manual run, browser-vault refresh, device-sync
-recovery, lag recovery, due `runtimeResultWakeAt`, due workspace wake projection,
-then idle until the earliest future runtime-result or workspace wake. Web uses
-`runtimeResultWakeReason` only to decide whether a due runtime-result wake needs
-the product usage gate: explicit non-model maintenance reasons can run ungated
-when they are not masking a due model-capable workspace wake, while unknown or
-model-capable reasons are gated before execution.
+Demand priority is any mailbox lag, manual run, browser-vault refresh,
+device-sync recovery, lag recovery, due `runtimeResultWakeAt`, due workspace
+wake projection, then idle until the earliest future runtime-result or
+workspace wake. Web gates `mailbox_backlog` only when the conversation lane has
+lag; system-only mailbox lag still outranks manual demand but does not consume
+the foreground AI usage gate. Web uses `runtimeResultWakeReason` only to decide
+whether a due runtime-result wake needs the product usage gate: explicit
+non-model maintenance reasons can run ungated when they are not masking a due
+model-capable workspace wake, while unknown or model-capable reasons are gated
+before execution.
 
 The demand endpoint owns stale workspace wake suppression. If the supplied
 `ignoredWorkspaceWakeKey` matches the current workspace wake projection and no
@@ -276,9 +279,9 @@ Cloudflare must not:
 - Treat accepted nudge, accepted wake, or completed invocation as workflow
   completion.
 - Reuse write-fence clear helpers that implicitly write `wake_at` or
-  `backoff_until` for execution-only paths. Batch 2B must add execution-only
-  clear methods that clear active fences and record bounded diagnostics without
-  scheduling retry/wake state.
+  `backoff_until` for execution-only paths. Execution-only clear methods must
+  clear active fences and record bounded diagnostics without scheduling
+  retry/wake state.
 
 Activity timeouts must be config-derived. Demand reads use a short timeout.
 Ensure-execution uses the Cloudflare runner timeout plus a safety margin so
@@ -368,6 +371,10 @@ The hard-cut architecture is accepted when:
 - Workflow setup uses an ESM-compatible explicit `workflowsPath`.
 - Vercel Workflow nudge files and Cloudflare nudge fallback paths are deleted
   or hard-disabled for production.
+- The root `hosted-temporal:guard` script remains wired into `pnpm typecheck`
+  and `pnpm test:diff` so legacy Vercel nudge workflows, Cloudflare scheduler
+  methods, and business payload fields in Temporal workflow history surfaces
+  cannot re-enter production source silently.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after web/runtime demand is idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

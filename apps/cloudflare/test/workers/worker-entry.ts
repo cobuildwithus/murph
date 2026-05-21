@@ -151,7 +151,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async runAlarmForTest(): Promise<void> {
-    await this.runner.nudgeHostedRunner();
+    await this.runner.alarm();
   }
 
   override async alarm(): Promise<void> {
@@ -168,12 +168,12 @@ async function wakeRunnerForTest(
   if (wake.kind === "runtime.timer") {
     await persistRuntimeTimerWakeForTest(wake);
     await armRuntimeWakeInWeb(runtimeEnv, wake);
-    await driveRunnerNudgeForTest(runner);
+    await driveRunnerNudgeForTest(runner, wake.userId);
     return runner.runnerStatus();
   }
 
   await appendHostedWakeInWeb(runtimeEnv, wake);
-  await driveRunnerNudgeForTest(runner);
+  await driveRunnerNudgeForTest(runner, wake.userId);
   return runner.runnerStatus();
 }
 
@@ -186,10 +186,10 @@ async function wakeRunnerWithOutcomeForTest(
   if (wake.kind === "runtime.timer") {
     await persistRuntimeTimerWakeForTest(wake);
     await armRuntimeWakeInWeb(runtimeEnv, wake);
-    await driveRunnerNudgeForTest(runner);
+    await driveRunnerNudgeForTest(runner, wake.userId);
   } else {
     await appendHostedWakeInWeb(runtimeEnv, wake);
-    await driveRunnerNudgeForTest(runner);
+    await driveRunnerNudgeForTest(runner, wake.userId);
   }
   const status = await runner.runnerStatus();
 
@@ -549,9 +549,21 @@ function roundLatencyMs(value: number): number {
 
 async function driveRunnerNudgeForTest(
   runner: HostedUserRunner,
+  userId: string,
 ): Promise<void> {
-  await runner.nudgeHostedRunner();
-  await runner.runUntilIdleOrBudget({ reason: "nudge" });
+  await runner.ensureRuntimeExecutionForUser({
+    orchestrationAttemptId: createTestOrchestrationAttemptId("wake"),
+    reason: "nudge",
+    userId,
+  });
+}
+
+function createTestOrchestrationAttemptId(source: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `test-worker-${source}-${crypto.randomUUID()}`;
+  }
+
+  return `test-worker-${source}-${Date.now().toString(36)}`;
 }
 
 function hostedRunnerStatusIsIdle(status: HostedRunnerStatusResponse): boolean {

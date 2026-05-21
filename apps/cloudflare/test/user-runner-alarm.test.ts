@@ -92,7 +92,7 @@ describe("HostedUserRunner execution coordination", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("maps the deprecated local nudge shim to one direct ensure-execution adapter run", async () => {
+  it("runs one direct ensure-execution adapter pass without reading status as demand", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
@@ -109,13 +109,16 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      alarmScheduled: false,
-      immediateDriveStarted: true,
-      inFlight: false,
-      kind: "processing-ensured",
-      nextAlarmAt: null,
+    await expect(runner.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_completed",
+      runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
+      runtimeStatus: "idle",
     });
 
     expect(onStatusRead).not.toHaveBeenCalled();
@@ -160,13 +163,14 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "7",
     });
 
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      alarmScheduled: true,
-      immediateDriveStarted: false,
-      inFlight: true,
-      kind: "processing-ensured",
-      nextAlarmAt: RUNNER_TIMEOUT_AT,
+    await expect(runner.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_wake_sent",
+      recommendedRecheckAt: expect.any(String),
+      runtimeAttemptId: token?.attemptId,
     });
 
     expect(ensureProcessing).toHaveBeenCalledWith({
@@ -249,37 +253,6 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     expect(token?.expiresAt).toBe(RUNNER_TIMEOUT_AT);
-  });
-
-  it("keeps legacy browser-vault refresh scheduling as a no-op", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, invoke, runner, sql } = createRunnerHarness({
-      workspace: createWorkspaceState({
-        browserVaultReplicaRef: createBrowserVaultReplicaRef({
-          generatedAt: "2026-05-08T00:00:00.000Z",
-        }),
-        checkpointedAt: "2026-05-10T00:00:00.000Z",
-      }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      accepted: true,
-      removed: true,
-      scheduled: false,
-      userId: TEST_USER_ID,
-    });
-
-    expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toEqual([]);
-    expect(readRunnerMeta(sql)).toMatchObject({
-      backoff_until: null,
-      failure_count: 0,
-      wake_at: null,
-    });
   });
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
