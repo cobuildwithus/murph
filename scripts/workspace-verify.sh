@@ -66,6 +66,7 @@ readonly node_syntax_check_scripts=(
 readonly typecheck_package_dirs=(
   "packages/contracts"
   "packages/hosted-execution"
+  "packages/hosted-orchestrator-temporal"
   "packages/runtime-state"
   "packages/cloudflare-hosted-control"
   "packages/operator-config"
@@ -148,6 +149,8 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
+readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 55)"
+readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")"
 # Package coverage and app verification share generated setup. Keep the legacy
 # Cloudflare-only overlap as an explicit escape hatch when full app overlap is
 # disabled.
@@ -589,6 +592,7 @@ run_all_package_coverage() {
     "packages/gateway-local"
     "packages/health-metrics"
     "packages/hosted-execution"
+    "packages/hosted-orchestrator-temporal"
     "packages/importers"
     "packages/inbox-services"
     "packages/inboxd"
@@ -615,6 +619,7 @@ run_all_package_coverage() {
     "Gateway local package coverage"
     "Health metrics package coverage"
     "Hosted execution owner coverage"
+    "Hosted Temporal orchestrator package coverage"
     "Importers owner coverage"
     "Inbox services package coverage"
     "Inboxd package coverage"
@@ -879,6 +884,18 @@ run_test_packages_coverage() {
   run_test_packages_coverage_after_hygiene "$@"
 }
 
+run_acceptance_app_verification_after_delay() {
+  local acceptance_typechecked="${1:-0}"
+  local health_commons_generated_prepared="${2:-0}"
+
+  if [[ "$acceptance_app_verify_delay_seconds" -gt 0 ]]; then
+    verify_log "delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput"
+    sleep "$acceptance_app_verify_delay_seconds"
+  fi
+
+  run_timed_step "App verification" run_test_apps "$acceptance_typechecked" "$health_commons_generated_prepared"
+}
+
 run_test_coverage() {
   local acceptance_typechecked="${1:-0}"
 
@@ -907,7 +924,7 @@ run_test_coverage() {
       run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage &
       smoke_pid="$!"
       register_background_pid "$smoke_pid"
-      run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1 &
+      run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1 &
       local app_verify_pid="$!"
       register_background_pid "$app_verify_pid"
 

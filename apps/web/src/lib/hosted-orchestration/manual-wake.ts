@@ -24,12 +24,11 @@ export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
   timeoutMs?: number;
   userId: string;
 }): Promise<HostedRuntimeManualWakeBestEffortResult> {
-  void input.timeoutMs;
-
   try {
-    const signal = await signalHostedManualRunRuntime({
+    const signalPromise = signalHostedManualRunRuntime({
       userId: input.userId,
     });
+    const signal = await withManualWakeTimeout(signalPromise, input.timeoutMs);
 
     return {
       accepted: true,
@@ -69,4 +68,50 @@ export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
 function isHostedRuntimeTemporalNotConfiguredError(error: unknown): boolean {
   return error instanceof Error &&
     error.message === "Hosted runtime Temporal client is not configured.";
+}
+
+async function withManualWakeTimeout<T>(
+  signalPromise: Promise<T>,
+  timeoutMs: number | undefined,
+): Promise<T> {
+  const normalizedTimeoutMs = normalizeManualWakeTimeoutMs(timeoutMs);
+  if (normalizedTimeoutMs === null) {
+    return await signalPromise;
+  }
+
+  signalPromise.catch(() => undefined);
+
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      signalPromise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(createManualWakeTimeoutError(normalizedTimeoutMs));
+        }, normalizedTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function normalizeManualWakeTimeoutMs(timeoutMs: number | undefined): number | null {
+  if (
+    typeof timeoutMs !== "number" ||
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
+    return null;
+  }
+
+  return Math.ceil(timeoutMs);
+}
+
+function createManualWakeTimeoutError(timeoutMs: number): Error {
+  const error = new Error(`Hosted runtime manual wake timed out after ${timeoutMs}ms.`);
+  error.name = "TimeoutError";
+  return error;
 }

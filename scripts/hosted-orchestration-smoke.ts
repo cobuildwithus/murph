@@ -41,9 +41,7 @@ async function main(): Promise<void> {
 
 function readSmokeSignal(): HostedRuntimeSignal {
   return parseHostedRuntimeSignal({
-    eventId: "hosted-orchestration-smoke",
     kind: "manual_run_requested",
-    source: "test",
   });
 }
 

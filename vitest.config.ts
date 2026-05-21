@@ -10,6 +10,7 @@ import gatewayCoreProject from "./packages/gateway-core/vitest.config.ts";
 import gatewayLocalProject from "./packages/gateway-local/vitest.config.ts";
 import healthMetricsProject from "./packages/health-metrics/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
+import hostedOrchestratorTemporalProject from "./packages/hosted-orchestrator-temporal/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
 import inboxServicesProject from "./packages/inbox-services/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
@@ -101,6 +102,11 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: hostedExecutionProject,
     root: "packages/hosted-execution",
+    include: ["test/**/*.test.ts"],
+  },
+  {
+    config: hostedOrchestratorTemporalProject,
+    root: "packages/hosted-orchestrator-temporal",
     include: ["test/**/*.test.ts"],
   },
   {
