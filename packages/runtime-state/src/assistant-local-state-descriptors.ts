@@ -154,21 +154,21 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/cron/jobs.json",
     "Assistant cron job scheduling state that must follow hosted execution continuity.",
   ),
-  defineMachineLocalAssistantSubtree(
+  definePortableAssistantSubtree(
     ".runtime/operations/assistant/cron/runs",
-    "Assistant cron run artifacts are local observability residue only.",
+    "Assistant cron run history is bounded runtime observability that moves with hosted debugging continuity.",
   ),
-  defineMachineLocalAssistantSubtree(
+  definePortableAssistantSubtree(
     ".runtime/operations/assistant/diagnostics",
-    "Assistant diagnostics snapshots and events are local observability residue only.",
+    "Assistant diagnostics snapshots and events move with hosted debugging continuity.",
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/indexes.json",
     "Assistant session alias and conversation indexes that keep hosted resume on the latest bound thread without a rebuild pass.",
   ),
-  defineMachineLocalAssistantSubtree(
+  definePortableAssistantSubtree(
     ".runtime/operations/assistant/journals",
-    "Assistant journals and runtime event logs are machine-local operational residue.",
+    "Assistant journals and runtime event logs move with hosted debugging continuity.",
   ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/issues",
@@ -182,16 +182,16 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/quarantine",
     "Assistant quarantine artifacts are machine-local repair residue.",
   ),
-  defineMachineLocalAssistantFile(
+  definePortableAssistantFile(
     ".runtime/operations/assistant/runtime-budgets.json",
-    "Assistant runtime budget snapshots are machine-local operational residue.",
+    "Assistant runtime budget snapshots move with hosted runtime continuity.",
   ),
   defineMachineLocalAssistantSubtree(
     ".runtime/operations/assistant/secrets",
     "Assistant local secret sidecars never travel in hosted snapshots.",
   ),
-  defineMachineLocalAssistantFile(
+  definePortableAssistantFile(
     ".runtime/operations/assistant/status.json",
-    "Assistant status snapshots are local observability residue only.",
+    "Assistant status snapshots move with hosted debugging continuity.",
   ),
 ] as const;
