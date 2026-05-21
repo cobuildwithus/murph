@@ -8,7 +8,9 @@ const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  getPrisma: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
@@ -22,8 +24,16 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+}));
+
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -47,7 +57,9 @@ describe("hosted orchestration demand", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: true });
@@ -116,6 +128,86 @@ describe("hosted orchestration demand", () => {
     expect(JSON.stringify(body)).not.toContain("redactedStatus");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(body)).not.toMatch(/payload|message|transcript/u);
+  });
+
+  it("blocks demand for missing hosted users before reading runtime state", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+
+    const response = await demandRoute.GET(
+      requestForDemand(
+        "?manualRunRequested=1&runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
+      ),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toEqual({
+      kind: "blocked",
+      mailboxLag: [],
+      reason: "user_not_active",
+      retryAt: null,
+      workspace: null,
+    });
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("blocks demand for inactive hosted users instead of honoring stale wakes", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+    }));
+
+    const response = await demandRoute.GET(
+      requestForDemand(
+        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
+      ),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toEqual({
+      kind: "blocked",
+      mailboxLag: [],
+      reason: "user_not_active",
+      retryAt: null,
+      workspace: null,
+    });
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("blocks selected run demand when hosted runtime workspace state is missing", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(null);
+
+    const response = await demandRoute.GET(
+      requestForDemand("?manualRunRequested=1"),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toEqual({
+      kind: "blocked",
+      mailboxLag: [
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "system",
+          maxSeq: "0",
+        },
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "conversation",
+          maxSeq: "0",
+        },
+      ],
+      reason: "hosted_runtime_not_configured",
+      retryAt: null,
+      workspace: null,
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("gates maintenance runtime-result wakes that mask model-capable workspace wakes", async () => {
@@ -517,6 +609,20 @@ function noMailboxBacklog() {
       maxSeq: "0",
     },
   ];
+}
+
+function buildActiveMemberRecord(overrides: Partial<{
+  billingStatus: string;
+  suspendedAt: Date | null;
+}> = {}) {
+  return {
+    billingStatus: "active",
+    createdAt: new Date(FIXED_NOW),
+    id: MEMBER_ID,
+    suspendedAt: null,
+    updatedAt: new Date(FIXED_NOW),
+    ...overrides,
+  };
 }
 
 function buildWorkspaceRecord(overrides: Partial<{

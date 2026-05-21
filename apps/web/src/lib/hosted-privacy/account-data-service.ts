@@ -17,6 +17,9 @@ import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
 } from "../hosted-execution/user-data-delete";
+import {
+  terminateHostedUserRuntimeWorkflowBestEffort,
+} from "../hosted-orchestration/workflow-termination";
 import { buildStoredTokenBundle } from "../device-sync/agent-session-token-bundle";
 import { composeHostedRuntimeOAuthDeviceSyncAccount } from "../device-sync/internal-runtime";
 import {
@@ -263,6 +266,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "best-effort-delete",
     export: "documented-only",
     note: "Best-effort hosted execution control deletes opaque per-user runtime and ingress R2 objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres.",
+  },
+  {
+    slug: "temporal.per_user_runtime_workflow",
+    label: "Hosted per-user Temporal runtime workflow",
+    deletion: "best-effort-delete",
+    export: "documented-only",
+    note: "Best-effort Temporal termination neutralizes sleeping per-user workflow flags and runtime-result wake state after account deletion commits.",
   },
   {
     slug: "providers.oura_whoop_strava",
@@ -1266,8 +1276,16 @@ export async function deleteHostedAccountData(input: {
       prisma: tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await terminateHostedUserRuntimeWorkflowBestEffort({
+    reason: "account-deleted",
+    userId: input.memberId,
+  });
   const cloudflare = await deleteHostedRunnerUserDataBestEffort({
     context: "settings.account-data.delete",
+    userId: input.memberId,
+  });
+  await terminateHostedUserRuntimeWorkflowBestEffort({
+    reason: "account-deleted",
     userId: input.memberId,
   });
 

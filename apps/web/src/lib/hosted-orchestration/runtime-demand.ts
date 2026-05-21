@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeDemand,
+  HostedRuntimeDemandBlockedReason,
   HostedRuntimeDemandRequest,
   HostedRuntimeDemandRunSource,
   HostedRuntimeDemandWorkspaceProjection,
@@ -17,12 +18,21 @@ import {
   readHostedMailboxRedactedStatusRecord,
 } from "../hosted-mailbox/lag";
 import {
+  hasHostedMemberActiveAccess,
+} from "../hosted-onboarding/entitlement";
+import {
+  readHostedMemberCoreState,
+} from "../hosted-onboarding/hosted-member-store";
+import {
   readHostedMailboxMaxSeqByLane,
 } from "../hosted-mailbox/store";
 import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
 } from "../hosted-workspace/store";
+import {
+  getPrisma,
+} from "../prisma";
 import {
   resolveHostedRuntimeAiUsageDemandGate,
 } from "./runtime-usage-decision";
@@ -36,9 +46,24 @@ export async function readHostedRuntimeDemand(
     now?: Date | string;
   },
 ): Promise<HostedRuntimeDemand> {
+  const prisma = getPrisma();
+  const member = await readHostedMemberCoreState({
+    memberId: input.userId,
+    prisma,
+  });
+
+  if (!member || !hasHostedMemberActiveAccess(member)) {
+    return buildHostedRuntimeBlockedDemand({
+      mailboxLag: [],
+      reason: "user_not_active",
+      retryAt: null,
+      workspace: null,
+    });
+  }
+
   const [workspace, maxSeqByLane] = await Promise.all([
-    readHostedWorkspace({ userId: input.userId }),
-    readHostedMailboxMaxSeqByLane({ userId: input.userId }),
+    readHostedWorkspace({ prisma, userId: input.userId }),
+    readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
   ]);
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -89,6 +114,15 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
     });
   }
 
+  if (workspace === null) {
+    return buildHostedRuntimeBlockedDemand({
+      mailboxLag: input.mailboxLag,
+      reason: "hosted_runtime_not_configured",
+      retryAt: null,
+      workspace,
+    });
+  }
+
   const shouldGateAiUsage = hostedRuntimeDemandNeedsAiUsageGate(
     run.source,
     {
@@ -132,6 +166,21 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
     reason: run.reason,
     source: run.source,
     workspace,
+  });
+}
+
+function buildHostedRuntimeBlockedDemand(input: {
+  mailboxLag: HostedMailboxLaneLag[];
+  reason: HostedRuntimeDemandBlockedReason;
+  retryAt: string | null;
+  workspace: HostedRuntimeDemandWorkspaceProjection | null;
+}): HostedRuntimeDemand {
+  return parseHostedRuntimeDemand({
+    kind: "blocked",
+    mailboxLag: input.mailboxLag,
+    reason: input.reason,
+    retryAt: input.retryAt,
+    workspace: input.workspace,
   });
 }
 

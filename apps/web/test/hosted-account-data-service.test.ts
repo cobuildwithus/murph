@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const serviceMocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
+  terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -11,6 +12,11 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
   deleteHostedRunnerUserDataBestEffort: serviceMocks.deleteHostedRunnerUserDataBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
+  terminateHostedUserRuntimeWorkflowBestEffort:
+    serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort,
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -66,6 +72,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.device_webhook_trace",
   "cloudflare.runner_durable_object",
   "cloudflare.r2_user_artifacts",
+  "temporal.per_user_runtime_workflow",
   "providers.oura_whoop_strava",
   "providers.linq_telegram_email_messages",
   "providers.stripe_privy",
@@ -89,6 +96,13 @@ beforeEach(() => {
   serviceMocks.createHostedDeviceSyncControlPlane.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
+  serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
+  serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+    configured: true,
+    errorCode: null,
+    notFound: false,
+    terminated: true,
+  });
 });
 
 describe("parseHostedAccountDeletionRequest", () => {
@@ -519,8 +533,17 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("commits Prisma deletion before running Cloudflare cleanup", async () => {
+  it("commits Prisma deletion before terminating Temporal and running Cloudflare cleanup", async () => {
     const order: string[] = [];
+    serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
+      order.push("temporal");
+      return {
+        configured: true,
+        errorCode: null,
+        notFound: false,
+        terminated: true,
+      };
+    });
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
       order.push("cloudflare");
       return makeCloudflareDeletionResult();
@@ -535,12 +558,26 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "cloudflare"]);
+    expect(order).toEqual(["prisma", "temporal", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
+      1,
+      {
+        reason: "account-deleted",
+        userId: "member_123",
+      },
+    );
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
       context: "settings.account-data.delete",
       userId: "member_123",
     });
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
+      2,
+      {
+        reason: "account-deleted",
+        userId: "member_123",
+      },
+    );
   });
 
   it("deletes short-lived hosted device connect intents with account data", async () => {
@@ -650,6 +687,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toThrow("transaction failed");
 
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
   });
 

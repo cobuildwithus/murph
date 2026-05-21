@@ -1,0 +1,176 @@
+import "server-only";
+
+import {
+  Client,
+  Connection,
+  type ConnectionOptions,
+  WorkflowNotFoundError,
+} from "@temporalio/client";
+
+import {
+  hostedUserRuntimeWorkflowId,
+} from "./signal-runtime";
+import {
+  readHostedRuntimeTemporalEnvironment,
+  type HostedRuntimeTemporalEnvironment,
+} from "./temporal-client";
+
+export const HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS = 5_000;
+
+interface HostedRuntimeTemporalTerminationClient {
+  workflow: {
+    getHandle(workflowId: string): {
+      terminate(reason?: string): Promise<unknown>;
+    };
+  };
+}
+
+interface HostedRuntimeTemporalTerminationConnection {
+  client: HostedRuntimeTemporalTerminationClient;
+  close(): Promise<unknown>;
+}
+
+export interface HostedRuntimeWorkflowTerminationBestEffortResult {
+  configured: boolean;
+  errorCode: string | null;
+  notFound: boolean | null;
+  terminated: boolean;
+}
+
+export async function terminateHostedUserRuntimeWorkflowBestEffort(input: {
+  reason: string;
+  userId: string;
+}): Promise<HostedRuntimeWorkflowTerminationBestEffortResult> {
+  try {
+    return await terminateHostedUserRuntimeWorkflow(input);
+  } catch (error) {
+    console.error(
+      "Hosted runtime workflow termination failed.",
+      safeHostedRuntimeWorkflowTerminationErrorCode(error),
+    );
+    return {
+      configured: true,
+      errorCode: safeHostedRuntimeWorkflowTerminationErrorCode(error),
+      notFound: null,
+      terminated: false,
+    };
+  }
+}
+
+async function terminateHostedUserRuntimeWorkflow(input: {
+  reason: string;
+  userId: string;
+}): Promise<HostedRuntimeWorkflowTerminationBestEffortResult> {
+  const temporal = await createHostedRuntimeTemporalTerminationConnection();
+  if (!temporal) {
+    return {
+      configured: false,
+      errorCode: null,
+      notFound: null,
+      terminated: false,
+    };
+  }
+
+  try {
+    const workflowId = hostedUserRuntimeWorkflowId(input.userId);
+    try {
+      await withHostedRuntimeWorkflowTerminationTimeout(
+        temporal.client.workflow
+          .getHandle(workflowId)
+          .terminate(input.reason.trim() || undefined),
+      );
+    } catch (error) {
+      if (error instanceof WorkflowNotFoundError) {
+        return {
+          configured: true,
+          errorCode: null,
+          notFound: true,
+          terminated: true,
+        };
+      }
+      throw error;
+    }
+
+    return {
+      configured: true,
+      errorCode: null,
+      notFound: false,
+      terminated: true,
+    };
+  } finally {
+    void temporal.close().catch(() => undefined);
+  }
+}
+
+async function createHostedRuntimeTemporalTerminationConnection(): Promise<
+  HostedRuntimeTemporalTerminationConnection | null
+> {
+  const environment = readHostedRuntimeTemporalEnvironment();
+  if (!environment.address) {
+    return null;
+  }
+
+  const connection = await withHostedRuntimeWorkflowTerminationTimeout(
+    Connection.connect(buildConnectionOptions(environment)),
+  );
+
+  return {
+    client: new Client({
+      connection,
+      namespace: environment.namespace,
+    }),
+    close: () => connection.close(),
+  };
+}
+
+function buildConnectionOptions(
+  environment: HostedRuntimeTemporalEnvironment,
+): ConnectionOptions {
+  if (!environment.address) {
+    throw new TypeError("HOSTED_TEMPORAL_ADDRESS must be configured.");
+  }
+
+  return {
+    address: environment.address,
+    ...(environment.apiKey ? { apiKey: environment.apiKey } : {}),
+    connectTimeout: HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS,
+    tls: environment.tls,
+  };
+}
+
+function safeHostedRuntimeWorkflowTerminationErrorCode(error: unknown): string {
+  if (!(error instanceof Error) || !error.name) {
+    return "UnknownError";
+  }
+  return /^[A-Z][A-Za-z0-9]*Error$/u.test(error.name)
+    ? error.name
+    : "UnknownError";
+}
+
+function withHostedRuntimeWorkflowTerminationTimeout<T>(
+  operation: Promise<T>,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new HostedRuntimeWorkflowTerminationTimeoutError());
+    }, HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS);
+
+    operation.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+class HostedRuntimeWorkflowTerminationTimeoutError extends Error {
+  constructor() {
+    super("Hosted runtime workflow termination timed out.");
+    this.name = "HostedRuntimeWorkflowTerminationTimeoutError";
+  }
+}
