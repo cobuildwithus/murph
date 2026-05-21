@@ -83,14 +83,6 @@ function resolveHostedLocalTemporalConfig(
 
 function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
   const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
-  if (
-    env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
-    || profile === "e2e:stub"
-    || profile === "e2e:live"
-  ) {
-    return "managed";
-  }
-
   if (profile === "worker-only" || env.MURPH_DEV_SKIP_WEB === "1") {
     return "disabled";
   }
@@ -99,7 +91,15 @@ function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
     return "external";
   }
 
-  return "disabled";
+  if (
+    env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "e2e:stub"
+    || profile === "e2e:live"
+  ) {
+    return "managed";
+  }
+
+  return "managed";
 }
 
 export function parseTemporalMode(
@@ -224,7 +224,7 @@ export function printHelp(): void {
       "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
       "  HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...  Comma-separated sender phone allowlist for local Linq webhooks",
       "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
-      "  MURPH_DEV_TEMPORAL=disabled        Temporal mode: managed starts local Temporal + worker, external uses caller-supplied Temporal, disabled skips orchestration",
+      "  MURPH_DEV_TEMPORAL=managed         Temporal mode: managed starts local Temporal + worker, external uses caller-supplied Temporal, disabled skips orchestration",
       "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for managed mode",
       "  MURPH_DEV_TEMPORAL_PORT=7233       Local Temporal frontend gRPC port",
       "  TEMPORAL_NAMESPACE=default         Temporal namespace for web signals and worker polling",

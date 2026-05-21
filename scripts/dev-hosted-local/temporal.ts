@@ -219,7 +219,7 @@ function assertTemporalCliAvailable(): void {
 
   if (result.error) {
     throw new Error(
-      "Temporal CLI is required for managed hosted-local Temporal. Install the Temporal CLI or set MURPH_DEV_TEMPORAL=external/disabled.",
+      "Temporal CLI is required for managed hosted-local Temporal. Run `pnpm temporal:cli:setup` or set MURPH_DEV_TEMPORAL=external/disabled.",
     );
   }
 

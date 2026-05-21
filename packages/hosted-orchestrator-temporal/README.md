@@ -15,8 +15,12 @@ pnpm temporal:cli:setup
 pnpm temporal:cli:check
 ```
 
-Hosted-local E2E profiles start a managed local Temporal dev server and the
-hosted runtime worker through the canonical hosted-local stack:
+The setup command installs a pinned official Temporal CLI release on Linux or
+Darwin when `temporal` is not already on `PATH`.
+
+The default `pnpm dev` profile and hosted-local E2E profiles start a managed
+local Temporal dev server and the hosted runtime worker through the canonical
+hosted-local stack:
 
 ```bash
 pnpm hosted-local e2e temporal-orchestration --profile e2e:stub
@@ -81,25 +85,37 @@ execution still requires the local web and Cloudflare adapter endpoints above.
 Temporal connection:
 
 - `MURPH_DEV_TEMPORAL`: hosted-local mode, one of `managed`, `external`, or
-  `disabled`. E2E profiles default to `managed`; interactive dev defaults to
-  `disabled` unless Temporal env is explicit.
+  `disabled`. Full-stack interactive dev and E2E profiles default to
+  `managed`; `worker-only` and `MURPH_DEV_SKIP_WEB=1` default to `disabled`.
+  Explicit `HOSTED_TEMPORAL_ADDRESS` or `TEMPORAL_ADDRESS` defaults the stack
+  to `external`.
 - `MURPH_DEV_TEMPORAL_HOST` / `MURPH_DEV_TEMPORAL_PORT`: local dev server bind
   address for managed hosted-local Temporal.
-- `TEMPORAL_ADDRESS`: Temporal frontend address, for example `localhost:7233`.
-- `TEMPORAL_NAMESPACE`: namespace, defaults to `default`.
-- `TEMPORAL_TASK_QUEUE`: task queue, defaults to `murph-hosted-runtime`.
-- `TEMPORAL_TLS_ENABLED`: `true` or `false`; local dev uses `false`.
-- `TEMPORAL_API_KEY`: optional Temporal Cloud API key. If set, TLS is enabled
-  unless `TEMPORAL_TLS_ENABLED=false`, which is rejected.
-- `TEMPORAL_CLIENT_CERT_PEM` / `TEMPORAL_CLIENT_CERT_BASE64`: optional mTLS
-  client certificate. Configure exactly one form and pair it with the matching
-  client key.
-- `TEMPORAL_CLIENT_KEY_PEM` / `TEMPORAL_CLIENT_KEY_BASE64`: optional mTLS
-  client private key. Configure exactly one form and pair it with the matching
-  client certificate.
-- `TEMPORAL_SERVER_ROOT_CA_CERT_PEM` /
+- `HOSTED_TEMPORAL_ADDRESS` / `TEMPORAL_ADDRESS`: Temporal frontend address, for
+  example `localhost:7233`.
+- `HOSTED_TEMPORAL_NAMESPACE` / `TEMPORAL_NAMESPACE`: namespace, defaults to
+  `default`.
+- `HOSTED_TEMPORAL_TASK_QUEUE` / `TEMPORAL_TASK_QUEUE`: task queue, defaults to
+  `murph-hosted-runtime`.
+- `HOSTED_TEMPORAL_TLS_ENABLED` / `TEMPORAL_TLS_ENABLED`: `true` or `false`;
+  local dev uses `false`.
+- `HOSTED_TEMPORAL_API_KEY` / `TEMPORAL_API_KEY`: optional Temporal Cloud API
+  key. If set, TLS is enabled unless TLS is explicitly disabled, which is
+  rejected.
+- `HOSTED_TEMPORAL_CLIENT_CERT_PEM` / `TEMPORAL_CLIENT_CERT_PEM` or
+  `HOSTED_TEMPORAL_CLIENT_CERT_BASE64` / `TEMPORAL_CLIENT_CERT_BASE64`:
+  optional mTLS client certificate. Configure exactly one form and pair it with
+  the matching client key.
+- `HOSTED_TEMPORAL_CLIENT_KEY_PEM` / `TEMPORAL_CLIENT_KEY_PEM` or
+  `HOSTED_TEMPORAL_CLIENT_KEY_BASE64` / `TEMPORAL_CLIENT_KEY_BASE64`: optional
+  mTLS client private key. Configure exactly one form and pair it with the
+  matching client certificate.
+- `HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM` /
+  `TEMPORAL_SERVER_ROOT_CA_CERT_PEM` or
+  `HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64` /
   `TEMPORAL_SERVER_ROOT_CA_CERT_BASE64`: optional server root CA certificate.
-- `TEMPORAL_TLS_SERVER_NAME_OVERRIDE`: optional TLS SNI/server-name override.
+- `HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE` /
+  `TEMPORAL_TLS_SERVER_NAME_OVERRIDE`: optional TLS SNI/server-name override.
 
 Activity HTTP targets:
 
