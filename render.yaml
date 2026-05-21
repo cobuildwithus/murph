@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     autoDeployTrigger: "off"
-    buildCommand: "corepack enable && pnpm install --frozen-lockfile && pnpm --dir packages/hosted-orchestrator-temporal build"
+    buildCommand: "pnpm install --frozen-lockfile && pnpm --dir packages/hosted-orchestrator-temporal build"
     startCommand: "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod"
     envVars:
       - key: NODE_VERSION
