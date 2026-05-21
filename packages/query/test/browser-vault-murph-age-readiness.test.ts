@@ -110,6 +110,38 @@ test("keeps wearable-only browser-vault data on a context-only Murph Age path", 
   ]);
 });
 
+test("uses L1 glycemia as a browser-vault wearable shadow anchor", () => {
+  const readiness = selectBrowserVaultMurphAgeReadiness(clientFromPoints([
+    metricPoint("hba1c", "biomarker:hba1c", 5.3, "percent", "test-result"),
+    ...wearableShadowPoints(),
+  ]));
+
+  assert.equal(readiness.primaryBundle.bundleId, "l1-glycemia");
+  assert.equal(readiness.primaryBundle.status, "ready");
+  assert.equal(readiness.primaryBundle.recommendedCardId, "l1_tiny_glycemia_10y_acm_research");
+  assert.equal(readiness.scoreReadiness.status, "research-ready-product-blocked");
+  assert.equal(readiness.scoreReadiness.researchUsableIfModelLoaded, true);
+  assert.equal(readiness.scoreReadiness.productAgePolicyReady, false);
+  assert.equal(readiness.scoreReadiness.productRiskPolicyReady, false);
+  assert.equal(readiness.wearableShadow.anchorCardId, "l1_tiny_glycemia_10y_acm_research");
+
+  const activity = readiness.wearableShadow.increments.find((increment) => increment.family === "activity");
+  assert.equal(activity?.status, "ready");
+  assert.equal(activity?.anchorCardId, "l1_tiny_glycemia_10y_acm_research");
+  assert.equal(activity?.anchorCompatible, true);
+  assert.equal(activity?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(activity?.scoreBearing, false);
+  assert.equal(activity?.scoreContributionAuthorized, false);
+
+  const serialized = JSON.stringify(readiness);
+  assert.doesNotMatch(serialized, /"value"\s*:/u);
+  assert.doesNotMatch(serialized, /"unit"\s*:/u);
+  assert.doesNotMatch(serialized, /"pointIds"\s*:/u);
+  assert.doesNotMatch(serialized, /"coefficient"\s*:/u);
+  assert.doesNotMatch(serialized, /"biologicalAgeYears"\s*:/u);
+  assert.doesNotMatch(serialized, /metric-point:/u);
+});
+
 test("infers wearable source kinds from the shared Murph Age bridge contract when rows are absent", () => {
   const generatedAt = "2026-05-10T12:00:00.000Z";
   const points = [
