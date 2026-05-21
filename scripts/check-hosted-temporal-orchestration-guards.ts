@@ -41,6 +41,10 @@ const cloudflareExecutionOnlyPatterns = [
     label: "legacy Cloudflare semantic scheduler helper",
     pattern: /\b(?:ensureRunnerProgress|scheduleAfterRuntimeWake|scheduleShortProgressRecheck|parkIfRunnerRetryCapReached|clearRetryStateForFreshMailboxDemand)\b/u,
   },
+  {
+    label: "legacy Cloudflare local ensure loop state",
+    pattern: /\b(?:localEnsureInFlight|retiredEnsurePromises|retireCurrentEnsurePromise)\b/u,
+  },
 ] as const;
 
 const webVercelNudgePatterns = [

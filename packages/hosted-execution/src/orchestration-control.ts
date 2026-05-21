@@ -28,14 +28,15 @@ export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[numbe
 
 export type HostedRuntimeMailboxSignalSource = string;
 
+// Known built-in labels for callers that want stable defaults. These are not
+// exhaustive; parsers accept any bounded safe source string.
 export const HOSTED_RUNTIME_MANUAL_SIGNAL_SOURCES = [
   "user",
   "admin",
   "test",
 ] as const;
 
-export type HostedRuntimeManualSignalSource =
-  (typeof HOSTED_RUNTIME_MANUAL_SIGNAL_SOURCES)[number];
+export type HostedRuntimeManualSignalSource = string;
 
 export const HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS = [
   "dirty",
@@ -46,14 +47,15 @@ export const HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS = [
 export type HostedRuntimeDeviceSyncRecoveryReason =
   (typeof HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS)[number];
 
+// Known built-in labels for callers that want stable defaults. These are not
+// exhaustive; parsers accept any bounded safe source string.
 export const HOSTED_RUNTIME_LAG_SIGNAL_SOURCES = [
   "lag-sweeper",
   "admin",
   "test",
 ] as const;
 
-export type HostedRuntimeLagSignalSource =
-  (typeof HOSTED_RUNTIME_LAG_SIGNAL_SOURCES)[number];
+export type HostedRuntimeLagSignalSource = string;
 
 export type HostedRuntimeSignal =
   | {

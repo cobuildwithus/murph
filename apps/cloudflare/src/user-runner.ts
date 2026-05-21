@@ -150,8 +150,6 @@ export class HostedUserRunner {
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
-  private localEnsureInFlight: Promise<HostedWorkspaceInvocationResult> | null = null;
-  private readonly retiredEnsurePromises = new WeakSet<Promise<HostedWorkspaceInvocationResult>>();
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -213,7 +211,7 @@ export class HostedUserRunner {
 
     return {
       ...webStatus,
-      inFlight: this.localEnsureInFlight !== null || record.writeFence !== null,
+      inFlight: record.writeFence !== null,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
@@ -549,8 +547,6 @@ export class HostedUserRunner {
           "active-fence-replacement-stale",
         );
       }
-
-      this.retireCurrentEnsurePromise();
       return await this.startRuntimeExecution(input, "replaced");
     }
 
@@ -910,14 +906,6 @@ export class HostedUserRunner {
       nextWakeAt: readWriteFenceWatchdogAlarmAt(record),
       ok: true,
     };
-  }
-
-  private retireCurrentEnsurePromise(): void {
-    if (!this.localEnsureInFlight) {
-      return;
-    }
-    this.retiredEnsurePromises.add(this.localEnsureInFlight);
-    this.localEnsureInFlight = null;
   }
 
   private async invokeWorkspaceRunner(input: {

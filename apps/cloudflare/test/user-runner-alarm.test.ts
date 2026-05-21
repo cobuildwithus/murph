@@ -191,6 +191,67 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("routes concurrent ensure calls through the persisted active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const firstEnsure = runner.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-first",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-second",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_wake_sent",
+      recommendedRecheckAt: expect.any(String),
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(ensureProcessing.mock.calls[0]?.[0].activeRuntime).toMatchObject({
+      userId: TEST_USER_ID,
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_expires_at: expect.any(String),
+      active_workspace_version: "8",
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(firstEnsure).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_completed",
+      runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
+      runtimeStatus: "idle",
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: null,
+    });
+  });
+
   it("uses Durable Object alarms only as write-fence watchdogs", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -836,6 +897,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
   active_attempt_id: string | null;
   active_expires_at: string | null;
   active_generation: number;
+  active_workspace_version: string | null;
   backoff_until: string | null;
   failure_count: number;
   last_invocation_at: string | null;
@@ -845,6 +907,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     active_attempt_id: string | null;
     active_expires_at: string | null;
     active_generation: number;
+    active_workspace_version: string | null;
     backoff_until: string | null;
     failure_count: number;
     last_invocation_at: string | null;
@@ -853,6 +916,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     `SELECT active_attempt_id,
             active_expires_at,
             active_generation,
+            active_workspace_version,
             backoff_until,
             failure_count,
             last_invocation_at,
@@ -860,4 +924,18 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
      FROM runner_meta
      WHERE singleton = 1`,
   ).one();
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return {
+    promise,
+    reject,
+    resolve,
+  };
 }
