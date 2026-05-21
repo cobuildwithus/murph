@@ -288,6 +288,53 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests[1]?.reason).toBe("manual");
   });
 
+  it("waits signal-interruptibly after retry-later processing responses", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+    runtime.demands.push((request) => {
+      expect(request.manualRunRequested).toBe(true);
+      return runDemand({ source: "manual" });
+    });
+    runtime.executions.push(runtimeCompleted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-retry"));
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(manualSignal("manual-during-retry-wait"));
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([22_000]);
+    expect(runtime.now).toBe(BASE_TIME_MS);
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
+  it("retries after retry-later processing responses when no signal arrives", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(runtimeCompleted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-retry"));
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits[0]).toBe(22_000);
+    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
   it("does not pass usage decisions into execution", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
@@ -1039,7 +1086,12 @@ function idleDemand(nextWakeAt: string | null): HostedRuntimeDemand {
 }
 
 function runtimeCompleted(
-  input: Partial<HostedRuntimeEnsureProcessingResponse> = {},
+  input: Partial<
+    Extract<
+      HostedRuntimeEnsureProcessingResponse,
+      { kind: "runtime_processing_accepted" }
+    >
+  > = {},
 ): HostedRuntimeEnsureProcessingResponse {
   return {
     action: input.action ?? "started",
@@ -1057,6 +1109,14 @@ function runtimeWakeSent(
     kind: "runtime_processing_accepted",
     recommendedRecheckAt,
     runtimeAttemptId: "runtime_attempt_test",
+  };
+}
+
+function retryLater(retryAt: string): HostedRuntimeEnsureProcessingResponse {
+  return {
+    kind: "retry_later",
+    reason: "container_rpc_timeout",
+    retryAt,
   };
 }
 

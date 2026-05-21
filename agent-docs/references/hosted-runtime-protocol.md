@@ -199,7 +199,9 @@ Only Temporal decides when Cloudflare should process. The short-lived
 `ensure-processing` command asks the per-user Durable Object to make processing
 active by starting a runner, replacing an expired write fence, waking a ready
 child, or recording a pending wake while the child is still starting. The
-Durable Object keeps lease, in-flight invocation, alarm, and short-lived
+command returns `retry_later` instead of pretending success when Cloudflare
+cannot confirm start or wake acceptance. The Durable Object keeps lease,
+in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
 recovery truth. When a write-fenced invocation exists, the write fence is commit

@@ -196,6 +196,31 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("returns retry_later when processing cannot start without a container binding", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, sql } = createRunnerHarness({
+      runnerContainerNamespace: null,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      reason: "missing_container_binding",
+      retryAt: "2026-04-27T00:03:05.000Z",
+    });
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: null,
+    });
+  });
+
   it("sends a payloadless wake behind an active write fence without starting another container run", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -270,6 +295,45 @@ describe("HostedUserRunner execution coordination", () => {
       action: "already_running",
       kind: "runtime_processing_accepted",
       runtimeAttemptId: token?.attemptId,
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token?.attemptId,
+      active_expires_at: RUNNER_TIMEOUT_AT,
+      backoff_until: null,
+      wake_at: null,
+    });
+  });
+
+  it("returns retry_later when active child wake cannot be confirmed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "retry-scheduled" as const,
+        reason: "container-rpc-timeout" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      reason: "container_rpc_timeout",
+      retryAt: "2026-04-27T00:03:05.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
@@ -724,6 +788,7 @@ function createRunnerHarness(input: {
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
   onWorkspaceRead?: () => Promise<void> | void;
+  runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState();
@@ -785,7 +850,9 @@ function createRunnerHarness(input: {
     })),
     input.bucket ?? new MemoryEncryptedR2Bucket(),
     TEST_RUNNER_RUNTIME_ENV_SOURCE,
-    namespace,
+    input.runnerContainerNamespace === undefined
+      ? namespace
+      : input.runnerContainerNamespace,
   );
 
   return {

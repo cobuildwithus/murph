@@ -483,7 +483,10 @@ function recordLegacyRuntimeCompletionWake(
 
 function recordRuntimeProcessingAccepted(
   state: HostedRuntimeWorkflowState,
-  execution: HostedRuntimeEnsureProcessingResponse,
+  execution: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >,
 ): void {
   const sameRuntimeWake =
     state.lastRuntimeAttemptId === execution.runtimeAttemptId

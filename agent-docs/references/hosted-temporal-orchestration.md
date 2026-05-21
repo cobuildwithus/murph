@@ -237,11 +237,13 @@ hot-loop. The key is cleared when the workspace version or wake projection
 changes, mailbox lag appears, any explicit signal arrives, or runtime-result
 wake metadata becomes due.
 
-The normal execution command response is `runtime_processing_accepted` with an
-`action` of `started`, `replaced`, `woken`, or `already_running`, plus
-`runtimeAttemptId` and `recommendedRecheckAt`. This response is command
-acknowledgement only. It does not report runtime completion, status, mailbox
-lag, or next assistant wake facts.
+The normal execution command response is either `runtime_processing_accepted`
+or `retry_later`. Accepted responses include an `action` of `started`,
+`replaced`, `woken`, or `already_running`, plus `runtimeAttemptId` and
+`recommendedRecheckAt`. `retry_later` means Cloudflare could not confirm a
+start or wake and includes a bounded reason plus `retryAt`. These responses are
+command acknowledgement only. They do not report runtime completion, status,
+mailbox lag, or next assistant wake facts.
 
 Temporal observes completion by re-reading web-owned demand/status after the
 recommended recheck or any newer signal. Runtime wake and retry facts that matter
@@ -281,13 +283,17 @@ Response summary:
   the runtime process now or soon. `action` explains whether the command started
   a new attempt, replaced an expired attempt, woke a ready child, or recorded
   that the current attempt is already running/startup-pending.
+- `retry_later`: Cloudflare could not confirm the start/wake command. Temporal
+  keeps ownership of the decision loop and waits signal-interruptibly until
+  `retryAt`.
 
 The adapter must not return `caught-up`, `mailboxLag`, `nextAlarmAt`, or runtime
 completion status. Those belong to web demand/status plus the Temporal loop.
-Transport failures are Activity exceptions, not workflow success unions. After
-the Activity retry policy is exhausted, the per-user workflow records compact
-failure metadata, waits on a signal-aware retry timer, and keeps running.
-Business blocked states such as usage denial are demand responses from web.
+Transport failures and invalid protocol responses are still Activity
+exceptions. After the Activity retry policy is exhausted, the per-user workflow
+records compact failure metadata, waits on a signal-aware retry timer, and keeps
+running. Business blocked states such as usage denial are demand responses from
+web.
 
 Cloudflare may:
 

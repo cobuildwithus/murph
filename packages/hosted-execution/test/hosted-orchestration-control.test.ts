@@ -297,7 +297,7 @@ describe("hosted orchestration control contracts", () => {
     );
   });
 
-  it("parses ensure-processing request and accepted response variants", () => {
+  it("parses ensure-processing request and response variants", () => {
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
@@ -324,6 +324,16 @@ describe("hosted orchestration control contracts", () => {
         runtimeAttemptId: "runtime_attempt_test",
       });
     }
+
+    expect(parseHostedRuntimeEnsureProcessingResponse({
+      kind: "retry_later",
+      reason: "container_rpc_timeout",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    })).toEqual({
+      kind: "retry_later",
+      reason: "container_rpc_timeout",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    });
   });
 
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-execution contracts", () => {
@@ -396,6 +406,14 @@ describe("hosted orchestration control contracts", () => {
       recommendedRecheckAt: null,
       runtimeAttemptId: "runtime_attempt_test",
     })).toThrow("Hosted runtime processing-accepted response must not include mailboxLag.");
+
+    expect(() => parseHostedRuntimeEnsureProcessingResponse({
+      kind: "retry_later",
+      reason: "container rpc timeout",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    })).toThrow(
+      "Hosted runtime processing retry-later response reason is not supported.",
+    );
   });
 });
 
