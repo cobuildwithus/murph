@@ -17,6 +17,7 @@ import {
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
+  MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
@@ -5765,6 +5766,77 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     submittedCalculatorViewBundle.schemaVersion,
     MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   );
+  const submittedCalculatorCapabilities = submittedCalculatorViewBundle.capabilities;
+  assert.equal(
+    submittedCalculatorCapabilities.schemaVersion,
+    MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
+  );
+  assert.deepEqual(submittedCalculatorCapabilities.acceptedSourceKinds, [
+    "activity-summary",
+    "measurement",
+    "profile",
+    "questionnaire",
+    "sleep-summary",
+    "survey-response",
+    "test-result",
+    "wearable-summary",
+  ]);
+  assert.deepEqual(submittedCalculatorCapabilities.bundleIds, [
+    "lab9-bp-body",
+    "lab5-bp-bmi",
+    "l1-glycemia",
+    "r399-nhis-proxy-anchor",
+    "wearable-context",
+    "function-context",
+  ]);
+  assert.deepEqual(submittedCalculatorCapabilities.contextBundleIds, [
+    "wearable-context",
+    "function-context",
+  ]);
+  assert.deepEqual(submittedCalculatorCapabilities.researchAgeEstimateEligibleBundleIds, [
+    "lab9-bp-body",
+    "lab5-bp-bmi",
+    "l1-glycemia",
+    "r399-nhis-proxy-anchor",
+  ]);
+  assert.deepEqual(submittedCalculatorCapabilities.scoreBearingBundleIds, [
+    "lab9-bp-body",
+    "lab5-bp-bmi",
+    "l1-glycemia",
+    "r399-nhis-proxy-anchor",
+  ]);
+  assert.deepEqual(submittedCalculatorCapabilities.runtimeInputKeys, [
+    "chronological-age-years",
+    "sex",
+  ]);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("hba1c"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("steps"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("total-sleep-minutes"), true);
+  assert.equal(submittedCalculatorCapabilities.researchScoreBearingMetricKeys.includes("albumin"), true);
+  assert.equal(submittedCalculatorCapabilities.researchScoreBearingMetricKeys.includes("hba1c"), true);
+  assert.deepEqual(submittedCalculatorCapabilities.productScoreBearingMetricKeys, []);
+  assert.equal(submittedCalculatorCapabilities.researchPreviewSupported, true);
+  assert.equal(submittedCalculatorCapabilities.productAgeDisplayAuthorized, false);
+  assert.equal(submittedCalculatorCapabilities.productRiskDisplayAuthorized, false);
+  assert.equal(submittedCalculatorCapabilities.wearableContextMetricKeys.includes("steps"), true);
+  assert.equal(submittedCalculatorCapabilities.wearableContextMetricKeys.includes("hrv-rmssd"), true);
+  assert.equal(
+    submittedCalculatorCapabilities.wearableFirstPriorityFeatureKeys.includes("activity-volume"),
+    true,
+  );
+  assert.equal(
+    submittedCalculatorCapabilities.wearableSecondPriorityFeatureKeys.includes("resting-heart-rate"),
+    true,
+  );
+  assert.deepEqual(submittedCalculatorCapabilities.wearableScoreBearingMetricKeys, []);
+  assert.deepEqual(submittedCalculatorCapabilities.outputBoundary, {
+    modelParametersExportAllowed: false,
+    participantLevelExportAllowed: false,
+    productScoreDisplayAuthorized: false,
+    researchPreviewRequiresExplicitOptIn: true,
+    rowValuesExportAllowed: false,
+    submittedMetricScalarEchoAllowed: false,
+  });
   assert.equal(submittedCalculatorViewBundle.product.report.mode, "product");
   assert.equal(submittedCalculatorViewBundle.product.view.ageEstimate, null);
   assert.equal(submittedCalculatorViewBundle.product.view.risk.probability, null);

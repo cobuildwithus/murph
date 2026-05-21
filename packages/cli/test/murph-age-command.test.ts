@@ -10,6 +10,8 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
+  MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
   normalizeMetricValue,
   type MetricPoint,
@@ -1262,7 +1264,26 @@ test('age preview scores submitted labs and wearable context without a vault', a
       murphAgeSubmittedCalculatorViewBundleResultSchema.safeParse(productOnlyCalculatorBundle).success,
       true,
     )
-    assert.equal(productOnlyCalculatorBundle.schemaVersion, 'murph.age.submitted-calculator-view-bundle.v1')
+    assert.equal(productOnlyCalculatorBundle.schemaVersion, MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION)
+    assert.equal(
+      productOnlyCalculatorBundle.capabilities.schemaVersion,
+      MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
+    )
+    assert.deepEqual(productOnlyCalculatorBundle.capabilities.contextBundleIds, [
+      'wearable-context',
+      'function-context',
+    ])
+    assert.deepEqual(productOnlyCalculatorBundle.capabilities.scoreBearingBundleIds, [
+      'lab9-bp-body',
+      'lab5-bp-bmi',
+      'l1-glycemia',
+      'r399-nhis-proxy-anchor',
+    ])
+    assert.deepEqual(productOnlyCalculatorBundle.capabilities.runtimeInputKeys, [
+      'chronological-age-years',
+      'sex',
+    ])
+    assert.equal(productOnlyCalculatorBundle.capabilities.researchPreviewSupported, true)
     assert.equal(productOnlyCalculatorBundle.researchPreview, null)
     assert.equal(productOnlyCalculatorBundle.product.view.mode, 'product')
     assert.equal(productOnlyCalculatorBundle.product.view.status, 'abstain')
@@ -1312,7 +1333,38 @@ test('age preview scores submitted labs and wearable context without a vault', a
       murphAgeSubmittedCalculatorViewBundleResultSchema.safeParse(calculatorBundle).success,
       true,
     )
-    assert.equal(calculatorBundle.schemaVersion, 'murph.age.submitted-calculator-view-bundle.v1')
+    assert.equal(calculatorBundle.schemaVersion, MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION)
+    assert.equal(
+      calculatorBundle.capabilities.schemaVersion,
+      MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
+    )
+    assert.equal(calculatorBundle.capabilities.acceptedMetricKeys.includes('hba1c'), true)
+    assert.equal(calculatorBundle.capabilities.acceptedMetricKeys.includes('steps'), true)
+    assert.deepEqual(calculatorBundle.capabilities.acceptedSourceKinds, [
+      'activity-summary',
+      'measurement',
+      'profile',
+      'questionnaire',
+      'sleep-summary',
+      'survey-response',
+      'test-result',
+      'wearable-summary',
+    ])
+    assert.equal(calculatorBundle.capabilities.wearableContextMetricKeys.includes('total-sleep-minutes'), true)
+    assert.equal(calculatorBundle.capabilities.wearableFirstPriorityFeatureKeys.includes('activity-volume'), true)
+    assert.equal(calculatorBundle.capabilities.wearableSecondPriorityFeatureKeys.includes('resting-heart-rate'), true)
+    assert.deepEqual(calculatorBundle.capabilities.wearableScoreBearingMetricKeys, [])
+    assert.deepEqual(calculatorBundle.capabilities.productScoreBearingMetricKeys, [])
+    assert.equal(calculatorBundle.capabilities.productAgeDisplayAuthorized, false)
+    assert.equal(calculatorBundle.capabilities.productRiskDisplayAuthorized, false)
+    assert.deepEqual(calculatorBundle.capabilities.outputBoundary, {
+      modelParametersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      productScoreDisplayAuthorized: false,
+      researchPreviewRequiresExplicitOptIn: true,
+      rowValuesExportAllowed: false,
+      submittedMetricScalarEchoAllowed: false,
+    })
     assert.equal(calculatorBundle.product.view.mode, 'product')
     assert.equal(calculatorBundle.product.view.status, 'abstain')
     assert.equal(calculatorBundle.product.view.displayBlockedReason, 'product-not-authorized')
