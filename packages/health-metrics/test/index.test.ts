@@ -6216,7 +6216,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered",
     currentScoringMode: "single-selected-research-card",
     labBodyStatus: "selected-card-score-not-additive-increment",
-    nextArchitectureStep: "fit-function-sidecar-before-layered-scoring",
+    nextArchitectureStep: "parameterize-function-sidecar-for-layered-scoring",
     wearableStatus: "context-only-zero-product-multiplier",
   });
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
@@ -6226,15 +6226,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchViewJson.includes("\"riskDisplayReady\":false"), true);
   assert.equal(
     submittedLab5ResearchView.model.blockers.join("|"),
-    "biomarker-transport-not-confirmed|function-sidecar-parameter-pack-missing|wearable-increment-not-validated|product-use-not-authorized",
+    "biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized",
   );
   assert.equal(
     submittedLab5ResearchView.model.functionDisability.currentUse,
-    "bounded-research-sidecar-supported-pending-parameter-pack",
+    "hardened-research-lead-sidecar-not-product-age",
   );
   assert.equal(
     submittedLab5ResearchView.model.functionDisability.nextAction,
-    "fit-bounded-function-parameter-pack-then-validate-fresh-source",
+    "parameterize-function-sidecar-for-layered-scoring-then-fresh-validation",
   );
   assert.equal(submittedLab5ResearchView.model.functionDisability.scoreBearing, false);
   assert.equal(submittedLab5ResearchView.model.labBody.currentUse, "score-bearing-research-when-selected");

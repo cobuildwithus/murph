@@ -925,7 +925,6 @@ const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
 const murphAgeResearchModelStatusViewSchema = z.object({
   blockers: z.array(z.enum([
     'biomarker-transport-not-confirmed',
-    'function-sidecar-parameter-pack-missing',
     'product-use-not-authorized',
     'wearable-increment-not-validated',
   ])),
@@ -935,12 +934,12 @@ const murphAgeResearchModelStatusViewSchema = z.object({
     anchorLayerStatus: z.literal('available-as-research-anchor-and-fallback-not-layered'),
     currentScoringMode: z.literal('single-selected-research-card'),
     labBodyStatus: z.literal('selected-card-score-not-additive-increment'),
-    nextArchitectureStep: z.literal('fit-function-sidecar-before-layered-scoring'),
+    nextArchitectureStep: z.literal('parameterize-function-sidecar-for-layered-scoring'),
     wearableStatus: z.literal('context-only-zero-product-multiplier'),
   }),
   functionDisability: z.object({
-    currentUse: z.literal('bounded-research-sidecar-supported-pending-parameter-pack'),
-    nextAction: z.literal('fit-bounded-function-parameter-pack-then-validate-fresh-source'),
+    currentUse: z.literal('hardened-research-lead-sidecar-not-product-age'),
+    nextAction: z.literal('parameterize-function-sidecar-for-layered-scoring-then-fresh-validation'),
     scoreBearing: z.literal(false),
   }),
   labBody: z.object({
