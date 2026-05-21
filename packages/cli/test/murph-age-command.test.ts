@@ -1361,6 +1361,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
       'wearable-summary',
     ])
     assert.deepEqual(calculatorBundle.capabilities.acceptedUserInputFamilies, [
+      'demographics-age-sex',
       'bloodwork-common-labs',
       'vitals-body-composition',
       'wearable-activity',

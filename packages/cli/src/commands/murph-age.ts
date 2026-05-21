@@ -1012,6 +1012,7 @@ const murphAgeSubmittedCalculatorCapabilitySchema = z.object({
   acceptedMetricKeys: z.array(z.string().min(1)),
   acceptedSourceKinds: z.array(murphAgeSubmittedMetricSourceKindSchema),
   acceptedUserInputFamilies: z.array(z.enum([
+    'demographics-age-sex',
     'bloodwork-common-labs',
     'vitals-body-composition',
     'wearable-activity',
