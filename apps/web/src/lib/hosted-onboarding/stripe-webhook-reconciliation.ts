@@ -31,7 +31,7 @@ export type HostedStripeWebhookReconciliationResult = {
   hostedExecutionEventId: string | null;
 };
 
-export type HostedStripeWebhookRunnerNudgeResult = {
+export type HostedStripeWebhookRuntimeWakeResult = {
   accepted: boolean;
   required: boolean;
 };
@@ -145,25 +145,25 @@ export async function processRecordedHostedStripeWebhookEvent(input: {
   eventId: string;
   prisma?: PrismaClient;
   timeoutMs?: number;
-}): Promise<HostedStripeWebhookRunnerNudgeResult> {
+}): Promise<HostedStripeWebhookRuntimeWakeResult> {
   const reconciliation = await reconcileRecordedHostedStripeWebhookEvent({
     eventId: input.eventId,
     prisma: input.prisma,
   });
 
-  return nudgeHostedStripeWebhookActivationRunner({
+  return signalHostedStripeWebhookActivationRuntimeWake({
     ...reconciliation,
     timeoutMs: input.timeoutMs,
   });
 }
 
-export async function nudgeHostedStripeWebhookActivationRunner(input: {
+export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
   activatedMemberId: string | null;
   eventId: string;
   eventType: string;
   hostedExecutionEventId: string | null;
   timeoutMs?: number;
-}): Promise<HostedStripeWebhookRunnerNudgeResult> {
+}): Promise<HostedStripeWebhookRuntimeWakeResult> {
   const hostedExecutionEventId = input.hostedExecutionEventId ?? null;
   const hostedExecutionMemberId = input.activatedMemberId ?? null;
 
@@ -174,8 +174,8 @@ export async function nudgeHostedStripeWebhookActivationRunner(input: {
     };
   }
 
-  const nudgeTiming = startHostedOnboardingTiming(
-    "hosted-onboarding.stripe.runner-nudge",
+  const runtimeWakeTiming = startHostedOnboardingTiming(
+    "hosted-onboarding.stripe.runtime-wake",
     {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       eventType: input.eventType,
@@ -189,7 +189,7 @@ export async function nudgeHostedStripeWebhookActivationRunner(input: {
     timeoutMs: input.timeoutMs,
     userId: hostedExecutionMemberId,
   });
-  finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
+  finishHostedOnboardingTiming(runtimeWakeTiming, result.accepted ? "accepted" : "not-accepted", {
     accepted: result.accepted,
     configured: result.configured,
     errorCode: result.errorCode,

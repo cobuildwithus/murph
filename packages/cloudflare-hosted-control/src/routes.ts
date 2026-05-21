@@ -35,6 +35,10 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
   return buildCloudflareHostedControlUserRoutePath("status", userId);
 }
 
+/**
+ * @deprecated Legacy replay/deploy-skew route. New orchestration should use
+ * `buildCloudflareHostedControlRuntimeEnsureProcessingPath`.
+ */
 export function buildCloudflareHostedControlRuntimeEnsureExecutionPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureExecution", userId);
 }

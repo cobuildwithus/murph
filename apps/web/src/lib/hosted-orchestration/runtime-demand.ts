@@ -47,9 +47,14 @@ type HostedRuntimeDemandUsageGateStatus =
   | "not_required";
 
 type HostedRuntimeDemandUsageGateMode = "mutating" | "read_only";
+type HostedRuntimeDemandDecisionSource = "workflow" | "status";
+
+const HOSTED_RUNTIME_DEMAND_DECISION_LOG_SCHEMA =
+  "murph.hosted-runtime.demand-decision.v1";
 
 export async function readHostedRuntimeDemand(
   input: HostedRuntimeDemandRequest & {
+    decisionSource?: HostedRuntimeDemandDecisionSource;
     now?: Date | string;
     usageGateMode?: HostedRuntimeDemandUsageGateMode;
   },
@@ -413,7 +418,9 @@ function hasHostedMailboxLag(
 
 function emitHostedRuntimeDemandDecision(decision: {
   demand: HostedRuntimeDemand;
-  request: HostedRuntimeDemandRequest;
+  request: HostedRuntimeDemandRequest & {
+    decisionSource?: HostedRuntimeDemandDecisionSource;
+  };
   usageGateRequired: boolean;
   usageGateStatus: HostedRuntimeDemandUsageGateStatus;
 }): void {
@@ -422,11 +429,12 @@ function emitHostedRuntimeDemandDecision(decision: {
       decision.demand.kind === "blocked" ? decision.demand.reason : null,
     browserVaultRefreshRequested:
       decision.request.browserVaultRefreshRequested === true,
-    component: "hosted.runtime.demand",
+    component: "hosted.orchestration.demand",
     conversationLagPresent: hasHostedMailboxLag(
       decision.demand.mailboxLag,
       "conversation",
     ),
+    decisionSource: decision.request.decisionSource ?? "workflow",
     demandKind: decision.demand.kind,
     demandReason: decision.demand.kind === "run" ? decision.demand.reason : null,
     demandSource: decision.demand.kind === "run" ? decision.demand.source : null,
@@ -445,9 +453,10 @@ function emitHostedRuntimeDemandDecision(decision: {
         ? null
         : decision.request.runtimeResultWakeReason,
     ),
+    schema: HOSTED_RUNTIME_DEMAND_DECISION_LOG_SCHEMA,
     usageGateRequired: decision.usageGateRequired,
     usageGateStatus: decision.usageGateStatus,
-    userId: decision.request.userId,
+    userIdPresent: decision.request.userId.length > 0,
     workspaceNextWakeAtPresent:
       decision.demand.workspace?.nextWakeAt !== null
         && decision.demand.workspace?.nextWakeAt !== undefined,

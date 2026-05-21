@@ -16,9 +16,9 @@ import {
 } from "@murphai/hosted-execution/env";
 import {
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
-  HOSTED_RUNTIME_PROCESSING_RETRY_REASONS,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  readHostedRuntimeEnsureCloudflareExecutionTimeouts,
   readHostedRuntimeEnsureProcessingTimeouts,
 } from "@murphai/hosted-execution/temporal-env";
 import { log } from "@temporalio/activity";
@@ -41,6 +41,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export interface HostedOrchestratorTemporalActivityEnvironment {
   cloudflareHostedControlBaseUrl: string;
   cloudflareHostedControlSigning: HostedWebCallbackSigningEnvironment;
+  ensureCloudflareExecutionHttpTimeoutMs: number;
   ensureRuntimeProcessingHttpTimeoutMs: number;
   hostedWebBaseUrl: string;
   hostedWebCallbackSigning: HostedWebCallbackSigningEnvironment;
@@ -68,7 +69,10 @@ export interface HostedOrchestratorJsonRequest<TResponse> {
 const privateKeyCache = new Map<string, Promise<CryptoKey>>();
 
 export interface HostedTemporalActivityObservation {
-  activity: "readRuntimeDemand" | "ensureRuntimeProcessing";
+  activity:
+    | "readRuntimeDemand"
+    | "ensureRuntimeProcessing"
+    | "ensureCloudflareExecution";
   orchestrationAttemptId?: string | null;
   reason?: string | null;
   userId: string;
@@ -77,8 +81,10 @@ export interface HostedTemporalActivityObservation {
 export function readHostedOrchestratorTemporalActivityEnvironment(
   source: EnvSource = process.env,
 ): HostedOrchestratorTemporalActivityEnvironment {
-  const ensureCloudflareExecutionTimeouts =
+  const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
+  const ensureCloudflareExecutionTimeouts =
+    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -86,8 +92,10 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
+    ensureCloudflareExecutionHttpTimeoutMs:
+      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
     ensureRuntimeProcessingHttpTimeoutMs:
-      ensureCloudflareExecutionTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
+      ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
     hostedWebBaseUrl: requireWebOriginBaseUrl(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
@@ -108,10 +116,13 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
   HostedOrchestratorTemporalActivityEnvironment,
   | "cloudflareHostedControlBaseUrl"
   | "cloudflareHostedControlSigning"
+  | "ensureCloudflareExecutionHttpTimeoutMs"
   | "ensureRuntimeProcessingHttpTimeoutMs"
 > {
-  const ensureCloudflareExecutionTimeouts =
+  const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
+  const ensureCloudflareExecutionTimeouts =
+    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -119,8 +130,10 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
+    ensureCloudflareExecutionHttpTimeoutMs:
+      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
     ensureRuntimeProcessingHttpTimeoutMs:
-      ensureCloudflareExecutionTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
+      ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
   };
 }
 
@@ -272,8 +285,7 @@ export async function observeHostedTemporalActivity<TResponse>(
       reason: observation.reason ?? null,
       resultAction: resultDetails.resultAction,
       resultKind: resultDetails.resultKind,
-      retryReason: resultDetails.retryReason,
-      userId: observation.userId,
+      userIdPresent: observation.userId.length > 0,
     });
     return result;
   } catch (error) {
@@ -287,8 +299,7 @@ export async function observeHostedTemporalActivity<TResponse>(
       reason: observation.reason ?? null,
       resultAction: null,
       resultKind: null,
-      retryReason: null,
-      userId: observation.userId,
+      userIdPresent: observation.userId.length > 0,
     });
     throw error;
   }
@@ -353,7 +364,6 @@ export class HostedOrchestratorHttpResponseError extends Error {
 interface HostedTemporalActivityResultDetails {
   resultAction: string | null;
   resultKind: string | null;
-  retryReason: string | null;
 }
 
 function readHostedTemporalActivityResultDetails(
@@ -363,7 +373,6 @@ function readHostedTemporalActivityResultDetails(
     return {
       resultAction: null,
       resultKind: null,
-      retryReason: null,
     };
   }
 
@@ -376,15 +385,12 @@ function readHostedTemporalActivityResultDetails(
       )
       : null,
     resultKind,
-    retryReason: resultKind === "retry_later"
-      ? readKnownString(value.reason, HOSTED_RUNTIME_PROCESSING_RETRY_REASONS)
-      : null,
   };
 }
 
 function isHostedTemporalActivityResultRecord(
   value: unknown,
-): value is { action?: unknown; kind?: unknown; reason?: unknown } {
+): value is { action?: unknown; kind?: unknown } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

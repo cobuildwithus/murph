@@ -122,7 +122,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | Path                         | Responsibility                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/contracts`         | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts.                                                             |
-| `packages/hosted-execution`  | Shared hosted mailbox, workspace checkpoint, runtime log/status, nudge, and auth contracts for the hosted `apps/web` control plane and Cloudflare worker. |
+| `packages/hosted-execution`  | Shared hosted mailbox, workspace checkpoint, runtime log/status, Temporal processing, and auth contracts for the hosted `apps/web` control plane and Cloudflare worker. |
 | `packages/hosted-orchestrator-temporal` | Workspace-private Temporal worker package for pointer-only hosted runtime orchestration. |
 | `packages/runtime-state`     | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers.       |
 | `packages/core`              | Workspace-private canonical mutation owner. No other package may write canonical vault data directly.                                      |
@@ -143,7 +143,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
 | `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
 | `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, encrypted mailbox intake, workspace checkpoints, and hosted runtime status/logs. |
-| `apps/cloudflare`            | Thin hosted runner for authenticated nudges/status, per-user coordination, encrypted hosted bundles, and container-backed workspace runtime passes. |
+| `apps/cloudflare`            | Thin hosted runner for signed Temporal processing requests, status, per-user coordination, encrypted hosted bundles, and container-backed workspace runtime passes. |
 | `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
 ## Local and hosted surfaces
@@ -160,11 +160,13 @@ Murph now has three distinct runtime tiers:
 
 - `apps/web` owns hosted onboarding, billing, OAuth callbacks, webhook intake, device-sync control-plane metadata, sparse routing state, encrypted hosted mailbox rows, workspace checkpoint metadata, and hosted runtime status/logs
 - it does not own canonical health data
+- webhook and app paths commit durable demand and signal Temporal only; they do not directly nudge a user runner in Cloudflare
 
 ### 3. Hosted execution plane
 
 - `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runtime passes, keeps only DO-local runner coordination state, and invokes the workspace-private `@murphai/assistant-runtime` package against web-owned mailbox/checkpoint/log ports
-- `packages/hosted-orchestrator-temporal` runs the per-user Temporal workflow worker that reads web-owned demand, calls Cloudflare ensure-execution, and stores only pointer-level orchestration state
+- `packages/hosted-orchestrator-temporal` runs the per-user Temporal workflow worker that reads web-owned demand, calls Cloudflare `ensure-processing`, and stores only pointer-level orchestration state
+- Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns start, wake, watchdog, and cleanup for the active runner; legacy ensure-execution is compatibility only
 - the hosted execution plane is intentionally separate from the public hosted web app
 
 ## CLI surface

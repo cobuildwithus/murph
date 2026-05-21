@@ -158,10 +158,11 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
     ).toBe(HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS);
 
     expect(readHostedRuntimeEnsureCloudflareExecutionTimeouts({
-      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
+      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "5000",
     })).toEqual({
-      ensureCloudflareExecutionHttpTimeoutMs: 12_000,
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 17_000,
+      ensureCloudflareExecutionHttpTimeoutMs: 125_000,
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 155_000,
     });
   });
 

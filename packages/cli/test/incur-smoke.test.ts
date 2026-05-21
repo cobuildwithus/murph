@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import { Cli, z } from 'incur'
 import { initializeVault } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -22,64 +20,18 @@ import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { createVaultCli } from '../src/vault-cli.js'
+import { runMurphCliEntrypoint } from '../src/cli-entry.js'
 import {
-  binPath,
-  commandOutputFromError,
   type CliEnvelope,
   requireData,
   runCli,
   runRawCli,
-  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
-const execFileAsync = promisify(execFile)
 const packageJson = require('../package.json') as { version?: string }
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
-
-async function runBuiltCliFromCwd(
-  args: string[],
-  options: {
-    cwd: string
-    env?: NodeJS.ProcessEnv
-  },
-): Promise<string> {
-  const { stdout } = await execFileAsync(
-    process.execPath,
-    [binPath, ...args],
-    {
-      cwd: options.cwd,
-      encoding: 'utf8',
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        ...options.env,
-      }),
-    },
-  )
-
-  return stdout.trim()
-}
-
-async function runBuiltJsonCliFromCwd<TData = Record<string, unknown>>(
-  args: string[],
-  options: {
-    cwd: string
-    env?: NodeJS.ProcessEnv
-  },
-): Promise<CliEnvelope<TData>> {
-  try {
-    const stdout = await runBuiltCliFromCwd(withMachineJsonOutput(args), options)
-    return JSON.parse(stdout) as CliEnvelope<TData>
-  } catch (error) {
-    const output = commandOutputFromError(error)
-    if (output !== null) {
-      return JSON.parse(output) as CliEnvelope<TData>
-    }
-
-    throw error
-  }
-}
 
 function withMachineJsonOutput(args: string[]): string[] {
   const nextArgs = [...args]
@@ -96,16 +48,152 @@ function withMachineJsonOutput(args: string[]): string[] {
 }
 
 async function runSourceCliRaw(args: string[]): Promise<string> {
+  return runSourceCliRawFromCwd(args, {
+    cwd: process.cwd(),
+    env: process.env,
+  })
+}
+
+async function runSourceJsonCliFromCwd<TData = Record<string, unknown>>(
+  args: string[],
+  options: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<CliEnvelope<TData>> {
+  const stdout = await runSourceCliRawFromCwd(
+    withMachineJsonOutput(args),
+    options,
+  )
+
+  return JSON.parse(stdout) as CliEnvelope<TData>
+}
+
+async function runSourceEntrypointJsonCliFromCwd<TData = Record<string, unknown>>(
+  args: string[],
+  options: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<CliEnvelope<TData>> {
+  const stdout = await runSourceEntrypointRawFromCwd(
+    withMachineJsonOutput(args),
+    options,
+  )
+
+  return JSON.parse(stdout) as CliEnvelope<TData>
+}
+
+async function runSourceEntrypointRawFromCwd(
+  args: string[],
+  options: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<string> {
+  const previousCwd = process.cwd()
+  const previousEnv = { ...process.env }
+  const previousExitCode = process.exitCode
+  const originalStdoutWrite = process.stdout.write
+  const originalStderrWrite = process.stderr.write
+  const stdout: string[] = []
+  const stderr: string[] = []
+  let exitCode: number | undefined
+
+  try {
+    replaceProcessEnvForEntrypointTest({
+      ...process.env,
+      ...options.env,
+    })
+    process.chdir(options.cwd)
+    process.stdout.write = createProcessWriteInterceptor(stdout)
+    process.stderr.write = createProcessWriteInterceptor(stderr)
+
+    await runMurphCliEntrypoint(args, {
+      argv0: 'vault-cli',
+      exit(code = 0) {
+        exitCode = code
+      },
+    })
+
+    if (exitCode !== undefined && exitCode !== 0 && stdout.length === 0) {
+      throw new Error(stderr.join('').trim() || `CLI exited with code ${exitCode}.`)
+    }
+  } finally {
+    process.stdout.write = originalStdoutWrite
+    process.stderr.write = originalStderrWrite
+    process.chdir(previousCwd)
+    replaceProcessEnvForEntrypointTest(previousEnv)
+    process.exitCode = previousExitCode
+  }
+
+  return stdout.join('').trim()
+}
+
+function replaceProcessEnvForEntrypointTest(env: NodeJS.ProcessEnv): void {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in env)) {
+      delete process.env[key]
+    }
+  }
+
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
+  }
+}
+
+function createProcessWriteInterceptor(
+  chunks: string[],
+): typeof process.stdout.write {
+  return ((chunk: string | Uint8Array, encodingOrCallback, callback) => {
+    const resolvedEncoding =
+      typeof encodingOrCallback === 'string' ? encodingOrCallback : 'utf8'
+    const resolvedCallback =
+      typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
+    chunks.push(
+      typeof chunk === 'string'
+        ? chunk
+        : Buffer.from(chunk).toString(resolvedEncoding),
+    )
+
+    if (typeof resolvedCallback === 'function') {
+      resolvedCallback()
+    }
+
+    return true
+  }) as typeof process.stdout.write
+}
+
+async function runSourceCliRawFromCwd(
+  args: string[],
+  options: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<string> {
+  const previousCwd = process.cwd()
   const cli = createVaultCli()
   const output: string[] = []
 
-  await cli.serve(args, {
-    env: process.env,
-    exit: () => {},
-    stdout(chunk) {
-      output.push(chunk)
-    },
-  })
+  try {
+    process.chdir(options.cwd)
+    await cli.serve(args, {
+      env: {
+        ...process.env,
+        ...options.env,
+      },
+      exit: () => {},
+      stdout(chunk) {
+        output.push(chunk)
+      },
+    })
+  } finally {
+    process.chdir(previousCwd)
+  }
 
   return output.join('').trim()
 }
@@ -114,15 +202,7 @@ async function runJsonCli<TData>(
   cli: Cli.Cli,
   args: string[],
 ): Promise<{
-  envelope: {
-    ok: boolean
-    data?: TData
-    error?: {
-      code?: string
-      message?: string
-      retryable?: boolean
-    }
-  }
+  envelope: CliEnvelope<TData>
   exitCode: number | null
 }> {
   const output: string[] = []
@@ -139,15 +219,7 @@ async function runJsonCli<TData>(
   })
 
   return {
-    envelope: JSON.parse(output.join('').trim()) as {
-      ok: boolean
-      data?: TData
-      error?: {
-        code?: string
-        message?: string
-        retryable?: boolean
-      }
-    },
+    envelope: JSON.parse(output.join('').trim()) as CliEnvelope<TData>,
     exitCode,
   }
 }
@@ -201,7 +273,7 @@ test('root config file can provide command option defaults', async () => {
     )
 
     const showResult = requireData(
-      await runBuiltJsonCliFromCwd<{ vault: string }>(
+      await runSourceEntrypointJsonCliFromCwd<{ vault: string }>(
         ['--config', configPath, 'vault', 'show'],
         {
           cwd: tempRoot,
@@ -211,7 +283,7 @@ test('root config file can provide command option defaults', async () => {
     )
     assert.equal(showResult.vault, vaultRoot)
 
-    const withoutConfig = await runBuiltJsonCliFromCwd([
+    const withoutConfig = await runSourceEntrypointJsonCliFromCwd([
       '--config',
       configPath,
       '--no-config',
@@ -260,12 +332,13 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
       }),
     )
 
-    const output = await runBuiltCliFromCwd(
+    const output = await runSourceEntrypointRawFromCwd(
       ['vault', 'show', '--format', 'json', '--filter-output', 'vault'],
       {
         cwd: tempRoot,
         env: {
           HOME: homeRoot,
+          VAULT: '',
         },
       },
     )
@@ -869,7 +942,14 @@ test('blood-test list schema stays scoped to shared date-range and status filter
 
 test('query projection status schema stays scoped to projection-management options', async () => {
   const schema = JSON.parse(
-    await runRawCli(['query', 'projection', 'status', '--schema', '--format', 'json']),
+    await runSourceCliRaw([
+      'query',
+      'projection',
+      'status',
+      '--schema',
+      '--format',
+      'json',
+    ]),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1771,11 +1851,14 @@ test('full-output json exposes the native Incur success envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
-    const result = await runCli<{ created: boolean }>(['init', '--vault', vaultRoot])
+    const result = await runJsonCli<{ created: boolean }>(
+      createVaultCli(),
+      ['init', '--vault', vaultRoot],
+    )
 
-    assert.equal(result.ok, true)
-    assert.equal(result.meta.command, 'init')
-    assert.equal(requireData(result).created, true)
+    assert.equal(result.envelope.ok, true)
+    assert.equal(result.envelope.meta.command, 'init')
+    assert.equal(requireData(result.envelope).created, true)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1785,12 +1868,15 @@ test('health command metadata exposes Incur-native CTA suggestions', async () =>
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
-    const result = await runCli<{ noun: string }>(['goal', 'scaffold', '--vault', vaultRoot])
+    const result = await runJsonCli<{ noun: string }>(
+      createVaultCli(),
+      ['goal', 'scaffold', '--vault', vaultRoot],
+    )
 
-    assert.equal(result.ok, true)
-    assert.equal(requireData(result).noun, 'goal')
+    assert.equal(result.envelope.ok, true)
+    assert.equal(requireData(result.envelope).noun, 'goal')
     assert.equal(
-      result.meta.cta?.commands.some((command) =>
+      result.envelope.meta.cta?.commands.some((command) =>
         command.command.includes('vault-cli goal import-json'),
       ),
       true,
@@ -1940,19 +2026,23 @@ test('goal scaffold exposes a success CTA in the full-output json envelope', asy
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-cta-'))
 
   try {
-    const initResult = await runCli<{ created: boolean }>(['init', '--vault', vaultRoot])
-    assert.equal(initResult.ok, true)
-    assert.equal(requireData(initResult).created, true)
+    const cli = createVaultCli()
+    const initResult = await runJsonCli<{ created: boolean }>(
+      cli,
+      ['init', '--vault', vaultRoot],
+    )
+    assert.equal(initResult.envelope.ok, true)
+    assert.equal(requireData(initResult.envelope).created, true)
 
-    const scaffoldResult = await runCli<{
+    const scaffoldResult = await runJsonCli<{
       noun: string
       payload: Record<string, unknown>
-    }>(['goal', 'scaffold', '--vault', vaultRoot])
+    }>(cli, ['goal', 'scaffold', '--vault', vaultRoot])
 
-    assert.equal(scaffoldResult.ok, true)
-    assert.equal(scaffoldResult.meta.command, 'goal scaffold')
-    assert.equal(requireData(scaffoldResult).noun, 'goal')
-    assert.deepEqual(scaffoldResult.meta.cta?.commands, [
+    assert.equal(scaffoldResult.envelope.ok, true)
+    assert.equal(scaffoldResult.envelope.meta.command, 'goal scaffold')
+    assert.equal(requireData(scaffoldResult.envelope).noun, 'goal')
+    assert.deepEqual(scaffoldResult.envelope.meta.cta?.commands, [
       {
         command: 'vault-cli goal import-json --input @goal.json --vault <vault>',
         description: 'Apply the edited goal payload.',

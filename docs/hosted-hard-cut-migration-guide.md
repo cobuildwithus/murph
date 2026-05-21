@@ -7,14 +7,16 @@ has been superseded by the greenfield mailbox/workspace cutover in
 `migration.md` and the live protocol reference in
 `agent-docs/references/hosted-runtime-protocol.md`.
 
-## Current Shape
+## Historical Shape
 
 - `apps/web` owns encrypted hosted mailbox rows, hosted workspace checkpoint
   metadata, hosted runtime logs, and hosted runtime status.
-- Producers append mailbox envelopes in the same transaction as the owning web
-  state mutation, then best-effort nudge the runner.
+- Producers appended mailbox envelopes in the same transaction as the owning web
+  state mutation, then best-effort nudged the runner. The active architecture is
+  Temporal-only orchestration: producers append durable demand and signal
+  Temporal, and Temporal calls Cloudflare `ensure-processing`.
 - `apps/cloudflare` is a thin runner/container. It accepts authenticated
-  nudges/status reads, restores encrypted bundles, invokes
+  Temporal processing requests/status reads, restores encrypted bundles, invokes
   `@murphai/assistant-runtime`, and persists progress through the web-owned
   mailbox/workspace/log ports.
 - The assistant runtime owns mailbox import cursors, outbox/inbox semantics,

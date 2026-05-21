@@ -11,7 +11,7 @@ import type {
   HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
-  HostedRuntimeProcessingRetryReason,
+  HostedRuntimeProcessingAcceptedAction,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -95,6 +95,8 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const ACTIVE_RUNTIME_WAKE_RECHECK_MARGIN_MS = 5_000;
+const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
+const RUNTIME_PROCESSING_STARTUP_RECHECK_MS = 5_000;
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 
 export interface HostedRunnerUserDataDeletionResult {
@@ -132,6 +134,13 @@ type RuntimeInvocationInput = {
   reason: HostedWorkspaceInvocationReason;
   userId: string;
 };
+
+type RuntimeProcessingRetryReason =
+  | "active_child_rejected"
+  | "container_rpc_error"
+  | "container_rpc_timeout"
+  | "missing_container_binding"
+  | "stale_fence_replacement_race";
 
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
@@ -355,7 +364,7 @@ export class HostedUserRunner {
       }
     }
     await this.state.storage.put(workspaceSnapshotUploadSessionCurrentStorageKey(), session);
-    this.state.waitUntil?.(
+    this.state.waitUntil(
       this.cleanupHostedWorkspaceSnapshotOrphanCandidatesBestEffort(input.userId),
     );
     return session;
@@ -558,17 +567,19 @@ export class HostedUserRunner {
       await this.syncWatchdogAlarm(record);
       return {
         kind: "runtime_wake_sent",
-        recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+        recommendedRecheckAt: containerResult.action === "already_running"
+          ? this.computeStartupRuntimeRecheckAt()
+          : this.computeActiveRuntimeWakeRecheckAt(),
         runtimeAttemptId: activeFence.attemptId,
       };
     }
 
     if (containerResult.kind === "start-required") {
-      if (!isRunnerWriteFenceExpired(activeFence)) {
+      if (this.shouldPreserveStartingWriteFence(activeFence)) {
         await this.syncWatchdogAlarm(record);
         return {
           kind: "runtime_wake_sent",
-          recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+          recommendedRecheckAt: this.computeStartupRuntimeRecheckAt(),
           runtimeAttemptId: activeFence.attemptId,
         };
       }
@@ -616,23 +627,26 @@ export class HostedUserRunner {
 
     if (containerResult.kind === "accepted") {
       await this.syncWatchdogAlarm(record);
+      const action = containerResult.action === "already_running"
+        ? "already_running"
+        : "woken";
       return {
-        action: containerResult.action === "already_running"
-          ? "already_running"
-          : "woken",
+        action,
         kind: "runtime_processing_accepted",
-        recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+        recommendedRecheckAt:
+          this.computeRuntimeProcessingAcceptedRecheckAt(action),
         runtimeAttemptId: activeFence.attemptId,
       };
     }
 
     if (containerResult.kind === "start-required") {
-      if (!isRunnerWriteFenceExpired(activeFence)) {
+      if (this.shouldPreserveStartingWriteFence(activeFence)) {
         await this.syncWatchdogAlarm(record);
         return {
           action: "already_running",
           kind: "runtime_processing_accepted",
-          recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+          recommendedRecheckAt:
+            this.computeRuntimeProcessingAcceptedRecheckAt("already_running"),
           runtimeAttemptId: activeFence.attemptId,
         };
       }
@@ -645,17 +659,19 @@ export class HostedUserRunner {
       });
       await this.syncWatchdogAlarm(cleared.record);
       if (!cleared.cleared) {
-        return this.createRuntimeProcessingRetryLater(
-          "stale_fence_replacement_race",
-        );
+        return this.createRuntimeProcessingRetryLater({
+          reason: "stale_fence_replacement_race",
+          userId: input.userId,
+        });
       }
       return await this.startRuntimeProcessing(input, "replaced");
     }
 
     await this.syncWatchdogAlarm(record);
-    return this.createRuntimeProcessingRetryLater(
-      mapRunnerProcessingRetryReason(containerResult.reason),
-    );
+    return this.createRuntimeProcessingRetryLater({
+      reason: mapRunnerProcessingRetryReason(containerResult.reason),
+      userId: input.userId,
+    });
   }
 
   private async startRuntimeExecution(
@@ -729,7 +745,10 @@ export class HostedUserRunner {
     });
 
     if (!this.runnerContainerNamespace) {
-      return this.createRuntimeProcessingRetryLater("missing_container_binding");
+      return this.createRuntimeProcessingRetryLater({
+        reason: "missing_container_binding",
+        userId: input.userId,
+      });
     }
 
     let token: RunnerWriteFenceToken;
@@ -776,18 +795,28 @@ export class HostedUserRunner {
     return {
       action,
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+      recommendedRecheckAt: this.computeRuntimeProcessingAcceptedRecheckAt(action),
       runtimeAttemptId: token.attemptId,
     };
   }
 
-  private createRuntimeProcessingRetryLater(
-    reason: HostedRuntimeProcessingRetryReason,
-  ): HostedRuntimeEnsureProcessingResponse {
+  private createRuntimeProcessingRetryLater(input: {
+    reason: RuntimeProcessingRetryReason;
+    userId: string;
+  }): HostedRuntimeEnsureProcessingResponse {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        runtimeProcessingRetryReason: input.reason,
+      },
+      level: "warn",
+      message: "Hosted runner runtime processing could not be accepted yet.",
+      phase: "runtime.starting",
+      userId: input.userId,
+    });
     return {
       kind: "retry_later",
-      reason,
-      retryAt: this.computeActiveRuntimeWakeRecheckAt(),
+      retryAt: this.computeStartupRuntimeRecheckAt(),
     };
   }
 
@@ -796,6 +825,7 @@ export class HostedUserRunner {
     task: Promise<void>,
   ): void {
     this.runtimeExecutionTasks.set(attemptId, task);
+    this.state.waitUntil(task);
     void task.finally(() => {
       if (this.runtimeExecutionTasks.get(attemptId) === task) {
         this.runtimeExecutionTasks.delete(attemptId);
@@ -1225,6 +1255,36 @@ export class HostedUserRunner {
     return new Date(
       Date.now() + this.env.idleCheckpointDelayMs + ACTIVE_RUNTIME_WAKE_RECHECK_MARGIN_MS,
     ).toISOString();
+  }
+
+  private computeRuntimeProcessingAcceptedRecheckAt(
+    action: HostedRuntimeProcessingAcceptedAction,
+  ): string {
+    return action === "woken"
+      ? this.computeActiveRuntimeWakeRecheckAt()
+      : this.computeStartupRuntimeRecheckAt();
+  }
+
+  private computeStartupRuntimeRecheckAt(): string {
+    return new Date(
+      Date.now() + RUNTIME_PROCESSING_STARTUP_RECHECK_MS,
+    ).toISOString();
+  }
+
+  private shouldPreserveStartingWriteFence(
+    fence: NonNullable<RunnerStateRecord["writeFence"]>,
+  ): boolean {
+    if (isRunnerWriteFenceExpired(fence)) {
+      return false;
+    }
+    if (this.runtimeExecutionTasks.has(fence.attemptId)) {
+      return true;
+    }
+    const startedAtMs = Date.parse(fence.startedAt);
+    if (!Number.isFinite(startedAtMs)) {
+      return false;
+    }
+    return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -1759,7 +1819,7 @@ function mapRunnerProcessingRetryReason(
     RunnerContainerEnsureProcessingResult,
     { kind: "retry-scheduled" }
   >["reason"],
-): HostedRuntimeProcessingRetryReason {
+): RuntimeProcessingRetryReason {
   switch (reason) {
     case "active-child-rejected":
       return "active_child_rejected";

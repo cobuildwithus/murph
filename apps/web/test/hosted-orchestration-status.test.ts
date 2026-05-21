@@ -89,6 +89,7 @@ describe("hosted orchestration status route", () => {
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
       browserVaultRefreshRequested: false,
       deviceSyncRecoveryRequested: true,
+      decisionSource: "status",
       ignoredWorkspaceWakeKey: "8:2026-05-21T12:05:00.000Z:assistant_due",
       lagRecoveryObserved: true,
       manualRunRequested: true,
@@ -101,12 +102,14 @@ describe("hosted orchestration status route", () => {
     expect(body).toEqual({
       cloudflare: {
         runnerStatus: buildRunnerStatus(),
+        unavailableReason: null,
       },
       demand: {
         current: buildDemand(),
       },
       temporal: {
         status: buildWorkflowStatusProjection(),
+        unavailableReason: null,
         workflowId: "hosted-user-runtime:member_status_1",
       },
       userId: MEMBER_ID,
@@ -132,9 +135,11 @@ describe("hosted orchestration status route", () => {
     expect(body).toMatchObject({
       cloudflare: {
         runnerStatus: null,
+        unavailableReason: "not_configured",
       },
       temporal: {
         status: null,
+        unavailableReason: "not_configured",
         workflowId: "hosted-user-runtime:member_status_1",
       },
       userId: MEMBER_ID,
@@ -142,6 +147,7 @@ describe("hosted orchestration status route", () => {
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
       browserVaultRefreshRequested: false,
       deviceSyncRecoveryRequested: false,
+      decisionSource: "status",
       ignoredWorkspaceWakeKey: null,
       lagRecoveryObserved: false,
       manualRunRequested: false,
@@ -167,9 +173,11 @@ describe("hosted orchestration status route", () => {
     expect(body).toMatchObject({
       cloudflare: {
         runnerStatus: null,
+        unavailableReason: "request_failed",
       },
       temporal: {
         status: null,
+        unavailableReason: "query_failed",
       },
     });
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith(expect.objectContaining({
@@ -177,6 +185,102 @@ describe("hosted orchestration status route", () => {
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     }));
+  });
+
+  it("classifies workflow not found separately from query failures", async () => {
+    const error = new Error("workflow not found");
+    error.name = "WorkflowNotFoundError";
+    mocks.queryWorkflowStatus.mockRejectedValue(error);
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.temporal).toMatchObject({
+      status: null,
+      unavailableReason: "not_found",
+      workflowId: "hosted-user-runtime:member_status_1",
+    });
+  });
+
+  it("classifies configured Temporal client creation failures as query failures", async () => {
+    mocks.readHostedRuntimeTemporalSignalClientIfConfigured.mockRejectedValue(
+      new Error("Temporal connection failed"),
+    );
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.temporal).toMatchObject({
+      status: null,
+      unavailableReason: "query_failed",
+      workflowId: "hosted-user-runtime:member_status_1",
+    });
+  });
+
+  it("keeps old workflow status query shapes visible during deploy skew", async () => {
+    const oldStatus: Record<string, unknown> = { ...buildWorkflowStatus() };
+    delete oldStatus.currentWaitReason;
+    delete oldStatus.currentWaitUntil;
+    delete oldStatus.lastOrchestrationAttemptId;
+    delete oldStatus.lastRuntimeAttemptId;
+    delete oldStatus.lastRuntimeStatus;
+    delete oldStatus.legacyRuntimeFailedWithoutNextWakeCount;
+    delete oldStatus.sameRuntimeWakeAcceptedCount;
+    mocks.queryWorkflowStatus.mockResolvedValue(oldStatus);
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.temporal.unavailableReason).toBeNull();
+    expect(body.temporal.status).toMatchObject({
+      currentWaitReason: null,
+      currentWaitUntil: null,
+      lastOrchestrationAttemptId: null,
+      lastRuntimeAttemptId: null,
+      lastRuntimeStatus: null,
+      legacyRuntimeFailedWithoutNextWakeCount: 0,
+      sameRuntimeWakeAcceptedCount: 0,
+    });
+  });
+
+  it("reports invalid status payloads without collapsing them into absent state", async () => {
+    mocks.queryWorkflowStatus.mockResolvedValue({
+      ...buildWorkflowStatus(),
+      signalVersion: "invalid",
+    });
+    mocks.getRunnerStatus.mockRejectedValue(
+      new TypeError("Hosted runner status response userId must be a non-empty string."),
+    );
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      cloudflare: {
+        runnerStatus: null,
+        unavailableReason: "status_invalid",
+      },
+      temporal: {
+        status: null,
+        unavailableReason: "status_invalid",
+      },
+    });
   });
 
   it("treats workflow status for another user as unavailable", async () => {
@@ -194,11 +298,13 @@ describe("hosted orchestration status route", () => {
     expect(response.status).toBe(200);
     expect(body.temporal).toEqual({
       status: null,
+      unavailableReason: "user_mismatch",
       workflowId: "hosted-user-runtime:member_status_1",
     });
     expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith({
       browserVaultRefreshRequested: false,
       deviceSyncRecoveryRequested: false,
+      decisionSource: "status",
       ignoredWorkspaceWakeKey: null,
       lagRecoveryObserved: false,
       manualRunRequested: false,
@@ -311,10 +417,10 @@ function buildWorkflowStatus() {
     },
     mailboxSignalCount: 2,
     manualRunRequested: true,
-    runtimeFailedWithoutNextWakeCount: 1,
+    legacyRuntimeFailedWithoutNextWakeCount: 1,
     runtimeResultWakeAt: "2026-05-21T12:01:00.000Z",
     runtimeResultWakeReason: "runtime.failed",
-    sameRuntimeWakeSentCount: 0,
+    sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 4,
     userId: MEMBER_ID,
   };

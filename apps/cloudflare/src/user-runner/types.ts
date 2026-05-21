@@ -34,7 +34,7 @@ export interface DurableObjectStorageLike {
 
 export interface DurableObjectStateLike {
   storage: DurableObjectStorageLike;
-  waitUntil?(promise: Promise<unknown>): void;
+  waitUntil(promise: Promise<unknown>): void;
 }
 
 export type RunnerWriteFenceKind = "runtime";

@@ -109,3 +109,7 @@ Updated: 2026-05-21
   but failed Cloudflare app verify on a stale helper test that still expected the
   legacy ensure-execution response. The same run showed CLI coverage remained
   the package tail at 148s, so the CLI-active fanout default is back to 4 after splitting the long CLI smoke bucket.
+- The next full retry reached app verification at 149s and then failed because
+  `cli-incur-smoke` timed out on a schema-only projection-status assertion under
+  package coverage contention. That assertion now uses the in-process schema
+  helper, and the local app-verification delay is 45s for another full proof.

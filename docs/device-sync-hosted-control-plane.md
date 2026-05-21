@@ -55,7 +55,7 @@ It does not own canonical health-data import, token authority, or canonical host
 
 `apps/cloudflare` is responsible for:
 
-- hosted runner nudge handling, per-user Durable Object coordination, and bounded hosted workspace invocation drive
+- signed Temporal `ensure-processing` handling, per-user Durable Object coordination, and bounded hosted workspace invocation drive
 - invoking signed internal `apps/web` callbacks when a hosted job needs current device-sync runtime authority
 - consuming current runtime snapshots during a hosted job and sending narrow runtime updates back to web
 
@@ -227,9 +227,9 @@ This keeps control-plane truth in web while still allowing hosted execution to c
 
 Provider webhook traces remain exact and per delivery. Accepted webhook traces write sparse audit signals and upsert `device_sync_dirty_connection`. The dirty row increments `dirty_revision` for every accepted webhook and widens compact resource/window metadata. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
-When a connection transitions from clean to dirty, webhook ingress sends a best-effort user-level runner nudge. That nudge contains no work payload; it only tells Cloudflare that the user may have pending durable work. Additional webhooks while already dirty update the aggregate without another ingress nudge. If a post-commit nudge is missed, the dirty row remains pending and the device-sync dirty sweeper can nudge the runner later.
+When a connection transitions from clean to dirty, webhook ingress commits the dirty state and signals Temporal with a pointer to durable demand. Additional webhooks while already dirty update the aggregate without another ingress signal. If a post-commit Temporal signal is missed, the dirty row remains pending and the device-sync dirty sweeper can signal Temporal again later. Webhook and app paths do not send a user-level runner nudge directly to Cloudflare.
 
-During the first dual-deploy rollout, web also writes one temporary legacy `device-sync.wake` mailbox item on the same clean-to-dirty transition. Its event ID is revision-based, so it is bounded by dirty transitions rather than webhook count, and workflow start is best-effort after durable acceptance. This adapter lets an older Cloudflare deploy import a coarse device-sync command until both deploys understand dirty-state pulling. It should be removed after the hosted runner drains `device_sync_dirty_connection` directly in production.
+Temporal is the only normal wake orchestrator. When demand exists, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, watchdog, and cleanup. Legacy `ensure-execution`/`runtime_completed` behavior is compatibility only, not the steady-state device-sync freshness path.
 
 For accepted webhooks, provider trace completion means durable audit and dirty acceptance committed. Internal wake delivery is not allowed to force provider retry after that transaction commits. Existing connection-established and disconnect wakes remain immediate lifecycle commands because they are explicit lifecycle commands, not high-cardinality freshness hints.
 

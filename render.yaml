@@ -4,7 +4,7 @@ services:
     runtime: node
     region: virginia
     plan: starter
-    autoDeployTrigger: "checksPass"
+    autoDeployTrigger: "off"
     maxShutdownDelaySeconds: 300
     buildCommand: "pnpm install --frozen-lockfile && pnpm --dir packages/hosted-orchestrator-temporal build"
     startCommand: "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod"

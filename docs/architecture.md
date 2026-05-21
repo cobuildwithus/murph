@@ -89,12 +89,12 @@ repo/
 - `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
 - `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, projection/snapshot helpers, opaque ids, and event-log utilities.
 - `packages/gateway-local` owns the workspace-private local vault-backed gateway adapter and rebuildable `.runtime/projections/gateway.sqlite` store.
-- `packages/cloudflare-hosted-control` owns private Cloudflare runner nudge/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
+- `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
 - `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
 - `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
 - `packages/openclaw-plugin` exposes the published OpenClaw-compatible skill bundle that teaches OpenClaw to call the existing Murph CLI rather than running a second assistant runtime.
 - `apps/web` owns the hosted Next.js control plane, hosted Postgres product/control facts, encrypted mailbox rows, hosted workspace checkpoint metadata, usage ledger, onboarding, billing, consent, and device-sync authority.
-- `apps/cloudflare` owns the hosted execution plane: authenticated runner nudge/status/browser-vault requests, Durable Object coordination, encrypted runtime blobs, and the native runner-container path over `packages/assistant-runtime`.
+- `apps/cloudflare` owns the hosted execution plane: signed Temporal `ensure-processing` requests, status/browser-vault control, Durable Object coordination, encrypted runtime blobs, and the native runner-container path over `packages/assistant-runtime`.
 
 ## Storage Model
 
@@ -177,8 +177,8 @@ to Codex.
   device-sync authority, hosted AI usage reconciliation, external ingress
   ordering, hosted mailbox rows, hosted workspace checkpoints, runtime logs,
   and runtime status.
-- `apps/cloudflare` owns execution coordination only: authenticated nudge/status
-  requests, per-user lease and stale-result fencing, encrypted hosted workspace
+- `apps/cloudflare` owns execution coordination only: signed Temporal
+  `ensure-processing` requests, status control, per-user lease and stale-result fencing, encrypted hosted workspace
   snapshots, encrypted artifact blobs, encrypted runner-secret blobs, and other
   opaque runtime blobs needed to execute one hosted runtime pass safely. Durable
   Objects keep only runner-local lease, alarm, and bundle/addressing
@@ -205,6 +205,11 @@ to Codex.
 - Narrow Cloudflare-to-web signed callbacks remain only where the execution
   runtime still needs them, such as execution-time device-sync runtime
   snapshot/apply, device connect-link starts, and direct hosted usage recording.
+- Normal webhook and app paths commit durable demand in web-owned storage and
+  signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
+  responds with `runtime_processing_accepted` or `retry_later` and owns runner
+  start, wake, watchdog, and cleanup. Legacy `ensure-execution` and
+  `runtime_completed` are compatibility-only surfaces.
 
 ## Explicit Non-Goals
 

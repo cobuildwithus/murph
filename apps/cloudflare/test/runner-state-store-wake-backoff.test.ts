@@ -244,6 +244,7 @@ function createDurableObjectState(db: DatabaseSync): DurableObjectStateLike {
       setAlarm: async () => {},
       sql: new SqliteDurableObjectSqlStorage(db),
     },
+    waitUntil() {},
   };
 }
 

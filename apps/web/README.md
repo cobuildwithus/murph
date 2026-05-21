@@ -581,11 +581,11 @@ The onboarding lane is intentionally thin:
   Pulse Trial Checkout completion can activate Pulse in `trial` phase.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
-- Cloudflare-bound execution from onboarding and exact message ingress appends
+- Temporal-bound execution from onboarding and exact message ingress appends
   canonical hosted mailbox input first. Device-sync webhook freshness records
   dirty state first, appends opaque `device-sync.wake` mailbox pointers for
   clean-to-dirty transitions and dirty-sweeper recovery, and keeps the dirty row
-  as the source of truth until the runner acks it.
+  as the source of truth until the runtime checkpoints it.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

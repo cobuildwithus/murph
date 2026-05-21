@@ -200,8 +200,11 @@ Only Temporal decides when Cloudflare should process. The short-lived
 active by starting a runner, replacing an expired write fence, waking a ready
 child, or recording a pending wake while the child is still starting. The
 command returns `retry_later` instead of pretending success when Cloudflare
-cannot confirm start or wake acceptance. The Durable Object keeps lease,
-in-flight invocation, alarm, and short-lived
+cannot confirm start or wake acceptance. Accepted background invocations are
+registered with the Durable Object lifetime, cold-start and pending-child
+acceptance use short rechecks, and a confirmed non-wakeable child is replaced
+after the startup grace window instead of waiting for the full write-fence
+timeout. The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
 recovery truth. When a write-fenced invocation exists, the write fence is commit

@@ -12,6 +12,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  observeHostedTemporalActivity,
   readHostedOrchestratorTemporalCloudflareEnvironment,
   requestHostedOrchestratorJson,
 } from "./http-client.js";
@@ -36,18 +37,25 @@ export async function ensureCloudflareExecution(
     reason: parsedRequest.reason,
   } satisfies HostedRuntimeEnsureExecutionRequest);
 
-  return requestHostedOrchestratorJson(
-    cloudflareEnvironment.cloudflareHostedControlBaseUrl,
-    {
-      body: JSON.stringify(cloudflareRequest),
-      boundUserId: parsedRequest.userId,
-      label: "runtime ensure execution",
-      method: "POST",
-      parse: parseHostedRuntimeEnsureExecutionResponse,
-      path: buildCloudflareRuntimeEnsureExecutionPath(parsedRequest.userId),
-      signing: cloudflareEnvironment.cloudflareHostedControlSigning,
-      timeoutMs: cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
-    },
+  return observeHostedTemporalActivity({
+    activity: "ensureCloudflareExecution",
+    orchestrationAttemptId: parsedRequest.orchestrationAttemptId,
+    reason: parsedRequest.reason,
+    userId: parsedRequest.userId,
+  }, async () =>
+    requestHostedOrchestratorJson(
+      cloudflareEnvironment.cloudflareHostedControlBaseUrl,
+      {
+        body: JSON.stringify(cloudflareRequest),
+        boundUserId: parsedRequest.userId,
+        label: "runtime ensure execution",
+        method: "POST",
+        parse: parseHostedRuntimeEnsureExecutionResponse,
+        path: buildCloudflareRuntimeEnsureExecutionPath(parsedRequest.userId),
+        signing: cloudflareEnvironment.cloudflareHostedControlSigning,
+        timeoutMs: cloudflareEnvironment.ensureCloudflareExecutionHttpTimeoutMs,
+      },
+    )
   );
 }
 

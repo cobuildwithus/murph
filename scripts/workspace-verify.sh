@@ -149,7 +149,7 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
-readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 50)"
+readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 45)"
 readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")"
 # Package coverage and app verification share generated setup. Keep the legacy
 # Cloudflare-only overlap as an explicit escape hatch when full app overlap is

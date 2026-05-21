@@ -10,9 +10,11 @@ import {
   type HostedRuntimeDemandKind,
   type HostedRuntimeEnsureExecutionResponseKind,
   type HostedRuntimeEnsureProcessingResponseKind,
+  type HostedRuntimeLastRuntimeStatus,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  HOSTED_WORKSPACE_INVOCATION_STATUSES,
   isHostedMailboxLane,
   type HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -33,16 +35,32 @@ import {
 export interface HostedOrchestrationUserStatus {
   cloudflare: {
     runnerStatus: HostedRunnerStatusResponse | null;
+    unavailableReason: HostedCloudflareStatusUnavailableReason;
   };
   demand: {
     current: HostedRuntimeDemand;
   };
   temporal: {
     status: HostedRuntimeWorkflowStatusProjection | null;
+    unavailableReason: HostedTemporalStatusUnavailableReason;
     workflowId: string;
   };
   userId: string;
 }
+
+export type HostedTemporalStatusUnavailableReason =
+  | "not_configured"
+  | "not_found"
+  | "query_failed"
+  | "status_invalid"
+  | "user_mismatch"
+  | null;
+
+export type HostedCloudflareStatusUnavailableReason =
+  | "not_configured"
+  | "request_failed"
+  | "status_invalid"
+  | null;
 
 export type HostedRuntimeWorkflowStatusProjection =
   Omit<HostedRuntimeWorkflowState, "latestMailboxPointer"> & {
@@ -53,7 +71,7 @@ export async function readHostedOrchestrationUserStatus(input: {
   userId: string;
 }): Promise<HostedOrchestrationUserStatus> {
   const workflowId = hostedUserRuntimeWorkflowId(input.userId);
-  const [runtimeWorkflowStatus, runnerStatus] = await Promise.all([
+  const [temporalStatusResult, cloudflareStatusResult] = await Promise.all([
     readHostedRuntimeWorkflowStatusIfAvailable({
       userId: input.userId,
       workflowId,
@@ -62,31 +80,39 @@ export async function readHostedOrchestrationUserStatus(input: {
   ]);
   const demand = await readHostedRuntimeDemand({
     browserVaultRefreshRequested:
-      runtimeWorkflowStatus?.browserVaultRefreshRequested === true,
+      temporalStatusResult.status?.browserVaultRefreshRequested === true,
     deviceSyncRecoveryRequested:
-      runtimeWorkflowStatus?.deviceSyncRecoveryRequested === true,
+      temporalStatusResult.status?.deviceSyncRecoveryRequested === true,
+    decisionSource: "status",
     ignoredWorkspaceWakeKey:
-      runtimeWorkflowStatus?.ignoredWorkspaceWakeKey ?? null,
-    lagRecoveryObserved: runtimeWorkflowStatus?.lagRecoveryObserved === true,
-    manualRunRequested: runtimeWorkflowStatus?.manualRunRequested === true,
-    runtimeResultWakeAt: runtimeWorkflowStatus?.runtimeResultWakeAt ?? null,
+      temporalStatusResult.status?.ignoredWorkspaceWakeKey ?? null,
+    lagRecoveryObserved:
+      temporalStatusResult.status?.lagRecoveryObserved === true,
+    manualRunRequested:
+      temporalStatusResult.status?.manualRunRequested === true,
+    runtimeResultWakeAt:
+      temporalStatusResult.status?.runtimeResultWakeAt ?? null,
     runtimeResultWakeReason:
-      runtimeWorkflowStatus?.runtimeResultWakeReason ?? null,
+      temporalStatusResult.status?.runtimeResultWakeReason ?? null,
     usageGateMode: "read_only",
     userId: input.userId,
   });
 
   return {
     cloudflare: {
-      runnerStatus,
+      runnerStatus: cloudflareStatusResult.runnerStatus,
+      unavailableReason: cloudflareStatusResult.unavailableReason,
     },
     demand: {
       current: demand,
     },
     temporal: {
-      status: runtimeWorkflowStatus
-        ? projectHostedRuntimeWorkflowStatusForEndpoint(runtimeWorkflowStatus)
+      status: temporalStatusResult.status
+        ? projectHostedRuntimeWorkflowStatusForEndpoint(
+          temporalStatusResult.status,
+        )
         : null,
+      unavailableReason: temporalStatusResult.unavailableReason,
       workflowId,
     },
     userId: input.userId,
@@ -110,36 +136,118 @@ function projectHostedRuntimeWorkflowStatusForEndpoint(
 async function readHostedRuntimeWorkflowStatusIfAvailable(input: {
   userId: string;
   workflowId: string;
-}): Promise<HostedRuntimeWorkflowState | null> {
+}): Promise<{
+  status: HostedRuntimeWorkflowState | null;
+  unavailableReason: HostedTemporalStatusUnavailableReason;
+}> {
+  let client:
+    | Awaited<ReturnType<typeof readHostedRuntimeTemporalSignalClientIfConfigured>>
+    | null;
   try {
-    const client = await readHostedRuntimeTemporalSignalClientIfConfigured();
-    const getHandle = client?.workflow.getHandle;
-    if (!getHandle) {
-      return null;
-    }
-
-    const queried = await getHandle.call(client.workflow, input.workflowId)
-      .query(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME);
-    const status = parseHostedRuntimeWorkflowStatusForWeb(queried);
-    if (status.userId !== input.userId) {
-      return null;
-    }
-
-    return status;
+    client = await readHostedRuntimeTemporalSignalClientIfConfigured();
   } catch {
-    return null;
+    return { status: null, unavailableReason: "query_failed" };
   }
+
+  const workflow = client?.workflow;
+  if (!workflow?.getHandle) {
+    return { status: null, unavailableReason: "not_configured" };
+  }
+
+  let queried: unknown;
+  try {
+    queried = await workflow.getHandle(input.workflowId)
+      .query(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME);
+  } catch (error) {
+    return {
+      status: null,
+      unavailableReason: readTemporalWorkflowQueryUnavailableReason(error),
+    };
+  }
+
+  let status: HostedRuntimeWorkflowState;
+  try {
+    status = parseHostedRuntimeWorkflowStatusForWeb(queried);
+  } catch {
+    return { status: null, unavailableReason: "status_invalid" };
+  }
+
+  if (status.userId !== input.userId) {
+    return { status: null, unavailableReason: "user_mismatch" };
+  }
+
+  return { status, unavailableReason: null };
 }
 
 async function readHostedRunnerStatusIfAvailable(
   userId: string,
-): Promise<HostedRunnerStatusResponse | null> {
+): Promise<{
+  runnerStatus: HostedRunnerStatusResponse | null;
+  unavailableReason: HostedCloudflareStatusUnavailableReason;
+}> {
+  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
   try {
-    const client = readHostedExecutionControlClientIfConfigured();
-    return client ? await client.getRunnerStatus(userId) : null;
+    client = readHostedExecutionControlClientIfConfigured();
   } catch {
-    return null;
+    return { runnerStatus: null, unavailableReason: "not_configured" };
   }
+
+  if (!client) {
+    return { runnerStatus: null, unavailableReason: "not_configured" };
+  }
+
+  try {
+    return {
+      runnerStatus: await client.getRunnerStatus(userId),
+      unavailableReason: null,
+    };
+  } catch (error) {
+    return {
+      runnerStatus: null,
+      unavailableReason: readCloudflareRunnerStatusUnavailableReason(error),
+    };
+  }
+}
+
+function readTemporalWorkflowQueryUnavailableReason(
+  error: unknown,
+): HostedTemporalStatusUnavailableReason {
+  return isNotFoundErrorLike(error) ? "not_found" : "query_failed";
+}
+
+function readCloudflareRunnerStatusUnavailableReason(
+  error: unknown,
+): HostedCloudflareStatusUnavailableReason {
+  if (error instanceof SyntaxError) {
+    return "status_invalid";
+  }
+
+  if (
+    error instanceof TypeError
+    && error.message.startsWith("Hosted runner status")
+  ) {
+    return "status_invalid";
+  }
+
+  return "request_failed";
+}
+
+function isNotFoundErrorLike(error: unknown): boolean {
+  const record = typeof error === "object" && error !== null
+    ? error as Record<string, unknown>
+    : {};
+  return hasNotFoundText(error instanceof Error ? error.name : null)
+    || hasNotFoundText(error instanceof Error ? error.message : null)
+    || hasNotFoundText(readErrorRecordText(record.type))
+    || hasNotFoundText(readErrorRecordText(record.code));
+}
+
+function readErrorRecordText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function hasNotFoundText(value: string | null): boolean {
+  return value !== null && /not[\s_-]*found/iu.test(value);
 }
 
 function parseHostedRuntimeWorkflowStatusForWeb(
@@ -151,8 +259,9 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     browserVaultRefreshRequested: requireBoolean(
       record.browserVaultRefreshRequested,
     ),
-    currentWaitReason: readNullableCurrentWaitReason(record.currentWaitReason),
-    currentWaitUntil: readNullableString(record.currentWaitUntil),
+    currentWaitReason:
+      readNullableCurrentWaitReason(record.currentWaitReason ?? null),
+    currentWaitUntil: readNullableString(record.currentWaitUntil ?? null),
     deviceSyncRecoveryRequested: requireBoolean(
       record.deviceSyncRecoveryRequested,
     ),
@@ -169,20 +278,25 @@ function parseHostedRuntimeWorkflowStatusForWeb(
       readNullableString(record.lastInvalidSignalErrorCode),
     lastMailboxLagLaneCount: requireSafeInteger(record.lastMailboxLagLaneCount),
     lastOrchestrationAttemptId:
-      readNullableString(record.lastOrchestrationAttemptId),
-    lastRuntimeAttemptId: readNullableString(record.lastRuntimeAttemptId),
-    lastRuntimeStatus: readNullableString(record.lastRuntimeStatus),
+      readNullableString(record.lastOrchestrationAttemptId ?? null),
+    lastRuntimeAttemptId: readNullableString(record.lastRuntimeAttemptId ?? null),
+    lastRuntimeStatus: readNullableLastRuntimeStatus(
+      record.lastRuntimeStatus ?? null,
+    ),
     latestMailboxPointer:
       readNullableMailboxPointer(record.latestMailboxPointer),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
     manualRunRequested: requireBoolean(record.manualRunRequested),
-    runtimeFailedWithoutNextWakeCount: requireSafeInteger(
-      record.runtimeFailedWithoutNextWakeCount,
+    legacyRuntimeFailedWithoutNextWakeCount: readOptionalSafeInteger(
+      record.legacyRuntimeFailedWithoutNextWakeCount
+        ?? record.runtimeFailedWithoutNextWakeCount,
+      0,
     ),
     runtimeResultWakeAt: readNullableString(record.runtimeResultWakeAt),
     runtimeResultWakeReason: readNullableString(record.runtimeResultWakeReason),
-    sameRuntimeWakeSentCount: requireSafeInteger(
-      record.sameRuntimeWakeSentCount,
+    sameRuntimeWakeAcceptedCount: readOptionalSafeInteger(
+      record.sameRuntimeWakeAcceptedCount ?? record.sameRuntimeWakeSentCount,
+      0,
     ),
     signalVersion: requireSafeInteger(record.signalVersion),
     userId: requireString(record.userId),
@@ -273,6 +387,29 @@ function readNullableExecutionKind(
   throw new TypeError("Hosted runtime workflow execution kind is invalid.");
 }
 
+function readNullableLastRuntimeStatus(
+  value: unknown,
+): HostedRuntimeLastRuntimeStatus {
+  if (value === null) {
+    return null;
+  }
+
+  const status = requireString(value);
+  if (status === "retry_later") {
+    return status;
+  }
+
+  if (
+    HOSTED_WORKSPACE_INVOCATION_STATUSES.includes(
+      status as Exclude<HostedRuntimeLastRuntimeStatus, "retry_later" | null>,
+    )
+  ) {
+    return status as HostedRuntimeLastRuntimeStatus;
+  }
+
+  throw new TypeError("Hosted runtime workflow runtime status is invalid.");
+}
+
 function readNullableString(value: unknown): string | null {
   if (value === null) {
     return null;
@@ -287,6 +424,10 @@ function requireBoolean(value: unknown): boolean {
   }
 
   return value;
+}
+
+function readOptionalSafeInteger(value: unknown, fallback: number): number {
+  return value === undefined ? fallback : requireSafeInteger(value);
 }
 
 function requireSafeInteger(value: unknown): number {

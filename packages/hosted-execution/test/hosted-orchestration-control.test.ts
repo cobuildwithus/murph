@@ -327,11 +327,18 @@ describe("hosted orchestration control contracts", () => {
 
     expect(parseHostedRuntimeEnsureProcessingResponse({
       kind: "retry_later",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    })).toEqual({
+      kind: "retry_later",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    });
+
+    expect(parseHostedRuntimeEnsureProcessingResponse({
+      kind: "retry_later",
       reason: "container_rpc_timeout",
       retryAt: "2026-05-20T12:04:00.000Z",
     })).toEqual({
       kind: "retry_later",
-      reason: "container_rpc_timeout",
       retryAt: "2026-05-20T12:04:00.000Z",
     });
   });
@@ -403,16 +410,33 @@ describe("hosted orchestration control contracts", () => {
       action: "woken",
       kind: "runtime_processing_accepted",
       mailboxLag: [],
-      recommendedRecheckAt: null,
+      recommendedRecheckAt: "2026-05-20T12:03:00.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     })).toThrow("Hosted runtime processing-accepted response must not include mailboxLag.");
+
+    expect(() => parseHostedRuntimeEnsureProcessingResponse({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: null,
+      runtimeAttemptId: "runtime_attempt_test",
+    })).toThrow(
+      "Hosted runtime processing-accepted response recommendedRecheckAt must be a string.",
+    );
+
+    expect(() => parseHostedRuntimeEnsureProcessingResponse({
+      kind: "retry_later",
+      mailboxLag: [],
+      retryAt: "2026-05-20T12:04:00.000Z",
+    })).toThrow(
+      "Hosted runtime processing retry-later response must not include mailboxLag.",
+    );
 
     expect(() => parseHostedRuntimeEnsureProcessingResponse({
       kind: "retry_later",
       reason: "container rpc timeout",
       retryAt: "2026-05-20T12:04:00.000Z",
     })).toThrow(
-      "Hosted runtime processing retry-later response reason is not supported.",
+      "Hosted runtime processing retry-later legacy response reason is not supported.",
     );
   });
 });
