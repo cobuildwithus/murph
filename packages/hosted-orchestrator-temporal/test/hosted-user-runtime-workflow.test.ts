@@ -165,6 +165,33 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(2);
   });
 
+  it("re-reads demand immediately when a signal arrives before runtime_wake_sent returns", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(() => {
+      machine?.applySignal(browserVaultSignal());
+      return runtimeWakeSent(isoAfter(45_000));
+    });
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(runtimeCompleted());
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-wake"));
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([]);
+    expect(runtime.demandRequests[1]).toMatchObject({
+      browserVaultRefreshRequested: true,
+      manualRunRequested: true,
+    });
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
   it("falls back to the configured active-wake delay when no recommended recheck is returned", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
