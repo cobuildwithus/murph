@@ -70,23 +70,45 @@ test('vault context injects vault for fetch transport without command-level vaul
   cleanupPaths.push(parentRoot)
   const cli = createVaultCli()
 
-  const response = await cli.fetch(
+  const queryResponse = await cli.fetch(
     new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`),
   )
-  assert.equal(response.status, 200)
+  assert.equal(queryResponse.status, 200)
+  assert.equal(await readFetchDataVault(queryResponse), vaultRoot)
 
-  const envelope = await response.json() as unknown
-  assert.ok(isRecord(envelope))
-  assert.equal(envelope.ok, true)
+  const headerResponse = await cli.fetch(
+    new Request('http://localhost/measurement/list', {
+      headers: {
+        'x-murph-vault': vaultRoot,
+      },
+    }),
+  )
+  assert.equal(headerResponse.status, 200)
+  assert.equal(await readFetchDataVault(headerResponse), vaultRoot)
 
-  const data = getRecord(envelope, 'data')
-  assert.equal(data.vault, vaultRoot)
+  const duplicateResponse = await cli.fetch(
+    new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`, {
+      headers: {
+        'x-murph-vault': vaultRoot,
+      },
+    }),
+  )
+  assert.equal(duplicateResponse.status, 400)
+  assert.equal(await readFetchErrorCode(duplicateResponse), 'invalid_option')
+
+  const emptyResponse = await cli.fetch(
+    new Request('http://localhost/measurement/list?vault='),
+  )
+  assert.equal(emptyResponse.status, 400)
+  assert.equal(await readFetchErrorCode(emptyResponse), 'invalid_option')
 })
 
 test('vault context keeps overlapping serve invocations isolated', async () => {
   const cli = Cli.create('test-cli')
   const firstMiddlewarePaused = createDeferred()
   const firstMiddlewareGate = createDeferred()
+  const secondMiddlewarePaused = createDeferred()
+  const secondMiddlewareGate = createDeferred()
   let middlewareEntrances = 0
 
   cli.use(async (_context, next) => {
@@ -94,6 +116,9 @@ test('vault context keeps overlapping serve invocations isolated', async () => {
     if (middlewareEntrances === 1) {
       firstMiddlewarePaused.resolve()
       await firstMiddlewareGate.promise
+    } else if (middlewareEntrances === 2) {
+      secondMiddlewarePaused.resolve()
+      await secondMiddlewareGate.promise
     }
     await next()
   })
@@ -123,20 +148,118 @@ test('vault context keeps overlapping serve invocations isolated', async () => {
   ])
   await firstMiddlewarePaused.promise
 
-  const second = await captureJson(cli, [
+  const second = captureJson(cli, [
     'read-vault',
     '--vault',
     '/vaults/second',
     '--format',
     'json',
   ])
-  assert.ok(isRecord(second))
-  assert.equal(second.vault, '/vaults/second')
+  await secondMiddlewarePaused.promise
 
   firstMiddlewareGate.resolve()
   const firstResult = await first
   assert.ok(isRecord(firstResult))
   assert.equal(firstResult.vault, '/vaults/first')
+
+  secondMiddlewareGate.resolve()
+  const secondResult = await second
+  assert.ok(isRecord(secondResult))
+  assert.equal(secondResult.vault, '/vaults/second')
+})
+
+test('vault context installation is idempotent and preserves active invocation context', async () => {
+  const { parentRoot, vaultRoot } = await createInitializedVault('murph-vault-idempotent-')
+  cleanupPaths.push(parentRoot)
+  const cli = createVaultCli()
+
+  installVaultCliVaultContext(cli, createVaultCliVaultContext())
+
+  const result = await runInProcessJsonCli(cli, [
+    'measurement',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+
+  const response = await cli.fetch(
+    new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`),
+  )
+  assert.equal(response.status, 200)
+  assert.equal(await readFetchDataVault(response), vaultRoot)
+})
+
+test('nested serve and fetch calls inherit the active vault invocation context', async () => {
+  const cli = Cli.create('test-cli')
+
+  cli.command('read-vault', {
+    options: z.object({
+      vault: z.string().min(1),
+    }),
+    output: z.object({
+      vault: z.string(),
+    }),
+    run(context) {
+      return {
+        vault: context.options.vault,
+      }
+    },
+  })
+
+  cli.command('nested-serve', {
+    options: z.object({
+      vault: z.string().min(1),
+    }),
+    output: z.object({
+      vault: z.string(),
+    }),
+    async run() {
+      const result = await captureJson(cli, ['read-vault', '--format', 'json'])
+      return {
+        vault: getString(result, 'vault'),
+      }
+    },
+  })
+
+  cli.command('nested-fetch', {
+    options: z.object({
+      vault: z.string().min(1),
+    }),
+    output: z.object({
+      vault: z.string(),
+    }),
+    async run() {
+      const response = await cli.fetch(new Request('http://localhost/read-vault'))
+      assert.equal(response.status, 200)
+      return {
+        vault: await readFetchDataVault(response),
+      }
+    },
+  })
+
+  installVaultCliVaultContext(cli, createVaultCliVaultContext())
+
+  const serveResult = await captureJson(cli, [
+    'nested-serve',
+    '--vault',
+    '/vaults/outer',
+    '--format',
+    'json',
+  ])
+  assert.ok(isRecord(serveResult))
+  assert.equal(serveResult.vault, '/vaults/outer')
+
+  const fetchResult = await captureJson(cli, [
+    'nested-fetch',
+    '--vault',
+    '/vaults/outer',
+    '--format',
+    'json',
+  ])
+  assert.ok(isRecord(fetchResult))
+  assert.equal(fetchResult.vault, '/vaults/outer')
 })
 
 test('vault override parsing is a single boundary option, not a command option', () => {
@@ -289,6 +412,27 @@ function createDeferred(): {
       resolvePromise()
     },
   }
+}
+
+async function readFetchDataVault(response: Response): Promise<string> {
+  const envelope = await response.json() as unknown
+  const data = getRecord(envelope, 'data')
+  return getString(data, 'vault')
+}
+
+async function readFetchErrorCode(response: Response): Promise<string> {
+  const envelope = await response.json() as unknown
+  const error = getRecord(envelope, 'error')
+  return getString(error, 'code')
+}
+
+function getString(source: unknown, key: string): string {
+  assert.ok(isRecord(source))
+  const value = source[key]
+  if (typeof value !== 'string') {
+    assert.fail(`Expected ${key} to be a string.`)
+  }
+  return value
 }
 
 function getRecord(source: unknown, key: string): Record<string, unknown> {
