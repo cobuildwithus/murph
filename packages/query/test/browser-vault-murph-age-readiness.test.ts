@@ -33,6 +33,7 @@ test("reports lab9/BP/body Murph Age research readiness without leaking values o
   assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
     "lab9-bp-body",
     "lab5-bp-bmi",
+    "l1-glycemia",
     "r399-nhis-proxy-anchor",
     "wearable-context",
     "function-context",

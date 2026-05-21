@@ -3060,6 +3060,7 @@ test("keeps the wearable scoring strategy explicit while product contribution st
   );
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
+  assert.equal(strategy.residualLayerContract.anchorCardIds.includes("l1_tiny_glycemia_10y_acm_research"), true);
   assert.deepEqual(strategy.residualLayerContract.featureSetContract.activityVolumeCandidateMetricKeys, [
     "steps",
     "activity-minutes",
@@ -3309,6 +3310,7 @@ test("exposes wearable shadow increment policies without score authorization", (
     assert.equal(policy.scoreContributionAuthorized, false);
     assert.equal(policy.compatibleAnchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
     assert.equal(policy.compatibleAnchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
+    assert.equal(policy.compatibleAnchorCardIds.includes("l1_tiny_glycemia_10y_acm_research"), true);
     assert.equal(policy.allowedMetricKeys.includes("wearable-coverage-index"), true);
     assert.equal(policy.requiredQualityMetricKeys.includes("wearable-coverage-index"), true);
     assert.ok(policy.signalMetricKeys.length >= 1);
@@ -3390,7 +3392,11 @@ test("validates aggregate wearable shadow result cards as blocked research evide
   const validation = validateMurphAgeWearableShadowIncrementResultCard(resultCard);
   assert.equal(validation.status, "valid");
   assert.deepEqual(validation.warnings, []);
-  for (const anchorCardId of ["lab9_bp_body_10y_acm_research", "lab5_bp_bmi_transport_research"]) {
+  for (const anchorCardId of [
+    "lab9_bp_body_10y_acm_research",
+    "lab5_bp_bmi_transport_research",
+    "l1_tiny_glycemia_10y_acm_research",
+  ]) {
     const anchorValidation = validateMurphAgeWearableShadowIncrementResultCard({
       ...resultCard,
       anchorCardId,

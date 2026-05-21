@@ -1450,6 +1450,90 @@ test('age preview scores submitted labs and wearable context without a vault', a
   }
 })
 
+test('age calculate-bundle supports L1 glycemia plus wearable context as a research preview', async () => {
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-l1-model-cards-'))
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-l1-preview-'))
+  const payloadPath = path.join(payloadRoot, 'payload.json')
+  try {
+    await writeLocalModelCardArtifact(payloadRoot, 'l1.json', {
+      cardId: 'l1_tiny_glycemia_10y_acm_research',
+      model: fixtureL1GlycemiaResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    }, artifactRoot)
+    await writeFile(payloadPath, JSON.stringify({
+      asOf: '2026-05-10T00:00:00.000Z',
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [
+        { metricKey: 'HbA1c', sourceKind: 'test-result', unit: '%', value: 5.4 },
+        { metricKey: 'steps', sourceKind: 'wearable-summary', unit: 'count', value: 10_000 },
+        { metricKey: 'activity-minutes', sourceKind: 'wearable-summary', unit: 'minutes', value: 62 },
+        { metricKey: 'resting-heart-rate', sourceKind: 'wearable-summary', unit: 'bpm', value: 58 },
+        { metricKey: 'wearable_valid_day_count_28d', sourceKind: 'wearable-summary', unit: 'count', value: 24 },
+        { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.86 },
+      ],
+    }))
+
+    const calculatorBundle = requireData(await runSliceCli<MurphAgeSubmittedCalculatorViewBundle>([
+      'age',
+      'calculate-bundle',
+      '--input',
+      `@${payloadPath}`,
+      '--include-research-preview',
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+
+    assert.equal(
+      murphAgeSubmittedCalculatorViewBundleResultSchema.safeParse(calculatorBundle).success,
+      true,
+    )
+    assert.equal(calculatorBundle.product.view.mode, 'product')
+    assert.equal(calculatorBundle.product.view.status, 'abstain')
+    assert.equal(calculatorBundle.product.view.displayBlockedReason, 'product-not-authorized')
+    assert.equal(calculatorBundle.product.view.ageEstimate, null)
+    assert.equal(calculatorBundle.product.view.risk.probability, null)
+    assert.ok(calculatorBundle.researchPreview)
+    assert.equal(calculatorBundle.researchPreview.view.mode, 'research')
+    assert.equal(calculatorBundle.researchPreview.view.status, 'ready')
+    assert.equal(calculatorBundle.researchPreview.view.selectedCardId, 'l1_tiny_glycemia_10y_acm_research')
+    assert.equal(calculatorBundle.researchPreview.view.arbiter.selectedCardRole, 'minimal-glycemia-first-pass')
+    assert.equal(typeof calculatorBundle.researchPreview.view.ageEstimate?.biologicalAgeYears, 'number')
+    assert.equal(typeof calculatorBundle.researchPreview.view.risk.probability, 'number')
+    assert.equal(calculatorBundle.researchPreview.view.wearable.scoreBearing, false)
+    assert.equal(calculatorBundle.researchPreview.view.wearable.readyFeatureKeys.includes('activity-volume'), true)
+    assert.equal(
+      calculatorBundle.researchPreview.view.featureContributions.some((feature) => feature.metricKey === 'hba1c'),
+      true,
+    )
+    assert.equal(
+      calculatorBundle.researchPreview.view.featureContributions.some((feature) => feature.metricKey === 'steps'),
+      false,
+    )
+
+    const encoded = JSON.stringify(calculatorBundle)
+    for (const forbidden of [
+      artifactRoot,
+      payloadPath,
+      'fixture-l1-glycemia-research-model',
+      'metric-point:',
+      '"value"',
+      '"unit"',
+      '"label"',
+      '"message"',
+      'selectedPointIds',
+      'coefficient',
+      'contributionLogit',
+      'prediction',
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(artifactRoot, { force: true, recursive: true })
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
 test('age model-cards reports missing local artifacts as policy blockers', async () => {
   const vaultRoot = await createProjectionVault()
   try {
@@ -3220,6 +3304,18 @@ function fixtureLab5ResearchModel(): MurphAgeRiskModel {
       labFeature('bmi', 'BMI', 'bmi', 0.08, 25, 4, 'kg/m^2'),
     ],
     modelId: 'fixture-lab5-research-model',
+  }
+}
+
+function fixtureL1GlycemiaResearchModel(): MurphAgeRiskModel {
+  return {
+    ...fixtureLab9ResearchModel(),
+    features: [
+      { coefficient: 0.055, key: 'age', kind: 'chronological-age', label: 'Age' },
+      { coefficient: 0.12, key: 'male', kind: 'sex', label: 'Male', sex: 'male' },
+      labFeature('hba1c', 'HbA1c', 'hba1c', 0.12, 5.4, 0.5, 'percent'),
+    ],
+    modelId: 'fixture-l1-glycemia-research-model',
   }
 }
 

@@ -2526,6 +2526,7 @@ const MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_CARD_DEFINITIONS = [
 const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
   "lab9_bp_body_10y_acm_research",
   "lab5_bp_bmi_transport_research",
+  "l1_tiny_glycemia_10y_acm_research",
 ] satisfies readonly MurphAgeScoreBearingCardId[];
 
 const MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS = [
@@ -3570,6 +3571,7 @@ export function summarizeMurphAgeWearableResidualLayerContract(): MurphAgeWearab
     anchorCardIds: [
       "lab9_bp_body_10y_acm_research",
       "lab5_bp_bmi_transport_research",
+      "l1_tiny_glycemia_10y_acm_research",
     ],
     parameterPackContract: summarizeMurphAgeWearableParameterPackContract(),
     combinationScale: "logit-residual",

@@ -590,6 +590,7 @@ function inferWearableShadowAnchorCardId(
   switch (assessment.recommendedCardId) {
     case "lab5_bp_bmi_transport_research":
     case "lab9_bp_body_10y_acm_research":
+    case "l1_tiny_glycemia_10y_acm_research":
       return assessment.recommendedCardId;
     default:
       return null;
