@@ -727,7 +727,7 @@ describe("hosted workspace runtime entrypoint", () => {
       mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
         events.push("sidecar.ready");
         assert.equal(input.bestEffort, true);
-        assert.equal(input.rebuild, false);
+        assert.equal(input.rebuild, true);
         assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_entrypoint");
         assert.equal(input.vaultRoot, path.resolve(vaultRoot));
         return await ensureHostedInboxSidecarReadyImpl(input);

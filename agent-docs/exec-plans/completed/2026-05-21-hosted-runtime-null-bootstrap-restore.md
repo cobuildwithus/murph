@@ -1,6 +1,6 @@
 # Hosted runtime null-bootstrap restore hardening
 
-Status: active
+Status: completed
 Created: 2026-05-21
 Updated: 2026-05-21
 
@@ -65,3 +65,4 @@ Updated: 2026-05-21
 - Expected outcomes:
 - All pass, or any failure is proven unrelated and paired with focused passing
   proof for this scope.
+Completed: 2026-05-21
