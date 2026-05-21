@@ -13,6 +13,7 @@ import {
   createWorkspaceWakeKey,
   HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
   HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+  HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
   type HostedUserRuntimeWorkflowMachine,
   type HostedUserRuntimeWorkflowRuntime,
 } from "../src/workflows/hosted-user-runtime.js";
@@ -209,6 +210,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
   });
 
   it("backs off after failed runtime completion with no runtime-provided next wake", async () => {
+    const runtimeCompletedFailureRecheckDelayMs = 11_000;
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({
       mailboxLag: [mailboxLag()],
@@ -218,9 +220,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       runtimeStatus: "failed",
     }));
     runtime.demands.push((request) => {
-      expect(request.runtimeResultWakeAt).toBe(isoAfter(
-        HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
-      ));
+      expect(request.runtimeResultWakeAt).toBe(isoAfter(runtimeCompletedFailureRecheckDelayMs));
       expect(request.runtimeResultWakeReason).toBe("runtime.failed");
       return runDemand({
         mailboxLag: [mailboxLag()],
@@ -230,7 +230,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     runtime.executions.push(runtimeCompleted());
 
     const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
+      options: {
+        continueAsNewAfterIterations: 2,
+        runtimeCompletedFailureRecheckDelayMs,
+      },
       userId: "member_test",
     });
     machine.applySignal(mailboxSignal());
@@ -238,7 +241,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([
-      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+      runtimeCompletedFailureRecheckDelayMs,
     ]);
     expect(runtime.executionRequests).toHaveLength(2);
   });
@@ -255,7 +258,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     runtime.demands.push((request) => {
       expect(request.manualRunRequested).toBe(true);
       expect(request.runtimeResultWakeAt).toBe(isoAfter(
-        HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+        HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
       ));
       expect(request.runtimeResultWakeReason).toBe("runtime.failed");
       return runDemand({ source: "manual" });
@@ -275,7 +278,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([
-      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+      HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
     ]);
     expect(runtime.now).toBe(BASE_TIME_MS);
     expect(runtime.executionRequests).toHaveLength(2);
@@ -414,6 +417,39 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       browserVaultRefreshRequested: true,
       manualRunRequested: true,
     });
+  });
+
+  it("does not reapply ignored workspace wake key after a signal arrives during execution", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    const workspace = workspaceProjection({
+      nextWakeAt: isoAfter(-1),
+      nextWakeReason: "assistant_due",
+      version: "workspace-version-1",
+    });
+    runtime.demands.push(runDemand({
+      source: "workspace_wake",
+      workspace,
+    }));
+    runtime.executions.push(() => {
+      machine?.applySignal(manualSignal("manual-during-workspace-wake"));
+      return runtimeCompleted();
+    });
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(runtimeCompleted());
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests[1]).toMatchObject({
+      ignoredWorkspaceWakeKey: null,
+      manualRunRequested: true,
+    });
+    expect(runtime.executionRequests).toHaveLength(2);
   });
 
   it("clears mailbox and explicit wake flags once demand is idle", async () => {

@@ -20,6 +20,7 @@ import {
 const defaultWorkflowOptions = {
   ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
   readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+  runtimeCompletedFailureRecheckDelayMs: 30_000,
 };
 
 describe("hostedUserRuntimeWorkflowId", () => {

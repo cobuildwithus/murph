@@ -18,4 +18,5 @@ export interface HostedUserRuntimeWorkflowOptions {
   continueAsNewAfterIterations?: number;
   ensureCloudflareExecutionStartToCloseTimeoutMs?: number;
   readRuntimeDemandStartToCloseTimeoutMs?: number;
+  runtimeCompletedFailureRecheckDelayMs?: number;
 }

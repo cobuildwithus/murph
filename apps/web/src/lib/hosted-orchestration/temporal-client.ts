@@ -14,6 +14,8 @@ const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
 const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS = 600_000;
 const DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS = 30_000;
+const DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
+const MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 3_600_000;
 
 export interface HostedRuntimeTemporalEnvironment {
   address: string | null;
@@ -29,6 +31,7 @@ export type HostedRuntimeTemporalTls =
 export interface HostedRuntimeTemporalWorkflowOptions {
   ensureCloudflareExecutionStartToCloseTimeoutMs: number;
   readRuntimeDemandStartToCloseTimeoutMs: number;
+  runtimeCompletedFailureRecheckDelayMs: number;
 }
 
 export interface HostedRuntimeTemporalSignalClient {
@@ -93,6 +96,12 @@ export function readHostedRuntimeTemporalWorkflowOptions(
       DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
       MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
       "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS",
+    ),
+    runtimeCompletedFailureRecheckDelayMs: parseBoundedPositiveInteger(
+      readOptionalEnv(source, "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS"),
+      DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+      MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+      "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS",
     ),
   };
 }

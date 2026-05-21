@@ -33,6 +33,7 @@ vi.mock("@temporalio/client", () => ({
 
 import {
   readHostedRuntimeTemporalEnvironment,
+  readHostedRuntimeTemporalWorkflowOptions,
   readHostedRuntimeTemporalSignalClientIfConfigured,
   resetHostedRuntimeTemporalSignalClientForTesting,
 } from "@/src/lib/hosted-orchestration/temporal-client";
@@ -201,6 +202,16 @@ describe("hosted web Temporal signal client", () => {
     expect(() => readHostedRuntimeTemporalEnvironment(buildProcessEnv({
       HOSTED_TEMPORAL_TLS_ENABLED: "sometimes",
     }))).toThrow("HOSTED_TEMPORAL_TLS_ENABLED must be true or false.");
+  });
+
+  it("includes an explicit failed-runtime completion recheck workflow option", () => {
+    expect(readHostedRuntimeTemporalWorkflowOptions(buildProcessEnv({
+      HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
+    }))).toEqual({
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+      readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+      runtimeCompletedFailureRecheckDelayMs: 45_000,
+    });
   });
 });
 
