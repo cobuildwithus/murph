@@ -93,6 +93,47 @@ describe("hosted workspace restore Codex continuity", () => {
         await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),
         "restored from v2\n",
       );
+
+      await writeFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "seq=467\n", "utf8");
+      await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
+        snapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          artifactGetCalls,
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              restoreCalls.push(request);
+              await mkdir(request.durableRoot, { recursive: true });
+              await writeFile(path.join(request.durableRoot, "note.md"), "restored from v2\n", "utf8");
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+
+      assert.equal(restoreCalls.length, 2);
+      await assert.rejects(readFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "utf8"), {
+        code: "ENOENT",
+      });
     } finally {
       await rm(workspaceRoot, {
         force: true,

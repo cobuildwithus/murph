@@ -93,6 +93,27 @@ async function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<voi
   });
 }
 
+function readWorkspaceSnapshotDiagnosticLogs(): Array<{
+  component?: unknown;
+  details?: Record<string, unknown>;
+  message?: unknown;
+  userId?: unknown;
+}> {
+  return mocks.emitHostedExecutionStructuredLog.mock.calls
+    .map(([input]) => input)
+    .filter((input): input is {
+      component?: unknown;
+      details?: Record<string, unknown>;
+      message?: unknown;
+      userId?: unknown;
+    } =>
+      Boolean(input)
+      && typeof input === "object"
+      && !Array.isArray(input)
+      && (input as { component?: unknown }).component === "hosted.runtime.workspace-snapshot"
+    );
+}
+
 function createAssistantUsageRecord(): AssistantUsageRecord {
   return {
     apiKeyEnv: null,
@@ -542,6 +563,337 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       expect(requireFetchRequest(fetchMock.mock.calls[2], "direct R2 workspace snapshot GET").url).toBe(getUrl);
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
+      const workspaceSnapshotLogs = readWorkspaceSnapshotDiagnosticLogs();
+      const completedSteps = workspaceSnapshotLogs
+        .filter((log) => log.message === "Hosted workspace snapshot restore step completed.")
+        .map((log) => log.details?.workspaceSnapshotRestoreStep);
+      expect(completedSteps).toEqual([
+        "size_guard",
+        "data_key_unwrap",
+        "scratch_prepare",
+        "presign_get",
+        "object_fetch",
+        "archive_restore",
+      ]);
+      expect(workspaceSnapshotLogs[0]?.details).toEqual(expect.objectContaining({
+        archiveEncryptedByteSize: encrypted.encryptedByteSize,
+        archiveFileCount: encrypted.fileCount,
+        operation: "workspace_snapshot_restore",
+      }));
+      expect(workspaceSnapshotLogs.every((log) => log.userId === null)).toBe(true);
+      const serializedLogs = JSON.stringify(workspaceSnapshotLogs);
+      expect(serializedLogs).not.toContain(objectKey);
+      expect(serializedLogs).not.toContain(snapshotId);
+      expect(serializedLogs).not.toContain(getUrl);
+      expect(serializedLogs).not.toContain("member_123");
+      expect(serializedLogs).not.toContain("root_key_test");
+      expect(serializedLogs).not.toContain(dataKeyBase64);
+      expect(serializedLogs).not.toContain(sourceRoot);
+      expect(serializedLogs).not.toContain(durableRoot);
+      expect(serializedLogs).not.toContain(scratchRoot);
+      expect(serializedLogs).not.toContain("note.md");
+      expect(serializedLogs).not.toContain("restored through direct r2");
+    } finally {
+      dataKey.fill(0);
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("logs the failing v2 workspace snapshot restore step without object identifiers", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-fail-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const scratchRoot = path.join(tempRoot, "scratch");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 1024,
+    });
+    const getUrl = "https://r2.example.test/bundles/hidden-object?X-Amz-Signature=fixture-get";
+
+    try {
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot restore failure fetch");
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+          return new Response(
+            JSON.stringify({ dataKey: dataKeyBase64 }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              getUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+        if (request.url === getUrl) {
+          return new Response("missing", { status: 404 });
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref,
+        scratchRoot,
+      })).rejects.toThrow("Hosted workspace snapshot encrypted object is unavailable.");
+
+      const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
+        .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");
+      expect(failedLogs).toHaveLength(1);
+      expect(failedLogs[0]).toEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "runtime_error",
+          errorMessagePresent: true,
+          errorName: "Error",
+          operation: "workspace_snapshot_restore",
+          workspaceSnapshotRestoreStep: "object_fetch",
+        }),
+        level: "warn",
+        phase: "runtime.starting",
+        userId: null,
+      }));
+      const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
+      expect(serializedLogs).not.toContain(ref.objectKey);
+      expect(serializedLogs).not.toContain(ref.snapshotId);
+      expect(serializedLogs).not.toContain(getUrl);
+      expect(serializedLogs).not.toContain("hidden-object");
+      expect(serializedLogs).not.toContain("member_123");
+      expect(serializedLogs).not.toContain(dataKeyBase64);
+      expect(serializedLogs).not.toContain(tempRoot);
+      expect(serializedLogs).not.toContain("missing");
+    } finally {
+      dataKey.fill(0);
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("logs v2 workspace snapshot unwrap response failures without snapshot path material", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-unwrap-fail-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const scratchRoot = path.join(tempRoot, "scratch");
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 1024,
+    });
+    const responseDetail =
+      `unwrap failed for ${ref.snapshotId} ${ref.objectKey} root_key_test wrapped_data_key_test https://r2.example.test/bundles/body-presigned`;
+
+    try {
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot unwrap failure fetch");
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+          return new Response(responseDetail, {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 500,
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref,
+        scratchRoot,
+      })).rejects.toThrow("Hosted workspace snapshot data key unwrap failed with HTTP 500.");
+
+      const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
+        .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");
+      expect(failedLogs).toHaveLength(1);
+      expect(failedLogs[0]).toEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "runtime_error",
+          errorMessagePresent: true,
+          errorName: "Error",
+          operation: "workspace_snapshot_restore",
+          workspaceSnapshotRestoreStep: "data_key_unwrap",
+        }),
+        level: "warn",
+        phase: "runtime.starting",
+        userId: null,
+      }));
+
+      const upstreamNonOkLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([input]) => input)
+        .filter((input): input is {
+          details?: Record<string, unknown>;
+          message?: unknown;
+        } =>
+          Boolean(input)
+          && typeof input === "object"
+          && !Array.isArray(input)
+          && (input as { message?: unknown }).message === "Hosted runtime upstream response returned non-OK."
+        );
+      expect(upstreamNonOkLogs).toHaveLength(1);
+      expect(upstreamNonOkLogs[0]?.details).toEqual(expect.objectContaining({
+        description: "Hosted workspace snapshot data key unwrap",
+        method: "POST",
+        path: "/workspace-snapshots/REDACTED/data-key/unwrap",
+        responseBodyBytes: new TextEncoder().encode(responseDetail).byteLength,
+        responseBodyPresent: true,
+        responseOrigin: "http://workspace-snapshots.worker",
+        responseStatus: 500,
+      }));
+
+      const serializedLogs = JSON.stringify([
+        ...readWorkspaceSnapshotDiagnosticLogs(),
+        ...upstreamNonOkLogs,
+      ]);
+      expect(serializedLogs).not.toContain(ref.objectKey);
+      expect(serializedLogs).not.toContain(ref.snapshotId);
+      expect(serializedLogs).not.toContain("body-presigned");
+      expect(serializedLogs).not.toContain("member_123");
+      expect(serializedLogs).not.toContain("root_key_test");
+      expect(serializedLogs).not.toContain("wrapped_data_key_test");
+      expect(serializedLogs).not.toContain(tempRoot);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("logs v2 workspace snapshot direct object transport errors without R2 path or query material", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-transport-fail-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const scratchRoot = path.join(tempRoot, "scratch");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 1024,
+    });
+    const getUrl = `https://r2.example.test/bundles/${ref.objectKey}?X-Amz-Signature=fixture-get&X-Amz-Credential=hidden`;
+
+    try {
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot restore transport failure fetch");
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+          return new Response(
+            JSON.stringify({ dataKey: dataKeyBase64 }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+        if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              getUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+        if (request.url === getUrl) {
+          throw new TypeError(`fetch failed for ${getUrl} with hidden transport detail`);
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref,
+        scratchRoot,
+      })).rejects.toThrow("Hosted workspace snapshot fetch request failed.");
+
+      const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
+        .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");
+      expect(failedLogs).toHaveLength(1);
+      expect(failedLogs[0]).toEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "type_error",
+          errorMessagePresent: true,
+          errorName: "Error",
+          fetchCauseCode: "type_error",
+          fetchCauseKind: "fetch_failed",
+          fetchCauseName: "TypeError",
+          operation: "workspace_snapshot_restore",
+          workspaceSnapshotRestoreStep: "object_fetch",
+        }),
+        level: "warn",
+        phase: "runtime.starting",
+        userId: null,
+      }));
+
+      const directFetchFailureLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([input]) => input)
+        .filter((input): input is {
+          details?: Record<string, unknown>;
+          message?: unknown;
+        } =>
+          Boolean(input)
+          && typeof input === "object"
+          && !Array.isArray(input)
+          && (input as { message?: unknown }).message === "Hosted runtime upstream request failed."
+        );
+      expect(directFetchFailureLogs).toHaveLength(1);
+      expect(directFetchFailureLogs[0]?.details).toEqual(expect.objectContaining({
+        description: "Hosted workspace snapshot fetch",
+        fetchCauseCode: "type_error",
+        fetchCauseKind: "fetch_failed",
+        fetchCauseName: "TypeError",
+        method: "GET",
+        path: "/workspace-snapshot-object",
+        responseOrigin: "workspace_snapshot_object",
+      }));
+
+      const serializedLogs = JSON.stringify([
+        ...readWorkspaceSnapshotDiagnosticLogs(),
+        ...directFetchFailureLogs,
+      ]);
+      expect(serializedLogs).not.toContain(ref.objectKey);
+      expect(serializedLogs).not.toContain(ref.snapshotId);
+      expect(serializedLogs).not.toContain(getUrl);
+      expect(serializedLogs).not.toContain("r2.example.test");
+      expect(serializedLogs).not.toContain("/bundles/");
+      expect(serializedLogs).not.toContain("X-Amz");
+      expect(serializedLogs).not.toContain("fixture-get");
+      expect(serializedLogs).not.toContain("hidden transport detail");
+      expect(serializedLogs).not.toContain("member_123");
+      expect(serializedLogs).not.toContain("root_key_test");
+      expect(serializedLogs).not.toContain("wrapped_data_key_test");
+      expect(serializedLogs).not.toContain(dataKeyBase64);
+      expect(serializedLogs).not.toContain(tempRoot);
     } finally {
       dataKey.fill(0);
       await rm(tempRoot, {
@@ -1058,10 +1410,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "assistant-delivery",
-        details: {
+        details: expect.objectContaining({
           description: "Hosted raw email read",
           responseStatus: 500,
-        },
+        }),
         level: "warn",
         message: "Hosted runtime upstream response returned non-OK.",
         phase: "outbox",

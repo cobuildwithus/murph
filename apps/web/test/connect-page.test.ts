@@ -948,6 +948,99 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   await rendered.cleanup();
 });
 
+test("ConnectSourcesGrid shows a pending-redirect dialog while an initial connect intent resolves", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  let resolveFetch: ((response: Response) => void) | undefined;
+  const fetch = vi.fn(async () =>
+    new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+    },
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Connecting Whoop/);
+  });
+
+  await act(async () => {
+    resolveFetch?.(Response.json({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://provider.example.test/oauth/start");
+  });
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid hides the pending-redirect dialog when a connect intent needs consent", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async () =>
+    Response.json({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+        message: "Accept the current Murph legal consent before continuing.",
+      },
+    }, { status: 403 }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    initialConnectIntent: {
+      claim,
+      connectSource: "whoop",
+    },
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Before you connect Whoop/);
+  });
+
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid preserves a device connect intent after consent acceptance", async () => {
   const claim = "dc_12345678901234567890123456789012";
   let attempts = 0;

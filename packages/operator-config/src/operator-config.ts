@@ -48,12 +48,6 @@ export {
   resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 export {
-  TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
-  applyDefaultVaultToArgs,
-  commandNeedsVaultForExecution,
-  hasExplicitVaultOption,
-} from './operator-config/cli-vault-defaults.js'
-export {
   expandConfiguredVaultPath,
   normalizeVaultForConfig,
   resolveOperatorConfigPath,

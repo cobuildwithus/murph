@@ -82,14 +82,18 @@ apps/web durable status
   - mailboxLag
 ```
 
-Execution acceptance is not completion. A Cloudflare response, a container wake,
-or a runtime attempt return means only that execution was attempted. Completion
-is observed only when Temporal re-reads web-owned demand/status and sees no
-mailbox lag, no due web-owned runtime/workspace wake projection, and no
+Execution acceptance is not completion. A Cloudflare accepted-processing
+response means the per-user Durable Object owns the active write-fenced run until
+the owner watchdog fires, the fence is cleared or expires, or a new signal
+interrupts the wait. While that owner exists, durable mailbox lag is recovery
+truth, not a reason for Temporal to poll and re-wake the same hot runner in a
+short loop. Completion is observed only after ownership ends or the owner
+watchdog returns the workflow to the demand loop and web-owned demand/status
+shows no mailbox lag, no due web-owned runtime/workspace wake projection, and no
 workflow-local wake flag that still requires an execution attempt.
 
-Web/runtime status is durable truth. Temporal must re-read it after every
-execution attempt and before idling.
+Web/runtime status is durable truth when no runner owns execution. Cloudflare's
+write fence is the active ownership truth while a run is in flight.
 
 ## Ownership Table
 
@@ -159,8 +163,8 @@ Workflow implementations must version-gate flag clearing around awaited demand
 and execution calls. If a signal arrives while an Activity is running, the loop
 must keep the existing flags and re-read demand instead of clearing state derived
 from a stale read. Workflow timers that should be preempted by fresh signals,
-including active-runtime recheck waits, must use a signal-aware `condition()`
-timeout instead of a bare timer sleep.
+including owner-watchdog waits after accepted processing, must use a
+signal-aware `condition()` timeout instead of a bare timer sleep.
 
 The workflow type constant must match the exported workflow function name
 exactly. Temporal TypeScript workflow type names are function names, so renaming
@@ -248,8 +252,11 @@ Cloudflare metadata logs. These responses are
 command acknowledgement only. They do not report runtime completion, status,
 mailbox lag, or next assistant wake facts.
 
-Temporal observes completion by re-reading web-owned demand/status after the
-recommended recheck or any newer signal. Runtime wake and retry facts that matter
+Temporal treats `recommendedRecheckAt` on accepted processing as an ownership
+watchdog horizon, not as a short durable-lag polling interval. Newer signals may
+interrupt that wait and cause one wake/ensure command for the active runner.
+Without a new signal, the workflow waits until the watchdog horizon before
+returning to durable demand recovery. Runtime wake and retry facts that matter
 to product behavior must be reflected in durable web/runtime state, not returned
 as the command result. Legacy `runtime_completed` and `runtime_wake_sent`
 responses remain replay/deploy-skew compatibility only. Target removal is
@@ -294,6 +301,9 @@ Response summary:
 
 The adapter must not return `caught-up`, `mailboxLag`, `nextAlarmAt`, or runtime
 completion status. Those belong to web demand/status plus the Temporal loop.
+Accepted responses set `recommendedRecheckAt` from the active write-fence owner
+watchdog, bounded by the expected idle checkpoint horizon or fence expiry, rather
+than from a five-second startup poll.
 Transport failures and invalid protocol responses are still Activity
 exceptions. After the Activity retry policy is exhausted, the per-user workflow
 records compact failure metadata, waits on a signal-aware retry timer, and keeps
@@ -409,8 +419,8 @@ The hard-cut architecture is accepted when:
 - Demand returns `blocked` for usage denial or gate unavailability. It does not
   return signed usage decisions or usage-gating metadata.
 - Workflow flag clearing is version-gated across awaited demand/execution calls.
-- Active-wake rechecks use Cloudflare's required `recommendedRecheckAt`, not a
-  one-second loop.
+- Accepted-processing waits use Cloudflare's required owner-watchdog
+  `recommendedRecheckAt`, not a short durable-lag polling loop.
 - Stale workspace wakes are guarded by `ignoredWorkspaceWakeKey`.
 - Workflow setup uses an ESM-compatible explicit `workflowsPath`.
 - Vercel Workflow nudge files and Cloudflare nudge fallback paths are deleted

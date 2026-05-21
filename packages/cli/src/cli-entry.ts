@@ -1,4 +1,3 @@
-import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Cli } from 'incur'
@@ -6,6 +5,10 @@ import type { Cli } from 'incur'
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  createVaultCliVaultContext,
+  extractVaultOverride,
+} from './vault-cli-vault-context.js'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -80,10 +83,7 @@ export async function runMurphCliAction(
   const setupRuntimeEnvModule = await import('@murphai/operator-config/setup-runtime-env')
 
   const {
-    applyDefaultVaultToArgs,
-    commandNeedsVaultForExecution,
     expandConfiguredVaultPath,
-    hasExplicitVaultOption,
     resolveConfiguredDefaultVault,
     resolveEffectiveTopLevelToken,
     resolveDefaultVault,
@@ -102,9 +102,11 @@ export async function runMurphCliAction(
   const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 
   const programName = detectSetupProgramName(options.argv0 ?? process.argv[1])
-  const topLevelToken = resolveEffectiveTopLevelToken(argv)
+  const setupTopLevelToken = resolveEffectiveTopLevelToken(argv)
+  const vaultContext = createVaultCliVaultContext()
   const cli = vaultCliModule.createVaultCliWithOptions({
     commandName: programName,
+    vaultContext,
   })
   const homeDirectory = resolveOperatorHomeDirectory()
   const serveOptions = createCliServeOptions(options.exit)
@@ -130,10 +132,11 @@ export async function runMurphCliAction(
     }
 
     const launchVault =
-      (programName === 'murph' && topLevelToken !== 'init'
+      (programName === 'murph' && setupTopLevelToken !== 'init'
         ? await resolveConfiguredDefaultVault(homeDirectory)
         : await resolveDefaultVault(homeDirectory)) ??
       expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
+    vaultContext.current = launchVault
 
     const readyWearables = listSetupReadyWearables(setupContext.result)
     const pendingWearables = listSetupPendingWearables(setupContext.result)
@@ -157,7 +160,7 @@ export async function runMurphCliAction(
       )
       try {
         await cli.serve(
-          ['device', 'connect', wearable, '--vault', launchVault, '--open'],
+          ['device', 'connect', wearable, '--open'],
           serveOptions,
         )
       } catch (error) {
@@ -176,33 +179,42 @@ export async function runMurphCliAction(
       process.stderr.write(
         '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram, Linq, and/or email. Press Ctrl+C to stop.\n\n',
       )
-      await cli.serve(['assistant', 'run', '--vault', launchVault], serveOptions)
+      await cli.serve(['assistant', 'run'], serveOptions)
       return
     }
 
     process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
-    await cli.serve(['assistant', 'chat', '--vault', launchVault], serveOptions)
+    await cli.serve(['assistant', 'chat'], serveOptions)
     return
   }
 
+  const vaultOverride = extractVaultOverride(argv)
+  const topLevelToken = resolveEffectiveTopLevelToken(vaultOverride.argv)
+  const commandAllowsExplicitVaultOverride =
+    programName === 'murph' && topLevelToken === 'init'
+
+  if (
+    programName === 'murph' &&
+    vaultOverride.explicit &&
+    !commandAllowsExplicitVaultOverride
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '`murph` uses one active vault. Omit `--vault` and use `murph use <path>` or `murph onboard --vault <path>` to change it.',
+    )
+  }
+
   const defaultVault =
-    programName === 'murph' && topLevelToken !== 'init'
+    vaultOverride.vault ??
+    (programName === 'murph' && topLevelToken !== 'init'
       ? await resolveConfiguredDefaultVault(homeDirectory)
-      : await resolveDefaultVault(homeDirectory)
-  await cli.serve(
-    await prepareProgramArgsForExecution({
-      applyDefaultVaultToArgs,
-      argv,
-      commandNeedsVaultForExecution,
-      configFiles: vaultCliModule.CLI_CONFIG_FILES,
-      defaultVault,
-      hasExplicitVaultOption,
-      homeDirectory,
-      programName,
-      resolveEffectiveTopLevelToken: () => topLevelToken,
-    }),
-    serveOptions,
-  )
+      : await resolveDefaultVault(homeDirectory))
+  vaultContext.current = defaultVault
+  vaultContext.missingVaultMessage =
+    programName === 'murph' && topLevelToken !== 'init'
+      ? 'No active Murph vault is configured. Run `murph onboard --vault ./vault` to create one, or `murph use <path>` to select an existing vault.'
+      : null
+  await cli.serve(vaultOverride.argv, serveOptions)
 }
 
 export function formatMurphCliError(error: unknown): string {
@@ -225,165 +237,6 @@ function resolvePublishedCliBinPath(): string {
   return moduleBaseName === 'src'
     ? path.resolve(moduleDirectory, '../dist/bin.js')
     : path.resolve(moduleDirectory, 'bin.js')
-}
-
-async function prepareProgramArgsForExecution(input: {
-  applyDefaultVaultToArgs: (args: readonly string[], vault: string | null) => string[]
-  argv: string[]
-  commandNeedsVaultForExecution: (args: readonly string[]) => boolean
-  configFiles: readonly string[]
-  defaultVault: string | null
-  hasExplicitVaultOption: (args: readonly string[]) => boolean
-  homeDirectory: string
-  programName: string
-  resolveEffectiveTopLevelToken: (args: readonly string[]) => string | null
-}): Promise<string[]> {
-  const explicitVaultRequested = input.hasExplicitVaultOption(input.argv)
-  const commandNeedsVault = input.commandNeedsVaultForExecution(input.argv)
-  const commandAllowsExplicitVaultOverride =
-    input.programName === 'murph' &&
-    input.resolveEffectiveTopLevelToken(input.argv) === 'init'
-
-  if (
-    input.programName === 'murph' &&
-    explicitVaultRequested &&
-    commandNeedsVault &&
-    !commandAllowsExplicitVaultOverride
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      '`murph` uses one active vault. Omit `--vault` and use `murph use <path>` or `murph onboard --vault <path>` to change it.',
-    )
-  }
-
-  if (
-    input.programName === 'murph' &&
-    input.defaultVault === null &&
-    commandNeedsVault &&
-    !commandAllowsExplicitVaultOverride
-  ) {
-    throw new VaultCliError(
-      'missing_vault',
-      'No active Murph vault is configured. Run `murph onboard --vault ./vault` to create one, or `murph use <path>` to select an existing vault.',
-    )
-  }
-
-  if (
-    input.programName !== 'murph' &&
-    input.defaultVault === null &&
-    !explicitVaultRequested &&
-    commandNeedsVault &&
-    !(await hasEnabledIncurConfigFile(input.argv, input.configFiles, input.homeDirectory)) &&
-    !argsRequestJsonOutput(input.argv)
-  ) {
-    throw new VaultCliError(
-      'missing_vault',
-      'No vault was provided. Pass --vault <path> or select a default vault before running this command.',
-    )
-  }
-
-  return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
-}
-
-function argsRequestJsonOutput(argv: readonly string[]): boolean {
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index]
-    if (token === '--') {
-      return false
-    }
-    if (token === '--json' || token === '--format=json') {
-      return true
-    }
-    if (token === '--format') {
-      const value = argv[index + 1]
-      if (value === 'json') {
-        return true
-      }
-      index += 1
-    }
-  }
-
-  return false
-}
-
-async function hasEnabledIncurConfigFile(
-  argv: readonly string[],
-  configFiles: readonly string[],
-  homeDirectory: string,
-): Promise<boolean> {
-  const configFlagState = readConfigFlagState(argv)
-  if (configFlagState.disabled) {
-    return false
-  }
-
-  if (configFlagState.explicit) {
-    return true
-  }
-
-  for (const filePath of configFiles) {
-    if (await pathIsReadable(resolveIncurConfigPath(filePath, homeDirectory))) {
-      return true
-    }
-  }
-
-  return false
-}
-
-function readConfigFlagState(argv: readonly string[]): {
-  disabled: boolean
-  explicit: boolean
-} {
-  let disabled = false
-  let explicit = false
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index]
-    if (token === '--config') {
-      disabled = false
-      explicit = true
-      index += 1
-      continue
-    }
-    if (token?.startsWith('--config=')) {
-      disabled = false
-      explicit = true
-      continue
-    }
-    if (token === '--no-config') {
-      disabled = true
-      explicit = false
-    }
-  }
-
-  return {
-    disabled,
-    explicit,
-  }
-}
-
-function resolveIncurConfigPath(configPath: string, homeDirectory: string): string {
-  if (configPath === '~') {
-    return homeDirectory
-  }
-
-  if (configPath.startsWith('~/')) {
-    return path.join(homeDirectory, configPath.slice(2))
-  }
-
-  return path.resolve(process.cwd(), configPath)
-}
-
-async function pathIsReadable(targetPath: string): Promise<boolean> {
-  try {
-    await access(targetPath)
-    return true
-  } catch (error) {
-    if (isNodeErrorWithCode(error, 'ENOENT') || isNodeErrorWithCode(error, 'ENOTDIR')) {
-      return false
-    }
-
-    throw error
-  }
 }
 
 function formatErrorMessage(error: unknown): string {

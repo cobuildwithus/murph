@@ -11,7 +11,6 @@ import type {
   HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
-  HostedRuntimeProcessingAcceptedAction,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -639,7 +638,7 @@ export class HostedUserRunner {
         action,
         kind: "runtime_processing_accepted",
         recommendedRecheckAt:
-          this.computeRuntimeProcessingAcceptedRecheckAt(action),
+          this.computeRuntimeProcessingOwnerWatchdogAt(activeFence),
         runtimeAttemptId: activeFence.attemptId,
       };
     }
@@ -651,7 +650,7 @@ export class HostedUserRunner {
           action: "already_running",
           kind: "runtime_processing_accepted",
           recommendedRecheckAt:
-            this.computeRuntimeProcessingAcceptedRecheckAt("already_running"),
+            this.computeRuntimeProcessingOwnerWatchdogAt(activeFence),
           runtimeAttemptId: activeFence.attemptId,
         };
       }
@@ -800,7 +799,7 @@ export class HostedUserRunner {
     return {
       action,
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: this.computeRuntimeProcessingAcceptedRecheckAt(action),
+      recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(token),
       runtimeAttemptId: token.attemptId,
     };
   }
@@ -1273,12 +1272,15 @@ export class HostedUserRunner {
     ).toISOString();
   }
 
-  private computeRuntimeProcessingAcceptedRecheckAt(
-    action: HostedRuntimeProcessingAcceptedAction,
-  ): string {
-    return action === "woken"
-      ? this.computeActiveRuntimeWakeRecheckAt()
-      : this.computeStartupRuntimeRecheckAt();
+  private computeRuntimeProcessingOwnerWatchdogAt(input: {
+    expiresAt: string;
+  }): string {
+    const activeRuntimeWakeRecheckMs = Date.parse(this.computeActiveRuntimeWakeRecheckAt());
+    const expiresAtMs = Date.parse(input.expiresAt);
+    const watchdogMs = Number.isFinite(expiresAtMs)
+      ? Math.min(expiresAtMs, activeRuntimeWakeRecheckMs)
+      : activeRuntimeWakeRecheckMs;
+    return new Date(Math.max(Date.now(), watchdogMs)).toISOString();
   }
 
   private computeStartupRuntimeRecheckAt(): string {
