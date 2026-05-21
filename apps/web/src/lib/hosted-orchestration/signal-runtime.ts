@@ -16,9 +16,14 @@ import {
 
 import {
   appendHostedMailboxEnvelopeTx,
+  readHostedMailboxFirstPendingSystemItemCheckpoint,
   readHostedMailboxItemCheckpointById,
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
+import {
+  readHostedMailboxImportedSeqForLane,
+  readHostedMailboxRedactedStatusRecord,
+} from "../hosted-mailbox/lag";
 import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
@@ -27,6 +32,7 @@ import {
 } from "../hosted-onboarding/hosted-member-store";
 import {
   ensureHostedWorkspace,
+  type HostedWorkspaceRecord,
 } from "../hosted-workspace/store";
 import {
   getPrisma,
@@ -163,6 +169,7 @@ export async function signalHostedMailboxLagObservedRuntime(
   input: SignalHostedMailboxLagObservedInput,
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedRuntimeControlMailboxRequest({
+    coalescePendingSystemKind: "runtime.mailbox-lag-observed",
     client: input.client,
     kind: "runtime.mailbox-lag-observed",
     source: "mailbox-lag",
@@ -207,14 +214,22 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 
 async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
+  coalescePendingSystemKind?: HostedExecutionRuntimeControlWakeKind | null;
   kind: HostedExecutionRuntimeControlWakeKind;
   source: string;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = getPrisma();
-  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  const workspace = await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  const existingControlItem = await readCoalescedHostedRuntimeControlMailboxItem({
+    coalescePendingSystemKind: input.coalescePendingSystemKind ?? null,
+    kind: input.kind,
+    prisma,
+    userId: input.userId,
+    workspace,
+  });
   const occurredAt = new Date().toISOString();
-  const mailboxAppend = await prisma.$transaction((tx) =>
+  const mailboxItem = existingControlItem ?? (await prisma.$transaction((tx) =>
     appendHostedMailboxEnvelopeTx({
       envelope: buildHostedExecutionRuntimeControlWake({
         eventId: `runtime-control:${input.kind}:${randomUUID()}`,
@@ -224,20 +239,47 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
       }),
       tx,
     })
-  );
+  )).item;
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     ensureWorkspace: false,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
-      lane: mailboxAppend.item.lane,
-      laneSeq: mailboxAppend.item.laneSeq,
-      mailboxItemId: mailboxAppend.item.id,
+      lane: mailboxItem.lane,
+      laneSeq: mailboxItem.laneSeq,
+      mailboxItemId: mailboxItem.id,
       source: sanitizeHostedRuntimeSignalSource(input.source),
     }),
     userId: input.userId,
   });
+}
+
+async function readCoalescedHostedRuntimeControlMailboxItem(input: {
+  coalescePendingSystemKind: HostedExecutionRuntimeControlWakeKind | null;
+  kind: HostedExecutionRuntimeControlWakeKind;
+  prisma: ReturnType<typeof getPrisma>;
+  userId: string;
+  workspace: HostedWorkspaceRecord;
+}): Promise<HostedMailboxItemCheckpointRecord | null> {
+  if (input.coalescePendingSystemKind !== input.kind) {
+    return null;
+  }
+
+  const firstPendingSystemItem = await readHostedMailboxFirstPendingSystemItemCheckpoint({
+    afterSeq: readHostedMailboxImportedSeqForLane(
+      readHostedMailboxRedactedStatusRecord(input.workspace.redactedStatusJson),
+      "system",
+    ),
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+
+  if (firstPendingSystemItem?.kind !== input.kind) {
+    return null;
+  }
+
+  return firstPendingSystemItem;
 }
 
 export async function signalHostedUserRuntimeWorkflow(
@@ -282,7 +324,7 @@ export async function signalHostedUserRuntimeWorkflow(
 async function ensureHostedRuntimeWorkspaceForActiveUser(
   userId: string,
   prisma = getPrisma(),
-): Promise<void> {
+): Promise<HostedWorkspaceRecord> {
   const member = await readHostedMemberCoreState({
     memberId: userId,
     prisma,
@@ -292,7 +334,7 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
     throw new Error("Hosted runtime user is not active.");
   }
 
-  await ensureHostedWorkspace({
+  return await ensureHostedWorkspace({
     prisma,
     userId,
   });

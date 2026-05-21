@@ -78,6 +78,11 @@ export interface HostedMailboxItemCheckpointRecord {
   userId: string;
 }
 
+export interface HostedMailboxPendingSystemItemCheckpointRecord
+  extends HostedMailboxItemCheckpointRecord {
+  kind: HostedMailboxKind;
+}
+
 export interface AppendHostedMailboxItemResult {
   duplicate: boolean;
   dedupeConflict: boolean;
@@ -486,6 +491,16 @@ export async function readHostedMailboxFirstPendingSystemKind(input: {
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<HostedMailboxKind | null> {
+  const item = await readHostedMailboxFirstPendingSystemItemCheckpoint(input);
+
+  return item?.kind ?? null;
+}
+
+export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
+  afterSeq: bigint | number | string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<HostedMailboxPendingSystemItemCheckpointRecord | null> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const afterSeq = normalizeHostedMailboxSeq(
@@ -497,7 +512,11 @@ export async function readHostedMailboxFirstPendingSystemKind(input: {
       laneSeq: "asc",
     },
     select: {
+      id: true,
       kind: true,
+      lane: true,
+      laneSeq: true,
+      userId: true,
     },
     where: {
       lane: "system",
@@ -508,7 +527,15 @@ export async function readHostedMailboxFirstPendingSystemKind(input: {
     },
   });
 
-  return row ? requireHostedMailboxKind(row.kind) : null;
+  return row
+    ? {
+      id: row.id,
+      kind: requireHostedMailboxKind(row.kind),
+      lane: requireHostedMailboxLane(row.lane),
+      laneSeq: row.laneSeq.toString(),
+      userId: row.userId,
+    }
+    : null;
 }
 
 export async function readHostedMailboxItemByDedupeKey(input: {
