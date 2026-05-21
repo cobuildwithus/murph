@@ -2230,6 +2230,18 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
     requiredFor: "wearable-context",
   },
   {
+    featureKey: "deep-sleep-minutes",
+    label: "Deep sleep",
+    metricKeys: ["deep-sleep-minutes"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "rem-sleep-minutes",
+    label: "REM sleep",
+    metricKeys: ["rem-sleep-minutes"],
+    requiredFor: "wearable-context",
+  },
+  {
     featureKey: "sleep-duration-variability-minutes",
     label: "Sleep duration variability",
     metricKeys: ["sleep-duration-variability-minutes"],
@@ -2248,9 +2260,27 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
     requiredFor: "wearable-context",
   },
   {
+    featureKey: "sleep-score",
+    label: "Sleep score",
+    metricKeys: ["sleep-score"],
+    requiredFor: "wearable-context",
+  },
+  {
     featureKey: "sleep-midpoint-variability-minutes",
     label: "Sleep timing variability",
     metricKeys: ["sleep-midpoint-variability-minutes"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "sleep-spo2",
+    label: "Sleep SpO2",
+    metricKeys: ["spo2"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "sleep-respiratory-rate",
+    label: "Sleep respiratory rate",
+    metricKeys: ["respiratory-rate"],
     requiredFor: "wearable-context",
   },
   {
@@ -2260,6 +2290,18 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
     requiredFor: "wearable-context",
   },
   { featureKey: "hrv-rmssd", label: "HRV", metricKeys: ["hrv-rmssd"], requiredFor: "wearable-context" },
+  {
+    featureKey: "readiness-score",
+    label: "Readiness score",
+    metricKeys: ["readiness-score"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "skin-temperature-deviation",
+    label: "Skin temperature deviation",
+    metricKeys: ["skin-temperature-deviation"],
+    requiredFor: "wearable-context",
+  },
   {
     featureKey: "wearable-valid-day-count-28d",
     label: "Wearable valid days",
@@ -2374,13 +2416,20 @@ const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
   ],
   recovery: [
     "hrv-rmssd",
+    "readiness-score",
     "resting-heart-rate",
+    "skin-temperature-deviation",
   ],
   sleep: [
+    "deep-sleep-minutes",
+    "rem-sleep-minutes",
+    "sleep-respiratory-rate",
     "sleep-duration-variability-minutes",
     "sleep-efficiency",
     "sleep-midpoint-variability-minutes",
     "sleep-regularity-score",
+    "sleep-score",
+    "sleep-spo2",
     "total-sleep-minutes",
   ],
 } satisfies Record<MurphAgeWearableContextFamily, readonly string[]>;
@@ -2414,6 +2463,7 @@ const MURPH_AGE_WEARABLE_DAY_COVERAGE_OBSERVATION_METRIC_KEYS = [
 const MURPH_AGE_WEARABLE_NIGHT_COVERAGE_OBSERVATION_METRIC_KEYS = [
   "deep-sleep-minutes",
   "rem-sleep-minutes",
+  "respiratory-rate",
   "sleep-duration-variability-minutes",
   "sleep-efficiency",
   "sleep-midpoint-variability-minutes",

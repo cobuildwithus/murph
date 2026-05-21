@@ -153,6 +153,8 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("peakCadence")?.key, "peak-30-minute-cadence");
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
+  assert.equal(resolveMetricDefinition("respiratoryRate")?.key, "respiratory-rate");
+  assert.equal(resolveMetricDefinition("temperature_deviation")?.key, "skin-temperature-deviation");
   assert.equal(resolveMetricDefinition("adl-count")?.key, "adl-limitation-count");
   assert.equal(resolveMetricDefinition("mobility-count")?.key, "mobility-limitation-count");
   assert.equal(resolveMetricDefinition("wearable_valid_day_count_28d")?.key, "wearable-valid-day-count-28d");
@@ -301,6 +303,16 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "ml/kg/min",
     value: 42.4,
   }).canonicalValue, 42.4);
+  assert.equal(normalizeMetricValue({
+    metricKey: "respiratory-rate",
+    unit: "breaths/minute",
+    value: 14.2,
+  }).canonicalUnit, "breaths/min");
+  assert.equal(normalizeMetricValue({
+    metricKey: "skin-temperature-deviation",
+    unit: "celsius",
+    value: 0.1,
+  }).canonicalUnit, "degC");
   assert.deepEqual(normalizeMetricValue({
     metricKey: "custom score",
     unit: "",
@@ -3016,6 +3028,7 @@ test("exposes one wearable bridge metric source and coverage contract", () => {
   assert.equal(isMurphAgeWearableBridgeValidDayMetricPoint({ metricKey: "hrv-rmssd", sourceKind: "wearable-summary" }), false);
   assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "total-sleep-minutes", sourceKind: "sleep-summary" }), true);
   assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "sleep-score", sourceKind: "wearable-summary" }), true);
+  assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "respiratory-rate", sourceKind: "sleep-summary" }), true);
   assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "hrv-rmssd", sourceKind: "sleep-summary" }), true);
   assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "hrv-rmssd", sourceKind: "wearable-summary" }), false);
 
@@ -5675,9 +5688,16 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     { metricKey: "resting-heart-rate", sourceKind: "wearable-summary", unit: "bpm", value: 58 },
     { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 62 },
     { metricKey: "total-sleep-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 455 },
+    { metricKey: "deep-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 82 },
+    { metricKey: "rem-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 96 },
     { metricKey: "sleep-efficiency", sourceKind: "wearable-summary", unit: "percent", value: 88 },
     { metricKey: "sleep-regularity-score", sourceKind: "wearable-summary", unit: "score", value: 84 },
+    { metricKey: "sleep-score", sourceKind: "sleep-summary", unit: "score", value: 82 },
+    { metricKey: "spo2", sourceKind: "sleep-summary", unit: "percent", value: 97 },
+    { metricKey: "respiratory-rate", sourceKind: "sleep-summary", unit: "breaths/min", value: 14.2 },
     { metricKey: "sleep-duration-variability-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 39 },
+    { metricKey: "readiness-score", sourceKind: "wearable-summary", unit: "score", value: 78 },
+    { metricKey: "skin-temperature-deviation", sourceKind: "wearable-summary", unit: "degC", value: 0.1 },
     { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
     { metricKey: "wearable_valid_night_count_28d", sourceKind: "wearable-summary", unit: "count", value: 22 },
     { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.86 },
@@ -5819,6 +5839,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("hba1c"), true);
   assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("steps"), true);
   assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("total-sleep-minutes"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("sleep-score"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("deep-sleep-minutes"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("rem-sleep-minutes"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("spo2"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("respiratory-rate"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("readiness-score"), true);
+  assert.equal(submittedCalculatorCapabilities.acceptedMetricKeys.includes("skin-temperature-deviation"), true);
   assert.equal(submittedCalculatorCapabilities.researchScoreBearingMetricKeys.includes("albumin"), true);
   assert.equal(submittedCalculatorCapabilities.researchScoreBearingMetricKeys.includes("hba1c"), true);
   assert.deepEqual(submittedCalculatorCapabilities.productScoreBearingMetricKeys, []);
@@ -5827,6 +5854,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedCalculatorCapabilities.productRiskDisplayAuthorized, false);
   assert.equal(submittedCalculatorCapabilities.wearableContextMetricKeys.includes("steps"), true);
   assert.equal(submittedCalculatorCapabilities.wearableContextMetricKeys.includes("hrv-rmssd"), true);
+  assert.equal(submittedCalculatorCapabilities.wearableContextMetricKeys.includes("respiratory-rate"), true);
+  assert.equal(submittedCalculatorCapabilities.wearableContextMetricKeys.includes("skin-temperature-deviation"), true);
   assert.equal(
     submittedCalculatorCapabilities.wearableFirstPriorityFeatureKeys.includes("activity-volume"),
     true,
