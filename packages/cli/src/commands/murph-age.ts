@@ -1017,6 +1017,23 @@ const murphAgeResearchModelStatusViewSchema = z.object({
     usableAsConsumerWearableValidation: z.literal(false),
   }),
 })
+const murphAgeResearchLayeredAgeEstimateSchema = z.object({
+  ageDeltaYears: z.number().nullable(),
+  appliedLayerIds: z.array(murphAgeResearchLayerIdSchema),
+  basis: z.enum(['selected-card-risk-age', 'wearable-shadow-risk-age']),
+  biologicalAgeYears: z.number().nullable(),
+  chronologicalAgeYears: z.number(),
+  intervalYears: z.object({
+    high: z.number(),
+    low: z.number(),
+  }).nullable(),
+  productAuthorized: z.literal(false),
+  residualDeltaYears: z.number().nullable(),
+  residualScoreContributionAuthorized: z.literal(false),
+  riskProbability: z.number().nullable(),
+  status: z.enum(['selected-card-only', 'wearable-shadow-applied']),
+  uncertaintyStatus: z.enum(['not-reestimated-for-shadow', 'selected-card-interval']),
+})
 export const murphAgeResearchCalculatorViewResultSchema = z.object({
   ageEstimate: murphAgePublicAgeEstimateViewSchema.nullable(),
   arbiter: murphAgeResearchArbiterViewSchema,
@@ -1029,6 +1046,7 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   missingFeatureKeys: z.array(z.string().min(1)),
   mode: murphAgeModeSchema,
   model: murphAgeResearchModelStatusViewSchema,
+  layeredAgeEstimate: murphAgeResearchLayeredAgeEstimateSchema.nullable(),
   product: z.object({
     ageDisplayReady: z.boolean(),
     productUseAuthorized: z.literal(false),

@@ -4627,6 +4627,25 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreContributionAuthorized, false);
   assert.equal(researchWithWearablePackView.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
   assert.equal(researchWithWearablePackView.wearableResidualLayer?.finalRiskProbability, shadowRiskProbability);
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.status, "wearable-shadow-applied");
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.basis, "wearable-shadow-risk-age");
+  assert.equal(
+    researchWithWearablePackView.layeredAgeEstimate?.biologicalAgeYears,
+    researchWithWearablePackView.wearableResidualLayer?.finalRiskAgeEquivalentYears,
+  );
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.riskProbability, shadowRiskProbability);
+  assert.equal(
+    researchWithWearablePackView.layeredAgeEstimate?.residualDeltaYears,
+    researchWithWearablePackView.wearableResidualLayer?.residualDeltaYears,
+  );
+  assert.deepEqual(researchWithWearablePackView.layeredAgeEstimate?.appliedLayerIds, [
+    "selected-lab-body-card",
+    "wearable-activity-residual",
+  ]);
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.intervalYears, null);
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.productAuthorized, false);
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.residualScoreContributionAuthorized, false);
+  assert.equal(researchWithWearablePackView.layeredAgeEstimate?.uncertaintyStatus, "not-reestimated-for-shadow");
   const parameterizedWearableLayer = researchWithWearablePackView.model.layeredResearchPath.layers.find((layer) =>
     layer.layerId === "wearable-activity-residual"
   );
@@ -6282,6 +6301,18 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(selectedLabLayer.status, "active-research-score");
   assert.equal(selectedLabLayer.scoreBearingNow, true);
   assert.equal(selectedLabLayer.metricKeys.join("|"), "glucose|egfr|bmi");
+  assert.equal(submittedLab5ResearchView.layeredAgeEstimate?.status, "selected-card-only");
+  assert.equal(submittedLab5ResearchView.layeredAgeEstimate?.basis, "selected-card-risk-age");
+  assert.deepEqual(submittedLab5ResearchView.layeredAgeEstimate?.appliedLayerIds, [
+    "selected-lab-body-card",
+  ]);
+  assert.equal(
+    submittedLab5ResearchView.layeredAgeEstimate?.biologicalAgeYears,
+    submittedLab5ResearchView.ageEstimate?.biologicalAgeYears,
+  );
+  assert.equal(submittedLab5ResearchView.layeredAgeEstimate?.productAuthorized, false);
+  assert.equal(submittedLab5ResearchView.layeredAgeEstimate?.residualScoreContributionAuthorized, false);
+  assert.equal(submittedLab5ResearchView.layeredAgeEstimate?.uncertaintyStatus, "selected-card-interval");
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
   assert.equal(submittedLab5ResearchView.model.selectedResearchCardId, "lab5_bp_bmi_transport_research");
   assert.equal(submittedLab5ResearchView.model.productUseAuthorized, false);

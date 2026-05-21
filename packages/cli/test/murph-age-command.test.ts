@@ -983,7 +983,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v11')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v12')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -1056,6 +1056,16 @@ test('age preview scores submitted labs and wearable context without a vault', a
       'function-disability-sidecar',
     ])
     assert.equal(view.model.layeredResearchPath.productAuthorized, false)
+    assert.equal(view.layeredAgeEstimate?.status, 'wearable-shadow-applied')
+    assert.equal(view.layeredAgeEstimate?.basis, 'wearable-shadow-risk-age')
+    assert.equal(view.layeredAgeEstimate?.productAuthorized, false)
+    assert.equal(view.layeredAgeEstimate?.residualScoreContributionAuthorized, false)
+    assert.deepEqual(view.layeredAgeEstimate?.appliedLayerIds, [
+      'selected-lab-body-card',
+      'wearable-activity-residual',
+    ])
+    assert.equal(view.layeredAgeEstimate?.intervalYears, null)
+    assert.equal(view.layeredAgeEstimate?.uncertaintyStatus, 'not-reestimated-for-shadow')
     const functionLayer = view.model.layeredResearchPath.layers.find((layer) =>
       layer.layerId === 'function-disability-sidecar'
     )
@@ -1491,7 +1501,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
-    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v11')
+    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v12')
     assert.equal(researchCalculatorView.researchOnly, true)
     assert.equal(researchCalculatorView.mode, 'research')
     assert.equal(researchCalculatorView.status, 'ready')
@@ -1522,6 +1532,20 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(typeof calculatorResidualLayer.finalRiskAgeEquivalentYears, 'number')
     assert.equal(typeof calculatorResidualLayer.residualDeltaYears, 'number')
     assert.equal(calculatorResidualLayer.scoreBearing, false)
+    assert.equal(researchCalculatorView.layeredAgeEstimate?.status, 'wearable-shadow-applied')
+    assert.equal(researchCalculatorView.layeredAgeEstimate?.basis, 'wearable-shadow-risk-age')
+    assert.equal(
+      researchCalculatorView.layeredAgeEstimate?.biologicalAgeYears,
+      calculatorResidualLayer.finalRiskAgeEquivalentYears,
+    )
+    assert.equal(researchCalculatorView.layeredAgeEstimate?.riskProbability, calculatorResidualLayer.finalRiskProbability)
+    assert.equal(researchCalculatorView.layeredAgeEstimate?.residualDeltaYears, calculatorResidualLayer.residualDeltaYears)
+    assert.equal(researchCalculatorView.layeredAgeEstimate?.productAuthorized, false)
+    assert.equal(researchCalculatorView.layeredAgeEstimate?.residualScoreContributionAuthorized, false)
+    assert.deepEqual(researchCalculatorView.layeredAgeEstimate?.appliedLayerIds, [
+      'selected-lab-body-card',
+      'wearable-activity-residual',
+    ])
     const parameterizedWearableLayer = researchCalculatorView.model.layeredResearchPath.layers.find((layer) =>
       layer.layerId === 'wearable-activity-residual'
     )
