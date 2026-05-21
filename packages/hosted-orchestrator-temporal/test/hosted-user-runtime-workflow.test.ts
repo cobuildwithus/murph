@@ -237,6 +237,46 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("keeps the legacy ensure-execution branch observable while the patch fallback remains", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.ensureRuntimeProcessingEnabled = false;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.legacyExecutions.push(legacyRuntimeCompleted({
+      runtimeStatus: "failed",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([]);
+    expect(runtime.legacyExecutionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "manual",
+        userId: "member_test",
+      },
+    ]);
+    expect(runtime.waits).toEqual([
+      HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+    ]);
+    expect(continued.state).toMatchObject({
+      lastExecutionKind: "runtime_completed",
+      lastRuntimeAttemptId: "legacy_runtime_attempt_test",
+      lastRuntimeStatus: "failed",
+      legacyRuntimeFailedWithoutNextWakeCount: 1,
+      manualRunRequested: false,
+      runtimeResultWakeAt: isoAfter(
+        HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+      ),
+      runtimeResultWakeReason: "runtime.failed",
+    });
+  });
+
   it("lets a signal interrupt accepted processing recheck wait", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({
@@ -881,6 +921,9 @@ type ExecutionInput = Parameters<
 type ExecutionHandler = (
   request: ExecutionInput,
 ) => HostedRuntimeEnsureProcessingResponse | Promise<HostedRuntimeEnsureProcessingResponse>;
+type LegacyExecutionHandler = (
+  request: ExecutionInput,
+) => HostedRuntimeEnsureExecutionResponse | Promise<HostedRuntimeEnsureExecutionResponse>;
 type RunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
 
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
@@ -889,6 +932,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly demands: Array<DemandHandler | HostedRuntimeDemand> = [];
   readonly executionRequests: ExecutionInput[] = [];
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
+  readonly legacyExecutionRequests: ExecutionInput[] = [];
+  readonly legacyExecutions:
+    Array<LegacyExecutionHandler | HostedRuntimeEnsureExecutionResponse> = [];
+  ensureRuntimeProcessingEnabled = true;
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
   signalOnlyNonRetryableFailureWaitEnabled = true;
@@ -905,8 +952,15 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return this.suggestContinueAsNew;
   }
 
-  async ensureCloudflareExecution(): Promise<HostedRuntimeEnsureExecutionResponse> {
-    throw new Error("Unexpected ensureCloudflareExecution call.");
+  async ensureCloudflareExecution(
+    request: ExecutionInput,
+  ): Promise<HostedRuntimeEnsureExecutionResponse> {
+    this.legacyExecutionRequests.push(request);
+    const next = this.legacyExecutions.shift();
+    if (!next) {
+      throw new Error("Unexpected ensureCloudflareExecution call.");
+    }
+    return typeof next === "function" ? next(request) : next;
   }
 
   async ensureRuntimeProcessing(
@@ -921,7 +975,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   }
 
   useEnsureRuntimeProcessing(): boolean {
-    return true;
+    return this.ensureRuntimeProcessingEnabled;
   }
 
   nowMs(): number {
@@ -1103,6 +1157,25 @@ function retryLater(retryAt: string): HostedRuntimeEnsureProcessingResponse {
   return {
     kind: "retry_later",
     retryAt,
+  };
+}
+
+function legacyRuntimeCompleted(
+  input: Partial<
+    Extract<
+      HostedRuntimeEnsureExecutionResponse,
+      { kind: "runtime_completed" }
+    >
+  > = {},
+): HostedRuntimeEnsureExecutionResponse {
+  return {
+    action: input.action ?? "started",
+    kind: "runtime_completed",
+    runtimeAttemptId:
+      input.runtimeAttemptId ?? "legacy_runtime_attempt_test",
+    runtimeResultNextWakeAt: input.runtimeResultNextWakeAt ?? null,
+    runtimeResultNextWakeReason: input.runtimeResultNextWakeReason ?? null,
+    runtimeStatus: input.runtimeStatus ?? "idle",
   };
 }
 
