@@ -2,8 +2,10 @@ services:
   - type: worker
     name: murph-temporal-worker
     runtime: node
+    region: virginia
     plan: starter
-    autoDeployTrigger: "off"
+    autoDeployTrigger: "checksPass"
+    maxShutdownDelaySeconds: 300
     buildCommand: "pnpm install --frozen-lockfile && pnpm --dir packages/hosted-orchestrator-temporal build"
     startCommand: "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod"
     envVars:
