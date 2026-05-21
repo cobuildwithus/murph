@@ -685,11 +685,18 @@ Updated: 2026-04-24
     expect(workspaceVerify).toContain(
       'run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene',
     )
+    expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
+    expect(workspaceVerify).toContain(
+      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 55)"',
+    )
+    expect(workspaceVerify).toContain(
+      'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
+    )
     expect(workspaceVerify).toContain(
       'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
     )
     expect(workspaceVerify).toContain(
-      'run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1',
+      'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
     )
     expect(
       workspaceVerify.indexOf(
@@ -698,6 +705,15 @@ Updated: 2026-04-24
     ).toBeLessThan(
       workspaceVerify.indexOf(
         'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
+      ),
+    )
+    expect(
+      workspaceVerify.indexOf(
+        'run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene',
+      ),
+    ).toBeLessThan(
+      workspaceVerify.indexOf(
+        'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
       ),
     )
   })

@@ -63,6 +63,16 @@ describe("hosted orchestration control contracts", () => {
       kind: "manual_run_requested",
     };
 
+    expect(() => parseHostedRuntimeSignal({
+      ...baseSignal,
+      eventId: "hosted-orchestration-smoke",
+    })).toThrow("Hosted runtime manual-run signal must not include eventId.");
+
+    expect(() => parseHostedRuntimeSignal({
+      ...baseSignal,
+      source: "test",
+    })).toThrow("Hosted runtime manual-run signal must not include source.");
+
     for (const field of [
       "body",
       "headers",
