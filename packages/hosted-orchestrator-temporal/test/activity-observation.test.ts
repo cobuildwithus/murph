@@ -29,6 +29,7 @@ describe("observeHostedTemporalActivity", () => {
     }, async () => ({
       action: "woken",
       kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-05-21T12:00:30.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     }))).resolves.toMatchObject({
       kind: "runtime_processing_accepted",
@@ -124,6 +125,7 @@ describe("observeHostedTemporalActivity", () => {
     }, async () => ({
       action: unsafeResultDetail,
       kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-05-21T12:00:30.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     }))).resolves.toMatchObject({
       kind: "runtime_processing_accepted",
