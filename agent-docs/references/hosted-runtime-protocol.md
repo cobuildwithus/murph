@@ -208,17 +208,22 @@ active by starting a runner, replacing an expired write fence, waking a ready
 child, or recording a pending wake while the child is still starting. The
 command returns `retry_later` instead of pretending success when Cloudflare
 cannot confirm start or wake acceptance. Accepted background invocations are
-registered with the Durable Object lifetime, cold-start and pending-child
-acceptance use short rechecks, and a confirmed non-wakeable child is replaced
-after the startup grace window instead of waiting for the full write-fence
-timeout. The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
+registered with the Durable Object lifetime. Accepted starts and wakes return an
+owner-watchdog recheck aligned to the expected idle checkpoint horizon or active
+write-fence expiry rather than a short durable-lag polling loop. A confirmed
+non-wakeable child is replaced after the startup grace window when a later
+ensure command observes it, instead of waiting for the full write-fence timeout.
+The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
 recovery truth. When a write-fenced invocation exists, the write fence is commit
-authority only, not proof that useful runtime progress is still possible. Local
-Durable Object promises are allowed to coalesce work, but they are not liveness
-authority. The alarm remains the active write-fence watchdog, not semantic wake
-or mailbox-demand scheduling. The hosted runtime owns the foreground
+authority and active ownership truth for orchestration; useful runtime progress
+is still proven only by the later durable checkpoint. Local Durable Object
+promises are allowed to coalesce work, but they are not durable demand truth. The
+alarm remains the active write-fence watchdog, not semantic wake or mailbox-demand
+scheduling. Durable mailbox lag is a start/recovery signal when no active owner
+exists, not a reason to repeatedly wake an already owned hot run. The hosted
+runtime owns the foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
 assistant-engine active-turn controller. The alarm remains the durable backstop
@@ -226,7 +231,11 @@ if the foreground wake path does not consume or commit the appended mailbox
 rows.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
-then restores the encrypted local workspace before fetching mailbox rows. The
+then restores the encrypted local workspace before fetching mailbox rows. A new
+v2 foreground lease restores from durable workspace snapshot truth and clears
+the legacy dirty live-runtime marker before restore; dirty local runtime files
+are valid only inside the currently owned child process and must not carry across
+leases. The
 restored `.runtime/operations/assistant/hosted-mailbox.json` file is the
 authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.

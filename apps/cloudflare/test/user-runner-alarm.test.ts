@@ -172,7 +172,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:00:05.000Z",
+      recommendedRecheckAt: RUNNER_TIMEOUT_AT,
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
 
@@ -276,6 +276,40 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("uses the active write fence watchdog for accepted processing wakes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: RUNNER_TIMEOUT_AT,
+      runtimeAttemptId: token?.attemptId,
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("accepts a fresh starting write fence when no active child is wakeable yet", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -302,7 +336,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "already_running",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:00:05.000Z",
+      recommendedRecheckAt: RUNNER_TIMEOUT_AT,
       runtimeAttemptId: token?.attemptId,
     });
 
@@ -345,7 +379,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:00:36.000Z",
+      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
       runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
     });
 

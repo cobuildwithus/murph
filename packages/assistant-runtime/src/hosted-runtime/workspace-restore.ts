@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -69,7 +69,6 @@ const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-hot-re
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-working-restore-cache.v1";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
-const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA = "murph.hosted-workspace-live-runtime-state.v1";
 const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
 
 export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
@@ -128,12 +127,6 @@ interface HostedWorkspaceWorkingRestoreCache {
   vaultRootName: string;
 }
 
-interface HostedWorkspaceLiveRuntimeState {
-  schema: typeof HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA;
-  snapshotRefKey: string;
-  vaultRootName: string;
-}
-
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
@@ -142,45 +135,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
   const restored = await createHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
-  const liveState = await readHostedWorkspaceLiveRuntimeState(restored.vaultRoot);
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
   const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
 
-  if (liveState) {
-    if (isHostedWorkspaceLiveRuntimeStateHit({
-      cache: liveState,
-      snapshotRef,
-      vaultRoot: restored.vaultRoot,
-    })) {
-      addHostedWorkspaceRuntimeBundleReaders({
-        baseSnapshotRef,
-        deltaSnapshotRef,
-        hotSnapshotRef,
-        platform: input.platform,
-        readBundles: materializerBundles,
-      });
-      const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-        vaultRoot: restored.vaultRoot,
-      });
-      return {
-        ...restored,
-        materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-          materializedArtifactPaths,
-          platform: input.platform,
-          restored,
-          readBundles: materializerBundles,
-        }),
-        materializedArtifactPaths,
-        mode: snapshotRef ? "snapshot" : "null-bootstrap",
-        restoreWasCold: false,
-      };
-    }
-
-    await clearHostedWorkspaceRuntimeLocalRoots(restored);
-    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-  }
+  await clearHostedWorkspaceLiveRuntimeStateBestEffort(restored.vaultRoot);
 
   const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: restored.vaultRoot,
@@ -192,6 +152,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     if (!input.platform.workspaceSnapshotPort) {
       throw new Error("Hosted workspace snapshot v2 restore requires a workspace snapshot port.");
     }
+    await clearHostedWorkspaceRuntimeLocalRoots(restored);
+    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
     await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
       durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,
@@ -336,9 +298,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         ref: baseSnapshotRef,
       });
       materializerBundles.push(async () => baseBundle);
-      if (deltaSnapshotRef) {
-        await clearHostedWorkspaceRuntimeLocalRoots(restored);
-      }
+      await clearHostedWorkspaceRuntimeLocalRoots(restored);
       await restoreHostedWorkspaceRuntimeBundle({
         bundle: baseBundle,
         platform: input.platform,
@@ -499,47 +459,13 @@ export async function tryOpenExistingWarmWorkspaceForIdleCheckpoint(input: {
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedWorkspaceWarmIdleCheckpointOpenResult> {
-  const restored = readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
-
-  try {
-    await access(restored.vaultRoot);
-  } catch {
-    return {
-      ok: false,
-      reason: "warm_workspace_missing",
-    };
-  }
-
-  const snapshotRef = input.workspace?.snapshotRef ?? null;
-  if (!snapshotRef) {
-    return {
-      ok: true,
-      restored,
-    };
-  }
-
-  const liveState = await readHostedWorkspaceLiveRuntimeState(restored.vaultRoot);
-  if (!liveState) {
-    return {
-      ok: false,
-      reason: "warm_workspace_missing",
-    };
-  }
-
-  if (!isHostedWorkspaceLiveRuntimeStateHit({
-    cache: liveState,
-    snapshotRef,
-    vaultRoot: restored.vaultRoot,
-  })) {
-    return {
-      ok: false,
-      reason: "workspace_version_mismatch",
-    };
-  }
-
+  void input.workspace;
+  await clearHostedWorkspaceLiveRuntimeStateBestEffort(
+    readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot).vaultRoot,
+  );
   return {
-    ok: true,
-    restored,
+    ok: false,
+    reason: "warm_workspace_missing",
   };
 }
 
@@ -591,23 +517,6 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
-}
-
-function addHostedWorkspaceRuntimeBundleReaders(input: {
-  baseSnapshotRef: HostedExecutionBundleRef | null;
-  deltaSnapshotRef: HostedExecutionBundleRef | null;
-  hotSnapshotRef: HostedExecutionBundleRef | null;
-  platform: HostedRuntimePlatform;
-  readBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>>;
-}): void {
-  for (const ref of [input.baseSnapshotRef, input.hotSnapshotRef, input.deltaSnapshotRef]) {
-    if (ref) {
-      input.readBundles.push(() => readHostedWorkspaceRuntimeBundle({
-        platform: input.platform,
-        ref,
-      }));
-    }
-  }
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
@@ -911,41 +820,17 @@ export async function markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBest
   snapshotRef: HostedWorkspaceState["snapshotRef"];
   vaultRoot: string;
 }): Promise<void> {
-  try {
-    await writeFile(
-      resolveHostedWorkspaceLiveRuntimeStatePath(input.vaultRoot),
-      JSON.stringify({
-        schema: HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA,
-        snapshotRefKey: snapshotRefKey(input.snapshotRef),
-        vaultRootName: readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot),
-      } satisfies HostedWorkspaceLiveRuntimeState) + "\n",
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
-    );
-  } catch {
-    // Restore remains correct without this marker; the next warm run may reapply the same snapshot.
-  }
-}
-
-async function readHostedWorkspaceLiveRuntimeState(
-  vaultRoot: string,
-): Promise<HostedWorkspaceLiveRuntimeState | null> {
-  try {
-    const contents = await readFile(resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot), "utf8");
-    const parsed: unknown = JSON.parse(contents);
-    return parseHostedWorkspaceLiveRuntimeState(parsed);
-  } catch {
-    return null;
-  }
+  void input.snapshotRef;
+  // Dirty local runtime state is valid only inside the currently owned child
+  // process. A later lease must restore from durable workspace truth.
+  await clearHostedWorkspaceLiveRuntimeStateBestEffort(input.vaultRoot);
 }
 
 async function clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot: string): Promise<void> {
   try {
     await rm(resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot), { force: true });
   } catch {
-    // A stale or missing marker only affects warm-restore performance.
+    // The legacy marker is best-effort cleanup only.
   }
 }
 
@@ -1057,17 +942,6 @@ function isHostedWorkspaceWorkingRestoreCacheHit(input: {
   );
 }
 
-function isHostedWorkspaceLiveRuntimeStateHit(input: {
-  cache: HostedWorkspaceLiveRuntimeState;
-  snapshotRef: HostedWorkspaceState["snapshotRef"];
-  vaultRoot: string;
-}): boolean {
-  return (
-    input.cache.snapshotRefKey === snapshotRefKey(input.snapshotRef)
-    && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
-  );
-}
-
 function parseHostedWorkspaceBaseRestoreCache(
   value: unknown,
 ): HostedWorkspaceBaseRestoreCache | null {
@@ -1167,63 +1041,6 @@ function parseHostedWorkspaceWorkingRestoreCache(
     schema: HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA,
     vaultRootName: value.vaultRootName,
   };
-}
-
-function parseHostedWorkspaceLiveRuntimeState(
-  value: unknown,
-): HostedWorkspaceLiveRuntimeState | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (value.schema !== HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA) {
-    return null;
-  }
-  if (typeof value.snapshotRefKey !== "string") {
-    return null;
-  }
-  if (typeof value.vaultRootName !== "string") {
-    return null;
-  }
-
-  return {
-    schema: HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA,
-    snapshotRefKey: value.snapshotRefKey,
-    vaultRootName: value.vaultRootName,
-  };
-}
-
-function snapshotRefKey(snapshotRef: HostedWorkspaceState["snapshotRef"]): string {
-  if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
-    return JSON.stringify({
-      workspaceSnapshotV2: {
-        encryptedByteSize: snapshotRef.archive.encryptedByteSize,
-        encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
-        objectKey: snapshotRef.objectKey,
-        schema: snapshotRef.schema,
-        snapshotId: snapshotRef.snapshotId,
-        upload: snapshotRef.upload,
-      },
-    });
-  }
-
-  const base = readHostedExecutionSnapshotBaseRef(snapshotRef);
-  const hot = readHostedExecutionSnapshotHotRef(snapshotRef);
-  const delta = readHostedExecutionSnapshotDeltaRef(snapshotRef);
-
-  return JSON.stringify({
-    base: bundlePayloadKey(base),
-    delta: bundlePayloadKey(delta),
-    hot: bundlePayloadKey(hot),
-  });
-}
-
-function bundlePayloadKey(ref: HostedExecutionBundleRef | null): { hash: string; size: number } | null {
-  return ref
-    ? {
-        hash: ref.hash,
-        size: ref.size,
-      }
-    : null;
 }
 
 function readHostedWorkspaceRestoreCacheVaultRootName(vaultRoot: string): string {

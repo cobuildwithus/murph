@@ -15,6 +15,11 @@ import {
 } from './device-services.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 import { installVaultCliSchemaIndex } from './vault-cli-schema-index.js'
+import {
+  createVaultCliVaultContext,
+  installVaultCliVaultContext,
+  type VaultCliVaultContext,
+} from './vault-cli-vault-context.js'
 
 export {
   CLI_CONFIG_FILES,
@@ -25,6 +30,7 @@ export interface CreateVaultCliOptions {
   commandName?: string
   inboxServices?: InboxServices
   services?: VaultServices | CliVaultServices
+  vaultContext?: VaultCliVaultContext
 }
 
 function createDefaultInboxServices(): InboxServices {
@@ -53,9 +59,16 @@ export function createVaultCliWithOptions(
     inboxServices,
   })
   installVaultCliSchemaIndex(cli)
+  installVaultCliVaultContext(
+    cli,
+    input.vaultContext ?? createVaultCliVaultContext(),
+  )
 
   return cli
 }
+
+export { createVaultCliVaultContext }
+export type { VaultCliVaultContext }
 
 export function createVaultCli(
   services: VaultServices | CliVaultServices = createDefaultVaultServices(),

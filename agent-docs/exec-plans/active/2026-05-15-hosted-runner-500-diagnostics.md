@@ -35,6 +35,9 @@ runtime phase boundaries.
 9. Add assistant input-selection and outbox metadata boundaries so production
    can distinguish "mailbox imported but no reply candidate" from provider,
    cron, and delivery failures without logging raw content or identifiers.
+10. Add v2 workspace snapshot restore step diagnostics so `workspace.restore`
+    failures identify the failing restore sub-step without logging object keys,
+    presigned URLs, snapshot ids, user ids, file paths, hashes, or content.
 
 ## Verification
 
@@ -112,6 +115,59 @@ runtime phase boundaries.
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/runner-outbound.test.ts` passed after the internal authority 401 operation-classification fix.
 - `pnpm --dir apps/cloudflare typecheck` passed after the internal authority 401 operation-classification fix.
 - `pnpm typecheck` passed after the internal authority 401 operation-classification fix.
+- `security-privacy-review` found no findings in the v2 workspace
+  snapshot restore step diagnostics. Residual exposure is limited to
+  intentional workspace-shape metadata: archive byte/count/compression totals
+  and timing.
+- `simplify` found one low issue: the restore log-details helper accepted
+  arbitrary detail overrides. The helper now accepts only the concrete safe
+  inputs needed by this diagnostic surface.
+- `coverage-write` added a direct R2 transport-error regression proving the
+  restore-step warning and adjacent upstream-fetch warning stay metadata-only
+  when the thrown fetch error contains presigned URL/path/query material.
+- `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts` passed
+  after the v2 workspace snapshot restore diagnostics and coverage-write
+  regression.
+- `pnpm --dir apps/cloudflare typecheck` passed after the v2 workspace
+  snapshot restore diagnostics and coverage-write regression.
+- `git diff --check -- apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-platform.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after the v2 workspace snapshot restore diagnostics and coverage-write regression.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-platform.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after the v2 workspace snapshot restore diagnostics and coverage-write regression.
+- `pnpm typecheck` passed after the v2 workspace snapshot restore
+  diagnostics and coverage-write regression.
+- `task-finish-review` found one medium adjacent-log gap: workspace snapshot
+  unwrap/presign non-OK upstream warnings still logged the raw
+  snapshot-id-bearing route path and used an error built from response text.
+  Fixed by adding redacted `fetchHostedJson` log paths for workspace snapshot
+  routes and logging a status-only error for non-OK upstream warnings while
+  preserving thrown error behavior.
+- `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts` passed
+  after the final-review adjacent-log fix.
+- `pnpm --dir apps/cloudflare typecheck` passed after the final-review
+  adjacent-log fix.
+- `git diff --check -- apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-platform.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after the final-review adjacent-log fix.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-platform.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after the final-review adjacent-log fix.
+- `pnpm typecheck` passed after the final-review adjacent-log fix.
+- Final `task-finish-review` rerun found no findings. Residual gaps are
+  accepted as low value for this slice: presign GET non-OK uses the same
+  redacted `fetchHostedJson` path as the unwrap regression; archive-restore
+  failures are covered by static inspection of the same step wrapper; thrown
+  errors preserve upstream response text by design while structured logs stay
+  status-only/safe metadata.
+- Extra user-requested review subagents found no medium/high issues. Low
+  findings were fixed: renamed the control-plane helper override to
+  `redactedLogPath`, added a redacted direct workspace-snapshot-object origin
+  label for transport-failure logs, updated the transport-error regression to
+  reject the raw R2 origin, and tightened the coordination-ledger boundary to
+  forbid snapshot/object identifiers and hashes.
+- Post-fix focused verification passed again:
+  `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts`,
+  `pnpm --dir apps/cloudflare typecheck`, `git diff --check -- apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-platform.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`,
+  `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-platform.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`,
+  and `pnpm typecheck`.
+- Post-fix final follow-up review found no findings. Residual risks: thrown
+  upstream response text is still preserved for callers by design while
+  structured logs stay redacted; hash redaction is covered by static inspection
+  of the restore-detail helper rather than a dedicated test assertion.
 
 ## State
 
@@ -218,6 +274,16 @@ runtime phase boundaries.
 - Web-control non-OK responses now log only response body size/kind and safe
   JSON error code/shape, making hosted-web 404s distinguishable from HTML/text
   routing failures without logging response bodies.
+- Current local incident showed `workspace.restore:fail` after data-key unwrap
+  and presign GET. V2 snapshot restore now emits diagnostics at the
+  snapshot-port boundary for size guard, data-key unwrap, scratch preparation,
+  presign GET, object fetch, and archive restore, so the next failure exposes
+  the fixed-vocabulary step that failed while preserving the raw
+  snapshot/object/path redaction boundary.
+- Workspace snapshot control-plane non-OK warnings now use redacted log paths
+  and status/body-size metadata only, so adjacent unwrap/presign warnings do
+  not leak snapshot ids or response-body text while thrown errors still keep
+  their existing behavior for callers.
 - Runtime phase logging now closes any still-open phase with a fail boundary
   before logging the outer runtime failure, so restore failures produce
   `workspace.restore:fail` instead of only `runtime:fail`.

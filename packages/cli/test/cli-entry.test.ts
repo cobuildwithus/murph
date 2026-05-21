@@ -35,17 +35,19 @@ function mockCliActionModules(input: {
   cli: {
     serve: ReturnType<typeof vi.fn>;
   };
+  onCreateVaultCliWithOptions?: (input: Record<string, unknown>) => void;
   operatorConfigModule: Record<string, unknown>;
   setupCliModule: Record<string, unknown>;
   setupRuntimeEnvModule?: Record<string, unknown>;
 }) {
   vi.doMock("../src/vault-cli.js", () => ({
     CLI_CONFIG_FILES: [],
-    createVaultCliWithOptions: vi.fn(() => input.cli),
+    createVaultCliWithOptions: vi.fn((options: Record<string, unknown>) => {
+      input.onCreateVaultCliWithOptions?.(options);
+      return input.cli;
+    }),
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => ({
-    commandNeedsVaultForExecution: vi.fn(() => true),
-    hasExplicitVaultOption: vi.fn(() => false),
     resolveConfiguredDefaultVault: vi.fn(async () => null),
     resolveEffectiveTopLevelToken: vi.fn(
       (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
@@ -180,20 +182,17 @@ test("installSqliteExperimentalWarningFilter is idempotent", () => {
 
 test("runMurphCliAction injects the resolved default vault for non-setup invocations", async () => {
   const serve = vi.fn(async () => undefined);
-  const applyDefaultVaultToArgs = vi.fn(
-    (argv: readonly string[], defaultVault: string | null) =>
-      defaultVault === null ? [...argv] : [...argv, "--vault", defaultVault],
-  );
   const resolveDefaultVault = vi.fn(async () => "/vaults/default");
   const resolveConfiguredDefaultVault = vi.fn(async () => null);
+  let vaultContext: { current: string | null } | null = null;
 
   mockCliActionModules({
     cli: { serve },
+    onCreateVaultCliWithOptions: (options) => {
+      vaultContext = options.vaultContext as { current: string | null };
+    },
     operatorConfigModule: {
-      applyDefaultVaultToArgs,
-      commandNeedsVaultForExecution: vi.fn(() => true),
       expandConfiguredVaultPath: vi.fn(),
-      hasExplicitVaultOption: vi.fn(() => false),
       resolveConfiguredDefaultVault,
       resolveEffectiveTopLevelToken: vi.fn(
         (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
@@ -214,14 +213,12 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
 
   await runMurphCliAction(["assistant", "chat"]);
 
-  assert.deepEqual(applyDefaultVaultToArgs.mock.calls, [
-    [["assistant", "chat"], "/vaults/default"],
-  ]);
   assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
   assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
+  assert.equal(vaultContext?.current, "/vaults/default");
   assert.deepEqual(serve.mock.calls, [
     [
-      ["assistant", "chat", "--vault", "/vaults/default"],
+      ["assistant", "chat"],
       {
         env: process.env,
       },
@@ -236,10 +233,7 @@ test("runMurphCliAction rejects explicit --vault overrides for murph product com
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
-      applyDefaultVaultToArgs: vi.fn((argv: readonly string[]) => [...argv]),
-      commandNeedsVaultForExecution: vi.fn(() => true),
       expandConfiguredVaultPath: vi.fn(),
-      hasExplicitVaultOption: vi.fn(() => true),
       resolveConfiguredDefaultVault,
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveEffectiveTopLevelToken: vi.fn(() => "assistant"),
@@ -260,22 +254,18 @@ test("runMurphCliAction rejects explicit --vault overrides for murph product com
     () => runMurphCliAction(["assistant", "chat", "--vault", "/vaults/other"]),
     /`murph` uses one active vault/u,
   );
-  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, [["/operator-home"]]);
+  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
   assert.equal(serve.mock.calls.length, 0);
 });
 
 test("runMurphCliAction lets JSON requests reach Incur when vault defaults are absent", async () => {
   const serve = vi.fn(async () => undefined);
-  const applyDefaultVaultToArgs = vi.fn((argv: readonly string[]) => [...argv]);
   const resolveDefaultVault = vi.fn(async () => null);
 
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
-      applyDefaultVaultToArgs,
-      commandNeedsVaultForExecution: vi.fn(() => true),
       expandConfiguredVaultPath: vi.fn(),
-      hasExplicitVaultOption: vi.fn(() => false),
       resolveDefaultVault,
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
@@ -293,9 +283,6 @@ test("runMurphCliAction lets JSON requests reach Incur when vault defaults are a
   await runMurphCliAction(["--no-config", "vault", "show", "--format", "json"]);
 
   assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
-  assert.deepEqual(applyDefaultVaultToArgs.mock.calls, [
-    [["--no-config", "vault", "show", "--format", "json"], null],
-  ]);
   assert.deepEqual(serve.mock.calls, [
     [
       ["--no-config", "vault", "show", "--format", "json"],
@@ -312,16 +299,12 @@ for (const jsonArgv of [
 ]) {
   test(`runMurphCliAction lets ${jsonArgv.at(-1)} requests reach Incur when vault defaults are absent`, async () => {
     const serve = vi.fn(async () => undefined);
-    const applyDefaultVaultToArgs = vi.fn((argv: readonly string[]) => [...argv]);
     const resolveDefaultVault = vi.fn(async () => null);
 
     mockCliActionModules({
       cli: { serve },
       operatorConfigModule: {
-        applyDefaultVaultToArgs,
-        commandNeedsVaultForExecution: vi.fn(() => true),
         expandConfiguredVaultPath: vi.fn(),
-        hasExplicitVaultOption: vi.fn(() => false),
         resolveDefaultVault,
         resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
       },
@@ -338,7 +321,6 @@ for (const jsonArgv of [
 
     await runMurphCliAction(jsonArgv);
 
-    assert.deepEqual(applyDefaultVaultToArgs.mock.calls, [[jsonArgv, null]]);
     assert.deepEqual(serve.mock.calls, [
       [
         jsonArgv,
@@ -350,18 +332,27 @@ for (const jsonArgv of [
   });
 }
 
-test("runMurphCliAction fails with an active-vault message when murph has no configured vault", async () => {
+test("runMurphCliAction records the active-vault message when murph has no configured vault", async () => {
   const serve = vi.fn(async () => undefined);
   const resolveConfiguredDefaultVault = vi.fn(async () => null);
   const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
+  let vaultContext:
+    | {
+        current: string | null;
+        missingVaultMessage: string | null;
+      }
+    | null = null;
 
   mockCliActionModules({
     cli: { serve },
+    onCreateVaultCliWithOptions: (options) => {
+      vaultContext = options.vaultContext as {
+        current: string | null;
+        missingVaultMessage: string | null;
+      };
+    },
     operatorConfigModule: {
-      applyDefaultVaultToArgs: vi.fn((argv: readonly string[]) => [...argv]),
-      commandNeedsVaultForExecution: vi.fn(() => true),
       expandConfiguredVaultPath: vi.fn(),
-      hasExplicitVaultOption: vi.fn(() => false),
       resolveConfiguredDefaultVault,
       resolveDefaultVault,
       resolveEffectiveTopLevelToken: vi.fn(() => "workout"),
@@ -378,13 +369,20 @@ test("runMurphCliAction fails with an active-vault message when murph has no con
     },
   });
 
-  await assert.rejects(
-    () => runMurphCliAction(["workout", "list"]),
-    /No active Murph vault is configured/u,
-  );
+  await runMurphCliAction(["workout", "list"]);
+
   assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, [["/operator-home"]]);
   assert.deepEqual(resolveDefaultVault.mock.calls, []);
-  assert.equal(serve.mock.calls.length, 0);
+  assert.equal(vaultContext?.current, null);
+  assert.match(vaultContext?.missingVaultMessage ?? "", /No active Murph vault is configured/u);
+  assert.deepEqual(serve.mock.calls, [
+    [
+      ["workout", "list"],
+      {
+        env: process.env,
+      },
+    ],
+  ]);
 });
 
 test("runMurphCliAction still allows murph init to target an explicit vault", async () => {

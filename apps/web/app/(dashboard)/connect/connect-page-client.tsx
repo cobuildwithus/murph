@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { LoaderCircleIcon } from "lucide-react";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
@@ -144,6 +145,12 @@ export function ConnectSourcesGrid({
   );
   const visibleNotice = notice ?? initialConnectIntentPresentation?.notice ?? null;
   const visibleActionError = actionError ?? initialConnectIntentPresentation?.actionError ?? null;
+  // When this load carries a connect intent that the effect below will auto-redirect, show a
+  // pending-redirect dialog. Seeded on mount and cleared only if that redirect attempt fails.
+  const [connectIntentRedirectName, setConnectIntentRedirectName] = useState<string | null>(
+    () => resolveConnectIntentRedirectSource(activeConnectIntent, displaySources, authenticated)?.name
+      ?? null,
+  );
 
   useEffect(() => {
     if (hasInitialCallback) {
@@ -199,8 +206,8 @@ export function ConnectSourcesGrid({
     initialConnectIntentAttemptedRef.current = true;
     stripDeviceConnectIntentParams();
 
-    const source = findInitialConnectIntentSource(activeConnectIntent, displaySources);
-    if (!source || !source.connectTarget || (source.connected && !source.requiresReconnect)) {
+    const source = resolveConnectIntentRedirectSource(activeConnectIntent, displaySources, authenticated);
+    if (!source) {
       return;
     }
 
@@ -219,6 +226,7 @@ export function ConnectSourcesGrid({
           return;
         }
 
+        setConnectIntentRedirectName(null);
         setInitialConnectIntentDismissed(true);
         if (isHostedConsentRequiredError(error)) {
           setConsentRequest({
@@ -374,6 +382,8 @@ export function ConnectSourcesGrid({
           }
         }}
       />
+
+      <ConnectRedirectDialog sourceName={connectIntentRedirectName} />
 
     </section>
   );
@@ -812,6 +822,25 @@ function findInitialConnectIntentSource(
   return sources.find((source) => normalizeConnectSourceId(source.id) === sourceId) ?? null;
 }
 
+// Single source of truth for "this connect intent will auto-redirect, to this source".
+// Both the redirect effect and the pending-redirect dialog rely on this verdict.
+function resolveConnectIntentRedirectSource(
+  intent: InitialDeviceConnectIntent,
+  sources: readonly ConnectSource[],
+  authenticated: boolean,
+): ConnectSource | null {
+  if (!authenticated || !intent?.claim) {
+    return null;
+  }
+
+  const source = findInitialConnectIntentSource(intent, sources);
+  if (!source || !source.connectTarget || (source.connected && !source.requiresReconnect)) {
+    return null;
+  }
+
+  return source;
+}
+
 function normalizeConnectKey(value: string | null | undefined): string | null {
   const normalized = value
     ?.trim()
@@ -958,6 +987,30 @@ function ConnectDisconnectDialog({
             Cancel
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConnectRedirectDialog({ sourceName }: { sourceName: string | null }) {
+  return (
+    <Dialog open={Boolean(sourceName)}>
+      <DialogContent showCloseButton={false} className="max-w-sm gap-5 p-6 md:p-7">
+        <DialogHeader className="items-center text-center">
+          <span
+            aria-hidden="true"
+            className="mb-1 flex size-12 items-center justify-center rounded-full bg-muted"
+          >
+            <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+          </span>
+          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+            {sourceName ? `Connecting ${sourceName}` : "Connecting"}
+          </DialogTitle>
+          <DialogDescription>
+            Hang tight — we&apos;re taking you to {sourceName ?? "your source"} to finish setting up
+            the connection. This only takes a moment.
+          </DialogDescription>
+        </DialogHeader>
       </DialogContent>
     </Dialog>
   );

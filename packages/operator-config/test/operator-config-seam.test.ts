@@ -8,10 +8,8 @@ import { afterEach, test } from 'vitest'
 import {
   buildAssistantProviderDefaultsPatch,
   applyAssistantSelfDeliveryTargetDefaults,
-  applyDefaultVaultToArgs,
   clearAssistantSelfDeliveryTargets,
   expandConfiguredVaultPath,
-  hasExplicitVaultOption,
   listAssistantSelfDeliveryTargets,
   normalizeVaultForConfig,
   readOperatorConfig,
@@ -170,7 +168,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
   assert.equal(await readOperatorConfig(homeDirectory), null)
 })
 
-test('operator config resolves default vaults and injects them only for eligible command paths', async () => {
+test('operator config resolves default vaults without owning command argv mutation', async () => {
   const homeDirectory = await createTempHome('operator-config-vault-')
   const envVault = path.join(homeDirectory, 'env-vault')
   const configuredVault = path.join(homeDirectory, 'configured-vault')
@@ -201,126 +199,6 @@ test('operator config resolves default vaults and injects them only for eligible
   await rm(cwdVault, { force: true, recursive: true })
   assert.equal(await resolveDefaultVault(homeDirectory, {}), null)
   assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
-
-  assert.equal(hasExplicitVaultOption(['assistant', '--vault', '/tmp/vault']), true)
-  assert.equal(hasExplicitVaultOption(['assistant', '--vault=/tmp/vault']), true)
-  assert.equal(hasExplicitVaultOption(['assistant', '--', '--vault']), false)
-  assert.equal(
-    Reflect.apply(hasExplicitVaultOption, undefined, [
-      ['assistant', null, '--vault', '/tmp/vault'],
-    ]),
-    true,
-  )
-
-  assert.deepEqual(applyDefaultVaultToArgs(['assistant', 'run'], null), ['assistant', 'run'])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'run', '--vault', '/tmp/existing'], '/tmp/default'),
-    ['assistant', 'run', '--vault', '/tmp/existing'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--help', 'assistant'], '/tmp/default'),
-    ['--help', 'assistant'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['unknown-command'], '/tmp/default'),
-    ['unknown-command'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'self-target', 'list'], '/tmp/default'),
-    ['assistant', 'self-target', 'list'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(
-      ['--no-config', 'assistant', 'self-target', 'list', '--format', 'json'],
-      '/tmp/default',
-    ),
-    ['--no-config', 'assistant', 'self-target', 'list', '--format', 'json'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(
-      ['--config', '/tmp/murph-config.json', 'assistant', 'self-target', 'show', '--format', 'json'],
-      '/tmp/default',
-    ),
-    ['--config', '/tmp/murph-config.json', 'assistant', 'self-target', 'show', '--format', 'json'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--no-config', 'audit', 'list', '--format', 'json'], '/tmp/default'),
-    ['--no-config', 'audit', 'list', '--format', 'json', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(
-      ['--config=/tmp/murph-config.json', 'audit', 'list', '--format', 'json'],
-      '/tmp/default',
-    ),
-    ['--config=/tmp/murph-config.json', 'audit', 'list', '--format', 'json', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(
-      ['--config', '/tmp/murph-config.json', 'audit', 'list', '--format', 'json'],
-      '/tmp/default',
-    ),
-    ['--config', '/tmp/murph-config.json', 'audit', 'list', '--format', 'json', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['query', 'projection', 'status'], '/tmp/default'),
-    ['query', 'projection', 'status', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['unsupported'], '/tmp/default'),
-    ['unsupported'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['query'], '/tmp/default'),
-    ['query'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--no-config', 'assistant'], '/tmp/default'),
-    ['--no-config', 'assistant'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant'], '/tmp/default'),
-    ['assistant'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'run', '--', '--model', 'gpt-4.1'], '/tmp/default'),
-    ['assistant', 'run', '--vault', '/tmp/default', '--', '--model', 'gpt-4.1'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'run'], '/tmp/default'),
-    ['assistant', 'run', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--format', 'json'], '/tmp/default'),
-    ['--format', 'json'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--format', 'json', 'assistant', 'run'], '/tmp/default'),
-    ['--format', 'json', 'assistant', 'run', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--format=json', 'assistant', 'run'], '/tmp/default'),
-    ['--format=json', 'assistant', 'run', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--token-offset=5', 'assistant', 'run'], '/tmp/default'),
-    ['--token-offset=5', 'assistant', 'run', '--vault', '/tmp/default'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', '--token-offset', '5'], '/tmp/default'),
-    ['assistant', '--token-offset', '5'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'self-target', 'clear'], '/tmp/default'),
-    ['assistant', 'self-target', 'clear'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--format=json', 'assistant', 'self-target', 'list'], '/tmp/default'),
-    ['--format=json', 'assistant', 'self-target', 'list'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['--token-offset=5', 'assistant', 'self-target', 'clear'], '/tmp/default'),
-    ['--token-offset=5', 'assistant', 'self-target', 'clear'],
-  )
 })
 
 test('operator config saves, sorts, resolves, and clears assistant self-delivery targets', async () => {

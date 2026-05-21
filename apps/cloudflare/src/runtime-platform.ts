@@ -377,7 +377,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           headers,
           method: "PUT",
         },
-        logPath: "/objects/REDACTED",
+        redactedLogPath: "/objects/REDACTED",
         timeoutMs,
         url: new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
       });
@@ -499,7 +499,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             response = await fetchHostedResponse({
               description: "Hosted artifact fetch",
               fetchImpl,
-              logPath: "/objects/REDACTED",
+              redactedLogPath: "/objects/REDACTED",
               timeoutMs,
               url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
             });
@@ -1459,6 +1459,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         description: "Hosted workspace snapshot session abort",
         fetchImpl: input.fetchImpl,
         headers,
+        redactedLogPath: "/workspace-snapshots/REDACTED",
         method: "DELETE",
         timeoutMs: input.timeoutMs,
         url: new URL(
@@ -1483,6 +1484,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         description: "Hosted workspace snapshot complete",
         fetchImpl: input.fetchImpl,
         headers,
+        redactedLogPath: "/workspace-snapshots/REDACTED/complete",
         method: "POST",
         timeoutMs: input.timeoutMs,
         url: new URL(
@@ -1542,7 +1544,8 @@ function createCloudflareWorkspaceSnapshotPort(input: {
           },
           method: "PUT",
         } as RequestInit & { duplex: "half" },
-        logPath: "/workspace-snapshot-object",
+        redactedLogPath: "/workspace-snapshot-object",
+        redactedResponseOrigin: "workspace_snapshot_object",
         timeoutMs: Math.max(1, expiresAtMs - Date.now()),
         url: new URL(presignedPut.putUrl),
       });
@@ -1550,50 +1553,93 @@ function createCloudflareWorkspaceSnapshotPort(input: {
     },
 
     async restoreWorkspaceSnapshot(request) {
-      if (request.ref.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
-        throw new RangeError("Hosted workspace snapshot restore exceeds the single-part size guard.");
-      }
-      const dataKey = await unwrapWorkspaceSnapshotDataKey({
-        aad: request.ref.encryption.aad,
-        fetchImpl: input.fetchImpl,
-        rootKeyId: request.ref.encryption.rootKeyId,
+      const restoreLogDetails = buildHostedWorkspaceSnapshotRestoreLogDetails({
+        ref: request.ref,
+        scratchRootPresent: request.scratchRoot !== null && request.scratchRoot !== undefined,
         timeoutMs: input.timeoutMs,
-        workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-        wrappedDataKey: request.ref.encryption.wrappedDataKey,
       });
-      const scratchRoot = path.resolve(request.scratchRoot ?? tmpdir());
-      await mkdir(scratchRoot, { mode: 0o700, recursive: true });
-      const tempDir = await mkdtemp(path.join(scratchRoot, "workspace-snapshot-fetch-"));
-      const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
-      try {
-        const presignedGet = await presignWorkspaceSnapshotGet({
+      await runHostedWorkspaceSnapshotRestoreStep({
+        details: restoreLogDetails,
+        run: async () => {
+          if (request.ref.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+            throw new RangeError("Hosted workspace snapshot restore exceeds the single-part size guard.");
+          }
+        },
+        step: "size_guard",
+      });
+      const dataKey = await runHostedWorkspaceSnapshotRestoreStep({
+        details: restoreLogDetails,
+        run: async () => await unwrapWorkspaceSnapshotDataKey({
+          aad: request.ref.encryption.aad,
           fetchImpl: input.fetchImpl,
-          objectKey: request.ref.objectKey,
-          ref: request.ref,
-          snapshotId: request.ref.snapshotId,
+          rootKeyId: request.ref.encryption.rootKeyId,
           timeoutMs: input.timeoutMs,
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          wrappedDataKey: request.ref.encryption.wrappedDataKey,
+        }),
+        step: "data_key_unwrap",
+      });
+      const scratchRoot = path.resolve(request.scratchRoot ?? tmpdir());
+      const tempDir = await runHostedWorkspaceSnapshotRestoreStep({
+        details: restoreLogDetails,
+        run: async () => {
+          await mkdir(scratchRoot, { mode: 0o700, recursive: true });
+          return await mkdtemp(path.join(scratchRoot, "workspace-snapshot-fetch-"));
+        },
+        step: "scratch_prepare",
+      });
+      const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
+      try {
+        const presignedGet = await runHostedWorkspaceSnapshotRestoreStep({
+          details: restoreLogDetails,
+          run: async () => {
+            const result = await presignWorkspaceSnapshotGet({
+              fetchImpl: input.fetchImpl,
+              objectKey: request.ref.objectKey,
+              ref: request.ref,
+              snapshotId: request.ref.snapshotId,
+              timeoutMs: input.timeoutMs,
+              workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+            });
+            const expiresAtMs = Date.parse(result.expiresAt);
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+              throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
+            }
+            return {
+              ...result,
+              expiresAtMs,
+            };
+          },
+          step: "presign_get",
         });
-        const expiresAtMs = Date.parse(presignedGet.expiresAt);
-        if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-          throw new Error("Hosted workspace snapshot direct R2 download URL is expired.");
-        }
-        const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
-          encryptedFilePath,
-          expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
-          fetchImpl: input.fetchImpl,
-          getUrl: presignedGet.getUrl,
-          timeoutMs: Math.max(1, expiresAtMs - Date.now() - 5_000),
+        await runHostedWorkspaceSnapshotRestoreStep({
+          details: restoreLogDetails,
+          run: async () => {
+            const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
+              encryptedFilePath,
+              expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
+              fetchImpl: input.fetchImpl,
+              getUrl: presignedGet.getUrl,
+              timeoutMs: Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000),
+            });
+            if (!fetched) {
+              throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
+            }
+          },
+          step: "object_fetch",
         });
-        if (!fetched) {
-          throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
-        }
-        await restoreEncryptedWorkspaceSnapshot({
-          dataKey,
-          durableRoot: request.durableRoot,
-          encryptedFilePath,
-          ref: request.ref,
-          scratchRoot: request.scratchRoot ?? null,
+        await runHostedWorkspaceSnapshotRestoreStep({
+          details: restoreLogDetails,
+          run: async () => {
+            await restoreEncryptedWorkspaceSnapshot({
+              dataKey,
+              durableRoot: request.durableRoot,
+              encryptedFilePath,
+              ref: request.ref,
+              scratchRoot: request.scratchRoot ?? null,
+            });
+          },
+          step: "archive_restore",
         });
       } finally {
         await rm(tempDir, { force: true, recursive: true });
@@ -1621,6 +1667,79 @@ function createCloudflareWorkspaceSnapshotPort(input: {
     },
   };
   return port;
+}
+
+type HostedWorkspaceSnapshotRestoreStep =
+  | "archive_restore"
+  | "data_key_unwrap"
+  | "object_fetch"
+  | "presign_get"
+  | "scratch_prepare"
+  | "size_guard";
+
+function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
+  ref: HostedWorkspaceSnapshotV2Ref;
+  scratchRootPresent: boolean;
+  timeoutMs: number;
+}): HostedExecutionStructuredLogDetails {
+  return {
+    archiveCompression: input.ref.archive.compression,
+    archiveEncryptedByteSize: input.ref.archive.encryptedByteSize,
+    archiveFileCount: input.ref.archive.fileCount,
+    archiveTotalPlainBytes: input.ref.archive.totalPlainBytes,
+    operation: "workspace_snapshot_restore",
+    scratchRootPresent: input.scratchRootPresent,
+    timeoutMs: input.timeoutMs,
+  };
+}
+
+async function runHostedWorkspaceSnapshotRestoreStep<T>(input: {
+  details: HostedExecutionStructuredLogDetails;
+  run(): Promise<T>;
+  step: HostedWorkspaceSnapshotRestoreStep;
+}): Promise<T> {
+  const startedAt = Date.now();
+  emitHostedExecutionStructuredLog({
+    component: "hosted.runtime.workspace-snapshot",
+    details: {
+      ...input.details,
+      workspaceSnapshotRestoreStep: input.step,
+    },
+    message: "Hosted workspace snapshot restore step started.",
+    phase: "runtime.starting",
+    userId: null,
+  });
+
+  try {
+    const result = await input.run();
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.workspace-snapshot",
+      details: {
+        ...input.details,
+        durationMs: Date.now() - startedAt,
+        workspaceSnapshotRestoreStep: input.step,
+      },
+      message: "Hosted workspace snapshot restore step completed.",
+      phase: "runtime.starting",
+      userId: null,
+    });
+    return result;
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.workspace-snapshot",
+      details: {
+        ...input.details,
+        durationMs: Date.now() - startedAt,
+        workspaceSnapshotRestoreStep: input.step,
+        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+      },
+      level: "warn",
+      message: "Hosted workspace snapshot restore step failed.",
+      phase: "runtime.starting",
+      userId: null,
+    });
+    throw error;
+  }
 }
 
 function parseHostedWorkspaceSnapshotStartPayload(
@@ -1727,6 +1846,7 @@ async function presignWorkspaceSnapshotPut(input: {
     description: "Hosted workspace snapshot presign PUT",
     fetchImpl: input.fetchImpl,
     headers,
+    redactedLogPath: "/workspace-snapshots/REDACTED/presign-put",
     method: "POST",
     timeoutMs: input.timeoutMs,
     url: new URL(
@@ -1758,6 +1878,7 @@ async function presignWorkspaceSnapshotGet(input: {
     description: "Hosted workspace snapshot presign download",
     fetchImpl: input.fetchImpl,
     headers,
+    redactedLogPath: "/workspace-snapshots/REDACTED/presign-get",
     method: "POST",
     timeoutMs: input.timeoutMs,
     url: new URL(
@@ -1802,6 +1923,7 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
     description: "Hosted workspace snapshot data key unwrap",
     fetchImpl: input.fetchImpl,
     headers,
+    redactedLogPath: "/workspace-snapshots/REDACTED/data-key/unwrap",
     method: "POST",
     timeoutMs: input.timeoutMs,
     url: new URL(
@@ -1835,7 +1957,8 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
     init: {
       method: "GET",
     },
-    logPath: "/workspace-snapshot-object",
+    redactedLogPath: "/workspace-snapshot-object",
+    redactedResponseOrigin: "workspace_snapshot_object",
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
   });
@@ -2070,7 +2193,7 @@ async function fetchHostedWebControlPlaneJson(input: {
           }),
           method,
         },
-        logPath: createHostedWebControlLogPath(route.pathname),
+        redactedLogPath: createHostedWebControlLogPath(route.pathname),
         signal: input.signal ?? null,
         timeoutMs: input.timeoutMs,
         url: createHostedWebControlProxyUrl(route.pathAndSearch),
@@ -2356,6 +2479,7 @@ async function fetchHostedJson(input: {
   description: string;
   fetchImpl: typeof fetch;
   headers?: Headers;
+  redactedLogPath?: string;
   method: "DELETE" | "GET" | "POST" | "PUT";
   signal?: AbortSignal | null;
   timeoutMs: number;
@@ -2379,6 +2503,7 @@ async function fetchHostedJson(input: {
     signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: input.url,
+    ...(input.redactedLogPath ? { redactedLogPath: input.redactedLogPath } : {}),
   });
 
   if (input.allowNotFound && response.status === 404) {
@@ -2397,16 +2522,26 @@ async function fetchHostedJson(input: {
     };
     error.status = response.status;
     error.statusCode = response.status;
+    const logError = new Error(
+      `${input.description} failed with HTTP ${response.status}.`,
+    ) as Error & {
+      status: number;
+      statusCode: number;
+    };
+    logError.status = response.status;
+    logError.statusCode = response.status;
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
       details: {
         description: input.description,
         method: input.method,
-        path: input.url.pathname,
+        path: input.redactedLogPath ?? input.url.pathname,
+        responseBodyBytes: new TextEncoder().encode(detail).byteLength,
+        responseBodyPresent: detail.length > 0,
         responseOrigin: input.url.origin,
         responseStatus: response.status,
       },
-      error,
+      error: logError,
       level: "warn",
       message: "Hosted runtime upstream response returned non-OK.",
       phase: "outbox",
@@ -2537,7 +2672,8 @@ async function fetchHostedResponse(input: {
   description: string;
   fetchImpl: typeof fetch;
   init?: RequestInit;
-  logPath?: string;
+  redactedLogPath?: string;
+  redactedResponseOrigin?: string;
   signal?: AbortSignal | null;
   timeoutMs: number;
   url: URL;
@@ -2571,8 +2707,8 @@ async function fetchHostedResponse(input: {
       details: {
         description: input.description,
         method: input.init?.method ?? "GET",
-        path: input.logPath ?? input.url.pathname,
-        responseOrigin: input.url.origin,
+        path: input.redactedLogPath ?? input.url.pathname,
+        responseOrigin: input.redactedResponseOrigin ?? input.url.origin,
         ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
       },
       level: "warn",
