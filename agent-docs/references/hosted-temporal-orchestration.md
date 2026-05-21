@@ -155,6 +155,11 @@ exactly. Temporal TypeScript workflow type names are function names, so renaming
 the exported function requires changing the shared constant and tests together.
 The Temporal worker must use an ESM-compatible explicit `workflowsPath`, such as
 `createRequire(import.meta.url).resolve(...)`, or a prebuilt workflow bundle.
+Production Temporal Cloud clients must use the configured frontend address,
+namespace, API-key auth when configured, and TLS settings. The web signal client
+and worker connection code must support the same API key, TLS enablement,
+client certificate/key, server root CA, and server-name override settings so
+`signalWithStart` and worker polling use the same trust model.
 
 Mailbox signal `source` is a bounded safe string, not a provider enum. Parsers
 should enforce a non-empty trimmed value with a small max length and safe
