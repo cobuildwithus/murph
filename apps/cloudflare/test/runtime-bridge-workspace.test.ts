@@ -2110,6 +2110,44 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
 });
 
+describe("workspace snapshot tar test helpers", () => {
+  it("lists GNU tar long path entries by their expanded path", () => {
+    const longPath =
+      "home/.codex-hosted/sessions/2026/05/20/rollout-2026-05-20T01-02-03-00000000-0000-4000-8000-000000000041.jsonl";
+    const archive = createTestTarArchive([
+      createTestTarEntry({
+        contents: `${longPath}\0`,
+        name: "././@LongLink",
+        typeflag: "L",
+      }),
+      createTestTarEntry({
+        name: longPath.slice(0, 100),
+        typeflag: "0",
+      }),
+    ]);
+
+    expect(listTarArchiveEntries(archive)).toEqual([longPath]);
+  });
+
+  it("lists PAX path entries by their expanded path", () => {
+    const paxPath =
+      "home/.codex-hosted/sessions/2026/05/20/rollout-2026-05-20T01-02-03-00000000-0000-4000-8000-000000000041.jsonl";
+    const archive = createTestTarArchive([
+      createTestTarEntry({
+        contents: createTestPaxRecord("path", paxPath),
+        name: "./PaxHeaders.0/rollout",
+        typeflag: "x",
+      }),
+      createTestTarEntry({
+        name: "rollout.jsonl",
+        typeflag: "0",
+      }),
+    ]);
+
+    expect(listTarArchiveEntries(archive)).toEqual([paxPath]);
+  });
+});
+
 function createBridgeRequest(userId: string) {
   return {
     attemptId: "attempt_1",
@@ -2473,6 +2511,8 @@ function listEncryptedWorkspaceSnapshotTarEntries(
 
 function listTarArchiveEntries(archive: Buffer): string[] {
   const entries: string[] = [];
+  let pendingLongPath: string | null = null;
+  let pendingPaxPath: string | null = null;
   for (let offset = 0; offset + 512 <= archive.byteLength;) {
     const header = archive.subarray(offset, offset + 512);
     if (header.every((byte) => byte === 0)) {
@@ -2485,10 +2525,108 @@ function listTarArchiveEntries(archive: Buffer): string[] {
     if (!Number.isFinite(size) || size < 0) {
       throw new Error("Test tar archive entry size is invalid.");
     }
-    entries.push((prefix.length > 0 ? `${prefix}/${name}` : name).replace(/^\.\/+/u, ""));
+    const dataStart = offset + 512;
+    const dataEnd = dataStart + size;
+    if (dataEnd > archive.byteLength) {
+      throw new Error("Test tar archive entry exceeds archive length.");
+    }
+
+    const typeflag = readTarHeaderString(header, 156, 157);
+    const data = archive.subarray(dataStart, dataEnd);
     offset += 512 + Math.ceil(size / 512) * 512;
+
+    if (typeflag === "L") {
+      pendingLongPath = readTarEntryDataString(data);
+      continue;
+    }
+    if (typeflag === "K") {
+      continue;
+    }
+    if (typeflag === "x") {
+      pendingPaxPath = parsePaxTarHeader(data).path ?? pendingPaxPath;
+      continue;
+    }
+    if (typeflag === "g") {
+      continue;
+    }
+
+    const headerPath = prefix.length > 0 ? `${prefix}/${name}` : name;
+    const entryPath = normalizeTestTarEntryPath(
+      pendingPaxPath ?? pendingLongPath ?? headerPath,
+    );
+    pendingLongPath = null;
+    pendingPaxPath = null;
+    entries.push(entryPath);
   }
   return entries;
+}
+
+function normalizeTestTarEntryPath(entryPath: string): string {
+  return entryPath.replace(/^\.\/+/u, "");
+}
+
+function readTarEntryDataString(data: Buffer): string {
+  const nul = data.indexOf(0);
+  return data.subarray(0, nul === -1 ? data.byteLength : nul).toString("utf8");
+}
+
+function parsePaxTarHeader(data: Buffer): Record<string, string> {
+  const fields: Record<string, string> = {};
+  const text = data.toString("utf8");
+  for (let offset = 0; offset < text.length;) {
+    const separatorIndex = text.indexOf(" ", offset);
+    if (separatorIndex === -1) {
+      throw new Error("Test tar pax header record is invalid.");
+    }
+    const length = Number.parseInt(text.slice(offset, separatorIndex), 10);
+    if (!Number.isFinite(length) || length <= 0 || offset + length > text.length) {
+      throw new Error("Test tar pax header length is invalid.");
+    }
+    const record = text.slice(separatorIndex + 1, offset + length - 1);
+    const equalsIndex = record.indexOf("=");
+    if (equalsIndex > 0) {
+      fields[record.slice(0, equalsIndex)] = record.slice(equalsIndex + 1);
+    }
+    offset += length;
+  }
+  return fields;
+}
+
+function createTestTarArchive(entries: Buffer[]): Buffer {
+  return Buffer.concat([
+    ...entries,
+    Buffer.alloc(1024),
+  ]);
+}
+
+function createTestTarEntry(input: {
+  contents?: string;
+  name: string;
+  typeflag: string;
+}): Buffer {
+  const contents = Buffer.from(input.contents ?? "", "utf8");
+  const header = Buffer.alloc(512);
+  header.write(input.name, 0, Math.min(Buffer.byteLength(input.name), 100), "utf8");
+  header.write(contents.byteLength.toString(8).padStart(11, "0"), 124, 11, "ascii");
+  header[135] = 0;
+  header.write(input.typeflag, 156, 1, "ascii");
+  return Buffer.concat([
+    header,
+    contents,
+    Buffer.alloc(Math.ceil(contents.byteLength / 512) * 512 - contents.byteLength),
+  ]);
+}
+
+function createTestPaxRecord(key: string, value: string): string {
+  const body = `${key}=${value}\n`;
+  let length = body.length + 2;
+  for (;;) {
+    const record = `${length} ${body}`;
+    if (record.length === length) {
+      return record;
+    }
+    length = record.length;
+  }
 }
 
 function readTarHeaderString(header: Buffer, start: number, end: number): string {
