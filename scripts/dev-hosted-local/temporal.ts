@@ -89,6 +89,9 @@ export async function startHostedLocalTemporalRuntime(input: {
   }
 
   const address = resolveHostedLocalTemporalAddress(input);
+  const cloudflareHostedControlBaseUrl = normalizeHostedLocalClientBaseUrl(
+    input.cloudflareHostedControlBaseUrl,
+  );
   let serverProcess: BufferedNamedChildProcess | null = null;
   let workerProcess: BufferedNamedChildProcess | null = null;
 
@@ -109,7 +112,7 @@ export async function startHostedLocalTemporalRuntime(input: {
         "bash",
         ["scripts/temporal-dev-server.sh"],
         {
-          ...input.env,
+          ...buildHostedLocalTemporalServerEnv(input.env),
           TEMPORAL_DEV_HEADLESS: "1",
           TEMPORAL_DEV_IP: temporal.host,
           TEMPORAL_DEV_PORT: String(temporal.port),
@@ -138,7 +141,7 @@ export async function startHostedLocalTemporalRuntime(input: {
           config: input.config,
           env: input.env,
         }),
-        CLOUDFLARE_HOSTED_CONTROL_BASE_URL: input.cloudflareHostedControlBaseUrl,
+        CLOUDFLARE_HOSTED_CONTROL_BASE_URL: cloudflareHostedControlBaseUrl,
         HOSTED_WEB_BASE_URL: hostedWebBaseUrl,
       },
       {
@@ -175,6 +178,22 @@ export async function startHostedLocalTemporalRuntime(input: {
     ]);
     throw error;
   }
+}
+
+function normalizeHostedLocalClientBaseUrl(baseUrl: string): string {
+  const url = new URL(baseUrl);
+  if (url.hostname === "0.0.0.0") {
+    url.hostname = "127.0.0.1";
+  } else if (url.hostname === "[::]") {
+    url.hostname = "[::1]";
+  }
+  return url.toString().replace(/\/$/u, "");
+}
+
+function buildHostedLocalTemporalServerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const serverEnv = { ...env };
+  delete serverEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
+  return serverEnv;
 }
 
 function resolveHostedLocalTemporalAddress(input: {

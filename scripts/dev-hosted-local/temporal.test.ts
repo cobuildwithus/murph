@@ -9,6 +9,18 @@ import type {
   HostedLocalDevConfig,
 } from "./types.ts";
 
+type SpawnChildProcess = (
+  name: HostedLocalChildProcessName,
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  input?: {
+    pipeOutput?: boolean;
+    stderrTarget?: NodeJS.WritableStream;
+    stdoutTarget?: NodeJS.WritableStream;
+  },
+) => BufferedNamedChildProcess;
+
 const spawnSyncMock = vi.hoisted(() =>
   vi.fn<() => {
     error: Error | undefined;
@@ -19,7 +31,7 @@ const spawnSyncMock = vi.hoisted(() =>
   })),
 );
 const spawnChildProcessMock = vi.hoisted(() =>
-  vi.fn((
+  vi.fn<SpawnChildProcess>((
     name: HostedLocalChildProcessName,
   ) => createBufferedChild({
     exitCode: null,
@@ -163,10 +175,14 @@ describe("hosted-local Temporal lifecycle", () => {
             taskQueue: "hosted-managed-queue",
           },
         },
-        env: {},
+        env: {
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "local-callback-private",
+        },
         hostedWebBaseUrl: "http://localhost:3000",
       });
 
+      const serverCall = spawnChildProcessMock.mock.calls.find(([name]) => name === "temporal-server");
+      expect(serverCall?.[3]).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
       expect(runtime?.address).toBe(`127.0.0.1:${port}`);
       expect(spawnChildProcessMock).toHaveBeenCalledWith(
         "temporal-server",
@@ -186,6 +202,7 @@ describe("hosted-local Temporal lifecycle", () => {
         ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
         expect.objectContaining({
           CLOUDFLARE_HOSTED_CONTROL_BASE_URL: "http://127.0.0.1:8787",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "local-callback-private",
           HOSTED_WEB_BASE_URL: "http://localhost:3000",
           TEMPORAL_ADDRESS: `127.0.0.1:${port}`,
           TEMPORAL_NAMESPACE: "hosted-managed",
@@ -196,6 +213,69 @@ describe("hosted-local Temporal lifecycle", () => {
 
       await runtime?.stop();
       expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it.each([
+    {
+      bindBaseUrl: "http://0.0.0.0:8787",
+      expectedClientBaseUrl: "http://127.0.0.1:8787",
+      name: "IPv4",
+    },
+    {
+      bindBaseUrl: "http://[::]:8787",
+      expectedClientBaseUrl: "http://[::1]:8787",
+      name: "IPv6",
+    },
+  ])("normalizes $name wildcard Cloudflare control bind hosts for the host-side Temporal worker", async ({
+    bindBaseUrl,
+    expectedClientBaseUrl,
+  }) => {
+    const port = await reserveLocalTcpPort();
+    const server = net.createServer();
+    spawnChildProcessMock.mockImplementation((name) => {
+      if (name === "temporal-server") {
+        server.listen(port, "127.0.0.1");
+      }
+
+      return createBufferedChild({
+        exitCode: null,
+        name,
+        pid: name === "temporal-server" ? 301 : 302,
+      });
+    });
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    try {
+      const runtime = await startHostedLocalTemporalRuntime({
+        cloudflareHostedControlBaseUrl: bindBaseUrl,
+        config: {
+          ...baseConfig,
+          temporal: {
+            host: "127.0.0.1",
+            mode: "managed",
+            namespace: "hosted-managed",
+            port,
+            taskQueue: "hosted-managed-queue",
+          },
+        },
+        env: {},
+        hostedWebBaseUrl: "http://localhost:3000",
+      });
+
+      expect(spawnChildProcessMock).toHaveBeenCalledWith(
+        "temporal-worker",
+        "pnpm",
+        ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
+        expect.objectContaining({
+          CLOUDFLARE_HOSTED_CONTROL_BASE_URL: expectedClientBaseUrl,
+        }),
+        expect.any(Object),
+      );
+
+      await runtime?.stop();
     } finally {
       await closeServer(server);
     }

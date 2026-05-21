@@ -1,8 +1,8 @@
 # Hosted-local Temporal E2E lifecycle
 
-Status: active
+Status: completed
 Created: 2026-05-20
-Updated: 2026-05-20
+Updated: 2026-05-21
 
 ## Goal
 
@@ -81,3 +81,4 @@ web demand activity -> Cloudflare ensure-execution activity -> runner execution.
   command when local dependencies are available.
 - Expected outcomes: static checks pass; targeted E2E proves Temporal server,
   worker task queue polling, web demand, and Cloudflare ensure-execution.
+Completed: 2026-05-21

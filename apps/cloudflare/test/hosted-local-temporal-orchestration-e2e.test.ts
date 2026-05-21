@@ -5,6 +5,9 @@ import {
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
+import {
   createHostedRuntimeTemporalClientFromEnv,
 } from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
 
@@ -52,6 +55,12 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(activeScenario.harness.runtimeEnv.TEMPORAL_ADDRESS).toBeTruthy();
 
     await activeScenario.seedActiveHostedMember({ memberId: userId });
+    await activeScenario.runWake(
+      buildActivationWake(userId),
+      userId,
+    );
+    await activeScenario.waitForHostedCompletion(userId);
+
     const signal = await signalHostedManualRunRuntimeForTest({
       environment: activeScenario.runtimeEnv,
       eventSource: "hosted-local-temporal-orchestration",
@@ -124,4 +133,17 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
+}
+
+function buildActivationWake(memberId: string) {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: `member.activated:local:${memberId}:evt_temporal_activation`,
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
+    memberId,
+    occurredAt: new Date().toISOString(),
+  });
 }
