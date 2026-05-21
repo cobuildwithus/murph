@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   getPrisma: vi.fn(),
   readOptionalJsonObject: vi.fn(),
-  readHostedMailboxItemOwnerById: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -31,7 +30,6 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
-  readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -67,17 +65,13 @@ describe("hosted email mailbox ingress route", () => {
         userId: "member_123",
       },
     });
-    mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
-      id: "mailbox_item_24",
-      userId: "member_123",
-    });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
   });
 
-  it("appends hosted email conversation messages to the mailbox", async () => {
+  it("appends hosted email conversation messages and signals the runtime", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       attachmentSummaries: [
         {
@@ -147,6 +141,11 @@ describe("hosted email mailbox ingress route", () => {
         label: "mailbox-route-tx",
       }),
     });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_24",
+      source: "email",
+    });
   });
 
   it("rejects oversized callback bodies before signature verification", async () => {
@@ -164,60 +163,46 @@ describe("hosted email mailbox ingress route", () => {
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
-
-  it("signals the hosted user runtime after verifying the mailbox item owner", async () => {
-    mocks.readOptionalJsonObject.mockResolvedValue({
-      mailboxItemId: "mailbox_item_24",
-    });
-
-    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/nudge-workflow/route");
-    const response = await POST(new Request("https://example.test", {
-      body: JSON.stringify({
-        mailboxItemId: "mailbox_item_24",
-      }),
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      signalAccepted: true,
-      workflowId: "hosted-user-runtime:member_123",
-    });
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
-    expect(mocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_item_24",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_item_24",
-      source: "email",
-    });
-  });
-
-  it("does not signal the hosted user runtime for a mailbox item owned by another user", async () => {
-    mocks.readOptionalJsonObject.mockResolvedValue({
-      mailboxItemId: "mailbox_item_24",
-    });
-    mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
-      id: "mailbox_item_24",
-      userId: "member_other",
-    });
-
-    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/nudge-workflow/route");
-    const response = await POST(new Request("https://example.test", {
-      body: JSON.stringify({
-        mailboxItemId: "mailbox_item_24",
-      }),
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: expect.objectContaining({
-        code: "HOSTED_EMAIL_INGRESS_NUDGE_WORKFLOW_MAILBOX_ITEM_NOT_FOUND",
-      }),
-    });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps the canonical append committed when the Temporal signal fails", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      eventId: "evt_email",
+      identityId: "assistant@example.test",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      rawMessageKey: "raw_123",
+      selfAddress: "reply@example.test",
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    try {
+      const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
+      const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(expect.objectContaining({
+        item: expect.objectContaining({
+          id: "mailbox_item_24",
+        }),
+      }));
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        expectedUserId: "member_123",
+        mailboxItemId: "mailbox_item_24",
+        source: "email",
+      });
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted email ingress Temporal signal failed after mailbox append.",
+        expect.objectContaining({
+          errorName: "Error",
+          mailboxItemIdPresent: true,
+        }),
+      );
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 });

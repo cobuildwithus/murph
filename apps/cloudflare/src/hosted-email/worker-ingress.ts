@@ -35,7 +35,6 @@ import {
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   appendHostedEmailIngressWakeInWeb,
-  startHostedEmailIngressNudgeWorkflowInWeb,
 } from "../web-control-plane-email-ingress.ts";
 
 export interface HostedEmailIngressExecutionContext {
@@ -68,7 +67,7 @@ export function verifyHostedEmailTrustedSender(
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
-  ctx?: HostedEmailIngressExecutionContext,
+  _ctx?: HostedEmailIngressExecutionContext,
   options: HostedEmailIngressOptions = {},
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
@@ -206,7 +205,7 @@ export async function handleHostedEmailIngress(
   });
   const promptProjection = buildHostedEmailPromptProjection(parsedMessage);
 
-  const appendResult = await appendHostedEmailIngressWakeInWeb({
+  await appendHostedEmailIngressWakeInWeb({
     ...(environment.hostedWebAllowHttpHosts
       ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
       : {}),
@@ -270,29 +269,6 @@ export async function handleHostedEmailIngress(
 
     throw error;
   });
-
-  const nudgeWorkflow = startHostedEmailRunnerNudgeWorkflow({
-    eventId,
-    identityId: route.identityId,
-    routeAddress: route.routeAddress,
-    to: message.to,
-    userId: route.userId,
-    webControl: {
-      ...(environment.hostedWebAllowHttpHosts
-        ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
-        : {}),
-      baseUrl: environment.hostedWebBaseUrl,
-      callbackSigning: environment.webCallbackSigning,
-      mailboxItemId: appendResult.item.id,
-      timeoutMs: environment.webControlTimeoutMs,
-    },
-  });
-
-  if (ctx) {
-    ctx.waitUntil(nudgeWorkflow);
-  } else {
-    await nudgeWorkflow;
-  }
 }
 
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
@@ -304,51 +280,6 @@ const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
 const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
-
-async function startHostedEmailRunnerNudgeWorkflow(input: {
-  eventId: string;
-  identityId: string;
-  routeAddress: string;
-  to: string;
-  userId: string;
-  webControl: {
-    allowHttpHosts?: readonly string[];
-    baseUrl: string;
-    callbackSigning: ReturnType<typeof readHostedExecutionEnvironment>["webCallbackSigning"];
-    mailboxItemId: string;
-    timeoutMs: number | null;
-  };
-}): Promise<void> {
-  try {
-    await startHostedEmailIngressNudgeWorkflowInWeb({
-      ...(input.webControl.allowHttpHosts
-        ? { allowHttpHosts: input.webControl.allowHttpHosts }
-        : {}),
-      baseUrl: input.webControl.baseUrl,
-      boundUserId: input.userId,
-      callbackSigning: input.webControl.callbackSigning,
-      fetchImpl: fetch,
-      mailboxItemId: input.webControl.mailboxItemId,
-      timeoutMs: input.webControl.timeoutMs,
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.email",
-      details: buildHostedEmailIngressLogDetails({
-        eventId: input.eventId,
-        identityId: input.identityId,
-        reason: "runner-nudge-workflow-start-failed",
-        routeAddress: input.routeAddress,
-        to: input.to,
-      }),
-      error,
-      level: "warn",
-      message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event; ingress append remains committed.",
-      phase: "outbox",
-      userId: input.userId,
-    });
-  }
-}
 
 function buildHostedEmailPromptProjection(
   message: ParsedEmailMessage,

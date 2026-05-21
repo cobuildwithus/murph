@@ -4,7 +4,11 @@ import {
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
   type HostedRuntimeSignal,
   type HostedUserRuntimeWorkflowInput,
+  type HostedUserRuntimeWorkflowOptions,
 } from "../index.js";
+import {
+  readHostedUserRuntimeWorkflowOptions,
+} from "../temporal-env.js";
 
 export interface HostedUserRuntimeSignalWithStartOptions {
   args: [HostedUserRuntimeWorkflowInput];
@@ -28,6 +32,7 @@ export interface SignalHostedUserRuntimeWorkflowInput {
   signal: HostedRuntimeSignal;
   taskQueue?: string;
   userId: string;
+  workflowOptions?: HostedUserRuntimeWorkflowOptions;
   workflowId?: string;
 }
 
@@ -53,7 +58,10 @@ export async function signalHostedUserRuntimeWorkflow(
   await input.client.workflow.signalWithStart(
     HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
     {
-      args: [{ userId: input.userId }],
+      args: [{
+        options: input.workflowOptions ?? readHostedUserRuntimeWorkflowOptions(),
+        userId: input.userId,
+      }],
       signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
       signalArgs: [input.signal],
       taskQueue: input.taskQueue ?? HOSTED_USER_RUNTIME_TASK_QUEUE,

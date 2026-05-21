@@ -98,8 +98,8 @@ The hosted Temporal hard-cut target is documented in
 canonical target for replacing Vercel Workflow nudge handoff and Cloudflare
 semantic scheduling with pointer-only Temporal orchestration while keeping web
 as demand/status owner, Cloudflare as execution adapter, and Murph runtime as
-the owner of Codex and business logic. The active batch plan and subagent
-execution source of truth remains `agent-docs/exec-plans/active/TEMPORAL.md`.
+the owner of Codex and business logic. The completed execution snapshot and
+subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 ## CLI Framework Notes
 
@@ -115,7 +115,7 @@ execution source of truth remains `agent-docs/exec-plans/active/TEMPORAL.md`.
 - Durable docs index: `agent-docs/index.md`
 - Detailed architecture summary: `docs/architecture.md`
 - Hosted Temporal hard-cut ADR: `agent-docs/references/hosted-temporal-orchestration.md`
-- Active hosted Temporal migration plan: `agent-docs/exec-plans/active/TEMPORAL.md`
+- Completed hosted Temporal migration plan: `agent-docs/exec-plans/completed/TEMPORAL.md`
 - Frozen baseline contracts: `docs/contracts/*.md`
 
 ## Current Verification Posture

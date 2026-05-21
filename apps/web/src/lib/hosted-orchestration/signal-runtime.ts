@@ -18,6 +18,7 @@ import {
 } from "../hosted-mailbox/store";
 import {
   readHostedRuntimeTemporalEnvironment,
+  readHostedRuntimeTemporalWorkflowOptions,
   readHostedRuntimeTemporalSignalClientIfConfigured,
   type HostedRuntimeTemporalSignalClient,
 } from "./temporal-client";
@@ -223,7 +224,10 @@ export async function signalHostedUserRuntimeWorkflow(
   const signal = parseHostedRuntimeSignal(input.signal);
 
   await client.workflow.signalWithStart(HOSTED_USER_RUNTIME_WORKFLOW_TYPE, {
-    args: [{ userId: input.userId }],
+    args: [{
+      options: readHostedRuntimeTemporalWorkflowOptions(),
+      userId: input.userId,
+    }],
     signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
     signalArgs: [signal],
     taskQueue,

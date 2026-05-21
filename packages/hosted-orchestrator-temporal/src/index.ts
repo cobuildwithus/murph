@@ -51,10 +51,13 @@ export type HostedUserRuntimeWorkflowCarryForwardState = Omit<
 export interface HostedUserRuntimeWorkflowOptions {
   activeWakeRecheckDelayMs?: number;
   continueAsNewAfterIterations?: number;
+  ensureCloudflareExecutionStartToCloseTimeoutMs?: number;
+  readRuntimeDemandStartToCloseTimeoutMs?: number;
 }
 
 export {
   readHostedRuntimeTemporalEnvironment,
+  readHostedUserRuntimeWorkflowOptions,
 } from "./temporal-env.js";
 export type {
   HostedRuntimeTemporalEnvironment,

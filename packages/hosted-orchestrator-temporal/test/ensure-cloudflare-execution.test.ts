@@ -166,8 +166,9 @@ describe("ensureCloudflareExecution", () => {
       userId: "member_test",
     })).rejects.toMatchObject({
       code: "ai_usage_gate_unavailable",
-      name: "HostedOrchestratorUsageDecisionBlockedError",
+      nonRetryable: true,
       retryAt: "2026-05-20T12:00:30.000Z",
+      type: "ai_usage_gate_unavailable",
     });
 
     expect(observedRequests.map((request) => new URL(request.url).pathname)).toEqual([

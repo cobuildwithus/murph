@@ -14,6 +14,10 @@ const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
 const setHandler = vi.fn();
 const sleep = vi.fn(async () => undefined);
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
+const proxyActivities = vi.fn(() => ({
+  ensureCloudflareExecution,
+  readRuntimeDemand,
+}));
 const readRuntimeDemand = vi.fn(async (): Promise<HostedRuntimeDemand> => ({
   kind: "idle",
   mailboxLag: [],
@@ -27,10 +31,7 @@ vi.mock("@temporalio/workflow", () => ({
   continueAsNew,
   defineQuery,
   defineSignal,
-  proxyActivities: vi.fn(() => ({
-    ensureCloudflareExecution,
-    readRuntimeDemand,
-  })),
+  proxyActivities,
   setHandler,
   sleep,
   uuid4,
@@ -59,5 +60,11 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
     expect(handlerOrders[0]).toBeLessThan(firstDemandOrder);
     expect(handlerOrders[1]).toBeLessThan(firstDemandOrder);
     expect(condition).toHaveBeenCalledWith(expect.any(Function));
+    expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
+      startToCloseTimeout: 10_000,
+    }));
+    expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
+      startToCloseTimeout: 630_000,
+    }));
   });
 });

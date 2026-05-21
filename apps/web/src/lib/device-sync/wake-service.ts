@@ -432,7 +432,7 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
-    runnerNudgeIntent: "device-sync-reconcile-recovery",
+    recoverySignalIntent: "device-sync-reconcile-recovery",
     startWorkflowOnDuplicate: false,
     wake,
     store,
@@ -506,7 +506,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
   });
 
   await persistHostedDeviceSyncWake({
-    runnerNudgeIntent: "device-sync-dirty-recovery",
+    recoverySignalIntent: "device-sync-dirty-recovery",
     wake,
     store,
     persist: async () => {},
@@ -519,7 +519,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
 
 async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
-  runnerNudgeIntent?: HostedDeviceSyncRecoverySignalIntent | null;
+  recoverySignalIntent?: HostedDeviceSyncRecoverySignalIntent | null;
   startWorkflowOnDuplicate?: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
@@ -564,7 +564,7 @@ async function persistHostedDeviceSyncWake(input: {
     (mailboxAppendResult.duplicate && input.startWorkflowOnDuplicate !== false)
   ) {
     await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId, {
-      runnerNudgeIntent: input.runnerNudgeIntent ?? null,
+      recoverySignalIntent: input.recoverySignalIntent ?? null,
     });
   }
 
@@ -576,13 +576,13 @@ async function persistHostedDeviceSyncWake(input: {
 async function startHostedDeviceSyncWakeWorkflowBestEffort(
   mailboxItemId: string,
   options: {
-    runnerNudgeIntent?: HostedDeviceSyncRecoverySignalIntent | null;
+    recoverySignalIntent?: HostedDeviceSyncRecoverySignalIntent | null;
   } = {},
 ): Promise<void> {
   try {
     await signalHostedDeviceSyncMailboxRuntime({
       mailboxItemId,
-      recoveryIntent: options.runnerNudgeIntent ?? null,
+      recoveryIntent: options.recoverySignalIntent ?? null,
     });
   } catch (error) {
     console.warn("Hosted device-sync wake Temporal signal failed after mailbox append.", {
