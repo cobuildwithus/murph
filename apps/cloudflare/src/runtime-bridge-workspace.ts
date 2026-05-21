@@ -10,6 +10,10 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
+  collectHostedWorkspaceSnapshotArchivePlan,
+  type HostedWorkspaceSnapshotArchiveExtraPath,
+} from "@murphai/runtime-state/node";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -385,8 +389,24 @@ async function createHostedWorkspaceV2Snapshot(
       plan: input.legacyMaterialization,
       vaultRoot: input.vaultRoot,
     });
+    const legacySnapshotExtraFiles: HostedWorkspaceSnapshotArchiveExtraPath[] = [];
+    for (const file of input.legacyMaterialization.skippedInlineFiles) {
+      if (file.root === "operator-home" || file.root === "vault") {
+        legacySnapshotExtraFiles.push({
+          path: file.path,
+          root: file.root,
+        });
+      }
+    }
+    const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+      durableRoot,
+      extraFiles: legacySnapshotExtraFiles,
+      operatorHomeRoot,
+      vaultRoot: input.vaultRoot,
+    });
     const encrypted = await createEncryptedWorkspaceSnapshotFile({
       aad: snapshotSession.encryption.aad,
+      archiveEntries: archivePlan.entries,
       dataKey: snapshotSession.encryption.dataKeyBase64,
       durableRoot,
       ivBase64: snapshotSession.encryption.ivBase64,

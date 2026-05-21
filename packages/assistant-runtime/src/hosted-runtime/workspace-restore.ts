@@ -202,6 +202,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
       createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
     ]);
+    await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+      assistantStateRoot: restored.assistantStateRoot,
+      missingManifest: "preserve",
+    });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
