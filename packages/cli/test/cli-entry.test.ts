@@ -387,17 +387,17 @@ test("runMurphCliAction records the active-vault message when murph has no confi
 
 test("runMurphCliAction still allows murph init to target an explicit vault", async () => {
   const serve = vi.fn(async () => undefined);
-  const applyDefaultVaultToArgs = vi.fn((argv: readonly string[]) => [...argv]);
   const resolveConfiguredDefaultVault = vi.fn(async () => null);
   const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
+  let vaultContext: { current: string | null } | null = null;
 
   mockCliActionModules({
     cli: { serve },
+    onCreateVaultCliWithOptions: (options) => {
+      vaultContext = options.vaultContext as { current: string | null };
+    },
     operatorConfigModule: {
-      applyDefaultVaultToArgs,
-      commandNeedsVaultForExecution: vi.fn(() => true),
       expandConfiguredVaultPath: vi.fn(),
-      hasExplicitVaultOption: vi.fn(() => true),
       resolveConfiguredDefaultVault,
       resolveDefaultVault,
       resolveEffectiveTopLevelToken: vi.fn(() => "init"),
@@ -417,13 +417,11 @@ test("runMurphCliAction still allows murph init to target an explicit vault", as
   await runMurphCliAction(["init", "--vault", "/vaults/new"]);
 
   assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
-  assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
-  assert.deepEqual(applyDefaultVaultToArgs.mock.calls, [
-    [["init", "--vault", "/vaults/new"], "/vaults/from-env"],
-  ]);
+  assert.deepEqual(resolveDefaultVault.mock.calls, []);
+  assert.equal(vaultContext?.current, "/vaults/new");
   assert.deepEqual(serve.mock.calls, [
     [
-      ["init", "--vault", "/vaults/new"],
+      ["init"],
       {
         env: process.env,
       },
@@ -453,11 +451,6 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
-      applyDefaultVaultToArgs: vi.fn((argv: readonly string[]) => [
-        ...argv,
-        "--vault",
-        "/vaults/default",
-      ]),
       expandConfiguredVaultPath: vi.fn(),
       resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
@@ -484,7 +477,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
     ]);
     assert.deepEqual(serve.mock.calls, [
       [
-        ["assistant", "chat", "--vault", "/vaults/default"],
+        ["assistant", "chat"],
         {
           env: process.env,
         },
@@ -525,7 +518,6 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
-      applyDefaultVaultToArgs: vi.fn(),
       expandConfiguredVaultPath: vi.fn((vault: string, homeDirectory: string) =>
         path.join(homeDirectory, vault),
       ),
@@ -560,13 +552,13 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
   assert.equal(setupCliServe.mock.calls.length, 1);
   assert.deepEqual(serve.mock.calls, [
     [
-      ["device", "connect", "oura", "--vault", "/operator-home/vault-from-setup", "--open"],
+      ["device", "connect", "oura", "--open"],
       {
         env: process.env,
       },
     ],
     [
-      ["assistant", "chat", "--vault", "/operator-home/vault-from-setup"],
+      ["assistant", "chat"],
       {
         env: process.env,
       },
@@ -605,7 +597,6 @@ test("runMurphCliAction passes the published CLI bin path into setup constructio
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
-      applyDefaultVaultToArgs: vi.fn(),
       expandConfiguredVaultPath: vi.fn(),
       resolveDefaultVault: vi.fn(async () => null),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
@@ -675,7 +666,6 @@ test("runMurphCliAction starts assistant automation when setup requests assistan
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
-      applyDefaultVaultToArgs: vi.fn(),
       expandConfiguredVaultPath: vi.fn((vault: string, homeDirectory: string) =>
         path.join(homeDirectory, vault),
       ),
@@ -705,12 +695,7 @@ test("runMurphCliAction starts assistant automation when setup requests assistan
 
   assert.equal(setupCliServe.mock.calls.length, 1);
   assert.equal(typeof setupCliServe.mock.calls[0]?.[1]?.exit, "function");
-  assert.deepEqual(serve.mock.calls[0]?.[0], [
-    "assistant",
-    "run",
-    "--vault",
-    "/operator-home/vault-from-setup",
-  ]);
+  assert.deepEqual(serve.mock.calls[0]?.[0], ["assistant", "run"]);
   assert.equal(typeof serve.mock.calls[0]?.[1]?.exit, "function");
   assert.equal(exit.mock.calls.length, 2);
   assert.deepEqual(stderrSpy.mock.calls, [

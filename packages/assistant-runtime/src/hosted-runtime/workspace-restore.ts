@@ -440,16 +440,19 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     status: input.workspace?.redactedStatus ?? null,
     vaultRoot: restored.vaultRoot,
   });
+  const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+    vaultRoot: restored.vaultRoot,
+  });
 
   return {
     ...restored,
     materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-      materializedArtifactPaths,
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
       platform: input.platform,
       restored,
       readBundles: materializerBundles,
     }),
-    materializedArtifactPaths,
+    materializedArtifactPaths: restoredMaterializedArtifactPaths,
     mode: "snapshot",
     restoreWasCold,
   };
