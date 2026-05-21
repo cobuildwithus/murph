@@ -55,6 +55,7 @@ import {
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   isMurphAgeWearableBridgeValidDayMetricPoint,
   isMurphAgeWearableBridgeValidNightMetricPoint,
+  isMurphAgeWearableShadowAnchorCardId,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
@@ -67,6 +68,7 @@ import {
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableBridgeMetricSourceHints,
+  listMurphAgeWearableShadowAnchorCardIds,
   listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
   listMetricDefinitions,
@@ -3061,6 +3063,17 @@ test("keeps the wearable scoring strategy explicit while product contribution st
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("l1_tiny_glycemia_10y_acm_research"), true);
+  assert.deepEqual(strategy.residualLayerContract.anchorCardIds, listMurphAgeWearableShadowAnchorCardIds());
+  assert.equal(isMurphAgeWearableShadowAnchorCardId("lab9_bp_body_10y_acm_research"), true);
+  assert.equal(isMurphAgeWearableShadowAnchorCardId("lab5_bp_bmi_transport_research"), true);
+  assert.equal(isMurphAgeWearableShadowAnchorCardId("l1_tiny_glycemia_10y_acm_research"), true);
+  assert.equal(isMurphAgeWearableShadowAnchorCardId("r399_nhis_proxy_10y_acm_research"), false);
+  const anchorIds = listMurphAgeWearableShadowAnchorCardIds();
+  anchorIds.push("r399_nhis_proxy_10y_acm_research");
+  assert.equal(
+    listMurphAgeWearableShadowAnchorCardIds().includes("r399_nhis_proxy_10y_acm_research"),
+    false,
+  );
   assert.deepEqual(strategy.residualLayerContract.featureSetContract.activityVolumeCandidateMetricKeys, [
     "steps",
     "activity-minutes",
