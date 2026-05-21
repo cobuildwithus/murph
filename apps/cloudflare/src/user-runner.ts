@@ -1044,10 +1044,10 @@ export class HostedUserRunner {
   ): Promise<
     | Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>
     | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
-    | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>
+    | Extract<RunnerContainerEnsureProcessingResult, { kind: "wake-unconfirmed" }>
   > {
     if (!this.runnerContainerNamespace) {
-      return { kind: "retry-scheduled", reason: "missing-container-binding" };
+      return { kind: "wake-unconfirmed", reason: "missing-container-binding" };
     }
 
     const container = this.runnerContainerNamespace.getByName(
@@ -1067,11 +1067,11 @@ export class HostedUserRunner {
         if (
           result.kind === "accepted"
           || result.kind === "start-required"
-          || result.kind === "retry-scheduled"
+          || result.kind === "wake-unconfirmed"
         ) {
           return result;
         }
-        return { kind: "retry-scheduled", reason: "legacy-wake-result" };
+        return { kind: "wake-unconfirmed", reason: "legacy-wake-result" };
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
@@ -1081,12 +1081,12 @@ export class HostedUserRunner {
           phase: "scheduled",
           userId: input.activeRuntime.userId,
         });
-        return { kind: "retry-scheduled", reason: "container-rpc-error" };
+        return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
       }
     }
 
     if (!container.wakeRuntime) {
-      return { kind: "retry-scheduled", reason: "missing-wake-method" };
+      return { kind: "wake-unconfirmed", reason: "missing-wake-method" };
     }
 
     try {
@@ -1097,7 +1097,7 @@ export class HostedUserRunner {
       if (runtimeWake.kind === "not-wakeable") {
         return { kind: "start-required", reason: "no-active-child" };
       }
-      return { kind: "retry-scheduled", reason: runtimeWake.reason };
+      return { kind: "wake-unconfirmed", reason: runtimeWake.reason };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -1107,7 +1107,7 @@ export class HostedUserRunner {
           phase: "scheduled",
           userId: input.activeRuntime.userId,
         });
-      return { kind: "retry-scheduled", reason: "container-rpc-error" };
+      return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
     }
   }
 
@@ -1817,7 +1817,7 @@ function readHostedWorkspaceV2SnapshotObjectKey(
 function mapRunnerProcessingRetryReason(
   reason: Extract<
     RunnerContainerEnsureProcessingResult,
-    { kind: "retry-scheduled" }
+    { kind: "wake-unconfirmed" }
   >["reason"],
 ): RuntimeProcessingRetryReason {
   switch (reason) {

@@ -701,6 +701,7 @@ run_all_package_coverage() {
   while [[ "$package_index" -lt "$package_count" ]]; do
     local active_pids=()
     local active_failure_files=()
+    local active_labels=()
     local active_status_files=()
 
     current_package_coverage_concurrency() {
@@ -768,6 +769,7 @@ run_all_package_coverage() {
       local coverage_pid="$!"
       active_pids+=("$coverage_pid")
       active_failure_files+=("$failure_file")
+      active_labels+=("$package_label")
       active_status_files+=("$status_file")
       register_background_pid "$coverage_pid"
       if [[ "$package_dir" == "packages/cli" ]]; then
@@ -780,6 +782,7 @@ run_all_package_coverage() {
     reap_finished_package_coverage() {
       local remaining_pids=()
       local remaining_failure_files=()
+      local remaining_labels=()
       local remaining_status_files=()
       local reaped_any=0
       local active_index
@@ -787,6 +790,7 @@ run_all_package_coverage() {
       for active_index in "${!active_pids[@]}"; do
         local active_pid="${active_pids[$active_index]}"
         local failure_file="${active_failure_files[$active_index]}"
+        local active_label="${active_labels[$active_index]}"
         local status_file="${active_status_files[$active_index]}"
 
         if [[ ! -f "$status_file" ]]; then
@@ -796,19 +800,28 @@ run_all_package_coverage() {
             if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
               cli_coverage_active=0
             fi
-            saw_unreported_background_failure=1
+            if [[ -n "$active_label" ]]; then
+              record_failed_package_coverage "$active_label"
+            else
+              saw_unreported_background_failure=1
+            fi
             reaped_any=1
             continue
           fi
           remaining_pids+=("$active_pid")
           remaining_failure_files+=("$failure_file")
+          remaining_labels+=("$active_label")
           remaining_status_files+=("$status_file")
           continue
         fi
 
         if ! wait "$active_pid"; then
           if [[ ! -f "$failure_file" ]]; then
-            saw_unreported_background_failure=1
+            if [[ -n "$active_label" ]]; then
+              record_failed_package_coverage "$active_label"
+            else
+              saw_unreported_background_failure=1
+            fi
           fi
         fi
         unregister_background_pid "$active_pid"
@@ -820,11 +833,13 @@ run_all_package_coverage() {
 
       active_pids=()
       active_failure_files=()
+      active_labels=()
       active_status_files=()
 
       if [[ "${#remaining_pids[@]}" -gt 0 ]]; then
         active_pids=("${remaining_pids[@]}")
         active_failure_files=("${remaining_failure_files[@]}")
+        active_labels=("${remaining_labels[@]}")
         active_status_files=("${remaining_status_files[@]}")
       fi
 

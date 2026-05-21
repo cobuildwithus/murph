@@ -220,7 +220,7 @@ export type RunnerContainerEnsureProcessingResult =
       reason: "no-active-child";
     }
   | {
-      kind: "retry-scheduled";
+      kind: "wake-unconfirmed";
       reason: Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"];
     };
 
@@ -296,7 +296,7 @@ export class RunnerContainer extends Container {
 
       if (wake.kind === "unknown") {
         return {
-          kind: "retry-scheduled",
+          kind: "wake-unconfirmed",
           reason: wake.reason,
         };
       }
