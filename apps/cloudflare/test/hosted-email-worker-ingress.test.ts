@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
   resolveHostedExecutionUserCryptoContext: vi.fn(),
   resolveUserRunnerStub: vi.fn(),
   runUntilIdleOrBudget: vi.fn(),
-  startHostedEmailIngressNudgeWorkflowInWeb: vi.fn(),
 }));
 
 vi.mock("../src/env.ts", () => ({
@@ -44,7 +43,6 @@ vi.mock("../src/web-control-plane-email-ingress.ts", async () => {
   return {
     ...actual,
     appendHostedEmailIngressWakeInWeb: mocks.appendHostedEmailIngressWakeInWeb,
-    startHostedEmailIngressNudgeWorkflowInWeb: mocks.startHostedEmailIngressNudgeWorkflowInWeb,
   };
 });
 
@@ -157,9 +155,6 @@ describe("hosted email worker ingress", () => {
       kind: "processing-ensured",
       inFlight: false,
       nextAlarmAt: null,
-    });
-    mocks.startHostedEmailIngressNudgeWorkflowInWeb.mockResolvedValue({
-      runId: "workflow_run_123",
     });
     mocks.runUntilIdleOrBudget.mockResolvedValue({
       nextWakeAt: null,
@@ -361,11 +356,6 @@ describe("hosted email worker ingress", () => {
       timeoutMs: 30_000,
     });
     expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mailboxItemId: "mailbox_item_123",
-      }),
-    );
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
@@ -512,43 +502,6 @@ describe("hosted email worker ingress", () => {
     );
   });
 
-  it("posts hosted email nudge workflow starts to the pointer-only callback route", async () => {
-    const actualEmailIngressClient = await vi.importActual<
-      typeof import("../src/web-control-plane-email-ingress.ts")
-    >("../src/web-control-plane-email-ingress.ts");
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
-      JSON.stringify({
-        runId: "workflow_run_123",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-
-    await expect(actualEmailIngressClient.startHostedEmailIngressNudgeWorkflowInWeb({
-      baseUrl: "https://web.example.test",
-      boundUserId: "user_123",
-      callbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
-      fetchImpl: fetch,
-      mailboxItemId: "mailbox_item_123",
-      timeoutMs: 30_000,
-    })).resolves.toEqual({
-      runId: "workflow_run_123",
-    });
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: JSON.stringify({
-          mailboxItemId: "mailbox_item_123",
-        }),
-        method: "POST",
-        path: "/api/internal/hosted-mailbox/email-ingress/nudge-workflow",
-      }),
-    );
-  });
-
   it("routes fixed public-sender ingress through the web-owned direct-public-sender authorization lookup", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
 
@@ -587,16 +540,11 @@ describe("hosted email worker ingress", () => {
       boundUserId: "user_456",
     }));
     expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mailboxItemId: "mailbox_item_123",
-      }),
-    );
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
-  it("starts the durable email nudge workflow after appending the mailbox item", async () => {
+  it("relies on the web append route to signal Temporal after appending the mailbox item", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
@@ -624,14 +572,7 @@ describe("hosted email worker ingress", () => {
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith({
-      baseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
-      boundUserId: "user_456",
-      callbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
-      fetchImpl: fetch,
-      mailboxItemId: "mailbox_item_123",
-      timeoutMs: TEST_ENVIRONMENT.webControlTimeoutMs,
-    });
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
   it("does not use a direct Durable Object nudge on the email handoff path", async () => {
@@ -663,17 +604,10 @@ describe("hosted email worker ingress", () => {
     expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith({
-      baseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
-      boundUserId: "user_456",
-      callbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
-      fetchImpl: fetch,
-      mailboxItemId: "mailbox_item_123",
-      timeoutMs: TEST_ENVIRONMENT.webControlTimeoutMs,
-    });
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
-  it("does not branch on direct nudge acceptance before starting the email workflow", async () => {
+  it("does not branch on direct nudge acceptance before completing email ingress", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
 
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
@@ -701,14 +635,10 @@ describe("hosted email worker ingress", () => {
 
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mailboxItemId: "mailbox_item_123",
-      }),
-    );
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the Worker execution context for post-append email workflow handoff", async () => {
+  it("does not create a post-append Worker waitUntil nudge handoff", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const waitUntil = vi.fn();
 
@@ -735,57 +665,8 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, env, { waitUntil });
 
-    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mailboxItemId: "mailbox_item_123",
-      }),
-    );
-  });
-
-  it("keeps email ingress committed when the durable workflow handoff fails", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-
-    mocks.startHostedEmailIngressNudgeWorkflowInWeb.mockRejectedValueOnce(
-      new Error("workflow unavailable"),
-    );
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        userId: "user_456",
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-    const env = createWorkerEnv(bucket);
-
-    await expect(handleHostedEmailIngress({
-      authenticatedSender: AUTHENTICATED_SENDER,
-      from: "owner@example.com",
-      raw: buildRawEmail({
-        from: "Owner <owner@example.com>",
-        to: "assistant@mail.example.test",
-      }),
-      to: "assistant@mail.example.test",
-    }, env)).resolves.toBeUndefined();
-
-    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(mocks.startHostedEmailIngressNudgeWorkflowInWeb).toHaveBeenCalledTimes(1);
-    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.email",
-        details: expect.objectContaining({
-          reason: "runner-nudge-workflow-start-failed",
-        }),
-        level: "warn",
-        message: "Hosted email runner nudge workflow failed to start after appending the canonical ingress event; ingress append remains committed.",
-      }),
-    );
-    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    expect(waitUntil).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
   it("deletes newly written raw email blobs when the canonical append fails with a permanent client HTTP response", async () => {

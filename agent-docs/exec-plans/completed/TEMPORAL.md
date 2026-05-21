@@ -947,7 +947,7 @@ Files to inspect:
 - apps/web/app/api/internal/hosted-runtime/status/route.ts
 - apps/web/src/lib/hosted-mailbox/lag.ts
 - packages/assistant-runtime/src/hosted-runtime.ts
-- agent-docs/exec-plans/active/TEMPORAL.md
+- agent-docs/exec-plans/completed/TEMPORAL.md
 
 Files to change:
 - Add agent-docs/references/hosted-temporal-orchestration.md
@@ -1426,6 +1426,8 @@ Implement:
 - Activity timeouts:
   - readRuntimeDemand is short, e.g. 10s-30s from env/config.
   - ensureCloudflareExecution is Cloudflare runner timeout plus safety margin.
+  - signal-with-start args include env-derived workflow timeout options so the
+    workflow proxy timeouts match the HTTP Activity timeout budget.
 - When `requiresAiUsageDecision` is true, fetch the signed decision from web
   inside the Activity and pass it in the Cloudflare
   `HostedRuntimeEnsureExecutionRequest.aiUsageAllowDecision` field.
@@ -1542,6 +1544,10 @@ Files to inspect:
 - apps/web/src/lib/hosted-onboarding/webhook-workflow-start.ts
 - apps/web/src/lib/hosted-onboarding/webhook-workflows.ts
 - apps/web/src/lib/hosted-onboarding/webhook-workflow-steps.ts
+- apps/web/app/api/internal/hosted-mailbox/email-ingress/route.ts
+- apps/web/app/api/internal/hosted-mailbox/email-ingress/nudge-workflow/route.ts
+- apps/cloudflare/src/web-control-plane-email-ingress.ts
+- apps/cloudflare/src/hosted-email/worker-ingress.ts
 - apps/web/src/lib/device-sync/wake-service.ts
 - apps/web/src/lib/hosted-onboarding/webhook-service-wake.ts
 - apps/web/src/lib/hosted-mailbox/store.ts
@@ -1552,6 +1558,10 @@ Implement:
 - apps/web/src/lib/hosted-orchestration/temporal-client.ts
 - apps/web/src/lib/hosted-orchestration/signal-runtime.ts
 - Replace all startHostedWebhookNudgeWorkflow calls.
+- Ensure Cloudflare email ingress appends through the canonical web email
+  ingress route and that route signals Temporal directly after append.
+- Delete the old email-ingress nudge-workflow route/client; do not retain a
+  second post-append callback just to start the runtime.
 - For each mailbox append, signal:
   kind: "mailbox_appended"
   mailboxItemId
@@ -1995,13 +2005,14 @@ Before declaring done, these searches should pass.
 ## No old Vercel nudge workflow
 
 ```bash
-rg "hostedWebhookNudgeWorkflow|startHostedWebhookNudgeWorkflow|nudgeHostedWebhookMailboxItemStep|use workflow|use step" apps/web
+rg "hostedWebhookNudgeWorkflow|startHostedWebhookNudgeWorkflow|nudgeHostedWebhookMailboxItemStep|email-ingress/nudge-workflow|startHostedEmailIngressNudgeWorkflowInWeb|nudge-workflow" apps/web/src apps/web/app apps/cloudflare/src packages/cloudflare-hosted-control/src
 ```
 
 Expected:
 
 ```txt
-No production hosted webhook nudge workflow references.
+No production hosted webhook or email nudge workflow references. Stripe
+receipt/reconciliation workflows are outside this runtime-nudge deletion target.
 ```
 
 ## No production Cloudflare semantic scheduler
@@ -2019,13 +2030,27 @@ No production references, except deleted-file test snapshots if intentionally re
 ## No web direct Cloudflare nudge
 
 ```bash
-rg "nudgeHostedRunner|nudgeUserRunner|runnerNudge|assistant-nudge" apps/web packages
+rg "nudgeHostedRunner|nudgeUserRunner|runnerNudge|assistant-nudge" apps/web/src apps/web/app packages/cloudflare-hosted-control/src packages/hosted-orchestrator-temporal/src packages/hosted-execution/src/orchestration-control.ts packages/hosted-execution/src/parsers/orchestration-control.ts
 ```
 
 Expected:
 
 ```txt
 No production web path directly nudges Cloudflare.
+```
+
+## Activity timeout and retry classification
+
+```bash
+rg "readRuntimeDemandStartToCloseTimeoutMs|ensureCloudflareExecutionStartToCloseTimeoutMs|HOSTED_EXECUTION_RUNNER_TIMEOUT_MS|HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS|HOSTED_RUNTIME_DEMAND_TIMEOUT_MS|ApplicationFailure|nonRetryable" packages/hosted-orchestrator-temporal apps/web/src/lib/hosted-orchestration
+```
+
+Expected:
+
+```txt
+Temporal Activity start-to-close timeouts are workflow options derived from env
+or safe defaults, and fresh usage-decision block states are classified with
+non-retryable ApplicationFailure instead of ordinary retryable errors.
 ```
 
 ## Temporal payload safety
@@ -2226,3 +2251,6 @@ The key strategic move is to cut at the right seam: **Temporal signals and sleep
 [1]: https://docs.temporal.io/develop/typescript/message-passing "Workflow message passing - TypeScript SDK | Temporal Platform Documentation"
 [2]: https://docs.temporal.io/develop/typescript/timers "Timers - TypeScript SDK | Temporal Platform Documentation"
 [3]: https://docs.temporal.io/develop/typescript/continue-as-new "Continue-As-New - Typescript SDK | Temporal Platform Documentation"
+Status: completed
+Updated: 2026-05-20
+Completed: 2026-05-20

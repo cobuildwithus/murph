@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
   signalWithStart: vi.fn(),
 }));
 
+const defaultWorkflowOptions = {
+  ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+  readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+};
+
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxItemCheckpointById:
     mocks.readHostedMailboxItemCheckpointById,
@@ -55,7 +60,10 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       {
-        args: [{ userId: "member_123" }],
+        args: [{
+          options: defaultWorkflowOptions,
+          userId: "member_123",
+        }],
         signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
         signalArgs: [{
           kind: "mailbox_appended",

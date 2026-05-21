@@ -17,6 +17,11 @@ import {
   type HostedUserRuntimeSignalWithStartOptions,
 } from "../src/client/signal-hosted-user-runtime.js";
 
+const defaultWorkflowOptions = {
+  ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+  readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+};
+
 describe("hostedUserRuntimeWorkflowId", () => {
   it("builds a stable per-user workflow id", () => {
     expect(hostedUserRuntimeWorkflowId(" user_test ")).toBe(
@@ -64,7 +69,10 @@ describe("signalHostedUserRuntimeWorkflow", () => {
     expect(calls).toEqual([
       {
         options: {
-          args: [{ userId: "user_test" }],
+          args: [{
+            options: defaultWorkflowOptions,
+            userId: "user_test",
+          }],
           signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
           signalArgs: [signal],
           taskQueue: HOSTED_USER_RUNTIME_TASK_QUEUE,

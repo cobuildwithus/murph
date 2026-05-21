@@ -10,10 +10,20 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
 } from "@murphai/hosted-execution";
 
+const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
+const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
+const DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS = 600_000;
+const DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS = 30_000;
+
 export interface HostedRuntimeTemporalEnvironment {
   address: string | null;
   namespace: string;
   taskQueue: string;
+}
+
+export interface HostedRuntimeTemporalWorkflowOptions {
+  ensureCloudflareExecutionStartToCloseTimeoutMs: number;
+  readRuntimeDemandStartToCloseTimeoutMs: number;
 }
 
 export interface HostedRuntimeTemporalSignalClient {
@@ -46,6 +56,32 @@ export function readHostedRuntimeTemporalEnvironment(
     taskQueue:
       readOptionalEnv(source, "HOSTED_TEMPORAL_TASK_QUEUE", "TEMPORAL_TASK_QUEUE")
       ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
+  };
+}
+
+export function readHostedRuntimeTemporalWorkflowOptions(
+  source: NodeJS.ProcessEnv = process.env,
+): HostedRuntimeTemporalWorkflowOptions {
+  const runnerTimeoutMs = parsePositiveInteger(
+    readOptionalEnv(source, "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS"),
+    DEFAULT_HOSTED_EXECUTION_RUNNER_TIMEOUT_MS,
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+  );
+  const ensureExecutionTimeoutMarginMs = parsePositiveInteger(
+    readOptionalEnv(source, "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS"),
+    DEFAULT_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
+    "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS",
+  );
+
+  return {
+    ensureCloudflareExecutionStartToCloseTimeoutMs:
+      runnerTimeoutMs + ensureExecutionTimeoutMarginMs,
+    readRuntimeDemandStartToCloseTimeoutMs: parseBoundedPositiveInteger(
+      readOptionalEnv(source, "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS"),
+      DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
+      MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
+      "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS",
+    ),
   };
 }
 
@@ -94,4 +130,35 @@ function readOptionalEnv(
   }
 
   return null;
+}
+
+function parsePositiveInteger(
+  value: string | null,
+  fallback: number,
+  label: string,
+): number {
+  if (value === null) {
+    return fallback;
+  }
+  if (!/^[0-9]+$/u.test(value)) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+function parseBoundedPositiveInteger(
+  value: string | null,
+  fallback: number,
+  max: number,
+  label: string,
+): number {
+  const parsed = parsePositiveInteger(value, fallback, label);
+  if (parsed > max) {
+    throw new TypeError(`${label} must be less than or equal to ${max}.`);
+  }
+  return parsed;
 }

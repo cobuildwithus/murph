@@ -26,9 +26,14 @@ import {
 
 export const HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS = 65_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
+export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
+export const HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVE_WAKE_RECHECK_DELAY_MS = 5_000;
 export const HOSTED_USER_RUNTIME_MAX_ACTIVE_WAKE_RECHECK_DELAY_MS = 3_600_000;
+export const HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 30_000;
+export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
@@ -39,25 +44,33 @@ export const runtimeWorkflowStatus =
     HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   );
 
-const activityProxies = proxyActivities<typeof activities>({
-  retry: {
-    initialInterval: "2 seconds",
-    maximumAttempts: 6,
-    maximumInterval: "1 minute",
-  },
-  startToCloseTimeout: "20 minutes",
-});
-
 export async function hostedUserRuntimeWorkflow(
   input: HostedUserRuntimeWorkflowInput,
 ): Promise<void> {
+  const options = normalizeWorkflowOptions(input.options);
+  const demandActivities = proxyActivities<typeof activities>({
+    retry: {
+      initialInterval: "2 seconds",
+      maximumAttempts: 6,
+      maximumInterval: "1 minute",
+    },
+    startToCloseTimeout: options.readRuntimeDemandStartToCloseTimeoutMs,
+  });
+  const executionActivities = proxyActivities<typeof activities>({
+    retry: {
+      initialInterval: "2 seconds",
+      maximumAttempts: 6,
+      maximumInterval: "1 minute",
+    },
+    startToCloseTimeout: options.ensureCloudflareExecutionStartToCloseTimeoutMs,
+  });
   const machine = createHostedUserRuntimeWorkflowMachine(input, {
     continueAsNew: async (nextInput) => continueAsNew<typeof hostedUserRuntimeWorkflow>(
       nextInput,
     ),
-    ensureCloudflareExecution: activityProxies.ensureCloudflareExecution,
+    ensureCloudflareExecution: executionActivities.ensureCloudflareExecution,
     nowMs: () => Date.now(),
-    readRuntimeDemand: activityProxies.readRuntimeDemand,
+    readRuntimeDemand: demandActivities.readRuntimeDemand,
     sleep: async (durationMs) => {
       await sleep(durationMs);
     },
@@ -106,6 +119,8 @@ export interface HostedUserRuntimeWorkflowMachine {
 interface NormalizedWorkflowOptions {
   activeWakeRecheckDelayMs: number;
   continueAsNewAfterIterations: number;
+  ensureCloudflareExecutionStartToCloseTimeoutMs: number;
+  readRuntimeDemandStartToCloseTimeoutMs: number;
 }
 
 export function createHostedUserRuntimeWorkflowMachine(
@@ -309,6 +324,18 @@ function normalizeWorkflowOptions(
       max: HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD,
       min: 1,
       value: options?.continueAsNewAfterIterations,
+    }),
+    ensureCloudflareExecutionStartToCloseTimeoutMs: normalizePositiveIntegerOption({
+      fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+      value: options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
+    }),
+    readRuntimeDemandStartToCloseTimeoutMs: normalizePositiveIntegerOption({
+      fallback: HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
+      max: HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
+      min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+      value: options?.readRuntimeDemandStartToCloseTimeoutMs,
     }),
   };
 }

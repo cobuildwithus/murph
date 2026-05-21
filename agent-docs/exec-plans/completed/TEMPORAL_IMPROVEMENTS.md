@@ -1,3 +1,10 @@
+Landing status, 2026-05-20: these adjustments are incorporated into
+`agent-docs/exec-plans/completed/TEMPORAL.md` and the landed hard-cut
+implementation. The final fixes from audit were direct email-ingress Temporal
+signaling, deletion of the email nudge-workflow route/client, env-derived
+Temporal Activity start-to-close timeouts, and non-retryable
+`ApplicationFailure` classification for fresh usage-decision blocks.
+
 I’d keep the plan’s core architecture exactly as-is, but I would make **nine concrete adjustments** before landing. The plan is directionally strong: hard-cut to Temporal as scheduler, Cloudflare as execution adapter, web as ingress/status owner, and Murph runtime as business-logic owner.  
 
 ## 1. Do not put full demand/workspace/result objects into Temporal history
@@ -514,3 +521,6 @@ With those changes, the migration is cleaner, smaller, and more faithful to the 
 [4]: https://docs.temporal.io/develop/typescript/activities/timeouts "Activity Timeouts - TypeScript SDK | Temporal Platform Documentation"
 [5]: https://docs.temporal.io/develop/typescript/workflows/basics "Workflow basics - TypeScript SDK | Temporal Platform Documentation"
 [6]: https://docs.temporal.io/develop/typescript/workers/run-worker-process "Worker processes - TypeScript SDK | Temporal Platform Documentation"
+Status: completed
+Updated: 2026-05-20
+Completed: 2026-05-20

@@ -33,10 +33,10 @@ This ADR is the target architecture for the hard cut. Existing Vercel Workflow
 nudge paths and Cloudflare semantic scheduling paths are deletion targets, not
 fallbacks, compatibility modes, or coexisting long-term surfaces.
 
-The active implementation plan for this migration is
-`agent-docs/exec-plans/active/TEMPORAL.md`. Use that plan for batch sequencing
-and subagent execution details; use this ADR for durable architecture ownership,
-state, and deletion guardrails.
+The completed implementation plan for this migration is
+`agent-docs/exec-plans/completed/TEMPORAL.md`. Use that snapshot for batch
+sequencing and subagent execution details; use this ADR for durable architecture
+ownership, state, and deletion guardrails.
 
 ## Final Architecture
 
@@ -347,16 +347,17 @@ The hard-cut architecture is accepted when:
 - Workflow setup uses an ESM-compatible explicit `workflowsPath`.
 - Vercel Workflow nudge files and Cloudflare nudge fallback paths are deleted
   or hard-disabled for production.
-- End-to-end proof shows mailbox append to Temporal to Cloudflare execution to
-  runtime checkpoint to Temporal idle.
-- Tests prove that wake acceptance is not completion and that Temporal idles
-  only after web/runtime demand is idle.
+- Focused tests prove that wake acceptance is not completion and that Temporal
+  idles only after web/runtime demand is idle.
+- The remaining local E2E harness gap for mailbox append to Temporal to
+  Cloudflare execution to runtime checkpoint to Temporal idle is tracked in
+  `agent-docs/references/testing-ci-map.md`.
 
 ## Related References
 
 - `agent-docs/references/hosted-runtime-protocol.md` describes the current
   hosted mailbox/runtime protocol that the migration cuts over from.
-- `agent-docs/exec-plans/active/TEMPORAL.md` is the active migration plan and
-  execution source of truth for batch order and subagent prompts.
+- `agent-docs/exec-plans/completed/TEMPORAL.md` is the completed migration
+  plan and execution snapshot for batch order and subagent prompts.
 - `ARCHITECTURE.md` remains the top-level module map and points here for the
   Temporal hard-cut target.

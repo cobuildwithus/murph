@@ -3,6 +3,9 @@ import type {
   HostedRuntimeEnsureExecutionResponse,
 } from "../index.js";
 import {
+  ApplicationFailure,
+} from "@temporalio/common";
+import {
   parseHostedRuntimeEnsureExecutionRequest,
   parseHostedRuntimeEnsureExecutionResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -90,7 +93,7 @@ async function fetchFreshAiUsageAllowDecision(userId: string) {
   );
 
   if (decision.kind === "blocked") {
-    throw new HostedOrchestratorUsageDecisionBlockedError(decision);
+    throw createUsageDecisionBlockedFailure(decision);
   }
 
   if (decision.aiUsageAllowDecision.userId !== userId) {
@@ -100,16 +103,23 @@ async function fetchFreshAiUsageAllowDecision(userId: string) {
   return decision.aiUsageAllowDecision;
 }
 
-export class HostedOrchestratorUsageDecisionBlockedError extends Error {
-  readonly code: "ai_usage_denied" | "ai_usage_gate_unavailable";
-  readonly retryAt: string | null;
-
-  constructor(input: Extract<HostedRuntimeUsageAllowDecisionFetchResult, { kind: "blocked" }>) {
-    super("Hosted orchestrator AI usage decision is blocked.");
-    this.name = "HostedOrchestratorUsageDecisionBlockedError";
-    this.code = input.reason;
-    this.retryAt = input.retryAt;
-  }
+function createUsageDecisionBlockedFailure(
+  input: Extract<HostedRuntimeUsageAllowDecisionFetchResult, { kind: "blocked" }>,
+): ApplicationFailure {
+  const failure = ApplicationFailure.create({
+    details: [{
+      retryAt: input.retryAt,
+    }],
+    message: "Hosted orchestrator AI usage decision is blocked.",
+    nonRetryable: true,
+    type: input.reason,
+  }) as ApplicationFailure & {
+    code?: typeof input.reason;
+    retryAt?: string | null;
+  };
+  failure.code = input.reason;
+  failure.retryAt = input.retryAt;
+  return failure;
 }
 
 function parseEnsureCloudflareExecutionInput(

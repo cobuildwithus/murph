@@ -11,6 +11,9 @@ import {
 import {
   appendHostedMailboxEnvelopeTx,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  signalHostedMailboxAppendRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readOptionalJsonObject, readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -46,6 +49,21 @@ export const POST = withJsonError(async (request: Request) => {
       tx,
     });
   });
+  const mailboxItemId = response.item.id;
+  const mailboxItemIdPresent = mailboxItemId.length > 0;
+
+  try {
+    await signalHostedMailboxAppendRuntime({
+      expectedUserId: userId,
+      mailboxItemId,
+      source: "email",
+    });
+  } catch (error) {
+    console.warn("Hosted email ingress Temporal signal failed after mailbox append.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+      mailboxItemIdPresent,
+    });
+  }
 
   return jsonOk(response);
 });
