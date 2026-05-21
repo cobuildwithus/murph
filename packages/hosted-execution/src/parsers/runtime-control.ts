@@ -992,10 +992,17 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
         record.nextWakeAt,
         "Hosted workspace invocation result nextWakeAt",
       );
+  const nextWakeReason = record.nextWakeReason === undefined
+    ? undefined
+    : readNullableString(
+        record.nextWakeReason,
+        "Hosted workspace invocation result nextWakeReason",
+      );
   const status = parseHostedWorkspaceInvocationStatus(record.status);
 
   return {
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
+    ...(nextWakeReason === undefined ? {} : { nextWakeReason }),
     ...(record.redactedStatus === undefined
       ? {}
       : {

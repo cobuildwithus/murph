@@ -834,6 +834,7 @@ export interface HostedWorkspaceInvocationRequest {
 
 export interface HostedWorkspaceInvocationResult {
   nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   status: HostedWorkspaceInvocationStatus;
 }

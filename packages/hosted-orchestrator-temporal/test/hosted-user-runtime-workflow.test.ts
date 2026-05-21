@@ -145,12 +145,13 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.waits).toEqual([7_000]);
   });
 
-  it("preserves runtimeResultNextWakeAt as runtimeResultWakeAt on the next demand read", async () => {
+  it("preserves runtime result wake time and reason on the next demand read", async () => {
     const runtime = new FakeWorkflowRuntime();
     const runtimeResultNextWakeAt = isoAfter(300_000);
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(runtimeCompleted({
       runtimeResultNextWakeAt,
+      runtimeResultNextWakeReason: "assistant",
     }));
     runtime.demands.push(idleDemand(isoAfter(600_000)));
 
@@ -165,6 +166,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.demandRequests[1].runtimeResultWakeAt).toBe(
       runtimeResultNextWakeAt,
     );
+    expect(runtime.demandRequests[1].runtimeResultWakeReason).toBe("assistant");
   });
 
   it("does not pass usage decisions into execution", async () => {
@@ -207,6 +209,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
     runtime.demands.push((request) => {
       expect(request.runtimeResultWakeAt).toBe(runtimeResultWakeAt);
+      expect(request.runtimeResultWakeReason).toBe("assistant");
       return runDemand({
         source: "runtime_result_wake",
         workspace,
@@ -219,6 +222,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       state: {
         ...emptyCarryForwardState(),
         runtimeResultWakeAt,
+        runtimeResultWakeReason: "assistant",
       },
       userId: "member_test",
     });
@@ -443,6 +447,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         ...emptyCarryForwardState(),
         mailboxSignalCount: 3,
         runtimeResultWakeAt: isoAfter(300_000),
+        runtimeResultWakeReason: "assistant",
       },
       userId: "member_test",
     });
@@ -455,6 +460,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         lastDemandKind: "idle",
         mailboxSignalCount: 0,
         runtimeResultWakeAt: isoAfter(300_000),
+        runtimeResultWakeReason: "assistant",
         signalVersion: 0,
       }),
       userId: "member_test",
@@ -580,6 +586,7 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     mailboxSignalCount: 0,
     manualRunRequested: false,
     runtimeResultWakeAt: null,
+    runtimeResultWakeReason: null,
     signalVersion: 0,
   };
 }
@@ -656,6 +663,7 @@ function runtimeCompleted(
     kind: "runtime_completed",
     runtimeAttemptId: input.runtimeAttemptId ?? "runtime_attempt_test",
     runtimeResultNextWakeAt: input.runtimeResultNextWakeAt ?? null,
+    runtimeResultNextWakeReason: input.runtimeResultNextWakeReason ?? null,
     runtimeStatus: input.runtimeStatus ?? "idle",
   };
 }

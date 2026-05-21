@@ -191,6 +191,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         lagRecoveryObserved: state.lagRecoveryObserved,
         manualRunRequested: state.manualRunRequested,
         runtimeResultWakeAt: state.runtimeResultWakeAt,
+        runtimeResultWakeReason: state.runtimeResultWakeReason,
         userId: input.userId,
       });
 
@@ -253,6 +254,9 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       if (execution.kind === "runtime_completed") {
         state.runtimeResultWakeAt = execution.runtimeResultNextWakeAt;
+        state.runtimeResultWakeReason = execution.runtimeResultNextWakeAt
+          ? execution.runtimeResultNextWakeReason
+          : null;
         if (demand.source === "workspace_wake") {
           state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
         }
@@ -320,6 +324,7 @@ function createInitialWorkflowState(
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
     manualRunRequested: carryForward?.manualRunRequested ?? false,
     runtimeResultWakeAt: carryForward?.runtimeResultWakeAt ?? null,
+    runtimeResultWakeReason: carryForward?.runtimeResultWakeReason ?? null,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };

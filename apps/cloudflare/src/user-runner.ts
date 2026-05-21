@@ -673,10 +673,6 @@ export class HostedUserRunner {
 
     let workspaceVersion: string | null = null;
     let result: HostedWorkspaceInvocationResult;
-    let completed: {
-      completed: boolean;
-      record: RunnerStateRecord;
-    };
     try {
       const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
@@ -693,17 +689,6 @@ export class HostedUserRunner {
         workspace: workspaceRead.workspace,
         workspaceVersion,
       });
-      completed = await this.stateStore.clearWriteFenceAfterCompletion({
-        finishedAt: new Date().toISOString(),
-        token,
-      });
-      if (!completed.completed) {
-        throw new HostedRuntimeExecutionRetryableError(
-          "Hosted runtime execution completed after its write fence changed.",
-          "runtime-completion-stale",
-        );
-      }
-
     } catch (error) {
       const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
         error,
@@ -729,9 +714,14 @@ export class HostedUserRunner {
       throw error;
     }
 
+    const completion = await this.recordRuntimeCompletionAfterInvoke({
+      input,
+      token,
+      workspaceVersion,
+    });
     await this.syncWatchdogAlarmAfterCompletion({
       executionInput: input,
-      record: completed.record,
+      record: completion.record,
       token,
       workspaceVersion,
     });
@@ -742,6 +732,7 @@ export class HostedUserRunner {
         orchestrationAttemptId: input.orchestrationAttemptId,
         runtimeExecutionDurationMs: Date.now() - runtimeWakeStartedAt,
         runtimeResultNextWakeAtPresent: result.nextWakeAt != null,
+        runtimeResultNextWakeReasonPresent: result.nextWakeReason != null,
         workspaceAttemptId: token.attemptId,
         workspaceStatus: result.status,
         workspaceVersion,
@@ -756,16 +747,96 @@ export class HostedUserRunner {
       kind: "runtime_completed",
       runtimeAttemptId: token.attemptId,
       runtimeResultNextWakeAt: result.nextWakeAt ?? null,
+      runtimeResultNextWakeReason: result.nextWakeReason ?? null,
       runtimeStatus: result.status,
     };
   }
 
+  private async recordRuntimeCompletionAfterInvoke(input: {
+    input: RuntimeExecutionInput;
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string | null;
+  }): Promise<{ record: RunnerStateRecord | null }> {
+    try {
+      const completed = await this.stateStore.clearWriteFenceAfterCompletion({
+        finishedAt: new Date().toISOString(),
+        token: input.token,
+      });
+      if (!completed.completed) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            orchestrationAttemptId: input.input.orchestrationAttemptId,
+            workspaceAttemptId: input.token.attemptId,
+            workspaceReason: input.input.reason,
+            workspaceVersion: input.workspaceVersion,
+          },
+          level: "warn",
+          message: "Hosted runner runtime execution completed after its write fence changed; preserving completed result without transport retry.",
+          phase: "checkpoint",
+          userId: input.input.userId,
+        });
+      }
+      return {
+        record: completed.record,
+      };
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: input.input.reason,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted runner runtime execution completed but completion recording failed; preserving completed result without transport retry.",
+        phase: "checkpoint",
+        userId: input.input.userId,
+      });
+      return {
+        record: await this.readRunnerStateAfterCompletionRecordFailure(input),
+      };
+    }
+  }
+
+  private async readRunnerStateAfterCompletionRecordFailure(input: {
+    input: RuntimeExecutionInput;
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string | null;
+  }): Promise<RunnerStateRecord | null> {
+    try {
+      return await this.stateStore.readState();
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: input.input.reason,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted runner runtime execution completed but state read after completion recording failure also failed.",
+        phase: "checkpoint",
+        userId: input.input.userId,
+      });
+      return null;
+    }
+  }
+
   private async syncWatchdogAlarmAfterCompletion(input: {
     executionInput: RuntimeExecutionInput;
-    record: RunnerStateRecord;
+    record: RunnerStateRecord | null;
     token: RunnerWriteFenceToken;
     workspaceVersion: string | null;
   }): Promise<void> {
+    if (!input.record) {
+      return;
+    }
+
     try {
       await this.syncWatchdogAlarm(input.record);
     } catch (error) {
@@ -807,6 +878,7 @@ export class HostedUserRunner {
     if (execution.kind === "runtime_completed") {
       return {
         nextWakeAt: execution.runtimeResultNextWakeAt,
+        nextWakeReason: execution.runtimeResultNextWakeReason,
         status: execution.runtimeStatus,
       };
     }

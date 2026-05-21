@@ -67,6 +67,7 @@ describe("ensureCloudflareExecution", () => {
       kind: "runtime_completed",
       runtimeAttemptId: "runtime_attempt_test",
       runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
       runtimeStatus: "idle",
     };
     const observedRequests: ObservedRequest[] = [];

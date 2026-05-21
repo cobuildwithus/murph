@@ -260,8 +260,8 @@ Hosted runner cleanup:
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
 Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
 the removed Stripe meter path. The hosted allowance gate reads web-owned spend,
-and Cloudflare only enforces the signed gate decision before starting a new
-container invocation.
+and the runtime/provider layer enforces spend before actual model calls instead
+of relying on a Cloudflare-start signed decision.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.

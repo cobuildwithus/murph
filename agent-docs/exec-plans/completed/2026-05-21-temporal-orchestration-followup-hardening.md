@@ -15,6 +15,10 @@ Success criteria:
   ensure-execution contract and webhook wake handoff path.
 - Web AI usage demand gating covers only demand sources that strongly imply model
   work.
+- Runtime-result wake gating uses the runtime-provided wake reason and defaults
+  unknown runtime-result wakes to gated rather than bypassing usage policy.
+- Stale signed usage-allowance env/deploy surfaces are removed from the live
+  web/Cloudflare contract.
 - Cloudflare runtime ensure-execution is callback-signature only.
 - Workflow code imports only pure orchestration contracts and workflow-local types.
 - Mailbox signal coalescing state resets after demand is consumed or satisfied.
@@ -34,11 +38,20 @@ Success criteria:
 - `packages/hosted-execution/**`
 - `apps/web/src/lib/hosted-orchestration/**`
 - `apps/web/src/lib/hosted-onboarding/**`
+- `apps/web/src/lib/hosted-execution/**`
+- `apps/web/app/api/internal/hosted-orchestration/**`
+- `apps/web/.env.example`
 - `apps/web/test/**`
 - `apps/cloudflare/src/index.ts`
 - `apps/cloudflare/src/user-runner.ts`
+- `apps/cloudflare/src/hosted-execution-worker-env.ts`
+- `apps/cloudflare/src/worker-contracts.ts`
+- `apps/cloudflare/scripts/deploy-automation/worker-secret-names.ts`
 - `apps/cloudflare/test/**`
+- `apps/cloudflare/vitest.node.workspace.ts`
+- `apps/cloudflare/DEPLOY.md`
 - `ARCHITECTURE.md`
+- `agent-docs/index.md`
 - `agent-docs/references/**`
 
 ## Verification Plan
@@ -48,3 +61,6 @@ Success criteria:
 - Affected package/app typechecks where scoped verification is truthful.
 - Root `pnpm typecheck` unless still blocked by unrelated dirty work.
 - Required completion audits for high-risk auth/retry/runtime changes.
+Status: completed
+Updated: 2026-05-20
+Completed: 2026-05-20

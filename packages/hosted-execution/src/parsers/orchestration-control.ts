@@ -166,6 +166,7 @@ export function parseHostedRuntimeDemandRequest(
     "lagRecoveryObserved",
     "manualRunRequested",
     "runtimeResultWakeAt",
+    "runtimeResultWakeReason",
     "userId",
   ]);
 
@@ -216,6 +217,14 @@ export function parseHostedRuntimeDemandRequest(
           runtimeResultWakeAt: readOptionalNullableIsoTimestamp(
             record.runtimeResultWakeAt,
             "Hosted runtime demand request runtimeResultWakeAt",
+          ),
+        }),
+    ...(record.runtimeResultWakeReason === undefined
+      ? {}
+      : {
+          runtimeResultWakeReason: readRequiredNullableBoundedString(
+            record.runtimeResultWakeReason,
+            "Hosted runtime demand request runtimeResultWakeReason",
           ),
         }),
     userId: requireOpaqueIdentifier(record.userId, "Hosted runtime demand request userId"),
@@ -362,6 +371,7 @@ export function parseHostedRuntimeEnsureExecutionResponse(
         "kind",
         "runtimeAttemptId",
         "runtimeResultNextWakeAt",
+        "runtimeResultNextWakeReason",
         "runtimeStatus",
       ]);
 
@@ -380,6 +390,12 @@ export function parseHostedRuntimeEnsureExecutionResponse(
           record.runtimeResultNextWakeAt,
           "Hosted runtime completed response runtimeResultNextWakeAt",
         ),
+        runtimeResultNextWakeReason: record.runtimeResultNextWakeReason === undefined
+          ? null
+          : readRequiredNullableBoundedString(
+              record.runtimeResultNextWakeReason,
+              "Hosted runtime completed response runtimeResultNextWakeReason",
+            ),
         runtimeStatus: parseHostedWorkspaceInvocationStatus(
           record.runtimeStatus,
           "Hosted runtime completed response runtimeStatus",

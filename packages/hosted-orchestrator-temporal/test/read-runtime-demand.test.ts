@@ -44,6 +44,7 @@ describe("readRuntimeDemand", () => {
       lagRecoveryObserved: true,
       manualRunRequested: true,
       runtimeResultWakeAt: "2026-05-20T12:01:00.000Z",
+      runtimeResultWakeReason: "assistant",
       userId: "member_test",
     })).resolves.toEqual(demand);
 
@@ -63,6 +64,7 @@ describe("readRuntimeDemand", () => {
     expect(url.searchParams.get("runtimeResultWakeAt")).toBe(
       "2026-05-20T12:01:00.000Z",
     );
+    expect(url.searchParams.get("runtimeResultWakeReason")).toBe("assistant");
     expect(url.searchParams.get("ignoredWorkspaceWakeKey")).toBe(
       "7:2026-05-20T12:00:00.000Z:assistant",
     );

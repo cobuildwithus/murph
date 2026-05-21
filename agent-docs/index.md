@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-05-20
+Last verified: 2026-05-21
 
 ## Purpose
 
@@ -52,7 +52,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, CI, diff-aware package-boundary checks, and the Cloudflare immediate-deploy Blacksmith path. | Testing and CI truth | High | 2026-05-20 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoint protocol, signed email reply-alias ingress boundary, idle-shutdown-only checkpoint snapshot writing, legacy snapshot restore compatibility, Worker-owned mailbox payload decode boundary, web/Cloudflare deploy compatibility, mailbox import with best-effort inbox projection, foreground runtime wakes, retry-only mailbox scheduling without dirty checkpoints, Workflow-owned pointer nudge retry ownership, and deleted run-protocol guardrails. | Hosted execution architecture | High | 2026-05-13 |
-| `agent-docs/references/hosted-temporal-orchestration.md` | Durable hard-cut Temporal orchestration ADR defining final ownership split, pointer-only Temporal state, execution-adapter contract, Cloudflare scheduler deletion targets, Vercel Workflow nudge deletion targets, and acceptance criteria; `agent-docs/exec-plans/completed/TEMPORAL.md` is the completed execution snapshot. | Hosted Temporal orchestration target | High | 2026-05-20 |
+| `agent-docs/references/hosted-temporal-orchestration.md` | Durable hard-cut Temporal orchestration ADR defining final ownership split, pointer-only Temporal state, signal-aware retry/wait behavior, callback-signed execution-adapter contract, web-owned demand gates without Activity-local signed usage decisions, Cloudflare scheduler deletion targets, Vercel Workflow nudge deletion targets, and acceptance criteria; `agent-docs/exec-plans/completed/TEMPORAL.md` is the completed execution snapshot. | Hosted Temporal orchestration target | High | 2026-05-21 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Current split-now, worth-planning, and keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-04-14 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
@@ -66,9 +66,9 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow. | Workflow prompt library | Low | 2026-04-23 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
-| `apps/web/README.md` | Hosted web control-plane overview and env/runtime contract. | `apps/web/**` | Medium | 2026-04-02 |
+| `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, hosted AI usage allowance ownership, and Temporal demand gating boundary. | `apps/web/**` | Medium | 2026-05-21 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract. | `apps/cloudflare/**` | Medium | 2026-05-11 |
-| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including immediate Blacksmith deploy handoff validation. | Hosted deploy flow | Medium | 2026-05-09 |
+| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including immediate Blacksmith deploy handoff validation and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-05-21 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare. | `packages/assistant-runtime/**` | Medium | 2026-04-30 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |

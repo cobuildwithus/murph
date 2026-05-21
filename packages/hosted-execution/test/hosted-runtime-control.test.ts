@@ -289,9 +289,11 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceInvocationResult({
       nextWakeAt: "2026-04-26T00:00:05.000Z",
+      nextWakeReason: "assistant",
       status: "idle",
     })).toEqual({
       nextWakeAt: "2026-04-26T00:00:05.000Z",
+      nextWakeReason: "assistant",
       status: "idle",
     });
     expect(() => parseHostedWorkspaceInvocationResult({

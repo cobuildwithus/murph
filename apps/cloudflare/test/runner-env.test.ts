@@ -1197,6 +1197,12 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",
     );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
+      "HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID",
+    );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
+      "HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET",
+    );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain("GARMIN_CLIENT_ID");
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain("GARMIN_CLIENT_SECRET");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(

@@ -28,7 +28,6 @@ import {
 } from "./runtime-usage-decision";
 
 const HOSTED_RUNTIME_AI_USAGE_SOURCES = new Set<HostedRuntimeDemandRunSource>([
-  "mailbox_backlog",
   "manual",
 ]);
 
@@ -92,6 +91,12 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
 
   const requiresAiUsageDecision = hostedRuntimeDemandRequiresAiUsageDecision(
     run.source,
+    {
+      mailboxLag: input.mailboxLag,
+      now,
+      runtimeResultWakeReason: input.runtimeResultWakeReason ?? null,
+      workspace,
+    },
   );
 
   if (requiresAiUsageDecision) {
@@ -147,7 +152,38 @@ export function buildHostedRuntimeWorkspaceWakeKey(
 
 export function hostedRuntimeDemandRequiresAiUsageDecision(
   source: HostedRuntimeDemandRunSource,
+  input: {
+    mailboxLag: readonly HostedMailboxLaneLag[];
+    now: Date;
+    runtimeResultWakeReason: string | null;
+    workspace: HostedRuntimeDemandWorkspaceProjection | null;
+  },
 ): boolean {
+  if (source === "mailbox_backlog") {
+    return hasHostedMailboxLag(input.mailboxLag, "conversation");
+  }
+
+  if (source === "workspace_wake") {
+    return isHostedRuntimeModelCapableWorkspaceWakeReason(
+      input.workspace?.nextWakeReason ?? null,
+    );
+  }
+
+  if (source === "runtime_result_wake") {
+    if (
+      isHostedRuntimeWakeDue(input.workspace?.nextWakeAt ?? null, input.now)
+      && isHostedRuntimeModelCapableWorkspaceWakeReason(
+        input.workspace?.nextWakeReason ?? null,
+      )
+    ) {
+      return true;
+    }
+
+    return hostedRuntimeResultWakeRequiresAiUsageDecision(
+      input.runtimeResultWakeReason,
+    );
+  }
+
   return HOSTED_RUNTIME_AI_USAGE_SOURCES.has(source);
 }
 
@@ -165,7 +201,7 @@ function selectHostedRuntimeRunDemand(input: {
   reason: HostedWorkspaceInvocationReason;
   source: HostedRuntimeDemandRunSource;
 } | null {
-  if (hasHostedMailboxLag(input.mailboxLag)) {
+  if (hasHostedMailboxLag(input.mailboxLag, "conversation")) {
     return {
       reason: "nudge",
       source: "mailbox_backlog",
@@ -176,6 +212,13 @@ function selectHostedRuntimeRunDemand(input: {
     return {
       reason: "manual",
       source: "manual",
+    };
+  }
+
+  if (hasHostedMailboxLag(input.mailboxLag)) {
+    return {
+      reason: "nudge",
+      source: "mailbox_backlog",
     };
   }
 
@@ -242,14 +285,35 @@ function readEarliestFutureWakeAt(input: {
     .sort()[0] ?? null;
 }
 
-function hasHostedMailboxLag(mailboxLag: readonly HostedMailboxLaneLag[]): boolean {
-  return mailboxLag.some((lane) => {
+function hasHostedMailboxLag(
+  mailboxLag: readonly HostedMailboxLaneLag[],
+  targetLane?: HostedMailboxLaneLag["lane"],
+): boolean {
+  return mailboxLag.some((laneLag) => {
+    if (targetLane !== undefined && laneLag.lane !== targetLane) {
+      return false;
+    }
     try {
-      return BigInt(lane.lag) > 0n;
+      return BigInt(laneLag.lag) > 0n;
     } catch {
       return false;
     }
   });
+}
+
+function isHostedRuntimeModelCapableWorkspaceWakeReason(
+  reason: string | null,
+): boolean {
+  return reason === "assistant" || reason === "assistant_due";
+}
+
+function hostedRuntimeResultWakeRequiresAiUsageDecision(
+  reason: string | null,
+): boolean {
+  if (reason === "device-sync.reconcile" || reason === "mailbox") {
+    return false;
+  }
+  return true;
 }
 
 function isHostedRuntimeWakeDue(value: string | null, now: Date): boolean {
