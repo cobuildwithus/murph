@@ -348,7 +348,13 @@ export async function startHostedLocalDevStack(input: {
         [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
       }
       : null;
-    workerProcessEnv = workerRuntimeEnv === null ? null : { ...workerRuntimeEnv };
+    workerProcessEnv = workerRuntimeEnv === null
+      ? null
+      : {
+        ...workerRuntimeEnv,
+        DOCKER_BUILDKIT: "1",
+        DOCKER_DEFAULT_PLATFORM: "linux/amd64",
+      };
     if (workerRuntimeEnv !== null) {
       if (isolatedDockerConfigDir !== null && minioServer === null) {
         await prepareIsolatedDockerConfig({
@@ -1104,30 +1110,52 @@ async function symlinkDockerCliPluginsIfPresent(input: {
   targetConfigDir: string;
   sourceEnv: NodeJS.ProcessEnv;
 }): Promise<void> {
-  const sourceDir = resolveDockerCliPluginSourceDir(input.sourceEnv);
   const targetDir = path.join(input.targetConfigDir, "cli-plugins");
-  if (path.resolve(sourceDir) === path.resolve(targetDir)) {
+  const sourceDir = await findDockerCliPluginSourceDir({
+    sourceEnv: input.sourceEnv,
+    targetDir,
+  });
+  if (sourceDir === null) {
     return;
   }
 
-  try {
-    await access(sourceDir);
-  } catch {
-    return;
-  }
-
-  try {
-    await symlink(sourceDir, targetDir, "dir");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
-  }
+  await rm(targetDir, { force: true, recursive: true });
+  await symlink(sourceDir, targetDir, "dir");
 }
 
-function resolveDockerCliPluginSourceDir(env: NodeJS.ProcessEnv): string {
+async function findDockerCliPluginSourceDir(input: {
+  sourceEnv: NodeJS.ProcessEnv;
+  targetDir: string;
+}): Promise<string | null> {
+  for (const candidate of resolveDockerCliPluginSourceDirs(input.sourceEnv)) {
+    if (path.resolve(candidate) === path.resolve(input.targetDir)) {
+      continue;
+    }
+
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function resolveDockerCliPluginSourceDirs(env: NodeJS.ProcessEnv): string[] {
   const dockerConfig = env.DOCKER_CONFIG?.trim();
-  return path.join(dockerConfig || path.join(os.homedir(), ".docker"), "cli-plugins");
+  const candidates = [
+    ...(dockerConfig ? [path.join(dockerConfig, "cli-plugins")] : []),
+    path.join(os.homedir(), ".docker", "cli-plugins"),
+    ...(process.platform === "darwin"
+      ? ["/Applications/Docker.app/Contents/Resources/cli-plugins"]
+      : []),
+    "/usr/local/lib/docker/cli-plugins",
+    "/usr/libexec/docker/cli-plugins",
+    "/usr/lib/docker/cli-plugins",
+  ];
+  return [...new Set(candidates.map((candidate) => path.resolve(candidate)))];
 }
 
 function resolvePreStartHostedRunnerContainerCleanupScope(

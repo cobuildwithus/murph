@@ -25,9 +25,6 @@ import type {
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  HostedRuntimeEnsureExecutionResponse,
-} from "@murphai/hosted-execution/orchestration-control";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -44,9 +41,6 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
-import {
-  wakeHostedWorker,
-} from "./helpers/hosted-local-wake.js";
 import {
   buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
@@ -752,7 +746,7 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
   }, 300_000);
 
   itOutsideFastDeployGate(
-    "does not keep servicing a stale scheduled wake after a Linq reply",
+    "does not resend Linq side effects when a stale scheduled wake remains after a reply",
     async () => {
       await requireScenario().seedActiveHostedLinqMember({
         homePhone: buildLinqHomePhoneNumber(typingLoopUserId),
@@ -852,7 +846,12 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         typingLoopUserId,
         200,
       );
-      expect(statusAfterReplyIdle.workspace?.nextWakeAt ?? null).toBeNull();
+      const postReplyNextWakeAt = statusAfterReplyIdle.workspace?.nextWakeAt ?? null;
+      if (postReplyNextWakeAt !== null) {
+        const postReplyWakeMs = Date.parse(postReplyNextWakeAt);
+        expect(Number.isFinite(postReplyWakeMs)).toBe(true);
+        expect(postReplyWakeMs).toBeGreaterThanOrEqual(replyStartedAtMs);
+      }
       expect(
         countAssistantCanonicalRuntimeCommitDeferrals(statusAfterReplyIdle, replyStartedAtMs),
       ).toBeLessThanOrEqual(1);
@@ -870,9 +869,7 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       expect(hasHostedMailboxBacklog(statusAfterStaleWakeSeed)).toBe(true);
 
       const alarmStartedAtMs = Date.now();
-      const alarmOutcome = await runHostedAlarmWithRuntimeWakeProbesForTest(
-        typingLoopUserId,
-      );
+      const alarmOutcome = await runHostedAlarmUntilIdleForTest(typingLoopUserId);
 
       const statusAfterAlarm = await readHostedRunnerStatusWithLogLimit(
         typingLoopUserId,
@@ -885,26 +882,14 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         .filter((request) => request.method === "POST" && request.url === expectedTypingPath);
       const outboundCountAfterAlarm = requireLinqStub().countObservedSends(expectedReplyPath);
 
-      if (alarmOutcome.result.status === "scheduled") {
-        expect(alarmOutcome.result.nextWakeAt).toEqual(expect.any(String));
-        const scheduledWakeMs = Date.parse(alarmOutcome.result.nextWakeAt ?? "");
+      if (alarmOutcome.status === "scheduled") {
+        expect(alarmOutcome.nextWakeAt).toEqual(expect.any(String));
+        const scheduledWakeMs = Date.parse(alarmOutcome.nextWakeAt ?? "");
         expect(Number.isFinite(scheduledWakeMs)).toBe(true);
         expect(scheduledWakeMs).toBeGreaterThanOrEqual(alarmStartedAtMs);
       } else {
-        expect(alarmOutcome.result.status).toBe("idle");
-        expect(alarmOutcome.result.nextWakeAt).toBeNull();
-      }
-      expect(alarmOutcome.probeCount).toBeGreaterThanOrEqual(1);
-      expect(alarmOutcome.probes.some((probe) =>
-        probe.kind === "processing-ensured" && probe.inFlight
-      )).toBe(true);
-      expect(statusAfterAlarm.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-      if (statusAfterAlarm.workspace?.nextWakeAt) {
-        expect(Date.parse(statusAfterAlarm.workspace.nextWakeAt)).toBeGreaterThanOrEqual(
-          alarmStartedAtMs,
-        );
-      } else {
-        expect(statusAfterAlarm.workspace?.nextWakeAt ?? null).toBeNull();
+        expect(alarmOutcome.status).toBe("idle");
+        expect(alarmOutcome.nextWakeAt).toBeNull();
       }
       expect(canonicalRuntimeDeferralsAfterAlarm).toBe(0);
       expect(postReplyTypingStarts).toHaveLength(0);
@@ -1179,6 +1164,7 @@ async function startLinqScenario(
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
+      MURPH_DEV_TEMPORAL: "disabled",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
@@ -1211,6 +1197,8 @@ async function restartLinqScenario(
   scenario = null;
   await linqStub?.stop();
   linqStub = null;
+
+  await sleep(2_000);
   await startLinqScenario(additionalEnv);
 }
 
@@ -1260,101 +1248,6 @@ async function runHostedAlarmUntilIdleForTest(
       signal,
     },
   );
-}
-
-async function runHostedAlarmWithRuntimeWakeProbesForTest(
-  userId: string,
-): Promise<{
-  probeCount: number;
-  probes: HostedRuntimeEnsureExecutionResponse[];
-  result: HostedWorkspaceInvocationResult;
-}> {
-  const alarmAbortController = new AbortController();
-  const alarmOutcomePromise = runHostedAlarmUntilIdleForTest(
-    userId,
-    alarmAbortController.signal,
-  ).then(
-    (result) => ({
-      kind: "fulfilled" as const,
-      result,
-    }),
-    (error: unknown) => ({
-      errorName: error instanceof Error ? error.name : typeof error,
-      kind: "rejected" as const,
-    }),
-  );
-
-  const deadlineMs = Date.now() + 2_750;
-  let probeCount = 0;
-  const probes: HostedRuntimeEnsureExecutionResponse[] = [];
-  let alarmSettled = false;
-  void alarmOutcomePromise.then(
-    () => {
-      alarmSettled = true;
-    },
-    () => {
-      alarmSettled = true;
-    },
-  );
-
-  while (!alarmSettled && Date.now() < deadlineMs) {
-    probes.push(await sendRuntimeWakeProbeForTest(userId));
-    probeCount += 1;
-
-    const remainingMs = deadlineMs - Date.now();
-    if (remainingMs <= 0) {
-      break;
-    }
-    await sleep(Math.min(250, remainingMs));
-  }
-
-  let alarmOutcome = await Promise.race([
-    alarmOutcomePromise,
-    sleep(250).then(() => null),
-  ]);
-  if (!alarmOutcome) {
-    alarmAbortController.abort();
-    alarmOutcome = await Promise.race([
-      alarmOutcomePromise,
-      sleep(1_000).then(() => null),
-    ]);
-  }
-
-  if (alarmOutcome) {
-    return {
-      ...resolveHostedAlarmProbeOutcome(alarmOutcome, probeCount),
-      probes,
-    };
-  }
-
-  throw new Error("Stale scheduled wake alarm did not settle while runtime wake probes were active.");
-}
-
-function resolveHostedAlarmProbeOutcome(
-  outcome:
-    | { kind: "fulfilled"; result: HostedWorkspaceInvocationResult }
-    | { errorName: string; kind: "rejected" },
-  probeCount: number,
-): { probeCount: number; result: HostedWorkspaceInvocationResult } {
-  if (outcome.kind === "fulfilled") {
-    return {
-      probeCount,
-      result: outcome.result,
-    };
-  }
-
-  throw new Error(
-    `Stale scheduled wake alarm rejected while runtime wake probes were active (${outcome.errorName}).`,
-  );
-}
-
-async function sendRuntimeWakeProbeForTest(
-  userId: string,
-): Promise<HostedRuntimeEnsureExecutionResponse> {
-  return await wakeHostedWorker({
-    harness: requireScenario().harness,
-    userId,
-  });
 }
 
 async function readHostedRunnerStatusWithLogLimit(

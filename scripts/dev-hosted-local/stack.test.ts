@@ -745,7 +745,9 @@ describe("hosted local dev stack", () => {
         ".tmp/e2e/wrangler",
       ]),
       expect.objectContaining({
+        DOCKER_BUILDKIT: "1",
         DOCKER_CONFIG: "/tmp/murph-dev-env-test/docker-config",
+        DOCKER_DEFAULT_PLATFORM: "linux/amd64",
       }),
       expect.any(Object),
     );
@@ -787,6 +789,54 @@ describe("hosted local dev stack", () => {
       containerHost: expect.any(String),
       tempDir: "/tmp/murph-dev-env-test",
     }));
+  });
+
+  it("falls back to host Docker CLI plugins when inherited Docker config is already isolated", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+    vi.mocked(access).mockResolvedValueOnce(undefined);
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        DOCKER_CONFIG: "/tmp/murph-dev-env-test/docker-config",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(access).toHaveBeenCalledWith(expect.stringContaining(".docker/cli-plugins"));
+    expect(rm).toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/docker-config/cli-plugins",
+      { force: true, recursive: true },
+    );
+    expect(symlink).toHaveBeenCalledWith(
+      expect.stringContaining(".docker/cli-plugins"),
+      "/tmp/murph-dev-env-test/docker-config/cli-plugins",
+      "dir",
+    );
   });
 
   it("wires hosted-local MinIO endpoints into the Worker env before Cloudflare starts", async () => {
