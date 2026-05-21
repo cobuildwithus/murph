@@ -738,6 +738,7 @@ describe("hostedRunnerIntercept", () => {
         testJsonByteLength(input[2]),
       ],
       inputItemTypeKinds: ["function_call", "message", "missing", "other"],
+      inputFunctionCallBytes: [testJsonByteLength(input[1])],
       inputFunctionCallNameCounts: [1],
       inputFunctionCallNameKinds: ["unknown"],
       inputLargestItemBytes: testJsonByteLength(input[0]),
@@ -864,6 +865,10 @@ describe("hostedRunnerIntercept", () => {
     });
 
     expect(diagnostic).toEqual(expect.objectContaining({
+      inputFunctionCallBytes: [
+        testJsonByteLength(input[0]),
+        testJsonByteLength(input[2]),
+      ],
       inputFunctionCallNameCounts: [1, 1],
       inputFunctionCallNameKinds: ["local_shell", "other"],
       inputFunctionOutputBytes: [
@@ -895,6 +900,98 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnosticJson).not.toContain("synthetic-unsafe-function-arguments");
     expect(diagnosticJson).not.toContain("synthetic-private-message");
     expect(diagnosticJson).not.toContain("private/tool-name");
+  });
+
+  it("uses safe deterministic function-call categories for unusual call IDs", async () => {
+    const sensitiveLookingName = ["sk", "live", "SYNTHETIC123"].join("_");
+    const earlyOutput = {
+      call_id: "call_late",
+      output: "early synthetic output",
+      type: "function_call_output",
+    };
+    const sensitiveNameOutput = {
+      call_id: "call_sensitive",
+      output: "sensitive-name synthetic output",
+      type: "function_call_output",
+    };
+    const duplicateOutput = {
+      call_id: "call_duplicate",
+      output: "duplicate synthetic output",
+      type: "function_call_output",
+    };
+    const input = [
+      earlyOutput,
+      {
+        arguments: "late synthetic arguments",
+        call_id: "call_late",
+        name: "exec_command",
+        type: "function_call",
+      },
+      {
+        arguments: "sensitive-name synthetic arguments",
+        call_id: "call_sensitive",
+        name: sensitiveLookingName,
+        type: "function_call",
+      },
+      sensitiveNameOutput,
+      {
+        arguments: "first duplicate synthetic arguments",
+        call_id: "call_duplicate",
+        name: "exec_command",
+        type: "function_call",
+      },
+      {
+        arguments: "second duplicate synthetic arguments",
+        call_id: "call_duplicate",
+        name: "local_shell",
+        type: "function_call",
+      },
+      duplicateOutput,
+    ] as const;
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.5",
+      })),
+    });
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      inputFunctionCallBytes: [
+        testJsonByteLength(input[4]) + testJsonByteLength(input[5]),
+        testJsonByteLength(input[1]),
+        testJsonByteLength(input[2]),
+      ],
+      inputFunctionCallNameCounts: [2, 1, 1],
+      inputFunctionCallNameKinds: ["duplicate", "exec_command", "other"],
+      inputFunctionOutputBytes: [
+        testJsonByteLength(duplicateOutput.output),
+        testJsonByteLength(earlyOutput.output),
+        testJsonByteLength(sensitiveNameOutput.output),
+      ],
+      inputFunctionOutputNameCounts: [1, 1, 1],
+      inputFunctionOutputNameKinds: ["duplicate", "exec_command", "other"],
+      inputTailItemFunctionNameKinds: [
+        "exec_command",
+        "exec_command",
+        "other",
+        "other",
+        "duplicate",
+        "duplicate",
+        "duplicate",
+      ],
+    }));
+    parseDiagnosticRuntimeLog(diagnostic);
+
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain("call_late");
+    expect(diagnosticJson).not.toContain("call_sensitive");
+    expect(diagnosticJson).not.toContain("call_duplicate");
+    expect(diagnosticJson).not.toContain(sensitiveLookingName);
+    expect(diagnosticJson).not.toContain("synthetic output");
+    expect(diagnosticJson).not.toContain("synthetic arguments");
   });
 
   it("bounds OpenAI input tail diagnostics to the last eight items", async () => {
