@@ -6032,7 +6032,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.selectedCardId, "lab5_bp_bmi_transport_research");
   assert.equal(
     submittedLab5ResearchView.arbiter.strategy,
-    "r399-anchor-lab9-primary-lab5-transport-wearables-context",
+    "r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context",
   );
   assert.equal(
     submittedLab5ResearchView.arbiter.labConflictPolicy,
@@ -6077,7 +6077,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered",
     currentScoringMode: "single-selected-research-card",
     labBodyStatus: "selected-card-score-not-additive-increment",
-    nextArchitectureStep: "validate-anchor-plus-increment-before-layered-scoring",
+    nextArchitectureStep: "fit-function-sidecar-before-layered-scoring",
     wearableStatus: "context-only-zero-product-multiplier",
   });
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
@@ -6087,10 +6087,16 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchViewJson.includes("\"riskDisplayReady\":false"), true);
   assert.equal(
     submittedLab5ResearchView.model.blockers.join("|"),
-    "biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized",
+    "biomarker-transport-not-confirmed|function-sidecar-parameter-pack-missing|wearable-increment-not-validated|product-use-not-authorized",
   );
-  assert.equal(submittedLab5ResearchView.model.functionDisability.currentUse, "context-only-diagnostic-sidecar");
-  assert.equal(submittedLab5ResearchView.model.functionDisability.nextAction, "fresh-source-feasibility-before-promotion");
+  assert.equal(
+    submittedLab5ResearchView.model.functionDisability.currentUse,
+    "bounded-research-sidecar-supported-pending-parameter-pack",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.functionDisability.nextAction,
+    "fit-bounded-function-parameter-pack-then-validate-fresh-source",
+  );
   assert.equal(submittedLab5ResearchView.model.functionDisability.scoreBearing, false);
   assert.equal(submittedLab5ResearchView.model.labBody.currentUse, "score-bearing-research-when-selected");
   assert.equal(submittedLab5ResearchView.model.labBody.nextAction, "validate-transport-before-product-use");
@@ -6101,7 +6107,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.map((item) => item.evidenceId).join("|"),
-    "midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|wearables-context-only-local-run",
+    "midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|mhas-function-mobility-sidecar-local-run|wearables-context-only-local-run",
   );
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "midus-lab-lift-local-run")?.signal,
@@ -6126,6 +6132,20 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "nshap-hba1c-transport-local-run")?.supportedMetricKeys.join("|"),
     "hba1c",
+  );
+  const mhasFunctionSidecarEvidence = submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) =>
+    item.evidenceId === "mhas-function-mobility-sidecar-local-run"
+  );
+  assert.ok(mhasFunctionSidecarEvidence);
+  assert.equal(mhasFunctionSidecarEvidence.cohortLabel, "MHAS");
+  assert.equal(mhasFunctionSidecarEvidence.bundleId, "function-context");
+  assert.equal(mhasFunctionSidecarEvidence.sourceRouteId, "mhas-harmonized-aging");
+  assert.equal(mhasFunctionSidecarEvidence.signal, "supported");
+  assert.equal(mhasFunctionSidecarEvidence.scoringMathChanged, false);
+  assert.equal(mhasFunctionSidecarEvidence.productAuthorizationChanged, false);
+  assert.equal(
+    mhasFunctionSidecarEvidence.supportedMetricKeys.join("|"),
+    "adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count",
   );
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.every((item) => item.scoringMathChanged === false),
