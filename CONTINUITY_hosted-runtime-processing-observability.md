@@ -19,10 +19,10 @@ Key decisions:
 - Keep status additions scalar and bounded.
 
 State:
-- Active plan: `agent-docs/exec-plans/active/2026-05-21-hosted-runtime-processing-observability.md`.
-- Runtime-processing fix and minimal observability implementation are in the
-  working tree. Focused typecheck and focused tests passed for changed hosted
-  execution, Temporal, Cloudflare, and web surfaces.
+- Completed plan: `agent-docs/exec-plans/completed/2026-05-21-hosted-runtime-processing-observability.md`.
+- Runtime-processing fix and minimal observability implementation are verified
+  in the working tree. A scoped commit is blocked by overlapping pre-existing
+  dirty hosted-runtime and verification edits in the same files.
 
 Done:
 - Read required repo routing, security, reliability, verification, hosted
@@ -38,18 +38,19 @@ Done:
   demand-decision logs, the activity observation wrapper, persisted active
   write-fence reason, and the composed internal status endpoint.
 - Updated focused tests and hosted runtime docs.
+- Passed focused hosted execution, Temporal, Cloudflare, and web tests; root
+  `pnpm typecheck`; locked `pnpm test:diff`; `git diff --check`; and a changed
+  file scan for local paths/user identifiers.
 
 Now:
-- Run final verification/audits and finish with a scoped commit if unrelated
-  dirty work does not block it.
+- Handoff with verified working-tree changes.
 
 Next:
-- Complete required audits, final test/typecheck pass, and scoped finish-task
-  commit or report the exact dirty-work blocker.
+- Commit only after the overlapping active dirty work is reconciled or staged by
+  its owners.
 
 Open questions (UNCONFIRMED if needed):
-- Whether the repository finish script can safely commit only this plan's files
-  is UNCONFIRMED because unrelated dirty files are present.
+- None.
 
 Working set (files/ids/commands):
 - Likely files: `packages/hosted-execution/src/orchestration-control.ts`,

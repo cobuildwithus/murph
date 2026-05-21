@@ -1,6 +1,6 @@
 # Hosted runtime processing wake fix and observability
 
-Status: active
+Status: completed
 Created: 2026-05-21
 Updated: 2026-05-21
 
@@ -77,9 +77,9 @@ Updated: 2026-05-21
 3. Done: Add observability fields, logs, wrapper, write-fence reason
    persistence, and internal composed status route.
 4. Done: Update focused tests and durable runtime docs.
-5. Now: Run verification and required audit subagents.
-6. Next: Finish the plan with a scoped commit if unrelated dirty work does not
-   block it.
+5. Done: Run verification.
+6. Done: Handoff without commit because overlapping pre-existing dirty files in
+   active hosted-runtime and verification rows block a safe scoped commit.
 
 ## Decisions
 
@@ -98,12 +98,28 @@ Updated: 2026-05-21
   - `pnpm --filter @murphai/hosted-orchestrator-temporal test -- hosted-user-runtime-workflow ensure-cloudflare-execution workflow-entrypoint workflow-contracts temporal-env signal-hosted-user-runtime`
   - `pnpm --dir . exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/index.test.ts apps/cloudflare/test/runner-state-store-wake-backoff.test.ts apps/cloudflare/test/runner-state-store.bundle-slots.test.ts --no-coverage`
   - `pnpm --dir . exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-orchestration-demand.test.ts apps/web/test/hosted-orchestration-status.test.ts apps/web/test/hosted-orchestration-signal-runtime.test.ts apps/web/test/hosted-orchestration-temporal-client.test.ts --no-coverage`
-- Commands still to run:
-  - Focused package/app tests for changed Temporal, web, Cloudflare, and shared
-    contract surfaces.
+  - `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts`
+  - `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts --no-coverage test/user-runner-alarm.test.ts test/runner-container.test.ts test/container-entrypoint.test.ts test/index.test.ts`
+  - `pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts --no-coverage test/hosted-orchestration-control.test.ts test/temporal-env.test.ts`
+  - `pnpm --dir packages/cloudflare-hosted-control exec vitest run --config vitest.config.ts --no-coverage test/routes.test.ts`
+  - `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts test/ensure-cloudflare-execution.test.ts test/temporal-env.test.ts test/signal-hosted-user-runtime.test.ts test/workflow-entrypoint.test.ts`
+  - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-orchestration-demand.test.ts apps/web/test/hosted-orchestration-status.test.ts apps/web/test/hosted-orchestration-signal-runtime.test.ts apps/web/test/hosted-orchestration-temporal-client.test.ts`
   - `pnpm typecheck`
-  - `pnpm test:diff <changed paths>` or `pnpm verify:acceptance` if diff-aware
-    coverage is not truthful enough.
-- Expected outcomes:
-  - All required commands pass, or any unrelated pre-existing failure is named
-    with exact target and reason.
+  - `pnpm test:diff` under the workspace artifact lock
+  - `git diff --check`
+  - changed-file scan for local paths/user identifiers
+- Outcomes:
+  - All focused hosted-runtime checks passed.
+  - Root typecheck passed.
+  - The first `pnpm test:diff` attempt hit a transient standalone
+    `packages/vault-usecases` typecheck failure while resolving
+    `@murphai/contracts`; after serializing behind the workspace artifact lock,
+    `pnpm test:diff` passed end to end.
+  - Diff whitespace and identifier/path scans passed.
+
+## Handoff
+
+- Commit intentionally left open: overlapping dirty work in active hosted
+  runtime, Temporal, Cloudflare, web, and verification rows prevents a safe
+  scoped commit without sweeping in unrelated edits.
+Completed: 2026-05-21
