@@ -4627,6 +4627,17 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreContributionAuthorized, false);
   assert.equal(researchWithWearablePackView.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
   assert.equal(researchWithWearablePackView.wearableResidualLayer?.finalRiskProbability, shadowRiskProbability);
+  const parameterizedWearableLayer = researchWithWearablePackView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "wearable-activity-residual"
+  );
+  assert.ok(parameterizedWearableLayer);
+  assert.equal(parameterizedWearableLayer.status, "parameter-pack-available-shadow-only");
+  assert.equal(parameterizedWearableLayer.parameterPackAvailable, true);
+  assert.equal(parameterizedWearableLayer.scoreBearingNow, false);
+  assert.equal(parameterizedWearableLayer.scoreContributionAuthorized, false);
+  assert.deepEqual(researchWithWearablePackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
+    "function-disability-sidecar",
+  ]);
   assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("metric-point:"), false);
   assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("10000"), false);
   assert.deepEqual(
@@ -6219,6 +6230,58 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     nextArchitectureStep: "parameterize-function-sidecar-for-layered-scoring",
     wearableStatus: "context-only-zero-product-multiplier",
   });
+  assert.equal(
+    submittedLab5ResearchView.model.layeredResearchPath.architecturePattern,
+    "frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.layeredResearchPath.currentExecutableMode,
+    "single-card-research-score-layer-contracts-only",
+  );
+  assert.deepEqual(submittedLab5ResearchView.model.layeredResearchPath.layerOrder, [
+    "r399-outcome-risk-anchor",
+    "selected-lab-body-card",
+    "function-disability-sidecar",
+    "wearable-activity-residual",
+  ]);
+  assert.deepEqual(submittedLab5ResearchView.model.layeredResearchPath.activeResearchScoreLayerIds, [
+    "selected-lab-body-card",
+  ]);
+  assert.deepEqual(submittedLab5ResearchView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
+    "function-disability-sidecar",
+    "wearable-activity-residual",
+  ]);
+  assert.equal(submittedLab5ResearchView.model.layeredResearchPath.productAuthorized, false);
+  const functionLayer = submittedLab5ResearchView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "function-disability-sidecar"
+  );
+  assert.ok(functionLayer);
+  assert.equal(functionLayer.status, "parameter-pack-needed");
+  assert.equal(functionLayer.parameterPackRequired, true);
+  assert.equal(functionLayer.parameterPackAvailable, false);
+  assert.equal(functionLayer.scoreBearingNow, false);
+  assert.equal(functionLayer.scoreContributionAuthorized, false);
+  assert.equal(functionLayer.sourceEvidenceIds.join("|"), "mhas-function-mobility-sidecar-local-run");
+  assert.equal(
+    functionLayer.metricKeys.join("|"),
+    "adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count",
+  );
+  const wearableActivityLayer = submittedLab5ResearchView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "wearable-activity-residual"
+  );
+  assert.ok(wearableActivityLayer);
+  assert.equal(wearableActivityLayer.status, "validation-receipt-needed");
+  assert.equal(wearableActivityLayer.parameterPackRequired, true);
+  assert.equal(wearableActivityLayer.parameterPackAvailable, false);
+  assert.equal(wearableActivityLayer.scoreBearingNow, false);
+  assert.equal(wearableActivityLayer.metricKeys.includes("steps"), true);
+  const selectedLabLayer = submittedLab5ResearchView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "selected-lab-body-card"
+  );
+  assert.ok(selectedLabLayer);
+  assert.equal(selectedLabLayer.status, "active-research-score");
+  assert.equal(selectedLabLayer.scoreBearingNow, true);
+  assert.equal(selectedLabLayer.metricKeys.join("|"), "glucose|egfr|bmi");
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
   assert.equal(submittedLab5ResearchView.model.selectedResearchCardId, "lab5_bp_bmi_transport_research");
   assert.equal(submittedLab5ResearchView.model.productUseAuthorized, false);
@@ -6915,6 +6978,24 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
   assert.equal(research.result?.authorization.cardId, "r399_nhis_proxy_10y_acm_research");
   assert.equal(research.result?.authorization.productAuthorized, false);
   assert.equal(research.result?.authorization.riskToAgeDisplayAuthorized, false);
+  const researchView = buildMurphAgeResearchCalculatorView(toPublicMurphAgeCalculatorReport(research));
+  assert.deepEqual(researchView.model.layeredResearchPath.activeResearchScoreLayerIds, [
+    "r399-outcome-risk-anchor",
+  ]);
+  const r399Layer = researchView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "r399-outcome-risk-anchor"
+  );
+  assert.ok(r399Layer);
+  assert.equal(r399Layer.status, "active-research-score");
+  assert.equal(r399Layer.selected, true);
+  assert.equal(r399Layer.scoreBearingNow, true);
+  const labBodyLayer = researchView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "selected-lab-body-card"
+  );
+  assert.ok(labBodyLayer);
+  assert.equal(labBodyLayer.status, "available-research-candidate");
+  assert.equal(labBodyLayer.selected, false);
+  assert.equal(labBodyLayer.scoreBearingNow, false);
   assert.equal(research.bundleAssessment.availableFeatureKeys.includes("bmi"), true);
   assert.equal(research.bundleAssessment.availableFeatureKeys.includes("self-rated-health"), true);
   assert.equal(research.bundleAssessment.missingFeatureKeys.includes("smoking-status"), true);

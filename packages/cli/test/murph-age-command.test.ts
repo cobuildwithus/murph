@@ -983,7 +983,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v10')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v11')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -1043,6 +1043,36 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.currentModelFamily, 'frozen-nhis-r399-plus-research-increments')
     assert.equal(view.model.composition.currentScoringMode, 'single-selected-research-card')
     assert.equal(view.model.composition.anchorLayerStatus, 'available-as-research-anchor-and-fallback-not-layered')
+    assert.equal(
+      view.model.layeredResearchPath.architecturePattern,
+      'frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals',
+    )
+    assert.equal(
+      view.model.layeredResearchPath.currentExecutableMode,
+      'single-card-research-score-layer-contracts-only',
+    )
+    assert.deepEqual(view.model.layeredResearchPath.activeResearchScoreLayerIds, ['selected-lab-body-card'])
+    assert.deepEqual(view.model.layeredResearchPath.parameterPackBlockedLayerIds, [
+      'function-disability-sidecar',
+    ])
+    assert.equal(view.model.layeredResearchPath.productAuthorized, false)
+    const functionLayer = view.model.layeredResearchPath.layers.find((layer) =>
+      layer.layerId === 'function-disability-sidecar'
+    )
+    assert.ok(functionLayer)
+    assert.equal(functionLayer.status, 'parameter-pack-needed')
+    assert.equal(functionLayer.parameterPackRequired, true)
+    assert.equal(functionLayer.parameterPackAvailable, false)
+    assert.equal(functionLayer.metricKeys.join('|'), 'adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count')
+    assert.equal(functionLayer.sourceEvidenceIds.join('|'), 'mhas-function-mobility-sidecar-local-run')
+    const wearableActivityLayer = view.model.layeredResearchPath.layers.find((layer) =>
+      layer.layerId === 'wearable-activity-residual'
+    )
+    assert.ok(wearableActivityLayer)
+    assert.equal(wearableActivityLayer.status, 'parameter-pack-available-shadow-only')
+    assert.equal(wearableActivityLayer.parameterPackRequired, true)
+    assert.equal(wearableActivityLayer.parameterPackAvailable, true)
+    assert.equal(wearableActivityLayer.metricKeys.includes('steps'), true)
     assert.equal(view.model.scoreInterpretation, 'risk-age-equivalent-research-only')
     assert.equal(view.model.selectedResearchCardId, 'lab5_bp_bmi_transport_research')
     assert.equal(view.model.productUseAuthorized, false)
@@ -1461,7 +1491,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
-    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v10')
+    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v11')
     assert.equal(researchCalculatorView.researchOnly, true)
     assert.equal(researchCalculatorView.mode, 'research')
     assert.equal(researchCalculatorView.status, 'ready')
@@ -1492,6 +1522,17 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(typeof calculatorResidualLayer.finalRiskAgeEquivalentYears, 'number')
     assert.equal(typeof calculatorResidualLayer.residualDeltaYears, 'number')
     assert.equal(calculatorResidualLayer.scoreBearing, false)
+    const parameterizedWearableLayer = researchCalculatorView.model.layeredResearchPath.layers.find((layer) =>
+      layer.layerId === 'wearable-activity-residual'
+    )
+    assert.ok(parameterizedWearableLayer)
+    assert.equal(parameterizedWearableLayer.status, 'parameter-pack-available-shadow-only')
+    assert.equal(parameterizedWearableLayer.parameterPackAvailable, true)
+    assert.equal(parameterizedWearableLayer.scoreBearingNow, false)
+    assert.equal(parameterizedWearableLayer.scoreContributionAuthorized, false)
+    assert.deepEqual(researchCalculatorView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
+      'function-disability-sidecar',
+    ])
 
     for (const encodedCalculatorView of [
       JSON.stringify(productCalculatorView),

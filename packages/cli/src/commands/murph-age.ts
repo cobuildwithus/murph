@@ -922,6 +922,49 @@ const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
   summary: z.string().min(1),
   supportedMetricKeys: z.array(z.string().min(1)),
 })
+const murphAgeResearchLayerIdSchema = z.enum([
+  'function-disability-sidecar',
+  'r399-outcome-risk-anchor',
+  'selected-lab-body-card',
+  'wearable-activity-residual',
+])
+const murphAgeResearchLayerContractItemSchema = z.object({
+  combinationScale: z.enum(['risk-logit', 'risk-logit-residual']),
+  layerId: murphAgeResearchLayerIdSchema,
+  metricKeys: z.array(z.string().min(1)),
+  parameterPackAvailable: z.boolean(),
+  parameterPackRequired: z.boolean(),
+  productAuthorized: z.literal(false),
+  role: z.enum([
+    'base-outcome-risk',
+    'function-mobility-residual',
+    'lab-body-risk-adjuster',
+    'wearable-activity-residual',
+  ]),
+  scoreBearingNow: z.boolean(),
+  scoreContributionAuthorized: z.literal(false),
+  selected: z.boolean(),
+  sourceEvidenceIds: z.array(murphAgeResearchLocalRunEvidenceItemSchema.shape.evidenceId),
+  status: z.enum([
+    'active-research-score',
+    'available-as-anchor',
+    'available-research-candidate',
+    'parameter-pack-available-shadow-only',
+    'parameter-pack-needed',
+    'validation-receipt-needed',
+  ]),
+  validationStillNeeded: z.boolean(),
+})
+const murphAgeResearchLayeredPathStatusSchema = z.object({
+  activeResearchScoreLayerIds: z.array(murphAgeResearchLayerIdSchema),
+  architecturePattern: z.literal('frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals'),
+  currentExecutableMode: z.literal('single-card-research-score-layer-contracts-only'),
+  layerOrder: z.array(murphAgeResearchLayerIdSchema),
+  layers: z.array(murphAgeResearchLayerContractItemSchema),
+  parameterPackBlockedLayerIds: z.array(murphAgeResearchLayerIdSchema),
+  productAuthorized: z.literal(false),
+  scoreCombinationScale: z.literal('risk-logit-residual'),
+})
 const murphAgeResearchModelStatusViewSchema = z.object({
   blockers: z.array(z.enum([
     'biomarker-transport-not-confirmed',
@@ -949,6 +992,7 @@ const murphAgeResearchModelStatusViewSchema = z.object({
   }),
   latestLocalRunEvidence: z.array(murphAgeResearchLocalRunEvidenceItemSchema),
   latestLocalRunEvidenceStatus: z.literal('mixed-research-only-no-product-promotion'),
+  layeredResearchPath: murphAgeResearchLayeredPathStatusSchema,
   productUseAuthorized: z.literal(false),
   scoreBearingFeatureKeys: z.array(z.string().min(1)),
   scoreBearingMetricKeys: z.array(z.string().min(1)),
