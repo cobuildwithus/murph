@@ -1,5 +1,3 @@
-import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
-
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
 import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider-whatsapp";
@@ -7,7 +5,6 @@ import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   response: TResult;
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
   wakeLinqChatId?: string;
   wakeMailboxItemId?: string;
@@ -15,7 +12,6 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
 };
 
 export type HostedWebhookWakeHandoff = {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;

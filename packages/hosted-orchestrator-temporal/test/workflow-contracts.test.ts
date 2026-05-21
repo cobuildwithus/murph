@@ -56,13 +56,14 @@ describe("hosted runtime workflow contracts", () => {
     expect(queryHandlerIndex).toBeLessThan(runIndex);
   });
 
-  it("uses sleep for timer-only active wake rechecks", async () => {
+  it("uses signal-aware conditions for active wake rechecks", async () => {
     const source = await readFile(
       new URL("../src/workflows/hosted-user-runtime.ts", import.meta.url),
       "utf8",
     );
 
-    expect(source).toContain("await sleep(durationMs);");
+    expect(source).toContain("execution.kind === \"runtime_wake_sent\"");
+    expect(source).toContain("waitUntilTimestampOrSignal(");
     expect(source).not.toContain("condition(() => false");
   });
 });

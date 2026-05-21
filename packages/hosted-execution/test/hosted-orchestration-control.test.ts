@@ -261,25 +261,12 @@ describe("hosted orchestration control contracts", () => {
   });
 
   it("parses ensure-execution request and every response variant", () => {
-    const usageDecision = createAiUsageAllowDecision();
-
     expect(parseHostedRuntimeEnsureExecutionRequest({
-      aiUsageAllowDecision: usageDecision,
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
     })).toEqual({
-      aiUsageAllowDecision: usageDecision,
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
-    });
-    expect(parseHostedRuntimeEnsureExecutionRequest({
-      aiUsageAllowDecision: null,
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-    })).toEqual({
-      aiUsageAllowDecision: null,
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
     });
     expect(parseHostedRuntimeEnsureExecutionResponse({
       action: "started",
@@ -319,6 +306,14 @@ describe("hosted orchestration control contracts", () => {
   });
 
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-execution contracts", () => {
+    expect(() => parseHostedRuntimeEnsureExecutionRequest({
+      aiUsageAllowDecision: createAiUsageAllowDecision(),
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+    })).toThrow(
+      "Hosted runtime ensure-execution request must not include aiUsageAllowDecision.",
+    );
+
     expect(() => parseHostedRuntimeEnsureExecutionRequest({
       headers: true,
       orchestrationAttemptId: "orchestration_attempt_test",

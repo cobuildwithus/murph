@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
     userId: "member_whatsapp_123",
   })),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
-    input?: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    input?: { context?: string; timeoutMs?: number; userId: string },
   ) => {
     void input;
     return {
@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => ({
     };
   }),
   nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-    input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    input: { context?: string; timeoutMs?: number; userId: string },
   ) => {
     void input;
     return {

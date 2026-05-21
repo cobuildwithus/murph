@@ -246,9 +246,9 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
+- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and gates hosted Temporal demand sources that strongly imply foreground model work. It is a post-task hard stop, not an exact prepaid cap.
 - Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created on the next gate resolution after the prior billing or calendar period ends, with no separate reset cron.
-- `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET`, shared with Cloudflare, lets web issue a fresh signed allow decision after the live usage gate allows a turn. Temporal fetches that decision inside the execution Activity when demand requires model usage and passes it directly to Cloudflare ensure-execution; the workflow never stores the signed decision.
+- Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-execution, and webhook wake handoff signals Temporal by mailbox pointer only. Runtime/provider code still enforces spend before actual model calls and records usage rows through the hosted runtime platform.
 - Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 

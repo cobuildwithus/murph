@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => {
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
     releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
-    createHostedAiUsageAllowDecision: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     finishHostedOnboardingTiming: vi.fn(),
@@ -61,7 +60,7 @@ const mocks = vi.hoisted(() => {
       nextAlarmAtPresent: false,
     })),
     nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-      input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+      input: { context?: string; timeoutMs?: number; userId: string },
     ) => {
       void input;
       return {
@@ -76,7 +75,7 @@ const mocks = vi.hoisted(() => {
       };
     }),
     nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
-      input?: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+      input?: { context?: string; timeoutMs?: number; userId: string },
     ) => {
       void input;
       return {
@@ -201,10 +200,6 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
-}));
-
-vi.mock("@/src/lib/hosted-execution/usage-gate-allow-decision", () => ({
-  createHostedAiUsageAllowDecision: mocks.createHostedAiUsageAllowDecision,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -386,7 +381,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
-    mocks.createHostedAiUsageAllowDecision.mockResolvedValue(null);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue(makeHostedLinqDailyState());
@@ -453,20 +447,6 @@ https://join.example.test/join/code_first_text`);
   it.each(["sms", "RCS"] as const)(
     "reuses an existing transaction when dispatching active-member Linq %s messages",
     async (service) => {
-      const aiUsageAllowDecision = {
-        allowed: true,
-        expiresAt: "2026-04-27T00:00:30.000Z",
-        issuedAt: "2026-04-27T00:00:00.000Z",
-        nonce: "0123456789abcdef0123456789abcdef",
-        schema: "murph.hosted-ai-usage-allow-decision.v1" as const,
-        signature: {
-          alg: "HMAC-SHA256" as const,
-          keyId: "test",
-          signature: "signature",
-        },
-        userId: "member_123",
-      };
-      mocks.createHostedAiUsageAllowDecision.mockResolvedValueOnce(aiUsageAllowDecision);
       const prisma = asPrismaTransactionClient({
         hostedWebhookReceipt: {
           create: vi.fn().mockResolvedValue({}),

@@ -70,9 +70,7 @@ export interface HostedAiUsageAllowDecision
   signature: HostedAiUsageAllowDecisionSignature;
 }
 
-export interface HostedRunnerNudgeRequest {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
-}
+export type HostedRunnerNudgeRequest = Record<string, never>;
 
 export function isHostedAiUsageAllowancePricedModelId(
   value: string,
@@ -169,17 +167,12 @@ export function parseHostedRunnerNudgeRequest(value: unknown): HostedRunnerNudge
   }
 
   const record = requireHostedAiUsageAllowDecisionObject(value, "runner nudge request");
-  if (record.aiUsageAllowDecision === undefined || record.aiUsageAllowDecision === null) {
+  const keys = Object.keys(record);
+  if (keys.length === 0) {
     return {};
   }
 
-  try {
-    return {
-      aiUsageAllowDecision: parseHostedAiUsageAllowDecision(record.aiUsageAllowDecision),
-    };
-  } catch {
-    return {};
-  }
+  throw new TypeError("runner nudge request must not include legacy fields.");
 }
 
 export function buildHostedAiUsageAllowDecisionBody(input: {

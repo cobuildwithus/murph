@@ -85,13 +85,13 @@ Temporal connection:
 
 Activity HTTP targets:
 
-- `HOSTED_WEB_BASE_URL`: hosted web origin for demand and usage-decision calls.
+- `HOSTED_WEB_BASE_URL`: hosted web origin for demand calls.
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`: non-secret signing key id.
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`: P-256 private JWK JSON.
 - `CLOUDFLARE_HOSTED_CONTROL_BASE_URL`: Cloudflare execution adapter base URL.
 - Cloudflare ensure-execution calls use the same hosted callback signing env as
-  web demand and usage-decision calls; Cloudflare must verify the corresponding
-  signed internal callback key.
+  web demand calls; Cloudflare must verify the corresponding signed internal
+  callback key.
 - `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`: runner invocation timeout.
 - `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: Activity timeout margin.

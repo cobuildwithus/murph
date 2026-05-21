@@ -5,7 +5,6 @@ import {
   defineSignal,
   proxyActivities,
   setHandler,
-  sleep,
   uuid4,
 } from "@temporalio/workflow";
 
@@ -19,13 +18,16 @@ import {
   type HostedRuntimeEnsureExecutionResponse,
   type HostedRuntimeSignal,
   type HostedRuntimeWorkflowState,
-  type HostedUserRuntimeWorkflowCarryForwardState,
-  type HostedUserRuntimeWorkflowInput,
-  type HostedUserRuntimeWorkflowOptions,
-} from "../index.js";
+} from "@murphai/hosted-execution/orchestration-control";
+import type {
+  HostedUserRuntimeWorkflowCarryForwardState,
+  HostedUserRuntimeWorkflowInput,
+  HostedUserRuntimeWorkflowOptions,
+} from "../workflow-types.js";
 
 export const HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS = 65_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
+export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
@@ -71,9 +73,6 @@ export async function hostedUserRuntimeWorkflow(
     ensureCloudflareExecution: executionActivities.ensureCloudflareExecution,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
-    sleep: async (durationMs) => {
-      await sleep(durationMs);
-    },
     uuid: uuid4,
     waitForSignalOrTimeout: async (predicate, timeoutMs) => {
       if (timeoutMs === null) {
@@ -95,12 +94,10 @@ export interface HostedUserRuntimeWorkflowRuntime {
   ensureCloudflareExecution(input: {
     orchestrationAttemptId: string;
     reason: HostedRuntimeRunDemand["reason"];
-    requiresAiUsageDecision: boolean;
     userId: string;
   }): Promise<HostedRuntimeEnsureExecutionResponse>;
   nowMs(): number;
   readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
-  sleep(durationMs: number): Promise<void>;
   uuid(): string;
   waitForSignalOrTimeout(
     predicate: () => boolean,
@@ -230,14 +227,24 @@ export function createHostedUserRuntimeWorkflowMachine(
         execution = await runtime.ensureCloudflareExecution({
           orchestrationAttemptId: runtime.uuid(),
           reason: demand.reason,
-          requiresAiUsageDecision: demand.requiresAiUsageDecision,
           userId: input.userId,
         });
       } catch (error) {
         state.lastExecutionAt = isoNow(runtime);
         state.lastExecutionErrorCode = readExecutionErrorCode(error);
         state.lastExecutionKind = "failed";
-        throw error;
+        if (state.signalVersion !== versionBeforeExecution) {
+          continue;
+        }
+        await waitUntilTimestampOrSignal(
+          runtime,
+          new Date(
+            runtime.nowMs() + HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+          ).toISOString(),
+          state.signalVersion,
+          state,
+        );
+        continue;
       }
 
       state.lastExecutionAt = isoNow(runtime);
@@ -256,7 +263,16 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       if (execution.kind === "runtime_wake_sent") {
-        await sleepUntilRecommendedRecheck(runtime, execution, options);
+        const versionBeforeWakeWait = state.signalVersion;
+        await waitUntilTimestampOrSignal(
+          runtime,
+          execution.recommendedRecheckAt
+            ?? new Date(
+              runtime.nowMs() + options.activeWakeRecheckDelayMs,
+            ).toISOString(),
+          versionBeforeWakeWait,
+          state,
+        );
       }
     }
   };
@@ -404,6 +420,7 @@ function clearSatisfiedFlags(
   state.deviceSyncRecoveryRequested = false;
   state.lagRecoveryObserved = false;
   state.latestMailboxPointer = null;
+  state.mailboxSignalCount = 0;
   state.manualRunRequested = false;
 }
 
@@ -414,6 +431,7 @@ function clearConsumedFlagsAfterRun(
   switch (source) {
     case "mailbox_backlog": {
       state.latestMailboxPointer = null;
+      state.mailboxSignalCount = 0;
       return;
     }
     case "manual": {
@@ -458,22 +476,6 @@ async function waitUntilTimestampOrSignal(
     () => state.signalVersion !== versionBeforeWait,
     timeoutMs,
   );
-}
-
-async function sleepUntilRecommendedRecheck(
-  runtime: HostedUserRuntimeWorkflowRuntime,
-  execution: Extract<HostedRuntimeEnsureExecutionResponse, { kind: "runtime_wake_sent" }>,
-  options: NormalizedWorkflowOptions,
-): Promise<void> {
-  const recommendedDelayMs = millisecondsUntil(
-    execution.recommendedRecheckAt,
-    runtime.nowMs(),
-  );
-  const delayMs = recommendedDelayMs ?? options.activeWakeRecheckDelayMs;
-
-  if (delayMs > 0) {
-    await runtime.sleep(delayMs);
-  }
 }
 
 function millisecondsUntil(

@@ -154,7 +154,7 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "retry",
-      requiresAiUsageDecision: true,
+      requiresAiUsageDecision: false,
       source: "runtime_result_wake",
       workspace: {
         nextWakeAt: "2026-05-20T11:59:30.000Z",
@@ -238,7 +238,7 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      requiresAiUsageDecision: true,
+      requiresAiUsageDecision: false,
       source: "workspace_wake",
       workspace: {
         nextWakeAt,
@@ -260,9 +260,10 @@ describe("hosted orchestration demand", () => {
     expect(demand).toMatchObject({
       kind: "run",
       reason: "nudge",
-      requiresAiUsageDecision: true,
+      requiresAiUsageDecision: false,
       source: "device_sync_recovery",
     });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("treats browser-vault refresh as non-model demand", async () => {
@@ -301,7 +302,7 @@ describe("hosted orchestration demand", () => {
     mocks.resolveHostedAiUsageGate.mockRejectedValue(new Error("unavailable"));
 
     const response = await demandRoute.GET(
-      requestForDemand("?lagRecoveryObserved=1"),
+      requestForDemand("?manualRunRequested=1"),
       routeContext(),
     );
     const demand = parseHostedRuntimeDemand(await response.json());
@@ -311,6 +312,40 @@ describe("hosted orchestration demand", () => {
       reason: "ai_usage_gate_unavailable",
       retryAt: "2026-05-20T12:00:30.000Z",
     });
+  });
+
+  it("does not gate maintenance and recovery demand sources", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
+
+    const lagResponse = await demandRoute.GET(
+      requestForDemand("?lagRecoveryObserved=1"),
+      routeContext(),
+    );
+    const lagDemand = parseHostedRuntimeDemand(await lagResponse.json());
+
+    expect(lagDemand).toMatchObject({
+      kind: "run",
+      requiresAiUsageDecision: false,
+      source: "lag_recovery",
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:58:00.000Z",
+      nextWakeReason: "assistant_due",
+    }));
+    const workspaceResponse = await demandRoute.GET(
+      requestForDemand(),
+      routeContext(),
+    );
+    const workspaceDemand = parseHostedRuntimeDemand(await workspaceResponse.json());
+
+    expect(workspaceDemand).toMatchObject({
+      kind: "run",
+      requiresAiUsageDecision: false,
+      source: "workspace_wake",
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("returns the earliest future runtime or workspace wake while idle", async () => {

@@ -1575,16 +1575,19 @@ describe("cloudflare worker routes", () => {
       const env = createWorkerEnv(stub);
 
       const response = await worker.fetch(
-        await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-          body: JSON.stringify({
-            orchestrationAttemptId: "orchestration-attempt-test",
-            reason: "nudge",
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
           }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        })),
+          env,
+        ),
         env,
       );
 
@@ -1603,6 +1606,31 @@ describe("cloudflare worker routes", () => {
       });
       expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
       expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    });
+
+    it("rejects OIDC-only runtime ensure-execution route calls", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+          body: JSON.stringify({
+            orchestrationAttemptId: "orchestration-attempt-test",
+            reason: "nudge",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        })),
+        env,
+      );
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({
+        error: "Unauthorized.",
+      });
+      expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
     });
 
     it("accepts signed Temporal runtime ensure-execution route calls", async () => {
@@ -1837,6 +1865,36 @@ describe("cloudflare worker routes", () => {
       expect(alarms).toContain("2026-04-27T00:01:00.000Z");
       expect(alarms).toContain("deleted");
     });
+
+    it("does not turn post-completion alarm cleanup failure into transport failure", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
+      const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
+        deleteAlarmError: new Error("alarm cleanup failed"),
+        invocationResults: [{ nextWakeAt: runtimeNextWakeAt, status: "idle" }],
+      });
+
+      await expect(runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      })).resolves.toEqual({
+        action: "started",
+        kind: "runtime_completed",
+        runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+        runtimeResultNextWakeAt: runtimeNextWakeAt,
+        runtimeStatus: "idle",
+      });
+
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: null,
+        backoff_until: null,
+        failure_count: 0,
+        wake_at: null,
+      });
+      expect(alarms).toEqual(["2026-04-27T00:01:00.000Z"]);
+    });
   });
 
   it("rejects malformed runtime ensure-execution requests before calling the Durable Object", async () => {
@@ -1844,16 +1902,19 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-        body: JSON.stringify({
-          orchestrationAttemptId: "orchestration-attempt-test",
-          reason: "unsupported",
+      await signWebCallbackControlRequest(
+        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+          body: JSON.stringify({
+            orchestrationAttemptId: "orchestration-attempt-test",
+            reason: "unsupported",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
         }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
+        env,
+      ),
       env,
     );
 
@@ -1869,18 +1930,22 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-        body: JSON.stringify({
-          orchestrationAttemptId: "orchestration-attempt-test",
-          reason: "nudge",
+      await signWebCallbackControlRequest(
+        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+          body: JSON.stringify({
+            orchestrationAttemptId: "orchestration-attempt-test",
+            reason: "nudge",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
         }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+        env,
+        {
+          boundUserId: "other-test-user",
         },
-        method: "POST",
-      }), {
-        boundUserId: "other-test-user",
-      }),
+      ),
       env,
     );
 
@@ -2332,6 +2397,7 @@ type RuntimeControlMetaRow = {
 };
 
 function createRuntimeControlRunnerHarness(input: {
+  deleteAlarmError?: Error;
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
   workspace?: HostedWorkspaceState | null;
@@ -2354,6 +2420,9 @@ function createRuntimeControlRunnerHarness(input: {
   const storage: DurableObjectStorageLike = {
     delete: vi.fn(async (key: string) => values.delete(key)),
     deleteAlarm: vi.fn(async () => {
+      if (input.deleteAlarmError) {
+        throw input.deleteAlarmError;
+      }
       alarms.push("deleted");
     }),
     async get<T>(key: string): Promise<T | undefined> {

@@ -39,11 +39,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
-        requiresAiUsageDecision: false,
         userId: "member_test",
       },
     ]);
-    expect(continued.state?.mailboxSignalCount).toBe(1);
+    expect(continued.state?.mailboxSignalCount).toBe(0);
     expect(continued.state?.latestMailboxPointer).toBeNull();
     expect(continued.state?.lastDemandSource).toBe("mailbox_backlog");
   });
@@ -59,7 +58,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([60_000]);
-    expect(runtime.sleeps).toEqual([]);
   });
 
   it("lets a signal interrupt idle wait and drive a new demand read", async () => {
@@ -99,9 +97,32 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.sleeps).toEqual([45_000]);
+    expect(runtime.waits[0]).toBe(45_000);
     expect(runtime.demandRequests).toHaveLength(2);
     expect(runtime.demandRequests[1].manualRunRequested).toBe(false);
+  });
+
+  it("lets a signal interrupt runtime_wake_sent recheck wait", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(runtimeWakeSent(isoAfter(45_000)));
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(runtimeCompleted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-wake"));
+    runtime.onWait = () => {
+      machine.applySignal(manualSignal("manual-during-wake"));
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000]);
+    expect(runtime.demandRequests[1].manualRunRequested).toBe(true);
+    expect(runtime.executionRequests).toHaveLength(2);
   });
 
   it("falls back to the configured active-wake delay when no recommended recheck is returned", async () => {
@@ -121,7 +142,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS).toBeGreaterThan(1_000);
-    expect(runtime.sleeps).toEqual([7_000]);
+    expect(runtime.waits).toEqual([7_000]);
   });
 
   it("preserves runtimeResultNextWakeAt as runtimeResultWakeAt on the next demand read", async () => {
@@ -146,7 +167,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     );
   });
 
-  it("passes only the usage-decision requirement boolean into execution", async () => {
+  it("does not pass usage decisions into execution", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({
       requiresAiUsageDecision: true,
@@ -166,12 +187,14 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "manual",
-        requiresAiUsageDecision: true,
         userId: "member_test",
       },
     ]);
     expect(runtime.executionRequests[0]).not.toHaveProperty(
       "aiUsageAllowDecision",
+    );
+    expect(runtime.executionRequests[0]).not.toHaveProperty(
+      "requiresAiUsageDecision",
     );
   });
 
@@ -296,6 +319,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
           mailboxItemId: "mailbox_item_test",
           source: "test",
         },
+        mailboxSignalCount: 3,
         manualRunRequested: true,
       },
       userId: "member_test",
@@ -308,6 +332,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       deviceSyncRecoveryRequested: false,
       lagRecoveryObserved: false,
       latestMailboxPointer: null,
+      mailboxSignalCount: 0,
       manualRunRequested: false,
     });
   });
@@ -365,7 +390,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.waits).toEqual([30_000]);
   });
 
-  it("records safe execution error codes without storing error details", async () => {
+  it("records execution errors and keeps the workflow alive for retry", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(() => {
@@ -375,12 +400,18 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
 
     const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
       userId: "member_test",
     });
     machine.applySignal(manualSignal());
 
-    await expect(machine.run()).rejects.toThrow("transport failed");
+    const continued = await runUntilContinueAsNew(machine);
     expect(machine.readStatus()).toMatchObject({
+      lastExecutionErrorCode: "retryable_transport",
+      lastExecutionKind: "failed",
+    });
+    expect(runtime.waits).toEqual([30_000]);
+    expect(continued.state).toMatchObject({
       lastExecutionErrorCode: "retryable_transport",
       lastExecutionKind: "failed",
     });
@@ -399,7 +430,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.sleeps).toEqual([]);
+    expect(runtime.waits).toEqual([]);
   });
 
   it("continues as new with compact carry-forward state after the configured threshold", async () => {
@@ -422,7 +453,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       options: { continueAsNewAfterIterations: 1 },
       state: expect.objectContaining({
         lastDemandKind: "idle",
-        mailboxSignalCount: 3,
+        mailboxSignalCount: 0,
         runtimeResultWakeAt: isoAfter(300_000),
         signalVersion: 0,
       }),
@@ -459,7 +490,6 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureExecutionResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
-  readonly sleeps: number[] = [];
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
 
@@ -494,25 +524,20 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return typeof next === "function" ? next(request) : next;
   }
 
-  async sleep(durationMs: number): Promise<void> {
-    this.sleeps.push(durationMs);
-    this.now += durationMs;
-  }
-
   uuid(): string {
     this.uuidCounter += 1;
     return `orchestration-attempt-${this.uuidCounter}`;
   }
 
   async waitForSignalOrTimeout(
-    _predicate: () => boolean,
+    predicate: () => boolean,
     timeoutMs: number | null,
   ): Promise<void> {
     this.waits.push(timeoutMs);
-    if (timeoutMs !== null) {
+    this.onWait?.();
+    if (!predicate() && timeoutMs !== null) {
       this.now += timeoutMs;
     }
-    this.onWait?.();
   }
 }
 
