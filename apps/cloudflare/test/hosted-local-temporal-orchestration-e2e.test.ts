@@ -16,12 +16,15 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  signalHostedMailboxAppendRuntimeForTest,
   signalHostedManualRunRuntimeForTest,
 } from "#hosted-web-testing";
 
 vi.mock("server-only", () => ({}));
 
-const userId = `member_local_temporal_orchestration_${Date.now()}`;
+const runUserId = `member_local_temporal_orchestration_${Date.now()}`;
+const mailboxWorkspaceUserId =
+  `member_local_temporal_mailbox_workspace_${Date.now()}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -54,28 +57,67 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(activeScenario.harness.runtimeEnv.HOSTED_TEMPORAL_ADDRESS).toBeTruthy();
     expect(activeScenario.harness.runtimeEnv.TEMPORAL_ADDRESS).toBeTruthy();
 
-    await activeScenario.seedActiveHostedMember({ memberId: userId });
+    await activeScenario.seedActiveHostedMember({ memberId: runUserId });
     await activeScenario.runWake(
-      buildActivationWake(userId),
-      userId,
+      buildActivationWake(runUserId, "manual"),
+      runUserId,
     );
-    await activeScenario.waitForHostedCompletion(userId);
+    await activeScenario.waitForHostedCompletion(runUserId);
 
     const signal = await signalHostedManualRunRuntimeForTest({
       environment: activeScenario.runtimeEnv,
-      userId,
+      userId: runUserId,
     });
 
     const workflowState = await waitForWorkflowExecutionState({
       env: activeScenario.runtimeEnv,
       workflowId: signal.workflowId,
     });
-    expect(workflowState.userId).toBe(userId);
+    expect(workflowState.userId).toBe(runUserId);
     expect(workflowState.lastExecutionAt).not.toBeNull();
     expect(workflowState.lastExecutionErrorCode).toBeNull();
     expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
 
-    const finalStatus = await activeScenario.waitForHostedCompletion(userId);
+    const finalStatus = await activeScenario.waitForHostedCompletion(runUserId);
+    expect(finalStatus.workspace).not.toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+  }, 300_000);
+
+  it("creates workspace before a mailbox append signal starts the workflow", async () => {
+    const activeScenario = requireScenario();
+
+    await activeScenario.seedActiveHostedMember({
+      memberId: mailboxWorkspaceUserId,
+    });
+    await expect(
+      activeScenario.harness.readUserStatus(mailboxWorkspaceUserId),
+    ).resolves.toMatchObject({
+      workspace: null,
+    });
+
+    const append = await activeScenario.enqueueWake(
+      buildActivationWake(mailboxWorkspaceUserId, "mailbox-workspace"),
+      mailboxWorkspaceUserId,
+    );
+    const signal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: mailboxWorkspaceUserId,
+      mailboxItemId: append.wake.id,
+      source: "hosted-local-temporal-e2e",
+    });
+
+    const workflowState = await waitForWorkflowExecutionState({
+      env: activeScenario.runtimeEnv,
+      workflowId: signal.workflowId,
+    });
+    expect(workflowState.userId).toBe(mailboxWorkspaceUserId);
+    expect(workflowState.lastDemandSource).toBe("mailbox_backlog");
+    expect(workflowState.lastExecutionAt).not.toBeNull();
+    expect(workflowState.lastExecutionErrorCode).toBeNull();
+
+    const finalStatus = await activeScenario.waitForHostedCompletion(
+      mailboxWorkspaceUserId,
+    );
     expect(finalStatus.workspace).not.toBeNull();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
   }, 300_000);
@@ -133,9 +175,9 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-function buildActivationWake(memberId: string) {
+function buildActivationWake(memberId: string, eventLabel: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${memberId}:evt_temporal_activation`,
+    eventId: `member.activated:local:${memberId}:evt_temporal_${eventLabel}`,
     memberChannels: {
       email: false,
       linq: false,

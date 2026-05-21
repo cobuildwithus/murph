@@ -65,6 +65,13 @@ const temporalWorkflowHistoryPayloadPatterns = [
   },
 ] as const;
 
+const temporalWorkflowBundlePatterns = [
+  {
+    label: "Node-only hosted-execution parser import in Temporal workflow bundle",
+    pattern: /\bfrom\s+["']@murphai\/hosted-execution\/parsers(?:\/[^"']*)?["']/u,
+  },
+] as const;
+
 type GuardPattern = Readonly<{
   label: string;
   pattern: RegExp;
@@ -174,6 +181,10 @@ function selectGuardPatterns(relativePath: string): readonly GuardPattern[] {
     patterns.push(...temporalWorkflowHistoryPayloadPatterns);
   }
 
+  if (isTemporalWorkflowSourcePath(relativePath)) {
+    patterns.push(...temporalWorkflowBundlePatterns);
+  }
+
   if (
     relativePath.startsWith("apps/web/app/")
     || relativePath.startsWith("apps/web/src/")
@@ -196,9 +207,13 @@ function isPackageSourcePath(relativePath: string): boolean {
 }
 
 function isTemporalWorkflowHistorySurface(relativePath: string): boolean {
-  return relativePath.startsWith("packages/hosted-orchestrator-temporal/src/workflows/")
+  return isTemporalWorkflowSourcePath(relativePath)
     || relativePath === "packages/hosted-orchestrator-temporal/src/workflow-types.ts"
     || relativePath === "packages/hosted-execution/src/orchestration-control.ts";
+}
+
+function isTemporalWorkflowSourcePath(relativePath: string): boolean {
+  return relativePath.startsWith("packages/hosted-orchestrator-temporal/src/workflows/");
 }
 
 function findFirstPatternMatch(

@@ -158,7 +158,9 @@ export interface HostedRuntimeWorkflowState {
   browserVaultRefreshRequested: boolean;
   deviceSyncRecoveryRequested: boolean;
   ignoredWorkspaceWakeKey: string | null;
+  invalidSignalCount: number;
   lagRecoveryObserved: boolean;
+  lastInvalidSignalErrorCode: string | null;
   lastDemandKind: HostedRuntimeDemandKind | null;
   lastDemandNextWakeAt: string | null;
   lastDemandSource: string | null;

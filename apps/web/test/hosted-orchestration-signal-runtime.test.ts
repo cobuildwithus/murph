@@ -13,7 +13,10 @@ import {
 
 const mocks = vi.hoisted(() => ({
   ensureHostedWorkspace: vi.fn(),
+  getPrisma: vi.fn(),
+  prisma: { kind: "prisma" },
   readHostedMailboxItemCheckpointById: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
   signalWithStart: vi.fn(),
 }));
 
@@ -28,8 +31,16 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.readHostedMailboxItemCheckpointById,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+}));
+
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   ensureHostedWorkspace: mocks.ensureHostedWorkspace,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 import {
@@ -43,6 +54,8 @@ import {
 describe("hosted runtime Temporal signaling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.signalWithStart.mockResolvedValue(undefined);
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValue({
       id: "mailbox_123",
@@ -81,7 +94,14 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       },
     );
-    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
+    });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
     const signal = mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0];
     expect(Object.keys(signal as Record<string, unknown>).sort()).toEqual([
       "kind",
@@ -127,6 +147,8 @@ describe("hosted runtime Temporal signaling", () => {
     });
 
     expect(mocks.signalWithStart).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(2);
     expect(mocks.signalWithStart.mock.calls[1]?.[1]?.signalArgs[0]).toEqual(
       mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0],
     );
@@ -149,7 +171,12 @@ describe("hosted runtime Temporal signaling", () => {
       }),
     );
     expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
       userId: "member_123",
+    });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
     });
   });
 
@@ -169,7 +196,12 @@ describe("hosted runtime Temporal signaling", () => {
       }),
     );
     expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
       userId: "member_123",
+    });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
     });
     expect(JSON.stringify(mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0])).not.toMatch(
       /prompt|headers|payload|message/u,
@@ -192,8 +224,111 @@ describe("hosted runtime Temporal signaling", () => {
       }),
     );
     expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
       userId: "member_123",
     });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+  });
+
+  it("ensures workspace before device-sync mailbox pointer signals", async () => {
+    await signalHostedDeviceSyncMailboxRuntime({
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    });
+
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "mailbox_appended",
+          lane: "conversation",
+          laneSeq: "42",
+          mailboxItemId: "mailbox_123",
+          source: "device-sync",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
+    });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+  });
+
+  it("does not upsert workspace or start workflow for missing users on explicit signals", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+
+    await expect(signalHostedManualRunRuntime({
+      client: buildClient(),
+      userId: "member_deleted",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_deleted",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
+  it("does not upsert workspace or start workflow for inactive users on explicit signals", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+    }));
+
+    await expect(signalHostedBrowserVaultRefreshRuntime({
+      client: buildClient(),
+      userId: "member_inactive",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_inactive",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
+  it("does not upsert workspace or start workflow for suspended users on explicit signals", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      suspendedAt: new Date("2026-05-21T00:00:00.000Z"),
+    }));
+
+    await expect(signalHostedManualRunRuntime({
+      client: buildClient(),
+      userId: "member_suspended",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_suspended",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
+  it("does not upsert workspace or start workflow for missing users on mailbox signals", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+
+    await expect(signalHostedMailboxAppendRuntime({
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+      source: "email:agentmail",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 });
 
@@ -202,5 +337,19 @@ function buildClient() {
     workflow: {
       signalWithStart: mocks.signalWithStart,
     },
+  };
+}
+
+function buildActiveMemberRecord(overrides: Partial<{
+  billingStatus: string;
+  suspendedAt: Date | null;
+}> = {}) {
+  return {
+    billingStatus: "active",
+    createdAt: new Date("2026-05-21T00:00:00.000Z"),
+    id: "member_123",
+    suspendedAt: null,
+    updatedAt: new Date("2026-05-21T00:00:00.000Z"),
+    ...overrides,
   };
 }

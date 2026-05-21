@@ -444,12 +444,16 @@ function parsePositiveInteger(
   fallback: number,
   label: string,
 ): number {
-  if (!value) {
+  if (value === null) {
     return fallback;
   }
 
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  if (!/^[0-9]+$/u.test(value)) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new TypeError(`${label} must be a positive integer.`);
   }
 

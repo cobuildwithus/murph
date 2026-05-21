@@ -3,6 +3,7 @@ import {
   continueAsNew,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -42,6 +43,8 @@ export const HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 30_
 export const HOSTED_USER_RUNTIME_MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MIN_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 1_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
+const HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH =
+  "hosted-user-runtime-non-retryable-failure-signal-wait-v1";
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
@@ -80,6 +83,8 @@ export async function hostedUserRuntimeWorkflow(
     ensureCloudflareExecution: executionActivities.ensureCloudflareExecution,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
+    useSignalOnlyWaitForNonRetryableFailure: () =>
+      patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
     waitForSignalOrTimeout: async (predicate, timeoutMs) => {
       if (timeoutMs === null) {
@@ -106,6 +111,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   }): Promise<HostedRuntimeEnsureExecutionResponse>;
   nowMs(): number;
   readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
+  useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
     predicate: () => boolean,
@@ -114,9 +120,13 @@ export interface HostedUserRuntimeWorkflowRuntime {
 }
 
 type HostedRuntimeRunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
+type HostedRuntimeMailboxSignal = Extract<
+  HostedRuntimeSignal,
+  { kind: "mailbox_appended" }
+>;
 
 export interface HostedUserRuntimeWorkflowMachine {
-  applySignal(signal: HostedRuntimeSignal): void;
+  applySignal(signal: unknown): void;
   readStatus(): HostedRuntimeWorkflowState;
   run(): Promise<void>;
 }
@@ -140,7 +150,16 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
-  const applySignal = (signal: HostedRuntimeSignal): void => {
+  const applySignal = (rawSignal: unknown): void => {
+    let signal: HostedRuntimeSignal;
+    try {
+      signal = parseHostedRuntimeSignal(rawSignal);
+    } catch (error) {
+      state.invalidSignalCount += 1;
+      state.lastInvalidSignalErrorCode = readExecutionErrorCode(error);
+      return;
+    }
+
     state.signalVersion += 1;
 
     switch (signal.kind) {
@@ -219,9 +238,11 @@ export function createHostedUserRuntimeWorkflowMachine(
         }
         await waitUntilTimestampOrSignal(
           runtime,
-          new Date(
-            runtime.nowMs() + HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS,
-          ).toISOString(),
+          readActivityFailureRetryAt({
+            error,
+            retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS,
+            runtime,
+          }),
           state.signalVersion,
           state,
         );
@@ -272,9 +293,11 @@ export function createHostedUserRuntimeWorkflowMachine(
         }
         await waitUntilTimestampOrSignal(
           runtime,
-          new Date(
-            runtime.nowMs() + HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
-          ).toISOString(),
+          readActivityFailureRetryAt({
+            error,
+            retryDelayMs: HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+            runtime,
+          }),
           state.signalVersion,
           state,
         );
@@ -390,7 +413,9 @@ function createInitialWorkflowState(
     deviceSyncRecoveryRequested:
       carryForward?.deviceSyncRecoveryRequested ?? false,
     ignoredWorkspaceWakeKey: carryForward?.ignoredWorkspaceWakeKey ?? null,
+    invalidSignalCount: carryForward?.invalidSignalCount ?? 0,
     lagRecoveryObserved: carryForward?.lagRecoveryObserved ?? false,
+    lastInvalidSignalErrorCode: carryForward?.lastInvalidSignalErrorCode ?? null,
     lastDemandKind: carryForward?.lastDemandKind ?? null,
     lastDemandNextWakeAt: carryForward?.lastDemandNextWakeAt ?? null,
     lastDemandSource: carryForward?.lastDemandSource ?? null,
@@ -601,7 +626,30 @@ function isoNow(runtime: HostedUserRuntimeWorkflowRuntime): string {
   return new Date(runtime.nowMs()).toISOString();
 }
 
+function readActivityFailureRetryAt(input: {
+  error: unknown;
+  retryDelayMs: number;
+  runtime: HostedUserRuntimeWorkflowRuntime;
+}): string | null {
+  if (
+    isNonRetryableFailure(input.error)
+    && input.runtime.useSignalOnlyWaitForNonRetryableFailure()
+  ) {
+    return null;
+  }
+
+  return new Date(input.runtime.nowMs() + input.retryDelayMs).toISOString();
+}
+
 function readExecutionErrorCode(error: unknown): string {
+  const applicationFailureType = readApplicationFailureType(error, 0);
+  if (
+    applicationFailureType !== null
+    && isSafeErrorCode(applicationFailureType)
+  ) {
+    return applicationFailureType;
+  }
+
   if (error && typeof error === "object") {
     const code = (error as { code?: unknown }).code;
     if (typeof code === "string" && isSafeErrorCode(code)) {
@@ -617,6 +665,179 @@ function readExecutionErrorCode(error: unknown): string {
   return "unknown";
 }
 
+function readApplicationFailureType(
+  error: unknown,
+  depth: number,
+): string | null {
+  if (!error || typeof error !== "object" || depth > 5) {
+    return null;
+  }
+
+  const type = readObjectProperty(error, "type");
+  if (typeof type === "string" && type.length > 0) {
+    return type;
+  }
+
+  return readApplicationFailureType(readObjectProperty(error, "cause"), depth + 1);
+}
+
+function isNonRetryableFailure(error: unknown): boolean {
+  return hasNonRetryableFailureFlag(error, 0);
+}
+
+function hasNonRetryableFailureFlag(error: unknown, depth: number): boolean {
+  if (!error || typeof error !== "object" || depth > 5) {
+    return false;
+  }
+
+  if (readObjectProperty(error, "nonRetryable") === true) {
+    return true;
+  }
+
+  return hasNonRetryableFailureFlag(readObjectProperty(error, "cause"), depth + 1);
+}
+
+function readObjectProperty(value: object, key: string): unknown {
+  return (value as Record<string, unknown>)[key];
+}
+
 function isSafeErrorCode(value: string): boolean {
   return value.length > 0 && value.length <= 96 && /^[A-Za-z0-9._:-]+$/u.test(value);
+}
+
+function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
+  const record = requireSignalRecord(value, "Hosted runtime signal");
+  const kind = requireString(record.kind, "Hosted runtime signal kind");
+
+  switch (kind) {
+    case "mailbox_appended": {
+      assertExactSignalKeys(record, "Hosted runtime mailbox signal", [
+        "kind",
+        "lane",
+        "laneSeq",
+        "mailboxItemId",
+        "source",
+      ]);
+
+      return {
+        kind,
+        lane: parseHostedMailboxLane(record.lane),
+        laneSeq: requireNonNegativeBigIntString(
+          record.laneSeq,
+          "Hosted runtime mailbox signal laneSeq",
+        ),
+        mailboxItemId: requireOpaqueIdentifier(
+          record.mailboxItemId,
+          "Hosted runtime mailbox signal mailboxItemId",
+        ),
+        source: requireSafeRuntimeSignalSource(
+          record.source,
+          "Hosted runtime mailbox signal source",
+        ),
+      };
+    }
+    case "manual_run_requested": {
+      assertKindOnlySignal(record, "Hosted runtime manual-run signal");
+      return { kind };
+    }
+    case "browser_vault_refresh_requested": {
+      assertKindOnlySignal(record, "Hosted runtime browser-vault refresh signal");
+      return { kind };
+    }
+    case "device_sync_recovery_requested": {
+      assertKindOnlySignal(record, "Hosted runtime device-sync recovery signal");
+      return { kind };
+    }
+    case "mailbox_lag_observed": {
+      assertKindOnlySignal(record, "Hosted runtime mailbox-lag signal");
+      return { kind };
+    }
+    default:
+      throw new TypeError("Hosted runtime signal kind is not supported.");
+  }
+}
+
+function requireSignalRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function parseHostedMailboxLane(value: unknown): HostedRuntimeMailboxSignal["lane"] {
+  const text = requireString(value, "Hosted runtime mailbox signal lane");
+  if (text === "system" || text === "conversation") {
+    return text;
+  }
+
+  throw new TypeError("Hosted runtime mailbox signal lane is not supported.");
+}
+
+function requireOpaqueIdentifier(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (text.length > 192 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text)) {
+    throw new TypeError(`${label} must be a bounded opaque identifier.`);
+  }
+
+  return text;
+}
+
+function requireSafeRuntimeSignalSource(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (
+    text.length > 64
+    || text.trim() !== text
+    || !/^[a-z0-9._:-]+$/u.test(text)
+  ) {
+    throw new TypeError(
+      `${label} must be a non-empty trimmed safe source string with at most 64 characters.`,
+    );
+  }
+
+  return text;
+}
+
+function requireNonNegativeBigIntString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (!/^[0-9]+$/u.test(text)) {
+    throw new TypeError(`${label} must be a non-negative base-10 integer string.`);
+  }
+
+  return text;
+}
+
+function assertKindOnlySignal(
+  record: Record<string, unknown>,
+  label: string,
+): void {
+  assertExactSignalKeys(record, label, ["kind"]);
+}
+
+function assertExactSignalKeys(
+  record: Record<string, unknown>,
+  label: string,
+  allowedKeys: readonly string[],
+): void {
+  const allowed = new Set(allowedKeys);
+
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new TypeError(`${label} must not include ${key}.`);
+    }
+  }
 }

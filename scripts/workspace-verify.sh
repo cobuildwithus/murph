@@ -637,8 +637,13 @@ run_all_package_coverage() {
   local failed_package_labels=()
   local saw_unreported_background_failure=0
   local failure_dir
+  local failure_labels_dir
+  local status_dir
   local failure_dir_quoted
   failure_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-package-coverage-failures.XXXXXX")"
+  failure_labels_dir="$failure_dir/failures"
+  status_dir="$failure_dir/status"
+  mkdir -p "$failure_labels_dir" "$status_dir"
   printf -v failure_dir_quoted '%q' "$failure_dir"
 
   record_failed_package_coverage() {
@@ -656,7 +661,7 @@ run_all_package_coverage() {
       fi
       [[ -n "$label" ]] || continue
       record_failed_package_coverage "$label"
-    done < <(find "$failure_dir" -type f -print0 | sort -z)
+    done < <(find "$failure_labels_dir" -type f -print0 | sort -z)
   }
 
   trap "rm -rf -- $failure_dir_quoted" RETURN
@@ -685,30 +690,89 @@ run_all_package_coverage() {
   fi
 
   while [[ "$package_index" -lt "$package_count" ]]; do
-    local batch_pids=()
-    local batch_slots=0
+    local active_pids=()
+    local active_failure_files=()
+    local active_status_files=()
 
-    while [[ "$package_index" -lt "$package_count" && "$batch_slots" -lt "$package_coverage_concurrency" ]]; do
-      local failure_file="$failure_dir/$package_index"
+    launch_package_coverage() {
+      local failure_file="$failure_labels_dir/$package_index"
+      local status_file="$status_dir/$package_index"
       (
+        local status=0
+
         if ! run_workspace_package_coverage \
           "${package_coverage_dirs[$package_index]}" \
           "${package_coverage_labels[$package_index]}" \
           "$contracts_artifacts_prepared"; then
           printf '%s\n' "${package_coverage_labels[$package_index]}" >"$failure_file"
-          exit 1
+          status=1
         fi
+
+        printf '%s\n' "$status" >"$status_file"
+        exit "$status"
       ) &
       local coverage_pid="$!"
-      batch_pids+=("$coverage_pid")
+      active_pids+=("$coverage_pid")
+      active_failure_files+=("$failure_file")
+      active_status_files+=("$status_file")
       register_background_pid "$coverage_pid"
       package_index=$((package_index + 1))
-      batch_slots=$((batch_slots + 1))
-    done
+    }
 
-    if ! wait_for_background_jobs_allow_failures "${batch_pids[@]}"; then
-      saw_unreported_background_failure=1
-    fi
+    reap_finished_package_coverage() {
+      local remaining_pids=()
+      local remaining_failure_files=()
+      local remaining_status_files=()
+      local reaped_any=0
+      local active_index
+
+      for active_index in "${!active_pids[@]}"; do
+        local active_pid="${active_pids[$active_index]}"
+        local failure_file="${active_failure_files[$active_index]}"
+        local status_file="${active_status_files[$active_index]}"
+
+        if [[ ! -f "$status_file" ]]; then
+          remaining_pids+=("$active_pid")
+          remaining_failure_files+=("$failure_file")
+          remaining_status_files+=("$status_file")
+          continue
+        fi
+
+        if ! wait "$active_pid"; then
+          if [[ ! -f "$failure_file" ]]; then
+            saw_unreported_background_failure=1
+          fi
+        fi
+        unregister_background_pid "$active_pid"
+        reaped_any=1
+      done
+
+      active_pids=()
+      active_failure_files=()
+      active_status_files=()
+
+      if [[ "${#remaining_pids[@]}" -gt 0 ]]; then
+        active_pids=("${remaining_pids[@]}")
+        active_failure_files=("${remaining_failure_files[@]}")
+        active_status_files=("${remaining_status_files[@]}")
+      fi
+
+      [[ "$reaped_any" -eq 1 ]]
+    }
+
+    while [[ "$package_index" -lt "$package_count" || "${#active_pids[@]}" -gt 0 ]]; do
+      while [[ "$package_index" -lt "$package_count" && "${#active_pids[@]}" -lt "$package_coverage_concurrency" ]]; do
+        launch_package_coverage
+      done
+
+      if [[ "${#active_pids[@]}" -eq 0 ]]; then
+        continue
+      fi
+
+      if ! reap_finished_package_coverage; then
+        sleep 0.2
+      fi
+    done
   done
 
   collect_failed_package_coverage_labels
@@ -875,7 +939,7 @@ run_test_packages_coverage_after_hygiene() {
   else
     verify_log "skip Health Commons generated catalog; prepared runtime artifacts already covered it"
   fi
-  run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared"
+  run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared" || return $?
   run_package_boundary_verification
 }
 

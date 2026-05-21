@@ -61,3 +61,20 @@ Updated: 2026-05-21
   - `pnpm verify:acceptance`
 - Expected outcomes:
   - full command passes and reports final app verification at <=144s
+
+## Progress
+
+- Added dynamic package-coverage slot refill so completed package jobs open the
+  next package immediately instead of waiting for a whole batch to drain.
+- Split long CLI device and release/audit smoke tests into independent CLI
+  workspace buckets.
+- Added delayed local app-verification overlap for acceptance coverage runs.
+- Fixed package-coverage failure propagation after finding a masked hosted
+  Temporal package failure in the captured full acceptance log.
+- Focused checks passed: shell syntax, hosted Temporal package coverage, CLI
+  release-script coverage audit, CLI export-pack runtime test, and standalone
+  CLI coverage at 80s.
+- Full timing proof is still pending. A captured full run reached 166s and was
+  not acceptable because it missed the 144s target and masked a package failure.
+  A follow-up measurement was stopped to avoid competing with other local
+  verification already running in the shared checkout.

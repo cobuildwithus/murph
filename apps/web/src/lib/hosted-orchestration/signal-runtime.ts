@@ -15,8 +15,17 @@ import {
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
+  hasHostedMemberActiveAccess,
+} from "../hosted-onboarding/entitlement";
+import {
+  readHostedMemberCoreState,
+} from "../hosted-onboarding/hosted-member-store";
+import {
   ensureHostedWorkspace,
 } from "../hosted-workspace/store";
+import {
+  getPrisma,
+} from "../prisma";
 import {
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
@@ -95,6 +104,7 @@ export async function signalHostedMailboxAppendRuntime(
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,
@@ -168,6 +178,7 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    ensureWorkspace: true,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,
@@ -191,7 +202,7 @@ export async function signalHostedUserRuntimeWorkflow(
   }
 
   if (input.ensureWorkspace === true) {
-    await ensureHostedWorkspace({ userId: input.userId });
+    await ensureHostedRuntimeWorkspaceForActiveUser(input.userId);
   }
 
   const workflowId = hostedUserRuntimeWorkflowId(input.userId);
@@ -216,6 +227,23 @@ export async function signalHostedUserRuntimeWorkflow(
     signalAccepted: true,
     workflowId,
   };
+}
+
+async function ensureHostedRuntimeWorkspaceForActiveUser(userId: string): Promise<void> {
+  const prisma = getPrisma();
+  const member = await readHostedMemberCoreState({
+    memberId: userId,
+    prisma,
+  });
+
+  if (!member || !hasHostedMemberActiveAccess(member)) {
+    throw new Error("Hosted runtime user is not active.");
+  }
+
+  await ensureHostedWorkspace({
+    prisma,
+    userId,
+  });
 }
 
 export function sanitizeHostedRuntimeSignalSource(source: string): string {

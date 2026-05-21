@@ -543,6 +543,34 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("records malformed raw signals as no-op diagnostics", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(idleDemand(isoAfter(60_000)));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    expect(() => machine.applySignal({
+      kind: "manual_run_requested",
+      source: "unexpected-source",
+    })).not.toThrow();
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests[0]).toMatchObject({
+      browserVaultRefreshRequested: false,
+      deviceSyncRecoveryRequested: false,
+      lagRecoveryObserved: false,
+      manualRunRequested: false,
+    });
+    expect(continued.state).toMatchObject({
+      invalidSignalCount: 1,
+      lastInvalidSignalErrorCode: "TypeError",
+      signalVersion: 0,
+    });
+  });
+
   it("waits until blocked demand retryAt or a newer signal", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push({
@@ -622,6 +650,49 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("waits for a signal only after non-retryable execution failures", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(() => {
+      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(continued.state).toMatchObject({
+      lastExecutionErrorCode: "hosted_orchestrator_http_non_retryable",
+      lastExecutionKind: "failed",
+    });
+  });
+
+  it("keeps old retry timer behavior when the non-retryable wait patch is inactive", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.signalOnlyNonRetryableFailureWaitEnabled = false;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(() => {
+      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([
+      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+    ]);
+  });
+
   it("records demand read errors and keeps the workflow alive for retry", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(() => {
@@ -645,6 +716,31 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       lastDemandNextWakeAt: null,
       lastDemandSource: "demand_read_failed",
       lastExecutionErrorCode: "demand_transport_unavailable",
+    });
+  });
+
+  it("waits for a signal only after non-retryable demand read failures", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(() => {
+      throw nonRetryableActivityFailure(
+        "hosted_orchestrator_invalid_protocol_response",
+      );
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(runtime.waits).toEqual([null]);
+    expect(continued.state).toMatchObject({
+      lastDemandKind: null,
+      lastDemandNextWakeAt: null,
+      lastDemandSource: "demand_read_failed",
+      lastExecutionErrorCode: "hosted_orchestrator_invalid_protocol_response",
     });
   });
 
@@ -786,6 +882,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureExecutionResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  signalOnlyNonRetryableFailureWaitEnabled = true;
   suggestContinueAsNew = false;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
@@ -823,6 +920,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
       throw new Error("Unexpected readRuntimeDemand call.");
     }
     return typeof next === "function" ? next(request) : next;
+  }
+
+  useSignalOnlyWaitForNonRetryableFailure(): boolean {
+    return this.signalOnlyNonRetryableFailureWaitEnabled;
   }
 
   uuid(): string {
@@ -869,7 +970,9 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     browserVaultRefreshRequested: false,
     deviceSyncRecoveryRequested: false,
     ignoredWorkspaceWakeKey: null,
+    invalidSignalCount: 0,
     lagRecoveryObserved: false,
+    lastInvalidSignalErrorCode: null,
     lastDemandKind: null,
     lastDemandNextWakeAt: null,
     lastDemandSource: null,
@@ -966,6 +1069,19 @@ function runtimeWakeSent(
     recommendedRecheckAt,
     runtimeAttemptId: "runtime_attempt_test",
   };
+}
+
+function nonRetryableActivityFailure(type: string): Error {
+  const applicationFailure = new Error("permanent hosted control failure") as
+    Error & {
+      nonRetryable: boolean;
+      type: string;
+    };
+  applicationFailure.nonRetryable = true;
+  applicationFailure.type = type;
+  return new Error("activity failed", {
+    cause: applicationFailure,
+  });
 }
 
 function workspaceProjection(

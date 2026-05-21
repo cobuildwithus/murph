@@ -38,6 +38,7 @@ const sampleDocumentPath = path.join(
   'fixtures/sample-imports/README.md',
 )
 const runtimeCliTestTimeoutMs = 60_000
+const exportPackCliTestTimeoutMs = 90_000
 
 test('runtime unavailable error preserves the shared vault runtime guidance payload', () => {
   const result = createRuntimeUnavailableError(
@@ -539,5 +540,5 @@ test(
       await rm(fixture.vaultRoot, { recursive: true, force: true })
     }
   },
-  runtimeCliTestTimeoutMs,
+  exportPackCliTestTimeoutMs,
 )

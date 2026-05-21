@@ -178,6 +178,28 @@ Worker shutdown:
   Ensure-execution calls that run longer than the platform window can still be
   retried by Temporal after the current attempt is interrupted.
 
+Worker concurrency:
+
+- `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS` /
+  `TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS`: maximum
+  concurrent Activity executions, default `2`. Keep this aligned with Render
+  instance size and Cloudflare runner capacity because `ensureCloudflareExecution`
+  can hold a request for minutes.
+- `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS` /
+  `TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS`: maximum concurrent
+  Activity task polls, default `2`, and must be no higher than the Activity
+  execution limit.
+- `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS` /
+  `TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS`: maximum concurrent
+  Workflow task executions, default `20`.
+- `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS` /
+  `TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS`: maximum concurrent
+  Workflow task polls, default `5`, and must be no higher than the Workflow task
+  execution limit.
+- Local development omits these Worker performance options unless an override is
+  configured. Production startup always sets explicit values instead of relying
+  on Temporal SDK defaults.
+
 ## Render Deployment
 
 The repo root `render.yaml` defines `murph-temporal-worker` as a Render
