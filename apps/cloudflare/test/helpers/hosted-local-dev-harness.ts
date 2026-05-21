@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildCloudflareHostedControlUserStatusPath } from "@murphai/cloudflare-hosted-control/routes";
-import { parseHostedRunnerStatusResponse } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedRunnerStatusResponse,
+  parseHostedRuntimeEnsureExecutionRequest,
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
@@ -20,6 +23,10 @@ import {
   startHostedLocalDevStack,
   type HostedLocalDevStack,
 } from "../../../../scripts/dev-hosted-local/stack.ts";
+import {
+  createHostedWebCallbackSignatureHeaders,
+  readHostedWebCallbackSigningEnvironment,
+} from "../../src/web-callback-auth.ts";
 
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusRequestTimeoutMs = 10_000;
@@ -418,12 +425,30 @@ export async function startHostedLocalDevHarness(input: {
   }
 
   async function nudgeHostedUserBestEffort(userId: string): Promise<void> {
-    await requestJsonForRuntime(`/internal/users/${encodeURIComponent(userId)}/nudge`, {
-      body: "{}",
-      headers: {
-        ...statusHeaders(userId),
-        "content-type": "application/json; charset=utf-8",
-      },
+    const pathname = `/internal/users/${encodeURIComponent(userId)}/runtime/ensure-execution`;
+    const url = new URL(pathname, `${workerBaseUrl}/`);
+    const requestBody = JSON.stringify(parseHostedRuntimeEnsureExecutionRequest({
+      orchestrationAttemptId: `hosted-local-nudge:${userId}`,
+      reason: "nudge",
+    }));
+    const headers = {
+      [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+      "content-type": "application/json; charset=utf-8",
+      ...await createHostedWebCallbackSignatureHeaders({
+        environment: readHostedWebCallbackSigningEnvironment(
+          stack?.workerRuntimeEnv ?? stack?.runtimeEnv ?? input.env,
+        ),
+        method: "POST",
+        path: url.pathname,
+        payload: requestBody,
+        search: url.search,
+        userId,
+      }),
+    };
+
+    await requestJsonForRuntime(pathname, {
+      body: requestBody,
+      headers,
       method: "POST",
       signal: AbortSignal.timeout(hostedLocalNudgeTimeoutMs),
     }).catch(() => {});

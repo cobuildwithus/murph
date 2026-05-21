@@ -35,6 +35,7 @@ import {
   readSimpleEnvFile,
   requireEnvValue,
   resolveCloudflareLocalEnv,
+  resolveHostedLocalClientWorkerHost,
   shouldSyncLocalDatabaseSchema,
   warnForMissingEnv,
 } from "./environment.ts";
@@ -151,7 +152,8 @@ export async function startHostedLocalDevStack(input: {
     initialEnv[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim() || randomUUID(),
   );
   const tsxTsconfigPath = path.join(repoRoot, "tsconfig.base.json");
-  const workerBaseUrl = `${config.workerProtocol}://${config.workerHost}:${config.workerPort}`;
+  const workerBaseUrl =
+    `${config.workerProtocol}://${resolveHostedLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
 
   if (!config.skipVercelPull && !providedVercelOidcToken) {
     await ensureVercelLinkExists();
@@ -638,10 +640,14 @@ export async function startHostedLocalDevStack(input: {
     }
 
     const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
+    const temporalRuntimeEnv = buildHostedLocalTemporalProcessEnv({
+      cloudflareDevVars,
+      runtimeEnv,
+    });
     temporalRuntime = await startHostedLocalTemporalRuntime({
       cloudflareHostedControlBaseUrl: workerBaseUrl,
       config,
-      env: runtimeEnv,
+      env: temporalRuntimeEnv,
       hostedWebBaseUrl: webBaseUrl,
       pipeOutput: input.pipeOutput,
       stderrTarget: input.stderrTarget,
@@ -1212,6 +1218,23 @@ function buildCloudflaredProcessEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEn
     }
   }
   return env;
+}
+
+function buildHostedLocalTemporalProcessEnv(input: {
+  cloudflareDevVars: Record<string, string>;
+  runtimeEnv: NodeJS.ProcessEnv;
+}): NodeJS.ProcessEnv {
+  const callbackPrivateJwkJson =
+    input.cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?.trim();
+
+  if (!callbackPrivateJwkJson) {
+    return input.runtimeEnv;
+  }
+
+  return {
+    ...input.runtimeEnv,
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+  };
 }
 
 function resolveRepoRelativeChildArg(filePath: string): string {

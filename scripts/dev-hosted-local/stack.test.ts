@@ -297,8 +297,12 @@ vi.mock("./environment.ts", () => ({
       y: "automation-y",
     }),
     HOSTED_CRYPTO_ENV: "development",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "local-callback-private",
     NODE_ENV: input.overrides?.NODE_ENV,
   })),
+  resolveHostedLocalClientWorkerHost: vi.fn((workerHost: string) =>
+    workerHost === "0.0.0.0" ? "127.0.0.1" : workerHost
+  ),
   resolveHostedLocalPersistentCryptoStatePath: vi.fn((env: Record<string, string | undefined>) => {
     const profile = env.MURPH_HOSTED_LOCAL_PROFILE;
     if (
@@ -584,6 +588,7 @@ describe("hosted local dev stack", () => {
         port: 7243,
         taskQueue: "hosted-local-test-queue",
       },
+      workerHost: "0.0.0.0",
     });
     const temporalServer = createBufferedChild({
       exitCode: null,
@@ -627,12 +632,16 @@ describe("hosted local dev stack", () => {
         HOSTED_TEMPORAL_ADDRESS: "127.0.0.1:7243",
         HOSTED_TEMPORAL_NAMESPACE: "hosted-local-test",
         HOSTED_TEMPORAL_TASK_QUEUE: "hosted-local-test-queue",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "local-callback-private",
         TEMPORAL_ADDRESS: "127.0.0.1:7243",
         TEMPORAL_NAMESPACE: "hosted-local-test",
         TEMPORAL_TASK_QUEUE: "hosted-local-test-queue",
       }),
       hostedWebBaseUrl: "http://localhost:3000",
     }));
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    const webEnv = webCall?.[3] as NodeJS.ProcessEnv;
+    expect(webEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(stack.processes.temporalServer).toBe(temporalServer);
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);

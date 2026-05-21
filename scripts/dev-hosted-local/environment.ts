@@ -656,7 +656,7 @@ export function buildHostedLocalDevOverrides(
 ): NodeJS.ProcessEnv {
   const webOrigin = `http://${config.webHost}:${config.webPort}`;
   const workerBaseUrl =
-    `${config.workerProtocol}://${resolveLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
+    `${config.workerProtocol}://${resolveHostedLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
   const callbackKeyId = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim();
   const cloudflareAutomationPrivateJwkJson =
@@ -731,7 +731,7 @@ function copyNonEmptyEnv(source: Record<string, string>, key: string): NodeJS.Pr
   return value ? { [key]: value } : {};
 }
 
-function resolveLocalClientWorkerHost(workerHost: string): string {
+export function resolveHostedLocalClientWorkerHost(workerHost: string): string {
   const normalized = workerHost.trim().toLowerCase();
 
   if (normalized === "0.0.0.0") {
