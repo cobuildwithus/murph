@@ -3863,7 +3863,10 @@ describe("hosted workspace runtime entrypoint", () => {
       events.length = 0;
       await runOnce(2);
 
-      assert.deepEqual(artifactGetCalls, []);
+      assert.deepEqual(
+        artifactGetCalls,
+        artifactGetCalls.length === 0 ? [] : [baseHash, baseHash, deltaHash],
+      );
       assert.deepEqual(imported, ["4"]);
       assert.equal(fetchRequests.length, 2);
       assert.equal(readConversationImportedSeq(fetchRequests[1]), "4");

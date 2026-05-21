@@ -5,7 +5,7 @@ const {
   PrismaPg,
 } = vi.hoisted(() => {
   const PrismaClient = vi.fn().mockImplementation(function (options: unknown) {
-    return { options };
+    return { $disconnect: vi.fn(), options };
   });
   const PrismaPg = vi.fn().mockImplementation(function (options: unknown) {
     return { options };
@@ -50,11 +50,11 @@ describe("prisma module", () => {
   });
 
   it("removes libpq-style system certificate sentinels that the pg adapter treats as file paths", async () => {
-    process.env.DATABASE_URL = "postgresql://user:pass@example.com/db?sslmode=require";
+    process.env.DATABASE_URL = "postgresql://example.invalid/db?sslmode=require";
 
     const { normalizePrismaConnectionString } = await import("@/src/lib/prisma");
     const normalized = normalizePrismaConnectionString(
-      "postgresql://user:pass@example.com/db?sslmode=require&sslrootcert=system",
+      "postgresql://example.invalid/db?sslmode=require&sslrootcert=system",
     );
     const url = new URL(normalized);
 
@@ -63,10 +63,10 @@ describe("prisma module", () => {
   });
 
   it("leaves ordinary Postgres URLs unchanged", async () => {
-    process.env.DATABASE_URL = "postgresql://user:pass@example.com/db?sslmode=require";
+    process.env.DATABASE_URL = "postgresql://example.invalid/db?sslmode=require";
 
     const { normalizePrismaConnectionString } = await import("@/src/lib/prisma");
-    const databaseUrl = "postgresql://user:pass@example.com/db?sslmode=require";
+    const databaseUrl = "postgresql://example.invalid/db?sslmode=require";
 
     expect(normalizePrismaConnectionString(databaseUrl)).toBe(databaseUrl);
   });
@@ -85,7 +85,7 @@ describe("prisma module", () => {
     process.env = {
       ...process.env,
       NODE_ENV: "production",
-      DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
     };
 
     const prismaModule = await import("@/src/lib/prisma");
@@ -94,7 +94,7 @@ describe("prisma module", () => {
 
     expect(prismaA).toBe(prismaB);
     expect(PrismaPg).toHaveBeenCalledWith({
-      connectionString: "postgresql://user:pass@example.com/db?sslmode=require",
+      connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 30_000,
       max: 5,
@@ -108,11 +108,41 @@ describe("prisma module", () => {
     });
   });
 
+  it("can reset the non-production Prisma client between ephemeral databases", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://example.invalid/first?sslmode=require",
+    };
+
+    const prismaModule = await import("@/src/lib/prisma");
+    const prismaA = prismaModule.getPrisma() as { $disconnect: () => Promise<void> };
+
+    process.env.DATABASE_URL = "postgresql://example.invalid/second?sslmode=require";
+    await prismaModule.resetPrismaClientForTest();
+    const prismaB = prismaModule.getPrisma();
+
+    expect(prismaA).not.toBe(prismaB);
+    expect(prismaA.$disconnect).toHaveBeenCalledTimes(1);
+    expect(PrismaPg).toHaveBeenNthCalledWith(1, {
+      connectionString: "postgresql://example.invalid/first?sslmode=require",
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      max: 5,
+    });
+    expect(PrismaPg).toHaveBeenNthCalledWith(2, {
+      connectionString: "postgresql://example.invalid/second?sslmode=require",
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      max: 5,
+    });
+  });
+
   it("enables Prisma warn and error logs in development only", async () => {
     process.env = {
       ...process.env,
       NODE_ENV: "development",
-      DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
     };
 
     const { getPrisma } = await import("@/src/lib/prisma");
@@ -134,7 +164,7 @@ describe("prisma module", () => {
       ...process.env,
       NODE_ENV: "production",
       DATABASE_POOL_MAX: "9",
-      DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
     };
 
     const { getPrisma } = await import("@/src/lib/prisma");
@@ -142,7 +172,7 @@ describe("prisma module", () => {
     getPrisma();
 
     expect(PrismaPg).toHaveBeenCalledWith({
-      connectionString: "postgresql://user:pass@example.com/db?sslmode=require",
+      connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 30_000,
       max: 9,

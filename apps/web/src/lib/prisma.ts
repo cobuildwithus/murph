@@ -55,6 +55,18 @@ export function getPrisma(): PrismaClient {
   return prisma;
 }
 
+export async function resetPrismaClientForTest(): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("resetPrismaClientForTest must not run in production.");
+  }
+
+  const current = prisma ?? globalForPrisma.__murphHostedWebPrisma;
+  prisma = undefined;
+  delete globalForPrisma.__murphHostedWebPrisma;
+
+  await current?.$disconnect();
+}
+
 export function resolvePrismaLogLevels(
   nodeEnv = process.env.NODE_ENV,
 ): ("error" | "warn")[] {

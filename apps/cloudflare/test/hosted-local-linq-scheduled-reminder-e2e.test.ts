@@ -11,13 +11,21 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
+  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+  type HostedRuntimeWorkflowState,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
+  createHostedRuntimeTemporalClientFromEnv,
+} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
+import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
   seedHostedWorkspaceCheckpointForTest,
+  signalHostedManualRunRuntimeForTest,
 } from "#hosted-web-testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedAssistantNotificationDecisionResponse,
@@ -38,8 +46,6 @@ const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
 const scheduledReminderLeadMs = 90_000;
 const productionLikeAssistantModel = "gpt-5.5";
-const hostedLocalWorkerRestartBody = "Your worker restarted mid-request.";
-const hostedLocalWorkerRestartMaxRetries = 4;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -49,8 +55,7 @@ const cleanupPaths: string[] = [];
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
-type HostedUserStatus =
-  Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
+vi.mock("server-only", () => ({}));
 
 afterAll(async () => {
   await scenario?.stop();
@@ -99,23 +104,20 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(unscheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
     expect(unscheduledStatus.nextAlarmAt ?? null).toBeNull();
 
-    const schedulingResult = await requireScenario().harness.runHostedManualInvocationForTest(userId);
-    expect(schedulingResult.status).toBe("scheduled");
-
-    const scheduledStatus = await waitForScheduledAlarmAt(scheduledReminderTimes.dueAtIso);
-    expect(scheduledStatus.lastErrorCode ?? null).toBeNull();
-    expect(scheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
-    expect(scheduledStatus.nextAlarmAt).toBe(scheduledReminderTimes.dueAtIso);
-    expect(scheduledStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        eventCode: "assistant.automation_detail",
-        redactedJson: expect.objectContaining({
-          failureReason: "not_due",
-          safeDetails: "not_due",
-          type: "cron.scan.job",
-        }),
-      }),
-    ]));
+    const signal = await signalHostedManualRunRuntimeForTest({
+      environment: requireScenario().runtimeEnv,
+      eventSource: "hosted-local-linq-scheduled-reminder",
+      source: "test",
+      userId,
+    });
+    const scheduledState = await waitForWorkflowNextWakeAt({
+      expectedNextWakeAt: scheduledReminderTimes.dueAtIso,
+      runtimeEnv: requireScenario().runtimeEnv,
+      workflowId: signal.workflowId,
+    });
+    expect(scheduledState.lastExecutionErrorCode).toBeNull();
+    expect(scheduledState.lastExecutionKind).toBe("runtime_completed");
+    expect(scheduledState.runtimeResultWakeAt).toBe(scheduledReminderTimes.dueAtIso);
 
     await sleepUntil(scheduledReminderTimes.dueAtIso);
     requireScenario().queueAssistantResponses([
@@ -124,7 +126,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         text: reminderText,
       }),
     ]);
-    await runHostedScheduledAlarm();
     const sendRequest = await requireLinqStub().waitForSend({
       expectedPath: `/chats/${encodeURIComponent(scheduledChatId)}/messages`,
       scenario: requireScenario(),
@@ -244,51 +245,44 @@ async function uploadHostedSnapshotArtifact(input: {
   );
 }
 
-async function runHostedScheduledAlarm(): Promise<void> {
-  for (let attempt = 0; attempt <= hostedLocalWorkerRestartMaxRetries; attempt += 1) {
-    try {
-      await requireScenario().harness.runHostedAlarmForTest(userId);
-      return;
-    } catch (error) {
-      if (!isHostedLocalWorkerRestartError(error) || attempt >= hostedLocalWorkerRestartMaxRetries) {
-        throw error;
+async function waitForWorkflowNextWakeAt(input: {
+  expectedNextWakeAt: string;
+  runtimeEnv: NodeJS.ProcessEnv;
+  workflowId: string;
+}): Promise<HostedRuntimeWorkflowState> {
+  const client = await createHostedRuntimeTemporalClientFromEnv(input.runtimeEnv);
+  const handle = client.workflow.getHandle(input.workflowId);
+  const startedAt = Date.now();
+  let latestState: HostedRuntimeWorkflowState | null = null;
+  let latestError: string | null = null;
+
+  try {
+    while ((Date.now() - startedAt) < 180_000) {
+      try {
+        latestState = await handle.query<HostedRuntimeWorkflowState>(
+          HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+        );
+        if (latestState.runtimeResultWakeAt === input.expectedNextWakeAt) {
+          return latestState;
+        }
+      } catch (error) {
+        latestError = error instanceof Error ? error.message : String(error);
       }
 
-      await sleep(250 * (attempt + 1));
+      await sleep(1_000);
     }
+  } finally {
+    await client.connection.close();
   }
 
-  throw new Error("Hosted local worker restart retry loop exhausted.");
-}
-
-async function waitForScheduledAlarmAt(expectedNextAlarmAt: string): Promise<HostedUserStatus> {
-  const startedAt = Date.now();
-  let lastStatus: HostedUserStatus | null = null;
-
-  while ((Date.now() - startedAt) < 10_000) {
-    const status = await requireScenario().harness.readUserStatus(userId);
-    lastStatus = status;
-
-    if (status.lastErrorCode) {
-      throw new Error(`Hosted runner errored before scheduling reminder alarm: ${status.lastErrorCode}`);
-    }
-
-    if (status.nextAlarmAt === expectedNextAlarmAt) {
-      return status;
-    }
-
-    await sleep(250);
-  }
-
-  throw new Error(JSON.stringify({
-    expectedNextAlarmAt,
-    lastErrorCode: lastStatus?.lastErrorCode ?? null,
-    lastNextAlarmAt: lastStatus?.nextAlarmAt ?? null,
-  }));
-}
-
-function isHostedLocalWorkerRestartError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes(hostedLocalWorkerRestartBody);
+  throw new Error(
+    [
+      "Timed out waiting for Temporal workflow to schedule the reminder wake.",
+      `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
+      latestState ? `last state: ${JSON.stringify(latestState)}` : null,
+      latestError ? `last query error: ${latestError}` : null,
+    ].filter((line): line is string => Boolean(line)).join("\n"),
+  );
 }
 
 async function sleep(ms: number): Promise<void> {

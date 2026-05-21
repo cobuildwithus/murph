@@ -1,8 +1,8 @@
 # Get hosted-local E2E passing
 
-Status: active
+Status: completed
 Created: 2026-05-12
-Updated: 2026-05-12
+Updated: 2026-05-21
 
 ## Goal
 
@@ -54,6 +54,7 @@ Updated: 2026-05-12
 ## Decisions
 
 - Use root `pnpm hosted-local e2e` as the primary success command because the user asked for hosted local E2E tests fully passing.
+- 2026-05-21: The current red suite is Temporal-cutover fallout, not a missing Temporal process. The legacy Linq direct-wake scenarios still assert manual Cloudflare wake behavior, so keep their scenario stacks on `MURPH_DEV_TEMPORAL=disabled` and leave the production-shaped Temporal chain to the dedicated `temporal-orchestration` scenario. The scheduled-reminder scenario now uses Temporal manual signaling because current runner status intentionally reports write-fence watchdog alarms only and Temporal owns semantic wake timing.
 
 ## Verification
 
@@ -61,6 +62,10 @@ Updated: 2026-05-12
 - `pnpm hosted-local e2e`
 - `pnpm typecheck`
 - Additional focused owner tests once touched files are known.
+- 2026-05-21 baseline already passed before this fix: `pnpm typecheck`, `pnpm test`, and `pnpm verify:acceptance`.
+- 2026-05-21 focused hosted-local reruns passed: `pnpm hosted-local e2e linq-first-contact --no-bundle`, `pnpm hosted-local e2e linq-webhook --no-bundle`, `pnpm hosted-local e2e linq-scheduled-reminder --no-bundle`, and `pnpm hosted-local e2e temporal-orchestration --no-bundle`.
+- 2026-05-21 final verification passed: `pnpm typecheck`, `pnpm test`, `pnpm verify:acceptance`, `pnpm test:e2e:hosted-local`, `pnpm test:repo-tools scripts/dev-hosted-local/stack.test.ts`, `pnpm --dir apps/web test prisma-store-client.test.ts`, and `pnpm --dir packages/assistant-runtime test:coverage`.
 - Expected outcomes:
 - Hosted-local E2E suite exits 0.
 - Typecheck and focused tests exit 0, or any unrelated pre-existing failure is explicitly identified.
+Completed: 2026-05-21

@@ -649,6 +649,7 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      MURPH_DEV_TEMPORAL: "disabled",
       ...resolvedAdditionalEnv,
     },
     localDatabaseUrl,

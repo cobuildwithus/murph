@@ -22,6 +22,11 @@ const hostedWorkspaceStoreModuleSpecifier = new URL(
   "./lib/hosted-workspace/store.ts",
   import.meta.url,
 ).href;
+const hostedTestingHostOnlyEnv = {
+  DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT,
+  DOCKER_CONFIG: process.env.DOCKER_CONFIG,
+  DOCKER_DEFAULT_PLATFORM: process.env.DOCKER_DEFAULT_PLATFORM,
+};
 
 interface HostedMailboxAppendForTestPrismaClient {
   $disconnect(): Promise<void>;
@@ -368,7 +373,18 @@ function applyHostedMailboxAppendForTestEnvironment(
       process.env[key] = value;
     }
   }
+  restoreHostedTestingHostOnlyEnv();
   return runtimeEnv;
+}
+
+function restoreHostedTestingHostOnlyEnv(): void {
+  for (const [key, value] of Object.entries(hostedTestingHostOnlyEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
 }
 
 async function loadHostedMailboxAppendForTestModules(

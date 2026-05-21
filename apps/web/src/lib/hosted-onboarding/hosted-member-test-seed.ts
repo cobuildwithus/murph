@@ -20,6 +20,11 @@ const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../hosted-crypto/domain-root-store.ts",
   import.meta.url,
 ).href;
+const hostedMemberSeedHostOnlyEnv = {
+  DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT,
+  DOCKER_CONFIG: process.env.DOCKER_CONFIG,
+  DOCKER_DEFAULT_PLATFORM: process.env.DOCKER_DEFAULT_PLATFORM,
+};
 
 type HostedMemberTestSeedBillingPlanCode =
   | "launch_monthly"
@@ -43,6 +48,7 @@ interface HostedMemberSeedPrismaClient {
 
 interface HostedMemberSeedPrismaModule {
   getPrisma(): HostedMemberSeedPrismaClient;
+  resetPrismaClientForTest(): Promise<void>;
 }
 
 interface HostedMemberStoreModule {
@@ -265,8 +271,19 @@ function applyHostedMemberSeedEnvironment(
 ): NodeJS.ProcessEnv {
   const runtimeEnv = createHostedWebSmokeEnvironment(source);
   Object.assign(process.env, runtimeEnv);
+  restoreHostedMemberSeedHostOnlyEnv();
   clearHostedMemberSeedGlobals();
   return runtimeEnv;
+}
+
+function restoreHostedMemberSeedHostOnlyEnv(): void {
+  for (const [key, value] of Object.entries(hostedMemberSeedHostOnlyEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
 }
 
 async function loadHostedMemberSeedModules(
@@ -295,6 +312,7 @@ async function loadHostedMemberSeedModules(
   }
 
   const typedPrismaModule = prismaModule as HostedMemberSeedPrismaModule;
+  await typedPrismaModule.resetPrismaClientForTest();
   const typedContactPrivacyModule = contactPrivacyModule as ContactPrivacyModule;
   const typedHostedCryptoDomainRootStoreModule =
     hostedCryptoDomainRootStoreModule as HostedCryptoDomainRootStoreModule;
