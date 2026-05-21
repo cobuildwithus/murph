@@ -112,10 +112,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
   await clearHostedWorkspaceLiveRuntimeStateBestEffort(restored.vaultRoot);
 
-  const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-    vaultRoot: restored.vaultRoot,
-  });
-
   // Current v2 restore path: restore the single direct-R2 encrypted snapshot
   // without legacy bundle, hot-layer, delta, or sidecar artifact handling.
   if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
@@ -162,17 +158,23 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   }
 
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
+    await clearHostedWorkspaceRuntimeLocalRoots(restored);
+    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+      vaultRoot: restored.vaultRoot,
+    });
+
     return {
       ...restored,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths,
+        materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
         restored,
         readBundles: materializerBundles,
       }),
-      materializedArtifactPaths,
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "null-bootstrap",
-      restoreWasCold: false,
+      restoreWasCold: true,
     };
   }
 

@@ -41,6 +41,53 @@ import type {
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace restore Codex continuity", () => {
+  test("cold-clears local roots for null-bootstrap restores", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-null-bootstrap-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "durable", "vault");
+      const assistantStateRoot = resolveAssistantStatePaths(restoredVaultRoot).assistantStateRoot;
+      const operatorHomeRoot = path.join(workspaceRoot, "durable", "home");
+      await mkdir(path.join(restoredVaultRoot, ".runtime", "operations", "assistant"), {
+        recursive: true,
+      });
+      await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), {
+        recursive: true,
+      });
+      await writeFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "seq=467\n", "utf8");
+      await writeFile(path.join(assistantStateRoot, "dirty-assistant-state.json"), "{}\n", "utf8");
+      await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "dirty-rollout.jsonl"), "{}\n", "utf8");
+
+      const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: null,
+        }),
+      });
+
+      assert.equal(restored.mode, "null-bootstrap");
+      assert.equal(restored.restoreWasCold, true);
+      assert.equal(restored.materializedArtifactPaths.size, 0);
+      await assert.rejects(readFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "utf8"), {
+        code: "ENOENT",
+      });
+      await assert.rejects(readFile(path.join(assistantStateRoot, "dirty-assistant-state.json"), "utf8"), {
+        code: "ENOENT",
+      });
+      await assert.rejects(readFile(path.join(operatorHomeRoot, ".codex-hosted", "dirty-rollout.jsonl"), "utf8"), {
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("restores v2 workspace snapshots through the snapshot port without artifact sidecars", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-restore-"));
 
