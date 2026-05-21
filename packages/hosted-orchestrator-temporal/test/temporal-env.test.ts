@@ -28,6 +28,27 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     });
   });
 
+  it("prefers hosted-prefixed Temporal env names over unprefixed compatibility names", () => {
+    expect(readHostedRuntimeTemporalEnvironment({
+      HOSTED_TEMPORAL_ADDRESS: "hosted-temporal.example.test:7233",
+      HOSTED_TEMPORAL_API_KEY: "hosted_temporal_test_api_key",
+      HOSTED_TEMPORAL_NAMESPACE: "hosted-prefixed",
+      HOSTED_TEMPORAL_TASK_QUEUE: "hosted-prefixed-queue",
+      HOSTED_TEMPORAL_TLS_ENABLED: "true",
+      TEMPORAL_ADDRESS: "temporal.example.test:7233",
+      TEMPORAL_API_KEY: "temporal_test_api_key",
+      TEMPORAL_NAMESPACE: "plain",
+      TEMPORAL_TASK_QUEUE: "plain-queue",
+      TEMPORAL_TLS_ENABLED: "false",
+    })).toEqual({
+      address: "hosted-temporal.example.test:7233",
+      apiKey: "hosted_temporal_test_api_key",
+      namespace: "hosted-prefixed",
+      taskQueue: "hosted-prefixed-queue",
+      tls: true,
+    });
+  });
+
   it("enables TLS when a Temporal API key is configured", () => {
     expect(readHostedRuntimeTemporalEnvironment({
       TEMPORAL_API_KEY: "temporal_test_api_key",
@@ -59,6 +80,27 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     });
   });
 
+  it("reads hosted-prefixed mTLS material from base64 env values", () => {
+    const environment = readHostedRuntimeTemporalEnvironment({
+      HOSTED_TEMPORAL_CLIENT_CERT_BASE64:
+        Buffer.from("hosted-cert-pem").toString("base64"),
+      HOSTED_TEMPORAL_CLIENT_KEY_BASE64:
+        Buffer.from("hosted-key-pem").toString("base64"),
+      HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64:
+        Buffer.from("hosted-ca-pem").toString("base64"),
+      HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE: "hosted-temporal.example.test",
+    });
+
+    expect(environment.tls).toEqual({
+      clientCertPair: {
+        crt: Buffer.from("hosted-cert-pem"),
+        key: Buffer.from("hosted-key-pem"),
+      },
+      serverNameOverride: "hosted-temporal.example.test",
+      serverRootCACertificate: Buffer.from("hosted-ca-pem"),
+    });
+  });
+
   it("rejects incomplete mTLS certificate pairs", () => {
     expect(() => readHostedRuntimeTemporalEnvironment({
       TEMPORAL_CLIENT_CERT_PEM: "cert-pem",
@@ -80,6 +122,10 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     expect(() => readHostedRuntimeTemporalEnvironment({
       TEMPORAL_TLS_ENABLED: "sometimes",
     })).toThrow("TEMPORAL_TLS_ENABLED must be true or false.");
+
+    expect(() => readHostedRuntimeTemporalEnvironment({
+      HOSTED_TEMPORAL_TLS_ENABLED: "sometimes",
+    })).toThrow("HOSTED_TEMPORAL_TLS_ENABLED must be true or false.");
   });
 
   it("accepts yes/no TLS aliases for shell ergonomics", () => {

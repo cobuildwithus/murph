@@ -27,7 +27,7 @@ describe("resolveHostedLocalDevConfig", () => {
       skipVercelPull: false,
       temporal: {
         host: "127.0.0.1",
-        mode: "disabled",
+        mode: "managed",
         namespace: "default",
         port: 7233,
         taskQueue: "murph-hosted-runtime",
@@ -118,6 +118,28 @@ describe("resolveHostedLocalDevConfig", () => {
       `Deprecated hosted-local Codex bridge env is no longer supported: ${name}.`,
     );
   });
+
+  it("disables Temporal by default when web is intentionally skipped", () => {
+    expect(
+      resolveHostedLocalDevConfig({
+        MURPH_DEV_SKIP_WEB: "1",
+      }).temporal.mode,
+    ).toBe("disabled");
+
+    expect(
+      resolveHostedLocalDevConfig({
+        MURPH_HOSTED_LOCAL_PROFILE: "worker-only",
+      }).temporal.mode,
+    ).toBe("disabled");
+  });
+
+  it("uses an explicit external Temporal address instead of starting managed Temporal", () => {
+    expect(
+      resolveHostedLocalDevConfig({
+        HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
+      }).temporal.mode,
+    ).toBe("external");
+  });
 });
 
 describe("printHelp", () => {
@@ -151,7 +173,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
     expect(output).toContain("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...");
     expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
-    expect(output).toContain("MURPH_DEV_TEMPORAL=disabled");
+    expect(output).toContain("MURPH_DEV_TEMPORAL=managed");
     expect(output).toContain("MURPH_DEV_TEMPORAL_PORT=7233");
     expect(output).toContain("TEMPORAL_TASK_QUEUE=murph-hosted-runtime");
     expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
