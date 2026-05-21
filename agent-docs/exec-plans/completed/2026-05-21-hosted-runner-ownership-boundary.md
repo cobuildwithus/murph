@@ -1,6 +1,6 @@
 # Hosted runner ownership boundary simplification
 
-Status: active
+Status: completed
 Created: 2026-05-21
 Updated: 2026-05-21
 
@@ -74,9 +74,12 @@ Updated: 2026-05-21
 
 ## Verification
 
-- Planned:
-  - Focused Temporal workflow tests.
-  - Focused Cloudflare runner tests.
-  - Focused assistant-runtime restore tests.
-  - `pnpm test:diff` for touched paths if truthful, otherwise owner coverage
-    commands plus `pnpm typecheck`.
+- Passed:
+  - `pnpm exec vitest run apps/cloudflare/test/user-runner-alarm.test.ts --config apps/cloudflare/vitest.config.ts --no-coverage`
+  - `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run test/hosted-user-runtime-workflow.test.ts --config vitest.config.ts --no-coverage`
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-workspace-restore-codex-continuity.test.ts --config vitest.config.ts --no-coverage`
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-workspace-entrypoint.test.ts --config vitest.config.ts --no-coverage`
+  - `git diff --check -- packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
+  - `pnpm typecheck`
+  - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts packages/assistant-runtime/test/hosted-runtime-workspace-restore-codex-continuity.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts ARCHITECTURE.md agent-docs/references/hosted-temporal-orchestration.md agent-docs/references/hosted-runtime-protocol.md`
+Completed: 2026-05-21
