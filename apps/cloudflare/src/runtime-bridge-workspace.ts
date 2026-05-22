@@ -7,6 +7,7 @@ import {
   normalizeHostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeConfig,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
+  type HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
@@ -299,7 +300,8 @@ function requireHostedWorkspaceBridgeIdleCheckpointRequest(
 
 const HOSTED_WORKSPACE_V2_SNAPSHOT_MODE = "workspace_snapshot_v2";
 
-interface HostedWorkspaceSnapshotTimingDetails {
+interface HostedWorkspaceSnapshotTimingDetails
+  extends HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
   snapshotArchiveBuildElapsedMs?: number;
   snapshotDirectR2UploadElapsedMs?: number;
 }
@@ -466,7 +468,7 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_direct_r2_put",
       userId: input.userId,
     });
-    await runHostedWorkspaceSnapshotMeasuredStep({
+    const directUploadTimings = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotDirectR2UploadElapsedMs",
       run: async () =>
         await workspaceSnapshotPort.putSnapshotObjectDirect({
@@ -478,6 +480,10 @@ async function createHostedWorkspaceV2Snapshot(
         }),
       timings: snapshotTimings,
     });
+    recordHostedWorkspaceSnapshotDirectUploadTimings(
+      snapshotTimings,
+      directUploadTimings,
+    );
 
     snapshotRef = {
       archive: {
@@ -640,6 +646,40 @@ function recordHostedWorkspaceSnapshotStepTiming(
   stepStartedAt: number,
 ): void {
   const elapsedMs = Date.now() - stepStartedAt;
+  timings[key] = Number.isSafeInteger(elapsedMs) && elapsedMs >= 0
+    ? elapsedMs
+    : 0;
+}
+
+function recordHostedWorkspaceSnapshotDirectUploadTimings(
+  timings: HostedWorkspaceSnapshotTimingDetails,
+  directUploadTimings: HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails | void,
+): void {
+  if (!directUploadTimings) {
+    return;
+  }
+
+  recordHostedWorkspaceSnapshotOptionalTiming(
+    timings,
+    "snapshotDirectR2PresignElapsedMs",
+    directUploadTimings.snapshotDirectR2PresignElapsedMs,
+  );
+  recordHostedWorkspaceSnapshotOptionalTiming(
+    timings,
+    "snapshotDirectR2PutElapsedMs",
+    directUploadTimings.snapshotDirectR2PutElapsedMs,
+  );
+}
+
+function recordHostedWorkspaceSnapshotOptionalTiming(
+  timings: HostedWorkspaceSnapshotTimingDetails,
+  key: keyof HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
+  elapsedMs: number | undefined,
+): void {
+  if (elapsedMs === undefined) {
+    return;
+  }
+
   timings[key] = Number.isSafeInteger(elapsedMs) && elapsedMs >= 0
     ? elapsedMs
     : 0;

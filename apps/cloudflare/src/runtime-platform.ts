@@ -13,6 +13,7 @@ import {
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedRuntimeEffectsPort,
   type HostedRuntimePlatform,
+  type HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
   type HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -1509,10 +1510,12 @@ function createCloudflareWorkspaceSnapshotPort(input: {
       if (!Number.isSafeInteger(request.encryptedByteSize) || request.encryptedByteSize <= 0) {
         throw new TypeError("Hosted workspace snapshot encryptedByteSize must be a positive safe integer.");
       }
+      const timings: HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails = {};
       const source = await stat(request.sourceFilePath);
       if (source.size !== request.encryptedByteSize) {
         throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
       }
+      const presignStartedAt = Date.now();
       const presignedPut = await presignWorkspaceSnapshotPut({
         encryptedByteSize: request.encryptedByteSize,
         encryptedObjectSha256: request.encryptedObjectSha256,
@@ -1522,6 +1525,8 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         timeoutMs: input.timeoutMs,
         workspaceCheckpointBridge: input.workspaceCheckpointBridge,
       });
+      timings.snapshotDirectR2PresignElapsedMs =
+        readHostedRuntimeStepElapsedMs(presignStartedAt);
       const expiresAtMs = Date.parse(presignedPut.expiresAt);
       if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
         throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
@@ -1530,6 +1535,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
       const checksumSha256Base64 = encodeHostedWorkspaceSnapshotSha256Base64(
         request.encryptedObjectSha256,
       );
+      const putStartedAt = Date.now();
       const response = await fetchHostedResponse({
         description: "Hosted workspace snapshot direct R2 upload",
         fetchImpl: input.fetchImpl,
@@ -1552,7 +1558,10 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         timeoutMs: Math.max(1, expiresAtMs - Date.now()),
         url: new URL(presignedPut.putUrl),
       });
+      timings.snapshotDirectR2PutElapsedMs =
+        readHostedRuntimeStepElapsedMs(putStartedAt);
       assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
+      return timings;
     },
 
     async restoreWorkspaceSnapshot(request) {
@@ -3166,6 +3175,13 @@ function sleepHostedReplaySafeReadRetryDelay(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, HOSTED_REPLAY_SAFE_READ_RETRY_DELAY_MS);
   });
+}
+
+function readHostedRuntimeStepElapsedMs(startedAt: number): number {
+  const elapsedMs = Date.now() - startedAt;
+  return Number.isSafeInteger(elapsedMs) && elapsedMs >= 0
+    ? elapsedMs
+    : 0;
 }
 
 function assertHostedOk(response: Response, description: string): void {

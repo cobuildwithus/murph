@@ -330,7 +330,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+      const timings = await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
@@ -338,6 +338,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         sourceFilePath: encryptedFilePath,
       });
 
+      expect(timings).toEqual({
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
+      });
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const presignRequest = requireFetchRequest(fetchMock.mock.calls[0], "workspace snapshot PUT presign");
       expect(presignRequest.url).toBe(

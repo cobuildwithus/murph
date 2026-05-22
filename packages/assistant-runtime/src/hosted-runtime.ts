@@ -159,6 +159,7 @@ export type {
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
+  HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
   HostedRuntimeWorkspaceSnapshotDataKey,
   HostedRuntimeWorkspaceSnapshotPort,
 } from "./hosted-runtime/platform.ts";

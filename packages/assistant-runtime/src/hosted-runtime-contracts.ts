@@ -40,6 +40,7 @@ export type {
   HostedRuntimeUsageRecordPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
+  HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
   HostedRuntimeWorkspaceSnapshotDataKey,
   HostedRuntimeWorkspaceSnapshotSessionCompleteResult,
   HostedRuntimeWorkspaceSnapshotSessionStart,
