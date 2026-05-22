@@ -249,6 +249,50 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("logs internal outbound non-OK response metadata without consuming the response body", async () => {
+    const rawPath = "/workspace-snapshots/snapshot_sensitive/presign-get";
+    const response = await hostedRunnerIntercept(
+      new Request(`http://workspace-snapshots.worker${rawPath}`, {
+        headers: {
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({}),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          boundUserIdHeaderPresent: true,
+          containerIdPresent: true,
+          hostKind: "workspace_snapshot_store",
+          method: "GET",
+          operation: "workspace_snapshot_presign_get",
+          responseBodyKind: "json",
+          responseErrorShape: "string_error",
+          responseOk: false,
+          responseStatus: 405,
+          runtimeAuthorityHeadersPresent: false,
+        }),
+        level: "warn",
+        message: "Hosted runner internal outbound response completed.",
+        phase: "wake.running",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain(rawPath);
+    expect(serializedLogs).not.toContain("snapshot_sensitive");
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain("Method not allowed.");
+  });
+
   it("injects OpenAI authorization with a valid runtime write fence and strips authority headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);

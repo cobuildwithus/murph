@@ -3110,6 +3110,30 @@ describe("handleRunnerOutboundRequest", () => {
     expect(getUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(body.expiresAt).toEqual(expect.stringMatching(/^20/u));
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          method: "POST",
+          objectKeyMatchesExpected: true,
+          operation: "workspace_snapshot_presign_get",
+          presignSucceeded: true,
+          refParsed: true,
+          snapshotIdMatchesRoute: true,
+          userIdPresent: true,
+          workspaceVersionPresent: true,
+        }),
+        level: "info",
+        message: "Hosted workspace snapshot presign GET completed.",
+        phase: "wake.running",
+      }),
+    );
+    let serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain(snapshotId);
+    expect(serializedLogs).not.toContain(objectKey);
 
     const workerBodyResponse = await handleRunnerOutboundRequest(
       new Request(`http://workspace-snapshots.worker/workspace-snapshots/${snapshotId}`, {
@@ -3152,6 +3176,30 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(missingRefResponse.json()).resolves.toEqual({
       error: "Hosted workspace snapshot presign ref is invalid.",
     });
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          method: "POST",
+          operation: "workspace_snapshot_presign_get",
+          refParsed: false,
+          rejectionReason: "invalid_ref",
+          snapshotIdMatchesRoute: true,
+          userIdPresent: true,
+          workspaceVersionPresent: true,
+        }),
+        level: "warn",
+        message: "Hosted workspace snapshot presign GET rejected.",
+        phase: "wake.running",
+      }),
+    );
+    let serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain(snapshotId);
+    expect(serializedLogs).not.toContain(objectKey);
+    hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
 
     const mismatchedObjectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
