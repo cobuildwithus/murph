@@ -124,6 +124,13 @@ export function stableStringify(value: unknown): string {
 }
 
 function normalizeWearableRawIngestJsonPayload(value: unknown): WearableRawIngestJsonValue {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new TypeError("Wearable raw ingest payload must contain only valid Dates.");
+    }
+    return value.toISOString();
+  }
+
   if (
     value === null ||
     typeof value === "boolean" ||

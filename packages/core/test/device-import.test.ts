@@ -686,6 +686,64 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   assert.equal(manifest.artifacts[0]?.originalFileName, "whoop-01.json");
 });
 
+test("importDeviceBatch writes Date raw artifact values as ISO strings", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-date-raw");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-04-22T12:00:00.000Z",
+    rawArtifacts: [
+      {
+        role: "provider-snapshot",
+        fileName: "snapshot.json",
+        content: {
+          importedAt: new Date("2026-04-22T12:00:00.000Z"),
+          nested: {
+            windowStart: new Date("2026-04-22T00:00:00.000Z"),
+          },
+        },
+      },
+    ],
+  });
+
+  const rawText = await fs.readFile(
+    path.join(vaultRoot, result.rawArtifacts[0]?.relativePath ?? ""),
+    "utf8",
+  );
+
+  assert.equal(
+    rawText,
+    '{"importedAt":"2026-04-22T12:00:00.000Z","nested":{"windowStart":"2026-04-22T00:00:00.000Z"}}\n',
+  );
+});
+
+test("importDeviceBatch rejects invalid Date raw artifact values", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-invalid-date-raw");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    () =>
+      importDeviceBatch({
+        vaultRoot,
+        provider: "junction",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        rawArtifacts: [
+          {
+            role: "provider-snapshot",
+            fileName: "snapshot.json",
+            content: {
+              importedAt: new Date("not-a-date"),
+            },
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_RAW_CONTENT",
+  );
+});
+
 test("importDeviceBatch does not implicitly attach synthetic wearable receipts as raw evidence", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-receipt-fallback");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

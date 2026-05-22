@@ -360,6 +360,44 @@ describe("garmin provider coverage", () => {
     expect(Object.hasOwn(receipt, "payload")).toBe(false);
   });
 
+  it("normalizes Date raw ingest payload fields before hashing", () => {
+    const importedAt = new Date("2026-04-22T12:00:00.000Z");
+    const windowStart = new Date("2026-04-22T00:00:00.000Z");
+    const receipt = buildWearableRawIngestReceipt({
+      provider: "junction",
+      payloadForHash: {
+        importedAt,
+        nested: {
+          windowStart,
+        },
+        samples: [new Date("2026-04-22T00:05:00.000Z")],
+      },
+    });
+    const equivalentReceipt = buildWearableRawIngestReceipt({
+      provider: "junction",
+      payloadForHash: {
+        importedAt: "2026-04-22T12:00:00.000Z",
+        nested: {
+          windowStart: "2026-04-22T00:00:00.000Z",
+        },
+        samples: ["2026-04-22T00:05:00.000Z"],
+      },
+    });
+
+    expect(stableStringify({ importedAt })).toBe('{"importedAt":"2026-04-22T12:00:00.000Z"}');
+    expect(receipt.payloadHash).toBe(equivalentReceipt.payloadHash);
+    expect(receipt.id).toBe(equivalentReceipt.id);
+    expect(Object.hasOwn(receipt, "payload")).toBe(false);
+    expect(() =>
+      buildWearableRawIngestReceipt({
+        provider: "junction",
+        payloadForHash: {
+          importedAt: new Date("not-a-date"),
+        },
+      }),
+    ).toThrow(/valid Dates/u);
+  });
+
   it("hashes raw ingest prototype-named payload fields as data without storing the payload", () => {
     const payload = JSON.parse(
       '{"id":"activity-1","__proto__":"blocked","nested":{"__proto__":"inner"}}',
