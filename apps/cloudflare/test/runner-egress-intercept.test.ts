@@ -1588,6 +1588,101 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
+  it.each([
+    {
+      name: "phone number probe",
+      method: "GET",
+      path: "/phone_numbers",
+      responseBody: JSON.stringify({ phone_numbers: [] }),
+    },
+    {
+      name: "attachment metadata",
+      method: "GET",
+      path: "/attachments/attachment_metadata_1",
+      responseBody: "{}",
+    },
+    {
+      body: {
+        from: "+15550000000",
+        message: { parts: [{ type: "text", value: "hello" }] },
+        to: ["+15550000001"],
+      },
+      method: "POST",
+      name: "chat creation",
+      path: "/chats",
+    },
+    {
+      body: {
+        message: { parts: [{ type: "text", value: "hello" }] },
+      },
+      method: "POST",
+      name: "chat message send",
+      path: "/chats/chat_1/messages",
+    },
+    {
+      method: "POST",
+      name: "typing start",
+      path: "/chats/chat_1/typing",
+    },
+    {
+      method: "POST",
+      name: "read receipt",
+      path: "/chats/chat_1/read",
+    },
+    {
+      method: "DELETE",
+      name: "typing stop",
+      path: "/chats/chat_1/typing",
+    },
+    {
+      method: "DELETE",
+      name: "message cleanup",
+      path: "/messages/message_1",
+    },
+  ] as const)("allows required Linq runtime route: $name", async (route) => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(route.responseBody ?? "ok", {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const body = "body" in route ? JSON.stringify(route.body) : undefined;
+
+    const response = await hostedRunnerIntercept(
+      new Request(`https://api.linqapp.com/api/partner/v3${route.path}`, {
+        ...(body ? { body } : {}),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        method: route.method,
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.method).toBe(route.method);
+    expect(forwarded.url).toBe(`https://api.linqapp.com/api/partner/v3${route.path}`);
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
