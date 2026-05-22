@@ -85,6 +85,9 @@ Updated: 2026-05-22
 - Keep canonical dirty and due-reconcile facts in `apps/web` Postgres.
 - Keep per-user Temporal workflows focused on user runtime execution after
   mailbox/signal nudges.
+- Register the Temporal Schedule through an explicit idempotent ensure command
+  gated by `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED` instead of making
+  worker startup mutate Temporal Schedule state.
 
 ## Verification
 
@@ -94,3 +97,6 @@ Updated: 2026-05-22
     activity wiring.
   - `pnpm typecheck`
   - Required completion audits and diff/privacy checks.
+- Results so far:
+  - PASS: `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-device-sync-dirty-sweeper-route.test.ts apps/web/test/hosted-device-sync-recovery-sweep-route.test.ts apps/web/test/hosted-device-sync-dirty-sweeper.test.ts apps/web/test/hosted-device-sync-due-reconcile-sweeper.test.ts`
+  - PASS: `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-device-sync-recovery-sweep-activity.test.ts test/hosted-device-sync-reconciler.test.ts test/worker.test.ts test/workflow-contracts.test.ts`

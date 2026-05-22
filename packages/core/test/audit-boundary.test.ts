@@ -19,6 +19,7 @@ const CANONICAL_WRITE_ALLOWLIST = new Set([
   "mutations.ts",
   "operations/write-batch.ts",
   "vault.ts",
+  "wearable-receipts.ts",
 ]);
 
 async function listSourceFiles(directory: string): Promise<string[]> {

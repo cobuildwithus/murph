@@ -176,15 +176,22 @@ resource/window map, completes the trace in the same transaction, and appends an
 opaque `device-sync.wake` mailbox pointer only when the dirty row transitions
 from clean to dirty. The pointer signal may wake hosted Temporal by mailbox item
 id; it must not carry provider payloads or become the device-sync queue.
-The dirty sweeper is the bounded recovery backstop for dirty rows that remain
-pending after a missed, denied, or insufficient wake: each sweep attempt for a
-still-dirty revision appends a fresh opaque wake pointer so an already-imported
-pointer cannot make recovery one-shot. The runtime must support dirty-pending
-and dirty-ack callbacks; dirty ack means the dirty revision was handed off into
-the checkpointed local device-sync job store, not that upstream provider sync
-succeeded. Connection-established and disconnect lifecycle commands may still
-use coarse device-sync mailbox wakes because they are explicit lifecycle events,
-not high-cardinality freshness hints.
+The dirty/due recovery sweep is the bounded recovery backstop for dirty rows
+that remain pending after a missed, denied, or insufficient wake, and for active
+connections whose canonical `nextReconcileAt` is due. Temporal owns the cadence
+through a global scheduled reconciler workflow, but web owns the signed recovery
+command that selects stale dirty and due-reconcile facts, appends wake pointers,
+records due-reconcile signals, and keeps retries idempotent. Each dirty sweep
+attempt for a still-dirty revision appends a fresh opaque wake pointer so an
+already-imported pointer cannot make recovery one-shot. During migration, the
+existing Vercel dirty-sweeper cron may call the same web recovery sweep as a
+temporary safety net; it must not remain a second long-term scheduler. The
+runtime must support dirty-pending and dirty-ack callbacks; dirty ack means the
+dirty revision was handed off into the checkpointed local device-sync job store,
+not that upstream provider sync succeeded. Connection-established and
+disconnect lifecycle commands may still use coarse device-sync mailbox wakes
+because they are explicit lifecycle events, not high-cardinality freshness
+hints.
 
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the
