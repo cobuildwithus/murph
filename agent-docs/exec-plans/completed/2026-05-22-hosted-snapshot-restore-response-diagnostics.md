@@ -56,6 +56,20 @@ smallest durable fix once the failing branch is proven.
 - `bash scripts/workspace-verify.sh test:diff packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts packages/assistant-runtime/test/hosted-runtime-workspace-restore-codex-continuity.test.ts packages/hosted-execution/src/runtime-control.ts agent-docs/exec-plans/active/2026-05-22-hosted-snapshot-restore-response-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
   passed. Existing web lint warnings and a Next.js NFT trace warning remain
   outside this patch.
+- `pnpm cf:deploy:immediate` completed the production Cloudflare deploy and
+  smoke tests passed.
+- Post-deploy Cloudflare Observability returned no error-level events and no
+  hosted container failure events during the controlled repro window.
+- Post-deploy DBHub evidence for the first controlled iMessage repro showed a
+  new `conversation.message`, fixed-vocabulary
+  `workspace.codex_continuity_repaired` events, `outbox.delivery_finished`,
+  `assistant.pass_finished`, and checkpoint completion.
+- Post-deploy DBHub evidence for the second controlled iMessage repro showed a
+  new `conversation.message`, `outbox.delivery_finished`,
+  `assistant.pass_finished`, and checkpoint completion without another
+  continuity repair event.
+- Computer Use verified both controlled repros received visible iMessage replies
+  from Murph.
 
 ## State
 
@@ -82,13 +96,14 @@ smallest durable fix once the failing branch is proven.
   validation is corrupt, clear provider resume continuity and continue from the
   restored vault/mailbox state with a fresh provider session instead of failing
   the whole hosted run.
-- Local patch verification is complete. Next step is a scoped commit, immediate
-  Cloudflare deploy, and post-deploy production repro/observability check.
+- Production repair is deployed and verified. The first controlled repro repaired
+  stale Codex continuity state and replied; the second controlled repro replied
+  without needing another continuity repair. No post-deploy Cloudflare error or
+  container-failure events were observed in the repro window.
 
 ## Open Questions
 
-- Does production emit a successful reply after the continuity-repair deploy and
-  next message/retry?
-- Did the user's newest iMessage reach hosted ingress, or is there a separate
-  upstream/local Messages delivery gap to investigate after runtime restore is
-  observable?
+- None for this incident.
+Status: completed
+Updated: 2026-05-22
+Completed: 2026-05-22
