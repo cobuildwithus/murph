@@ -34,66 +34,68 @@ export type ChatMessage = {
 // The chat card fill, reused by the bubble tails to carve their curl.
 const CHAT_CARD_FILL = "#fffcf6";
 
+// Sent-bubble ("you") treatments. "blue" is the literal iMessage cue;
+// "slate" is a desaturated, palette-friendly take; "dark" is shape-only.
+export type SentBubble = "dark" | "blue" | "slate";
+const SENT_FILLS: Record<SentBubble, string> = {
+  dark: "#2d3436",
+  blue: "#0a84ff",
+  slate: "#5b7a99",
+};
+
 export function ChatMock({
   title,
-  channel,
   members,
   messages,
+  sentBubble = "dark",
 }: {
   title: string;
-  // Optional channel tag (e.g. "iMessage group") shown as a pill above
-  // the card, signalling which messaging surface the thread lives on.
-  channel?: string;
   members: number;
   messages: readonly ChatMessage[];
+  // Fill treatment for the sender's bubbles — see SentBubble.
+  sentBubble?: SentBubble;
 }) {
+  const sentFill = SENT_FILLS[sentBubble];
   return (
-    <div className="flex flex-col">
-      {channel ? (
-        <span className="mb-2 ml-1 inline-flex w-fit items-center gap-1.5 rounded-full border border-[#c4a882]/35 bg-[#fffcf6] px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
-          <span className="size-1.5 rounded-full bg-[#0a84ff]" />
-          {channel}
+    <div
+      className="rounded-[22px] border border-[#c4a882]/30 p-4"
+      style={{ backgroundColor: CHAT_CARD_FILL }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-2.5 border-b border-[#c4a882]/25 px-2 pb-3">
+        <span className="flex size-8 items-center justify-center rounded-full bg-[#7a8c6e]/20 font-mono text-[10px] font-semibold uppercase text-[#5a6e32]">
+          {title.slice(0, 2)}
         </span>
-      ) : null}
-      <div
-        className="rounded-[22px] border border-[#c4a882]/30 p-4"
-        style={{ backgroundColor: CHAT_CARD_FILL }}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2.5 border-b border-[#c4a882]/25 px-2 pb-3">
-          <span className="flex size-8 items-center justify-center rounded-full bg-[#7a8c6e]/20 font-mono text-[10px] font-semibold uppercase text-[#5a6e32]">
-            {title.slice(0, 2)}
-          </span>
-          <div>
-            <p className="text-[13px] font-semibold leading-tight text-[#2d3436]">
-              {title}
-            </p>
-            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-              {members} members
-            </p>
-          </div>
+        <div>
+          <p className="text-[13px] font-semibold leading-tight text-[#2d3436]">
+            {title}
+          </p>
+          <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
+            {members} members
+          </p>
         </div>
-        {/* Messages */}
-        <div className="flex flex-col px-2 pt-3">
-          {messages.map((message, index) => {
-            const previous = messages[index - 1];
-            const next = messages[index + 1];
-            const sameAsPrevious =
-              previous?.kind === message.kind &&
-              previous?.name === message.name;
-            const sameAsNext =
-              next?.kind === message.kind && next?.name === message.name;
-            return (
-              <ChatBubble
-                key={index}
-                message={message}
-                firstOfGroup={!sameAsPrevious}
-                lastOfGroup={!sameAsNext}
-                stacked={index > 0}
-              />
-            );
-          })}
-        </div>
+      </div>
+      {/* Messages */}
+      <div className="flex flex-col px-2 pt-3">
+        {messages.map((message, index) => {
+          const previous = messages[index - 1];
+          const next = messages[index + 1];
+          const sameAsPrevious =
+            previous?.kind === message.kind &&
+            previous?.name === message.name;
+          const sameAsNext =
+            next?.kind === message.kind && next?.name === message.name;
+          return (
+            <ChatBubble
+              key={index}
+              message={message}
+              sentFill={sentFill}
+              firstOfGroup={!sameAsPrevious}
+              lastOfGroup={!sameAsNext}
+              stacked={index > 0}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -101,11 +103,13 @@ export function ChatMock({
 
 function ChatBubble({
   message,
+  sentFill,
   firstOfGroup,
   lastOfGroup,
   stacked,
 }: {
   message: ChatMessage;
+  sentFill: string;
   firstOfGroup: boolean;
   lastOfGroup: boolean;
   stacked: boolean;
@@ -113,7 +117,7 @@ function ChatBubble({
   const mine = message.kind === "you";
   const fill =
     message.kind === "you"
-      ? "#2d3436"
+      ? sentFill
       : message.kind === "murph"
         ? "#e4e8df"
         : "#ece3d2";
@@ -132,6 +136,14 @@ function ChatBubble({
         <div
           className={`relative w-fit max-w-[80%] rounded-[18px] px-3.5 py-2 text-sm leading-[1.35] ${
             mine ? "mr-2.5 text-[#f5f0e8]" : "ml-2.5 text-[#2d3436]"
+          } ${
+            // Square the tail-side bottom corner so the tail blob merges
+            // cleanly instead of clashing with a rounded corner.
+            lastOfGroup
+              ? mine
+                ? "rounded-br-[7px]"
+                : "rounded-bl-[7px]"
+              : ""
           }`}
           style={{ backgroundColor: fill }}
         >
