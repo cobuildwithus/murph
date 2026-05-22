@@ -14,8 +14,16 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
-function createSliceCli() {
+function createSliceCli(input: { config?: boolean } = {}) {
   const cli = Cli.create('vault-cli', {
+    ...(input.config
+      ? {
+          config: {
+            flag: 'config',
+            files: [],
+          },
+        }
+      : {}),
     description: 'experiment/journal/vault phase2 slice test cli',
     version: '0.0.0-test',
   })
@@ -33,8 +41,9 @@ function createSliceCli() {
 
 async function runSliceCli<TData>(
   args: string[],
+  input: { config?: boolean } = {},
 ): Promise<CliEnvelope<TData>> {
-  const cli = createSliceCli()
+  const cli = createSliceCli(input)
   const output: string[] = []
 
   await cli.serve([...args, '--full-output', '--format', 'json'], {
@@ -172,13 +181,18 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   assert.equal('protocolKey' in experimentStartSchema.options.properties, false)
   assert.equal('fromProtocol' in experimentStartSchema.options.properties, true)
   assert.equal('custom' in experimentStartSchema.options.properties, true)
+  assert.equal('publicProtocol' in experimentStartSchema.options.properties, true)
   assert.match(
     experimentStartSchema.options.properties.fromProtocol.description ?? '',
-    /Choose this instead of --custom/u,
+    /default experiment-start path/u,
   )
   assert.match(
     experimentStartSchema.options.properties.custom.description ?? '',
-    /Choose this instead of --from-protocol/u,
+    /Requires --no-public-protocol/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.publicProtocol.description ?? '',
+    /Pass --no-public-protocol/u,
   )
   assert.match(
     experimentStartSchema.options.properties.testPlanId.description ?? '',
@@ -199,10 +213,28 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   assert.equal('confirmedPlan' in experimentStartSchema.output.properties, false)
 })
 
-test.sequential('experiment start requires an explicit protocol or custom source', async () => {
+test.sequential('experiment start requires an explicit protocol or custom fallback source', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-source-'))
+  const configPath = path.join(vaultRoot, 'config.json')
 
   try {
+    await writeFile(
+      configPath,
+      `${JSON.stringify({
+        commands: {
+          experiment: {
+            commands: {
+              start: {
+                options: {
+                  publicProtocol: false,
+                },
+              },
+            },
+          },
+        },
+      }, null, 2)}\n`,
+      'utf8',
+    )
     const missingSource = await runSliceCli([
       'experiment',
       'start',
@@ -228,11 +260,58 @@ test.sequential('experiment start requires an explicit protocol or custom source
       '--vault',
       vaultRoot,
     ])
+    const customWithoutFallback = await runSliceCli([
+      'experiment',
+      'start',
+      'sleep-reset',
+      '--custom',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-biomarker-key',
+      'biomarker:sleep-efficiency',
+      '--vault',
+      vaultRoot,
+    ])
+    const customWithConfiguredFallbackOnly = await runSliceCli(
+      [
+        'experiment',
+        'start',
+        'sleep-reset',
+        '--custom',
+        '--intervention-start',
+        '2026-05-01',
+        '--primary-biomarker-key',
+        'biomarker:sleep-efficiency',
+        '--config',
+        configPath,
+        '--vault',
+        vaultRoot,
+      ],
+      { config: true },
+    )
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const protocolBackedWithConfiguredFallback = await runSliceCli(
+      [
+        'experiment',
+        'start',
+        'sauna-two-week',
+        '--from-protocol',
+        'finnish-sauna',
+        '--intervention-start',
+        '2026-05-01',
+        '--config',
+        configPath,
+        '--vault',
+        vaultRoot,
+      ],
+      { config: true },
+    )
     const customWithProtocolOnlyOption = await runSliceCli([
       'experiment',
       'start',
       'sleep-reset',
       '--custom',
+      '--no-public-protocol',
       '--test-plan-id',
       'rhr-21d',
       '--intervention-start',
@@ -246,13 +325,24 @@ test.sequential('experiment start requires an explicit protocol or custom source
     assert.equal(missingSource.ok, false)
     assert.match(
       missingSource.error.message ?? '',
-      /must choose a source: use --from-protocol <key-or-route>.*or --custom/u,
+      /must choose a source: use --from-protocol <key-or-route>.*--custom --no-public-protocol/u,
     )
     assert.equal(conflictingSource.ok, false)
     assert.match(
       conflictingSource.error.message ?? '',
       /either --from-protocol or --custom, not both/u,
     )
+    assert.equal(customWithoutFallback.ok, false)
+    assert.match(
+      customWithoutFallback.error.message ?? '',
+      /custom experiment starts are disabled by default/u,
+    )
+    assert.equal(customWithConfiguredFallbackOnly.ok, false)
+    assert.match(
+      customWithConfiguredFallbackOnly.error.message ?? '',
+      /Config defaults do not count/u,
+    )
+    assert.equal(protocolBackedWithConfiguredFallback.ok, true)
     assert.equal(customWithProtocolOnlyOption.ok, false)
     assert.match(
       customWithProtocolOnlyOption.error.message ?? '',
@@ -496,6 +586,7 @@ test.sequential(
         'start',
         'sauna-daily',
         '--custom',
+        '--no-public-protocol',
         '--title',
         'Sauna Daily',
         '--hypothesis',
@@ -1288,6 +1379,7 @@ test.sequential(
         'start',
         'context-seam',
         '--custom',
+        '--no-public-protocol',
         '--title',
         'Context Seam',
         '--started-on',
@@ -1567,6 +1659,7 @@ test.sequential(
         'start',
         'focus-sprint',
         '--custom',
+        '--no-public-protocol',
         '--title',
         'Focus Sprint',
         '--started-on',
@@ -1748,6 +1841,7 @@ test.sequential(
         'start',
         'focus-sprint',
         '--custom',
+        '--no-public-protocol',
         '--title',
         'Focus Sprint',
         '--started-on',

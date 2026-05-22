@@ -111,6 +111,7 @@ test.sequential(
         'start',
         'typed-confounders',
         '--custom',
+        '--no-public-protocol',
         '--title',
         'Typed Confounders',
         '--started-on',

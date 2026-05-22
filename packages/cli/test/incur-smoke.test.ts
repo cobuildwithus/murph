@@ -561,7 +561,7 @@ test('experiment descriptor describes the explicit start source choice', () => {
 
   assert.notEqual(startCommand, undefined, 'expected experiment start descriptor')
   assert.match(startCommand?.description ?? '', /Health Commons protocol/u)
-  assert.match(startCommand?.description ?? '', /custom experiment/u)
+  assert.match(startCommand?.description ?? '', /no-public-protocol fallback/u)
   assert.doesNotMatch(startCommand?.description ?? '', /protocol key is supplied/u)
 })
 
