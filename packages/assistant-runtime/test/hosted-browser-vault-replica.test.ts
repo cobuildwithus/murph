@@ -27,6 +27,79 @@ beforeEach(() => {
 });
 
 describe("hosted browser-vault replica refresh preparation", () => {
+  it("builds metric rows from projection points while readVault stays sparse", async () => {
+    const {
+      listMetricPoints,
+      readVault,
+    } = await import("@murphai/query");
+    const {
+      createHostedBrowserVaultReplicaForSourceState,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+
+    try {
+      await writeVaultFile(
+        vaultRoot,
+        "ledger/events/2026/2026-05.jsonl",
+        [
+          JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_projection_test",
+            kind: "test",
+            occurredAt: "2026-05-02T08:00:00.000Z",
+            recordedAt: "2026-05-02T18:00:00.000Z",
+            dayKey: "2026-05-02",
+            source: "manual",
+            title: "Blood panel",
+            results: [
+              {
+                analyte: "Apolipoprotein B",
+                biomarkerSlug: "apob",
+                unit: "mg/dL",
+                value: 87,
+              },
+            ],
+          }),
+          "",
+        ].join("\n"),
+      );
+      await writeVaultFile(
+        vaultRoot,
+        "ledger/samples/glucose/2026/2026-05.jsonl",
+        [
+          JSON.stringify({
+            schemaVersion: "murph.sample.v1",
+            id: "smp_dense_glucose",
+            recordedAt: "2026-05-02T09:00:00.000Z",
+            source: "device",
+            stream: "glucose",
+            unit: "mg/dL",
+            value: 101,
+          }),
+          "",
+        ].join("\n"),
+      );
+
+      const vault = await readVault(vaultRoot);
+      const points = await listMetricPoints(vaultRoot, { limit: null });
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2026-05-10T00:00:00.000Z",
+        sourceStateHash: "browser-vault-source-state-test",
+        vaultRoot,
+      });
+
+      expect(vault.entities.some((entity) => entity.entityId === "smp_dense_glucose")).toBe(false);
+      expect(vault.samples.some((sample) => sample.entityId === "smp_dense_glucose")).toBe(false);
+      expect(points.some((point) => point.metricKey === "apob" && point.value === 87)).toBe(true);
+      expect(points.some((point) => point.source.recordId === "smp_dense_glucose")).toBe(false);
+      expect(replica.entities.some((entity) => entity.id === "smp_dense_glucose")).toBe(false);
+      expect(replica.metricRows.some((row) => row.metricKey === "apob" && row.value === 87)).toBe(true);
+      expect(replica.metricRows.some((row) => row.metricKey === "glucose" && row.value === 101)).toBe(false);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("summarizes restored canonical source separately from default metric selection rows", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
     const { hashCanonicalQuerySources, listCanonicalSourceManifest } = await import("@murphai/query");
