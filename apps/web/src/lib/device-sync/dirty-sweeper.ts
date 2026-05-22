@@ -15,6 +15,8 @@ export interface HostedDeviceSyncDirtySweeperResult {
   staleAfterMs: number;
   wakeAppended: number;
   wakeAttempted: number;
+  wakeDuplicate: number;
+  wakeFailed: number;
   wakeLimit: number;
   wakeNotAppended: number;
 }
@@ -53,6 +55,8 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
 
   let wakeAppended = 0;
   let wakeAttempted = 0;
+  let wakeDuplicate = 0;
+  let wakeFailed = 0;
   let wakeNotAppended = 0;
 
   await runWithConcurrency(
@@ -85,6 +89,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
           userId: dirtyConnection.userId,
         });
       } catch (error) {
+        wakeFailed += 1;
         wakeNotAppended += 1;
         logger.warn("Hosted device-sync dirty sweeper device-sync wake append failed.", {
           connectionFingerprint,
@@ -94,7 +99,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
         return;
       }
 
-      if (wake.wakeAppended) {
+      if (wake.wakeInserted) {
         wakeAppended += 1;
         logger.info("Hosted device-sync dirty sweeper device-sync wake appended.", {
           connectionFingerprint,
@@ -103,6 +108,16 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
         return;
       }
 
+      if (wake.wakeDuplicate) {
+        wakeDuplicate += 1;
+        logger.info("Hosted device-sync dirty sweeper device-sync wake already existed.", {
+          connectionFingerprint,
+          userFingerprint,
+        });
+        return;
+      }
+
+      wakeFailed += 1;
       wakeNotAppended += 1;
       logger.warn("Hosted device-sync dirty sweeper device-sync wake was not appended.", {
         connectionFingerprint,
@@ -126,6 +141,8 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
     staleAfterMs,
     wakeAppended,
     wakeAttempted,
+    wakeDuplicate,
+    wakeFailed,
     wakeLimit,
     wakeNotAppended,
   };

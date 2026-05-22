@@ -188,7 +188,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   });
 
   if (disconnectResult.mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflowBestEffort(disconnectResult.mailboxItemId);
+    await startHostedDeviceSyncWakeWorkflow(disconnectResult.mailboxItemId);
   }
 
   return {
@@ -433,18 +433,11 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   });
   const appendResult = await persistHostedDeviceSyncWake({
     recoverySignalIntent: "device-sync-reconcile-recovery",
-    startWorkflowOnDuplicate: false,
+    signalFailureMode: "throw",
     wake,
     store,
     persist: async () => {},
-    persistAfterAppend: async (
-      tx: HostedPrismaTransactionClient,
-      mailboxAppend: AppendHostedMailboxItemResult,
-    ) => {
-      if (!mailboxAppend.inserted) {
-        return;
-      }
-
+    complete: async () => {
       await store.createSignal({
         userId: input.userId,
         connectionId: input.connectionId,
@@ -458,18 +451,27 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
         nextReconcileAt: hint.nextReconcileAt ?? null,
         revokeWarning: null,
         createdAt: input.createdAt,
-        tx,
       });
     },
   });
+  const wakeAccepted = appendResult.inserted
+    || (appendResult.duplicate && !appendResult.dedupeConflict);
 
   return {
     ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
-    wakeAccepted: appendResult.inserted || appendResult.duplicate,
+    wakeAccepted,
     wakeAppended: appendResult.inserted,
-    wakeDuplicate: appendResult.duplicate,
+    wakeDuplicate: appendResult.duplicate && !appendResult.dedupeConflict,
     wakeInserted: appendResult.inserted,
   };
+}
+
+export interface HostedDeviceSyncDirtyWakeResult {
+  reason?: string;
+  wakeAccepted: boolean;
+  wakeAppended: boolean;
+  wakeDuplicate: boolean;
+  wakeInserted: boolean;
 }
 
 export async function appendHostedDeviceSyncDirtyWake(input: {
@@ -482,7 +484,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
   store?: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
   userId: string;
-}): Promise<{ wakeAppended: boolean; reason?: string }> {
+}): Promise<HostedDeviceSyncDirtyWakeResult> {
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
@@ -505,21 +507,29 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
     userId: input.userId,
   });
 
-  await persistHostedDeviceSyncWake({
+  const appendResult = await persistHostedDeviceSyncWake({
     recoverySignalIntent: "device-sync-dirty-recovery",
+    signalFailureMode: "throw",
     wake,
     store,
     persist: async () => {},
   });
+  const wakeAccepted = appendResult.inserted
+    || (appendResult.duplicate && !appendResult.dedupeConflict);
 
   return {
-    wakeAppended: true,
+    ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
+    wakeAccepted,
+    wakeAppended: appendResult.inserted,
+    wakeDuplicate: appendResult.duplicate && !appendResult.dedupeConflict,
+    wakeInserted: appendResult.inserted,
   };
 }
 
 async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
   recoverySignalIntent?: HostedDeviceSyncRecoverySignalIntent | null;
+  signalFailureMode?: "best_effort" | "throw";
   startWorkflowOnDuplicate?: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
@@ -559,23 +569,33 @@ async function persistHostedDeviceSyncWake(input: {
     });
   }
 
+  const wakeAccepted = mailboxAppendResult.inserted
+    || (mailboxAppendResult.duplicate && !mailboxAppendResult.dedupeConflict);
   if (
     mailboxAppendResult.inserted ||
-    (mailboxAppendResult.duplicate && input.startWorkflowOnDuplicate !== false)
+    (
+      mailboxAppendResult.duplicate
+      && !mailboxAppendResult.dedupeConflict
+      && input.startWorkflowOnDuplicate !== false
+    )
   ) {
-    await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId, {
+    await startHostedDeviceSyncWakeWorkflow(mailboxItemId, {
+      failureMode: input.signalFailureMode ?? "best_effort",
       recoverySignalIntent: input.recoverySignalIntent ?? null,
     });
   }
 
-  await input.complete?.();
+  if (wakeAccepted) {
+    await input.complete?.();
+  }
 
   return mailboxAppendResult;
 }
 
-async function startHostedDeviceSyncWakeWorkflowBestEffort(
+async function startHostedDeviceSyncWakeWorkflow(
   mailboxItemId: string,
   options: {
+    failureMode?: "best_effort" | "throw";
     recoverySignalIntent?: HostedDeviceSyncRecoverySignalIntent | null;
   } = {},
 ): Promise<void> {
@@ -591,6 +611,9 @@ async function startHostedDeviceSyncWakeWorkflowBestEffort(
       ),
       mailboxItemIdPresent: mailboxItemId.length > 0,
     });
+    if (options.failureMode === "throw") {
+      throw error;
+    }
   }
 }
 
@@ -673,7 +696,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   });
 
   if (mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId);
+    await startHostedDeviceSyncWakeWorkflow(mailboxItemId);
   }
 }
 

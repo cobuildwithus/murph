@@ -11,11 +11,6 @@ import {
 
 const config = readHostedDeviceSyncReconcilerScheduleConfig();
 
-if (!config.enabled) {
-  console.log("Hosted device-sync reconciler Temporal Schedule is disabled.");
-  process.exit(0);
-}
-
 const environment = readHostedRuntimeTemporalEnvironment();
 const client = await createHostedRuntimeTemporalClient({
   address: environment.address,

@@ -162,6 +162,76 @@ test("compactLegacyWearableReceiptEnvelopes resumes bounded batches without a du
   );
 });
 
+test("compactLegacyWearableReceiptEnvelopes honors deadline and candidate byte bounds", async () => {
+  const deadlineVault = await createLegacyWearableFixture({
+    envelopeCount: 2,
+  });
+  const beforeDeadline = await snapshotVaultFiles(deadlineVault);
+  const deadlineResult = await compactLegacyWearableReceiptEnvelopes({
+    deadlineMs: 0,
+    now: COMPACTION_NOW,
+    vaultRoot: deadlineVault,
+  });
+
+  assert.equal(deadlineResult.mutated, false);
+  assert.equal(deadlineResult.compactedCount, 0);
+  assert.equal(deadlineResult.hasMore, true);
+  assert.deepEqual(await snapshotVaultFiles(deadlineVault), beforeDeadline);
+
+  const byteBoundVault = await createLegacyWearableFixture();
+  const byteBoundBefore = await snapshotVaultFiles(byteBoundVault);
+  const byteBoundResult = await compactLegacyWearableReceiptEnvelopes({
+    maxCandidateBytes: 1,
+    now: COMPACTION_NOW,
+    vaultRoot: byteBoundVault,
+  });
+
+  assert.equal(byteBoundResult.mutated, false);
+  assert.equal(byteBoundResult.compactedCount, 0);
+  assert.equal(byteBoundResult.skippedCount, 1);
+  assert.equal(byteBoundResult.hasMore, false);
+  assert.deepEqual(await snapshotVaultFiles(byteBoundVault), byteBoundBefore);
+});
+
+test("compactLegacyWearableReceiptEnvelopes bounds evidence proof reads", async () => {
+  const artifactBoundVault = await createLegacyWearableFixture();
+  const artifactBoundBefore = await snapshotVaultFiles(artifactBoundVault);
+  const providerArtifact = (await readManifest(artifactBoundVault, "manifest.json"))
+    .artifacts.find((artifact) => artifact.role === "provider-snapshot");
+  assert.ok(providerArtifact);
+  assert.ok(providerArtifact.byteSize > 1);
+
+  const artifactBoundResult = await compactLegacyWearableReceiptEnvelopes({
+    maxCandidateBytes: 1024 * 1024,
+    maxEvidenceArtifactBytes: providerArtifact.byteSize - 1,
+    now: COMPACTION_NOW,
+    vaultRoot: artifactBoundVault,
+  });
+
+  assert.equal(artifactBoundResult.mutated, false);
+  assert.equal(artifactBoundResult.compactedCount, 0);
+  assert.equal(artifactBoundResult.skippedCount, 1);
+  assert.deepEqual(await snapshotVaultFiles(artifactBoundVault), artifactBoundBefore);
+
+  const roleBoundVault = await createLegacyWearableFixture({
+    rawArtifactRoles: Array.from(
+      { length: 65 },
+      (_, index) => (index === 0 ? "provider-snapshot" : `missing-proof-${index}`),
+    ),
+  });
+  const roleBoundBefore = await snapshotVaultFiles(roleBoundVault);
+  const roleBoundResult = await compactLegacyWearableReceiptEnvelopes({
+    maxEvidenceRoles: 64,
+    now: COMPACTION_NOW,
+    vaultRoot: roleBoundVault,
+  });
+
+  assert.equal(roleBoundResult.mutated, false);
+  assert.equal(roleBoundResult.compactedCount, 0);
+  assert.equal(roleBoundResult.skippedCount, 1);
+  assert.deepEqual(await snapshotVaultFiles(roleBoundVault), roleBoundBefore);
+});
+
 test("compactLegacyWearableReceiptEnvelopes skips unsafe legacy envelope candidates", async () => {
   const mismatchVault = await createLegacyWearableFixture({
     envelopePayload: {

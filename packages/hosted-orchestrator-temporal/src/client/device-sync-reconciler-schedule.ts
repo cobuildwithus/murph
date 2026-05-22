@@ -76,7 +76,7 @@ export function readHostedDeviceSyncReconcilerScheduleConfig(
     ),
     enabled: readBoolean(
       source.HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED,
-      false,
+      true,
       "HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED",
     ),
     intervalMs: readBoundedPositiveInteger(

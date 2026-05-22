@@ -183,6 +183,7 @@ describe("hosted runtime Temporal signaling", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u),
         kind: "runtime.device-sync-recovery-requested",
         userId: "member_123",
       }),
@@ -209,6 +210,34 @@ describe("hosted runtime Temporal signaling", () => {
       memberId: "member_123",
       prisma: mocks.prisma,
     });
+  });
+
+  it("dedupes durable device-sync recovery demands by source mailbox item and intent", async () => {
+    const client = buildClient();
+
+    await signalHostedDeviceSyncMailboxRuntime({
+      client,
+      mailboxItemId: "mailbox_123",
+      recoveryIntent: "device-sync-dirty-recovery",
+    });
+    await signalHostedDeviceSyncMailboxRuntime({
+      client,
+      mailboxItemId: "mailbox_123",
+      recoveryIntent: "device-sync-dirty-recovery",
+    });
+    await signalHostedDeviceSyncMailboxRuntime({
+      client,
+      mailboxItemId: "mailbox_123",
+      recoveryIntent: "device-sync-reconcile-recovery",
+    });
+
+    const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      ([input]) => input.envelope.eventId,
+    );
+    expect(eventIds[0]).toBe(eventIds[1]);
+    expect(eventIds[0]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
+    expect(eventIds[2]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
+    expect(eventIds[2]).not.toBe(eventIds[0]);
   });
 
   it("persists browser-vault refresh as durable control demand before signaling", async () => {

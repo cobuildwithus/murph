@@ -20,6 +20,8 @@ export interface HostedDeviceSyncDirtySweeperResult {
   staleAfterMs: number;
   wakeAppended: number;
   wakeAttempted: number;
+  wakeDuplicate: number;
+  wakeFailed: number;
   wakeLimit: number;
   wakeNotAppended: number;
 }
@@ -82,6 +84,8 @@ function parseDirtySweeperResult(value: unknown): HostedDeviceSyncDirtySweeperRe
     staleAfterMs: requireCount(record.staleAfterMs, "staleAfterMs"),
     wakeAppended: requireCount(record.wakeAppended, "wakeAppended"),
     wakeAttempted: requireCount(record.wakeAttempted, "wakeAttempted"),
+    wakeDuplicate: requireCount(record.wakeDuplicate, "wakeDuplicate"),
+    wakeFailed: requireCount(record.wakeFailed, "wakeFailed"),
     wakeLimit: requireCount(record.wakeLimit, "wakeLimit"),
     wakeNotAppended: requireCount(record.wakeNotAppended, "wakeNotAppended"),
   };

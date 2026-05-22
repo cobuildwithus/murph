@@ -14,6 +14,7 @@ import type {
 export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON =
   "legacy-wearable-receipt-compaction-v1";
 export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_GRACE_MS = 5_000;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS = 10_000;
 
 export interface HostedWorkspaceHousekeepingPhaseInput {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
@@ -76,6 +77,7 @@ export async function runHostedWorkspaceHousekeepingPhase(
   }
 
   const compaction = await compactLegacyWearableReceiptEnvelopes({
+    deadlineMs: HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
     now: new Date(nowMs),
     vaultRoot: input.vaultRoot,
   });

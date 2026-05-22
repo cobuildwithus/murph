@@ -128,6 +128,8 @@ function buildRecoverySweepResponse() {
       staleAfterMs: 30000,
       wakeAppended: 1,
       wakeAttempted: 1,
+      wakeDuplicate: 0,
+      wakeFailed: 0,
       wakeLimit: 25,
       wakeNotAppended: 0,
     },

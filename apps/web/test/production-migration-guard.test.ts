@@ -232,6 +232,25 @@ describe("hosted web production migration guard", () => {
     ]);
   });
 
+  test("does not register device-sync recovery as a Vercel cron", async () => {
+    const vercelJson = JSON.parse(
+      await readFile(path.join(appRoot, "vercel.json"), "utf8"),
+    ) as {
+      crons?: Array<{
+        path?: string;
+        schedule?: string;
+      }>;
+    };
+
+    const cronPaths = (vercelJson.crons ?? []).map((cron) => cron.path).sort();
+
+    assert.deepEqual(cronPaths, [
+      "/api/internal/hosted-execution/retention/cron",
+      "/api/internal/hosted-onboarding/stripe/cron",
+    ]);
+    assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
+  });
+
   test("generates Prisma before direct local Next dev starts", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),

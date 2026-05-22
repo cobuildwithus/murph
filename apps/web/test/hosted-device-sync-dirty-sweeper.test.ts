@@ -15,9 +15,7 @@ import {
 describe("hosted device-sync dirty sweeper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValue({
-      wakeAppended: true,
-    });
+    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValue(buildDirtyWakeResult());
   });
 
   it("appends device-sync wakes for stale pending dirty device-sync rows", async () => {
@@ -65,6 +63,8 @@ describe("hosted device-sync dirty sweeper", () => {
       staleAfterMs: 30000,
       wakeAppended: 1,
       wakeAttempted: 1,
+      wakeDuplicate: 0,
+      wakeFailed: 0,
       wakeLimit: 5,
       wakeNotAppended: 0,
     });
@@ -175,7 +175,10 @@ describe("hosted device-sync dirty sweeper", () => {
     ]);
     mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValueOnce({
       reason: "append_failed",
+      wakeAccepted: false,
       wakeAppended: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
     });
 
     const result = await runHostedDeviceSyncDirtySweeper({
@@ -185,6 +188,7 @@ describe("hosted device-sync dirty sweeper", () => {
     });
 
     expect(result.wakeNotAppended).toBe(1);
+    expect(result.wakeFailed).toBe(1);
     expect(result.skippedDirtyConnections).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync dirty sweeper device-sync wake was not appended.",
@@ -233,9 +237,7 @@ describe("hosted device-sync dirty sweeper", () => {
     ]);
     mocks.appendHostedDeviceSyncDirtyWake
       .mockRejectedValueOnce(new Error("append failed"))
-      .mockResolvedValueOnce({
-        wakeAppended: true,
-      });
+      .mockResolvedValueOnce(buildDirtyWakeResult());
 
     const result = await runHostedDeviceSyncDirtySweeper({
       logger,
@@ -247,6 +249,7 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(result).toMatchObject({
       wakeAppended: 1,
       wakeAttempted: 2,
+      wakeFailed: 1,
       wakeNotAppended: 1,
     });
     expect(logger.warn).toHaveBeenCalledWith(
@@ -258,7 +261,59 @@ describe("hosted device-sync dirty sweeper", () => {
       }),
     );
   });
+
+  it("counts duplicate dirty wakes as accepted recovery work", async () => {
+    const store = buildStore([
+      {
+        connectionId: "dsc_dirty_1",
+        dirtyRevision: 1n,
+        latestEventType: "sleep.updated",
+        latestDirtyAt: "2026-05-05T00:00:00.000Z",
+        latestResourceCategory: "sleep",
+        latestTraceId: null,
+        provider: "oura",
+        userId: "member_dirty_1",
+      },
+    ]);
+    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValueOnce(
+      buildDirtyWakeResult({
+        wakeAppended: false,
+        wakeDuplicate: true,
+        wakeInserted: false,
+      }),
+    );
+
+    const result = await runHostedDeviceSyncDirtySweeper({
+      logger: buildLogger(),
+      nudgeLimit: 1,
+      store,
+    });
+
+    expect(result).toMatchObject({
+      wakeAppended: 0,
+      wakeAttempted: 1,
+      wakeDuplicate: 1,
+      wakeFailed: 0,
+      wakeNotAppended: 0,
+    });
+  });
 });
+
+function buildDirtyWakeResult(overrides: Partial<{
+  reason: string;
+  wakeAccepted: boolean;
+  wakeAppended: boolean;
+  wakeDuplicate: boolean;
+  wakeInserted: boolean;
+}> = {}) {
+  return {
+    wakeAccepted: true,
+    wakeAppended: true,
+    wakeDuplicate: false,
+    wakeInserted: true,
+    ...overrides,
+  };
+}
 
 function buildStore(rows: Array<{
   connectionId: string;

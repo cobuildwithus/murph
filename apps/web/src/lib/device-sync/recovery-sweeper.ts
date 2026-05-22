@@ -35,7 +35,10 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
 
   const dirtyWakeAppendFailed =
     dirtySweep.status === "fulfilled"
-    && dirtySweep.value.wakeNotAppended > 0;
+    && (
+      dirtySweep.value.wakeFailed > 0
+      || dirtySweep.value.wakeNotAppended > 0
+    );
   const dueReconcileWakeAppendFailed =
     dueReconcileSweep.status === "fulfilled"
     && (
@@ -53,10 +56,16 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
       dirtySweeperErrorName: describeErrorName(dirtySweep),
       dirtySweeperFailed: dirtySweep.status === "rejected",
       dirtyWakeAppendFailed,
+      dirtyWakeFailed: dirtySweep.status === "fulfilled"
+        ? dirtySweep.value.wakeFailed
+        : null,
       dirtyWakeNotAppended: dirtySweep.status === "fulfilled"
         ? dirtySweep.value.wakeNotAppended
         : null,
       dueReconcileWakeAppendFailed,
+      dueReconcileWakeFailed: dueReconcileSweep.status === "fulfilled"
+        ? dueReconcileSweep.value.wakeFailed
+        : null,
       dueReconcileWakeNotAppended: dueReconcileSweep.status === "fulfilled"
         ? dueReconcileSweep.value.wakeNotAppended
         : null,

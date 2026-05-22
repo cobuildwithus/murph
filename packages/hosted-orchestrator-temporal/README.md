@@ -121,23 +121,21 @@ empty JSON request to the hosted web command at
 `/api/internal/device-sync/recovery-sweep`; web reads Postgres dirty/due facts,
 appends idempotent mailbox wake pointers, and returns count-only summaries.
 
-The existing Vercel dirty-sweeper cron remains a temporary migration safety net
-until the Temporal Schedule has parity metrics. Do not move dirty resources,
-provider tokens, external account state, or canonical dirty/reconcile facts into
-Temporal Workflow state.
+The Vercel dirty-sweeper cron is removed; Temporal is the only production owner
+of this recovery cadence. Do not move dirty resources, provider tokens, external
+account state, or canonical dirty/reconcile facts into Temporal Workflow state.
 
 Create or update the schedule after configuring Temporal and hosted-web signing
-env:
+env. The schedule is enabled by default:
 
 ```bash
-export HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED=true
 pnpm --dir packages/hosted-orchestrator-temporal temporal:ensure-device-sync-reconciler-schedule
 ```
 
 The ensure command is idempotent: it creates the Schedule when missing and
-updates the interval/action when it already exists. If
-`HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED` is not true, the command exits
-without changing Temporal state.
+updates the interval/action when it already exists. Set
+`HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED=false` only to create or update
+the Schedule in a paused state.
 
 ## Env Contract
 
@@ -202,8 +200,8 @@ Activity HTTP targets:
 
 Device-sync reconciler Schedule:
 
-- `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED`: must be `true` for the
-  ensure command to create or update the Temporal Schedule.
+- `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED`: optional, default `true`.
+  Set to `false` only when the Temporal Schedule should be paused.
 - `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID`: optional Schedule id, default
   `hosted-device-sync-reconciler`.
 - `HOSTED_DEVICE_SYNC_RECONCILER_INTERVAL_MS`: optional interval, default

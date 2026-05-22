@@ -37,7 +37,7 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
             Text Murph to try health protocols with friends or public
-            groups and learn what actually makes you healthier.
+            groups and see what actually makes you healthier.
           </p>
           <button
             type="button"
