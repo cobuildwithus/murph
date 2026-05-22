@@ -1,5 +1,9 @@
 import {
+  buildHostedExecutionSafeErrorDetails,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_LOG_PATH,
@@ -17,6 +21,7 @@ import {
   readHostedRunnerDiagnosticMethod,
   readHostedRunnerInternalHostKind,
   readHostedRunnerInternalOperation,
+  readHostedRunnerSafeResponseBodyMetadata,
 } from "./runner-outbound/diagnostics.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
@@ -252,38 +257,94 @@ export async function handleHostedRunnerInternalOutbound(
   env: RunnerOutboundEnvironmentSource,
   ctx: HostedRunnerOutboundContext,
 ): Promise<Response> {
+  const startedAt = Date.now();
   const url = new URL(request.url);
   if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
     return disallowedProviderEgress();
   }
 
   const userId = readHostedRunnerBoundUserId(request);
+  const diagnosticDetails = {
+    boundUserIdHeaderPresent: userId !== null,
+    containerIdPresent: typeof ctx.containerId === "string" && ctx.containerId.length > 0,
+    hostKind: readHostedRunnerInternalHostKind(url.hostname),
+    method: readHostedRunnerDiagnosticMethod(request.method),
+    operation: readHostedRunnerInternalOperation({
+      hostname: url.hostname,
+      method: request.method,
+      pathname: url.pathname,
+    }),
+    runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(request.headers),
+  } satisfies HostedExecutionStructuredLogDetails;
   emitHostedExecutionStructuredLog({
     component: "runner",
-    details: {
-      boundUserIdHeaderPresent: userId !== null,
-      containerIdPresent: typeof ctx.containerId === "string" && ctx.containerId.length > 0,
-      hostKind: readHostedRunnerInternalHostKind(url.hostname),
-      method: readHostedRunnerDiagnosticMethod(request.method),
-      operation: readHostedRunnerInternalOperation({
-        hostname: url.hostname,
-        method: request.method,
-        pathname: url.pathname,
-      }),
-      runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(request.headers),
-    },
+    details: diagnosticDetails,
     message: "Hosted runner internal outbound request received.",
     phase: "wake.running",
   });
   if (!userId) {
-    return new Response("Missing hosted runner identity.", { status: 403 });
+    const response = new Response("Missing hosted runner identity.", { status: 403 });
+    await emitHostedRunnerInternalOutboundResponseCompleted({
+      diagnosticDetails,
+      response,
+      startedAt,
+    });
+    return response;
   }
 
-  return await handleRunnerOutboundRequest(
-    createHostedRunnerInternalRequest(request),
-    env,
-    userId,
-  );
+  try {
+    const response = await handleRunnerOutboundRequest(
+      createHostedRunnerInternalRequest(request),
+      env,
+      userId,
+    );
+    await emitHostedRunnerInternalOutboundResponseCompleted({
+      diagnosticDetails,
+      response,
+      startedAt,
+    });
+    return response;
+  } catch (error) {
+    const safeErrorDetails = buildHostedExecutionSafeErrorDetails(error);
+    const errorName = readHostedExecutionSafeErrorName(error);
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...diagnosticDetails,
+        durationMs: Date.now() - startedAt,
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorDetailsPresent: safeErrorDetails !== null,
+        errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+        ...(errorName ? { errorName } : {}),
+      },
+      level: "warn",
+      message: "Hosted runner internal outbound response failed.",
+      phase: "wake.running",
+    });
+    throw error;
+  }
+}
+
+async function emitHostedRunnerInternalOutboundResponseCompleted(input: {
+  diagnosticDetails: HostedExecutionStructuredLogDetails;
+  response: Response;
+  startedAt: number;
+}): Promise<void> {
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      ...input.diagnosticDetails,
+      durationMs: Date.now() - input.startedAt,
+      responseOk: input.response.ok,
+      responseStatus: input.response.status,
+      ...(input.response.ok
+        ? {}
+        : await readHostedRunnerSafeResponseBodyMetadata(input.response.clone())),
+    },
+    level: input.response.ok ? "info" : "warn",
+    message: "Hosted runner internal outbound response completed.",
+    phase: "wake.running",
+  });
 }
 
 export async function handleHostedRunnerOpenAiOutbound(

@@ -707,12 +707,41 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
+  const startedAt = Date.now();
+  const emitPresignGetDiagnostic = (
+    message: string,
+    level: "info" | "warn",
+    details: HostedExecutionStructuredLogDetails,
+  ) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        durationMs: Date.now() - startedAt,
+        method: readHostedRunnerDiagnosticMethod(input.request.method),
+        operation: "workspace_snapshot_presign_get",
+        userIdPresent: input.userId.length > 0,
+        ...details,
+      },
+      level,
+      message,
+      phase: "wake.running",
+      userId: null,
+    });
+  };
   const writeFence = await requireWorkspaceSnapshotWriteFence({
     env: input.env,
     request: input.request,
     userId: input.userId,
   });
   if (!writeFence) {
+    emitPresignGetDiagnostic(
+      "Hosted workspace snapshot presign GET rejected.",
+      "warn",
+      {
+        rejectionReason: "write_fence_unavailable",
+        workspaceVersionPresent: false,
+      },
+    );
     return unauthorized();
   }
   const body = await readJsonObject(input.request, {
@@ -727,19 +756,63 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
       "Hosted workspace snapshot presign GET ref",
     );
   } catch {
+    emitPresignGetDiagnostic(
+      "Hosted workspace snapshot presign GET rejected.",
+      "warn",
+      {
+        refParsed: false,
+        rejectionReason: "invalid_ref",
+        snapshotIdMatchesRoute: requestedSnapshotId === input.snapshotId,
+        workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
+      },
+    );
     return jsonError("Hosted workspace snapshot presign ref is invalid.", 400);
   }
   if (requestedSnapshotId !== input.snapshotId) {
+    emitPresignGetDiagnostic(
+      "Hosted workspace snapshot presign GET rejected.",
+      "warn",
+      {
+        refParsed: true,
+        rejectionReason: "snapshot_route_mismatch",
+        snapshotIdMatchesRoute: false,
+        workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
+      },
+    );
     return jsonError("Hosted workspace snapshot presign snapshotId does not match its route.", 400);
   }
+  const refUserMatchesBoundUser = requestedRef.userId === input.userId;
+  const refSnapshotIdMatchesRoute = requestedRef.snapshotId === input.snapshotId;
+  const refObjectKeyMatchesBody = requestedRef.objectKey === requestedObjectKey;
+  const refAadUserMatchesBoundUser = requestedRef.encryption.aad.userId === input.userId;
+  const refAadSnapshotIdMatchesRoute =
+    requestedRef.encryption.aad.snapshotId === input.snapshotId;
+  const refAadObjectKeyMatchesBody =
+    requestedRef.encryption.aad.objectKey === requestedObjectKey;
   if (
-    requestedRef.userId !== input.userId
-    || requestedRef.snapshotId !== input.snapshotId
-    || requestedRef.objectKey !== requestedObjectKey
-    || requestedRef.encryption.aad.userId !== input.userId
-    || requestedRef.encryption.aad.snapshotId !== input.snapshotId
-    || requestedRef.encryption.aad.objectKey !== requestedObjectKey
+    !refUserMatchesBoundUser
+    || !refSnapshotIdMatchesRoute
+    || !refObjectKeyMatchesBody
+    || !refAadUserMatchesBoundUser
+    || !refAadSnapshotIdMatchesRoute
+    || !refAadObjectKeyMatchesBody
   ) {
+    emitPresignGetDiagnostic(
+      "Hosted workspace snapshot presign GET rejected.",
+      "warn",
+      {
+        refAadObjectKeyMatchesBody,
+        refAadSnapshotIdMatchesRoute,
+        refAadUserMatchesBoundUser,
+        refObjectKeyMatchesBody,
+        refParsed: true,
+        refSnapshotIdMatchesRoute,
+        refUserMatchesBoundUser,
+        rejectionReason: "ref_route_mismatch",
+        snapshotIdMatchesRoute: true,
+        workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
+      },
+    );
     return jsonError("Hosted workspace snapshot presign ref does not match its route.", 403);
   }
 
@@ -748,6 +821,17 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
     userId: input.userId,
   });
   if (requestedObjectKey !== expectedObjectKey) {
+    emitPresignGetDiagnostic(
+      "Hosted workspace snapshot presign GET rejected.",
+      "warn",
+      {
+        objectKeyMatchesExpected: false,
+        refParsed: true,
+        rejectionReason: "object_key_namespace_mismatch",
+        snapshotIdMatchesRoute: true,
+        workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
+      },
+    );
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
@@ -756,6 +840,17 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
     expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS,
     key: requestedObjectKey,
   });
+  emitPresignGetDiagnostic(
+    "Hosted workspace snapshot presign GET completed.",
+    "info",
+    {
+      objectKeyMatchesExpected: true,
+      presignSucceeded: true,
+      refParsed: true,
+      snapshotIdMatchesRoute: true,
+      workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
+    },
+  );
 
   return json({
     expiresAt: presigned.expiresAt,
