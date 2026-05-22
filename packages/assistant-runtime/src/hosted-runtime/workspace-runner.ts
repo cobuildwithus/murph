@@ -362,7 +362,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         initialMailboxImport,
         now: input.now,
         vaultRoot: input.vaultRoot,
-        workspace: input.workspace,
+        workspace: checkpointRequestSession.latestWorkspace()
+          ?? initialMailboxImport.checkpoint?.workspace
+          ?? input.workspace,
       })
     : null;
   if (housekeepingPhaseResult?.handled === true) {

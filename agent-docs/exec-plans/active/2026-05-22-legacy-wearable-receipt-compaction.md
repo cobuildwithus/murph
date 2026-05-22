@@ -57,7 +57,9 @@ Updated: 2026-05-22
 ## State
 
 - Current repo imports already emit payload-free wearable raw ingest receipts.
-- The legacy compactor and hosted housekeeping lane are not implemented yet.
+- The shared wearable payload hash helper, core legacy receipt detector/compactor,
+  focused core tests, and hosted housekeeping lane implementation are in place.
+- Focused runtime tests and final verification/audits are in progress.
 - Unrelated Temporal/device-sync work is dirty in the current checkout and must
   not be touched by this task.
 
