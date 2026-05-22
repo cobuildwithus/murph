@@ -89,20 +89,38 @@ export function resolveOAuthTokenRequestAccountStatus(input: {
   diagnostics: Record<string, ProviderDiagnosticValue>;
   parameters: Record<string, string>;
   response: Response;
+  treatCompleteRefreshInvalidRequestAsReauthorization?: boolean;
+  treatUnauthorizedAsReauthorization?: boolean;
 }): "reauthorization_required" | null {
   const oauthErrorCode = typeof input.diagnostics.oauthErrorCode === "string"
     ? input.diagnostics.oauthErrorCode
     : null;
+  const isRefreshTokenRequest = input.parameters.grant_type === "refresh_token";
+  const isRefreshTokenFailureStatus = input.response.status === 400 || input.response.status === 401;
 
   if (
-    input.parameters.grant_type === "refresh_token"
-    && (input.response.status === 400 || input.response.status === 401)
+    isRefreshTokenRequest
+    && isRefreshTokenFailureStatus
     && oauthErrorCode === "invalid_grant"
   ) {
     return "reauthorization_required";
   }
 
-  return input.response.status === 401 ? "reauthorization_required" : null;
+  if (
+    input.treatCompleteRefreshInvalidRequestAsReauthorization === true
+    && isRefreshTokenRequest
+    && isRefreshTokenFailureStatus
+    && oauthErrorCode === "invalid_request"
+    && Boolean(input.parameters.client_id?.trim())
+    && Boolean(input.parameters.client_secret?.trim())
+    && Boolean(input.parameters.refresh_token?.trim())
+  ) {
+    return "reauthorization_required";
+  }
+
+  return input.response.status === 401 && input.treatUnauthorizedAsReauthorization !== false
+    ? "reauthorization_required"
+    : null;
 }
 
 export function buildProviderRequestDiagnostics(input: {
