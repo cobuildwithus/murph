@@ -85,6 +85,9 @@
       "@murphai/hosted-execution/parsers": [
         "packages/hosted-execution/src/parsers.ts"
       ],
+      "@murphai/hosted-execution/routes": [
+        "packages/hosted-execution/src/routes.ts"
+      ],
       "@murphai/hosted-execution/runtime-control": [
         "packages/hosted-execution/src/runtime-control.ts"
       ],
