@@ -27,6 +27,24 @@ export {
   resolveVaultPathOnDisk,
 } from "./path-safety.ts";
 export { walkVaultFiles } from "./fs.ts";
+export {
+  hashWearableRawPayload,
+  stableStringifyWearableRawPayload,
+} from "./wearable-raw-payload-hash.ts";
+export type {
+  WearableRawPayloadJsonValue,
+} from "./wearable-raw-payload-hash.ts";
+export {
+  LEGACY_WEARABLE_RAW_ENVELOPE_ROLE_PREFIX,
+  compactLegacyWearableReceiptEnvelopes,
+  detectLegacyWearableReceiptCompaction,
+} from "./wearable-receipts.ts";
+export type {
+  CompactLegacyWearableReceiptEnvelopesInput,
+  CompactLegacyWearableReceiptEnvelopesResult,
+  DetectLegacyWearableReceiptCompactionInput,
+  LegacyWearableReceiptCompactionDetection,
+} from "./wearable-receipts.ts";
 
 export {
   buildAttachmentCompatibilityProjections,

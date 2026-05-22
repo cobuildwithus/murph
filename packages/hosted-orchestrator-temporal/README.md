@@ -5,6 +5,10 @@ Private Temporal worker package for hosted runtime orchestration.
 Temporal owns only scheduling, sleeps, signal coalescing, and Activity retries.
 Web remains the demand and product-status owner. Cloudflare remains the runtime
 execution adapter. The workflow state and signals must stay pointer-only.
+The package also owns the global device-sync recovery reconciler workflow and
+Temporal Schedule helper. That reconciler calls a signed web command and stores
+only count/status metadata in Temporal history; web remains the owner of
+canonical dirty and due-reconcile facts.
 
 ## Workflow Replay Discipline
 
@@ -108,6 +112,33 @@ synthetic local user id and prints a redacted workflow id. It proves the Tempora
 server accepted Signal-With-Start. If the worker is also running, Activity
 execution still requires the local web and Cloudflare adapter endpoints above.
 
+## Device-Sync Reconciler Schedule
+
+The device-sync recovery cadence should be owned by a Temporal Schedule that
+starts `hostedDeviceSyncReconcilerWorkflow`. The Workflow runs one
+`runHostedDeviceSyncRecoverySweep` Activity and exits. The Activity signs an
+empty JSON request to the hosted web command at
+`/api/internal/device-sync/recovery-sweep`; web reads Postgres dirty/due facts,
+appends idempotent mailbox wake pointers, and returns count-only summaries.
+
+The existing Vercel dirty-sweeper cron remains a temporary migration safety net
+until the Temporal Schedule has parity metrics. Do not move dirty resources,
+provider tokens, external account state, or canonical dirty/reconcile facts into
+Temporal Workflow state.
+
+Create or update the schedule after configuring Temporal and hosted-web signing
+env:
+
+```bash
+export HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED=true
+pnpm --dir packages/hosted-orchestrator-temporal temporal:ensure-device-sync-reconciler-schedule
+```
+
+The ensure command is idempotent: it creates the Schedule when missing and
+updates the interval/action when it already exists. If
+`HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED` is not true, the command exits
+without changing Temporal state.
+
 ## Env Contract
 
 Temporal connection:
@@ -155,6 +186,9 @@ Activity HTTP targets:
   web demand calls; Cloudflare must verify the corresponding signed internal
   callback key.
 - `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
+- `HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS`: optional HTTP timeout for the
+  signed web device-sync recovery sweep Activity, default `30000`, max
+  `120000`.
 - `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`: short HTTP timeout for the
   ensure-processing command, max 30000. The Workflow Activity
   Start-To-Close timeout adds a small reporting slack over this value because
@@ -165,6 +199,18 @@ Activity HTTP targets:
   compatibility. Normal hosted runtime processing uses
   `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`. Target removal is 2026-06-04 after
   legacy hosted user runtime histories drain.
+
+Device-sync reconciler Schedule:
+
+- `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED`: must be `true` for the
+  ensure command to create or update the Temporal Schedule.
+- `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID`: optional Schedule id, default
+  `hosted-device-sync-reconciler`.
+- `HOSTED_DEVICE_SYNC_RECONCILER_INTERVAL_MS`: optional interval, default
+  `60000`, min `10000`, max `3600000`.
+- `HOSTED_DEVICE_SYNC_RECONCILER_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS`: optional
+  Activity Start-To-Close timeout for the scheduled Workflow, default `60000`,
+  min `1000`, max `300000`.
 
 Worker shutdown:
 

@@ -49,7 +49,16 @@ export interface HostedDeviceSyncReconcilerScheduleResult {
 }
 
 export interface HostedDeviceSyncReconcilerScheduleClient {
-  schedule: Pick<Client["schedule"], "create" | "getHandle">;
+  schedule: {
+    create(
+      schedule: HostedDeviceSyncReconcilerScheduleOptions,
+    ): Promise<unknown>;
+    getHandle(scheduleId: string): {
+      update(
+        updateFn: () => HostedDeviceSyncReconcilerScheduleUpdateOptions,
+      ): Promise<void>;
+    };
+  };
 }
 
 export function readHostedDeviceSyncReconcilerScheduleConfig(
