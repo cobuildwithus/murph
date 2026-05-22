@@ -1,6 +1,6 @@
 # Make wearable raw envelopes payload-free receipts
 
-Status: active
+Status: completed
 Created: 2026-05-22
 Updated: 2026-05-22
 
@@ -13,6 +13,7 @@ Updated: 2026-05-22
 - `WearableRawIngestEnvelope` no longer stores the sanitized provider snapshot payload.
 - Device-provider imports still compute a stable payload hash and attach a raw-envelope receipt artifact.
 - The receipt records small raw-artifact metadata such as role/count, not timeseries sample payloads.
+- Custom/provider adapters that omit raw artifacts still retain non-empty raw snapshot evidence as a fallback raw artifact.
 - Focused importer tests prove Junction dense timeseries are not duplicated inside the envelope.
 - Package verification and required completion audits pass or any unrelated blockers are documented.
 
@@ -42,6 +43,8 @@ Updated: 2026-05-22
    Mitigation: Search all usages and update tests/callers to the receipt contract; keep `payloadHash` stable.
 2. Risk: The receipt becomes a new manifest subsystem.
    Mitigation: Store only role/count metadata now; rely on existing raw artifact storage for evidence.
+3. Risk: A payload-free receipt becomes the only durable evidence when an adapter emits no raw artifacts.
+   Mitigation: Add a single fallback `provider-snapshot` raw artifact for non-empty snapshots before building the receipt.
 
 ## Tasks
 
@@ -54,6 +57,7 @@ Updated: 2026-05-22
 ## Decisions
 
 - Raw envelope remains an audit receipt and hash carrier, not a raw data store.
+- Raw artifacts remain the only raw provider evidence layer; the import bridge adds a fallback `provider-snapshot` only when an adapter omits provider raw artifacts for a non-empty snapshot.
 - No raw chunking, gzip support, or new timeseries storage abstraction in this change.
 
 ## Verification
@@ -66,3 +70,4 @@ Updated: 2026-05-22
 - `git diff --check`
 - Scoped privacy scan over touched files.
 - Expected outcomes: all required checks pass, or unrelated dirty-worktree failures are reported with scope.
+Completed: 2026-05-22

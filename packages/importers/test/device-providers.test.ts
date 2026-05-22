@@ -1628,6 +1628,7 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
       kind: "observation",
       occurredAt: "2026-03-16T12:00:00.000Z",
       title: "Polar daily steps",
+      rawArtifactRoles: ["provider-snapshot"],
       fields: {
         metric: "daily-steps",
         value: 4321,
@@ -1638,8 +1639,16 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
   assert.equal(Object.hasOwn(calls[0] ?? {}, "snapshot"), false);
   assert.equal(calls[0]?.rawIngestEnvelopes?.length, 1);
   assert.equal(calls[0]?.canonicalWearableRecords?.length, 1);
+  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"));
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-envelope:")));
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")));
+  const fallbackRawArtifact = calls[0]?.rawArtifacts?.find((artifact) => artifact.role === "provider-snapshot");
+  const rawEnvelope = calls[0]?.rawIngestEnvelopes?.[0];
+  assert.deepEqual(fallbackRawArtifact?.content, {
+    importedAt: "2026-03-16T12:05:00.000Z",
+  });
+  assert.deepEqual(rawEnvelope?.rawArtifactRoles, ["provider-snapshot"]);
+  assert.equal(rawEnvelope?.rawArtifactCount, 1);
   assert.equal(calls[0]?.vaultRoot, undefined);
 });
 
