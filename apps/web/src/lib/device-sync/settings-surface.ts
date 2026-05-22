@@ -213,6 +213,8 @@ function buildConnectedSource(input: {
   const setupPhase = connection.setupPhase ?? null;
 
   if (connection.status === "disconnected") {
+    const disconnectedReconnectAction = buildReconnectAction(input.connectTarget);
+
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
@@ -222,13 +224,15 @@ function buildConnectedSource(input: {
         ? "This source is disconnected. Your past history stays in place."
         : "This source is disconnected.",
       displayName,
-      guidance: "Past history stays in place.",
+      guidance: disconnectedReconnectAction
+        ? "Reconnect this source to resume syncing. Past history stays in place."
+        : "Past history stays in place.",
       headline: "Disconnected",
       lastActivityAt,
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: null,
-      primaryAction: null,
+      primaryAction: disconnectedReconnectAction,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
