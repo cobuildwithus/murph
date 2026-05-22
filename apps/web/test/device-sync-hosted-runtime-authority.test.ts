@@ -161,6 +161,39 @@ function buildStoredAccount(
   };
 }
 
+function buildDirtyConnectionRecord(overrides: Partial<{
+  connectionId: string;
+  dirtyRevision: bigint;
+  processedRevision: bigint;
+  provider: string;
+  userId: string;
+}> = {}) {
+  return {
+    connectionId: overrides.connectionId ?? "conn_dirty_123",
+    createdAt: "2026-04-06T09:00:00.000Z",
+    dirtyResources: {},
+    dirtyRevision: overrides.dirtyRevision ?? 1n,
+    eventCount: overrides.dirtyRevision ?? 1n,
+    firstDirtyAt: "2026-04-06T09:00:00.000Z",
+    latestDirtyAt: "2026-04-06T10:00:00.000Z",
+    latestEventType: "sleep.updated",
+    latestResourceCategory: "daily_sleep",
+    latestTraceId: "trace_dirty_123",
+    processedRevision: overrides.processedRevision ?? 0n,
+    provider: overrides.provider ?? "oura",
+    resourceCategoryCounts: {
+      daily_sleep: 1,
+    },
+    sourceProviderCounts: {
+      oura: 1,
+    },
+    updatedAt: "2026-04-06T10:00:00.000Z",
+    userId: overrides.userId ?? "user_123",
+    windowEnd: null,
+    windowStart: "2026-04-06T00:00:00.000Z",
+  };
+}
+
 function createAuthorityHarness(input: {
   connectionSources?: Array<{
     connectionId: string;
@@ -288,6 +321,58 @@ function createAuthorityHarness(input: {
     updateConnectionRecord: update,
   };
 }
+
+describe("readHostedDeviceSyncPendingDirtyState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns an immediate wake when one fetched batch contains multiple pending dirty rows", async () => {
+    const listPendingDirtyConnectionsForUser = vi.fn(async () => ({
+      hasMore: false,
+      items: [
+        buildDirtyConnectionRecord({
+          connectionId: "conn_dirty_first",
+          dirtyRevision: 3n,
+        }),
+        buildDirtyConnectionRecord({
+          connectionId: "conn_dirty_second",
+          dirtyRevision: 4n,
+        }),
+      ],
+    }));
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        listPendingDirtyConnectionsForUser,
+      },
+    });
+    const { readHostedDeviceSyncPendingDirtyState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncPendingDirtyState({
+      request: new Request("https://example.test/device-sync/runtime/dirty-pending", {
+        body: JSON.stringify({
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
+      limit: 10,
+      userId: "user_123",
+    });
+    expect(response.hasMore).toBe(false);
+    expect(response.items.map((item) => item.connectionId)).toEqual([
+      "conn_dirty_first",
+      "conn_dirty_second",
+    ]);
+    expect(response.nextWakeAt).toEqual(expect.any(String));
+    expect(Number.isFinite(Date.parse(response.nextWakeAt ?? ""))).toBe(true);
+  });
+});
 
 describe("applyHostedDeviceSyncRuntimeResult", () => {
   beforeEach(() => {
