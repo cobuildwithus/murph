@@ -25,6 +25,7 @@ vi.mock("@murphai/core", () => ({
 }));
 
 import {
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON,
   isLegacyWearableReceiptCompactionWakeDue,
   runHostedWorkspaceHousekeepingPhase,
@@ -79,6 +80,10 @@ describe("hosted workspace housekeeping", () => {
     assert.equal(
       coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].now.toISOString(),
       TEST_NOW,
+    );
+    assert.equal(
+      coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].deadlineMs,
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
     );
   });
 

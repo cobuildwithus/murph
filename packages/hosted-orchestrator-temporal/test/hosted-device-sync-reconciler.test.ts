@@ -79,6 +79,10 @@ describe("hostedDeviceSyncReconcilerWorkflow", () => {
 });
 
 describe("hosted device-sync reconciler Temporal Schedule", () => {
+  it("defaults the global reconciler schedule to enabled", () => {
+    expect(readHostedDeviceSyncReconcilerScheduleConfig({}).enabled).toBe(true);
+  });
+
   it("builds an enabled interval schedule for the global reconciler workflow", async () => {
     const config = readHostedDeviceSyncReconcilerScheduleConfig({
       HOSTED_DEVICE_SYNC_RECONCILER_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS: "45000",
@@ -204,6 +208,8 @@ function buildRecoverySweepResponse() {
       staleAfterMs: 30000,
       wakeAppended: 1,
       wakeAttempted: 1,
+      wakeDuplicate: 0,
+      wakeFailed: 0,
       wakeLimit: 25,
       wakeNotAppended: 0,
     },

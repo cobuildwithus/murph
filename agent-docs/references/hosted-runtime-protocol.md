@@ -184,11 +184,10 @@ command that selects stale dirty and due-reconcile facts, appends wake pointers,
 records due-reconcile signals, and keeps retries idempotent. Each dirty sweep
 attempt for a still-dirty revision appends a fresh opaque wake pointer so an
 already-imported pointer cannot make recovery one-shot. During migration, the
-existing Vercel dirty-sweeper cron may call the same web recovery sweep as a
-temporary safety net; it must not remain a second long-term scheduler. The
-runtime must support dirty-pending and dirty-ack callbacks; dirty ack means the
-dirty revision was handed off into the checkpointed local device-sync job store,
-not that upstream provider sync succeeded. Connection-established and
+Vercel dirty-sweeper cron was removed so Temporal remains the only scheduler.
+The runtime must support dirty-pending and dirty-ack callbacks; dirty ack means
+the dirty revision was handed off into the checkpointed local device-sync job
+store, not that upstream provider sync succeeded. Connection-established and
 disconnect lifecycle commands may still use coarse device-sync mailbox wakes
 because they are explicit lifecycle events, not high-cardinality freshness
 hints.

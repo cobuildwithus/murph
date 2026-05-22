@@ -37,6 +37,9 @@ export interface CompactLegacyWearableReceiptEnvelopesInput {
   vaultRoot: string;
   maxEnvelopes?: number;
   maxCandidateBytes?: number;
+  maxEvidenceArtifactBytes?: number;
+  maxEvidenceRoles?: number;
+  maxEvidenceTotalBytes?: number;
   deadlineMs?: number;
   now?: Date;
 }
@@ -70,8 +73,34 @@ interface PreparedLegacyEnvelopeCompaction {
   manifestPaths: string[];
 }
 
+type PrepareLegacyEnvelopeCompactionResult =
+  | {
+      kind: "prepared";
+      compaction: PreparedLegacyEnvelopeCompaction;
+    }
+  | {
+      kind: "skip";
+    }
+  | {
+      kind: "deadline";
+    };
+
+interface LegacyWearableCompactionBudget {
+  deadlineMs: number | undefined;
+  maxEvidenceArtifactBytes: number;
+  maxEvidenceRoles: number;
+  maxEvidenceTotalBytes: number;
+  startedAtMs: number;
+}
+
+interface CumulativeReadBudget {
+  maxBytes: number;
+  usedBytes: number;
+}
+
 const DEFAULT_MAX_ENVELOPES = 25;
 const DEFAULT_MAX_CANDIDATE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MAX_EVIDENCE_ROLES = 64;
 
 export async function detectLegacyWearableReceiptCompaction({
   vaultRoot,
@@ -106,10 +135,20 @@ export async function compactLegacyWearableReceiptEnvelopes({
   vaultRoot,
   maxEnvelopes = DEFAULT_MAX_ENVELOPES,
   maxCandidateBytes = DEFAULT_MAX_CANDIDATE_BYTES,
+  maxEvidenceArtifactBytes = maxCandidateBytes,
+  maxEvidenceRoles = DEFAULT_MAX_EVIDENCE_ROLES,
+  maxEvidenceTotalBytes = maxCandidateBytes,
   deadlineMs,
   now = new Date(),
 }: CompactLegacyWearableReceiptEnvelopesInput): Promise<CompactLegacyWearableReceiptEnvelopesResult> {
   const startedAtMs = Date.now();
+  const budget: LegacyWearableCompactionBudget = {
+    deadlineMs,
+    maxEvidenceArtifactBytes,
+    maxEvidenceRoles,
+    maxEvidenceTotalBytes,
+    startedAtMs,
+  };
   const manifestSnapshots = await readRawManifestSnapshots(vaultRoot);
   const candidates = collectLegacyEnvelopeCandidates(manifestSnapshots);
   const prepared: PreparedLegacyEnvelopeCompaction[] = [];
@@ -120,7 +159,7 @@ export async function compactLegacyWearableReceiptEnvelopes({
   let hasMore = false;
 
   for (let index = 0; index < candidates.length; index += 1) {
-    if (deadlineMs !== undefined && Date.now() - startedAtMs >= deadlineMs) {
+    if (legacyWearableCompactionDeadlineExceeded(budget)) {
       hasMore = true;
       break;
     }
@@ -134,16 +173,22 @@ export async function compactLegacyWearableReceiptEnvelopes({
       continue;
     }
 
-    const compaction = await prepareLegacyEnvelopeCompaction({
+    const preparedCompaction = await prepareLegacyEnvelopeCompaction({
+      budget,
       maxCandidateBytes,
       references,
       vaultRoot,
     });
-    if (!compaction) {
+    if (preparedCompaction.kind === "deadline") {
+      hasMore = true;
+      break;
+    }
+    if (preparedCompaction.kind === "skip") {
       skippedCount += 1;
       continue;
     }
 
+    const { compaction } = preparedCompaction;
     prepared.push(compaction);
     bytesBefore += compaction.bytesBefore;
     bytesAfter += compaction.bytesAfter;
@@ -295,13 +340,14 @@ function collectLegacyEnvelopeCandidates(
 }
 
 async function prepareLegacyEnvelopeCompaction(input: {
+  budget: LegacyWearableCompactionBudget;
   maxCandidateBytes: number;
   references: readonly LegacyEnvelopeReference[];
   vaultRoot: string;
-}): Promise<PreparedLegacyEnvelopeCompaction | null> {
+}): Promise<PrepareLegacyEnvelopeCompactionResult> {
   const [firstReference] = input.references;
   if (!firstReference || !legacyEnvelopeManifestReferencesAgree(input.references)) {
-    return null;
+    return { kind: "skip" };
   }
 
   const envelopeArtifact = firstReference.artifact;
@@ -309,55 +355,71 @@ async function prepareLegacyEnvelopeCompaction(input: {
     envelopeArtifact.byteSize > input.maxCandidateBytes
     || !artifactPathBelongsToRawDirectory(envelopeArtifact, firstReference.manifest.rawDirectory)
   ) {
-    return null;
+    return { kind: "skip" };
   }
 
-  const envelopeFile = await readManifestArtifactFile(input.vaultRoot, envelopeArtifact);
+  if (legacyWearableCompactionDeadlineExceeded(input.budget)) {
+    return { kind: "deadline" };
+  }
+
+  const envelopeFile = await readManifestArtifactFile(
+    input.vaultRoot,
+    envelopeArtifact,
+    { maxBytes: input.maxCandidateBytes },
+  );
   if (!envelopeFile) {
-    return null;
+    return { kind: "skip" };
   }
 
   const envelope = parseJsonObject(envelopeFile.content);
   if (!envelope || !hasOwn(envelope, "payload")) {
-    return null;
+    return { kind: "skip" };
   }
 
   const payloadHash = envelope.payloadHash;
   if (typeof payloadHash !== "string") {
-    return null;
+    return { kind: "skip" };
   }
 
   try {
     if (hashWearableRawPayload(envelope.payload) !== payloadHash) {
-      return null;
+      return { kind: "skip" };
     }
   } catch {
-    return null;
+    return { kind: "skip" };
   }
 
   const rawArtifactRoles = readStringArray(envelope.rawArtifactRoles);
-  if (!rawArtifactRoles || rawArtifactRoles.length === 0) {
-    return null;
+  if (
+    !rawArtifactRoles
+    || rawArtifactRoles.length === 0
+    || rawArtifactRoles.length > input.budget.maxEvidenceRoles
+  ) {
+    return { kind: "skip" };
   }
 
   const evidenceByManifest: Array<Map<string, RawImportManifestArtifact>> = [];
   for (const reference of input.references) {
     const evidenceIndex = indexManifestArtifactsByRole(reference.manifest);
     if (!evidenceIndex) {
-      return null;
+      return { kind: "skip" };
     }
     evidenceByManifest.push(evidenceIndex);
   }
 
-  const hasProof = await verifyLegacyEnvelopeEvidenceProof({
+  const proof = await verifyLegacyEnvelopeEvidenceProof({
+    budget: input.budget,
     evidenceByManifest,
     manifestReferences: input.references,
     payloadHash,
     rawArtifactRoles,
     vaultRoot: input.vaultRoot,
   });
-  if (!hasProof) {
-    return null;
+  if (proof === "deadline") {
+    return { kind: "deadline" };
+  }
+  if (proof !== "valid") {
+    return { kind: "skip" };
   }
 
   const compactedEnvelope = omitTopLevelPayload(envelope);
@@ -373,11 +435,14 @@ async function prepareLegacyEnvelopeCompaction(input: {
   }
 
   return {
-    bytesAfter: envelopeBytes,
-    bytesBefore: envelopeFile.byteSize,
-    envelopeContent,
-    envelopePath: envelopeArtifact.relativePath,
-    manifestPaths: input.references.map((reference) => reference.manifestPath),
+    kind: "prepared",
+    compaction: {
+      bytesAfter: envelopeBytes,
+      bytesBefore: envelopeFile.byteSize,
+      envelopeContent,
+      envelopePath: envelopeArtifact.relativePath,
+      manifestPaths: input.references.map((reference) => reference.manifestPath),
+    },
   };
 }
 
@@ -397,49 +462,74 @@ function legacyEnvelopeManifestReferencesAgree(
 }
 
 async function verifyLegacyEnvelopeEvidenceProof(input: {
+  budget: LegacyWearableCompactionBudget;
   evidenceByManifest: Array<Map<string, RawImportManifestArtifact>>;
   manifestReferences: readonly LegacyEnvelopeReference[];
   payloadHash: string;
   rawArtifactRoles: readonly string[];
   vaultRoot: string;
-}): Promise<boolean> {
+}): Promise<"deadline" | "invalid" | "valid"> {
+  const cumulativeBudget: CumulativeReadBudget = {
+    maxBytes: input.budget.maxEvidenceTotalBytes,
+    usedBytes: 0,
+  };
   let hasProof = false;
 
   for (const role of input.rawArtifactRoles) {
+    if (legacyWearableCompactionDeadlineExceeded(input.budget)) {
+      return "deadline";
+    }
+
+    let proofFile: { byteSize: number; content: string; sha256: string } | null = null;
+    const roleCanProvePayload = isProviderEvidenceProofRole(role);
+
     for (let index = 0; index < input.evidenceByManifest.length; index += 1) {
+      if (legacyWearableCompactionDeadlineExceeded(input.budget)) {
+        return "deadline";
+      }
+
       const artifact = input.evidenceByManifest[index]?.get(role);
       const manifest = input.manifestReferences[index]?.manifest;
       if (
         !artifact
         || !manifest
         || !artifactPathBelongsToRawDirectory(artifact, manifest.rawDirectory)
-        || !(await readManifestArtifactFile(input.vaultRoot, artifact))
       ) {
-        return false;
+        return "invalid";
+      }
+
+      const evidenceFile = await readManifestArtifactFile(
+        input.vaultRoot,
+        artifact,
+        {
+          cumulativeBudget,
+          maxBytes: input.budget.maxEvidenceArtifactBytes,
+        },
+      );
+      if (!evidenceFile) {
+        return "invalid";
+      }
+      if (index === 0 && roleCanProvePayload) {
+        proofFile = evidenceFile;
       }
     }
 
-    if (!isProviderEvidenceProofRole(role)) {
+    if (!roleCanProvePayload) {
       continue;
     }
 
-    const proofArtifact = input.evidenceByManifest[0]?.get(role);
-    if (!proofArtifact) {
-      return false;
-    }
-    const proofFile = await readManifestArtifactFile(input.vaultRoot, proofArtifact);
     if (!proofFile) {
-      return false;
+      return "invalid";
     }
     const proofValue = parseEvidenceJsonOrText(proofFile.content);
     try {
       hasProof ||= hashWearableRawPayload(proofValue) === input.payloadHash;
     } catch {
-      return false;
+      return "invalid";
     }
   }
 
-  return hasProof;
+  return hasProof ? "valid" : "invalid";
 }
 
 function indexManifestArtifactsByRole(
@@ -460,11 +550,44 @@ function indexManifestArtifactsByRole(
 async function readManifestArtifactFile(
   vaultRoot: string,
   artifact: RawImportManifestArtifact,
+  options: {
+    cumulativeBudget?: CumulativeReadBudget;
+    maxBytes?: number;
+  } = {},
 ): Promise<{ byteSize: number; content: string; sha256: string } | null> {
   const resolved = resolveVaultPath(vaultRoot, artifact.relativePath);
 
   try {
+    if (options.maxBytes !== undefined && artifact.byteSize > options.maxBytes) {
+      return null;
+    }
+
+    const stats = await fs.stat(resolved.absolutePath);
+    if (options.maxBytes !== undefined && stats.size > options.maxBytes) {
+      return null;
+    }
+    if (
+      options.cumulativeBudget
+      && options.cumulativeBudget.usedBytes + stats.size > options.cumulativeBudget.maxBytes
+    ) {
+      return null;
+    }
+
     const contentBuffer = await fs.readFile(resolved.absolutePath);
+    if (options.maxBytes !== undefined && contentBuffer.byteLength > options.maxBytes) {
+      return null;
+    }
+    if (
+      options.cumulativeBudget
+      && options.cumulativeBudget.usedBytes + contentBuffer.byteLength
+        > options.cumulativeBudget.maxBytes
+    ) {
+      return null;
+    }
+    if (options.cumulativeBudget) {
+      options.cumulativeBudget.usedBytes += contentBuffer.byteLength;
+    }
+
     const actual = {
       byteSize: contentBuffer.byteLength,
       content: contentBuffer.toString("utf8"),
@@ -588,6 +711,13 @@ function readStringArray(value: unknown): string[] | null {
 
 function hasOwn(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function legacyWearableCompactionDeadlineExceeded(
+  budget: LegacyWearableCompactionBudget,
+): boolean {
+  return budget.deadlineMs !== undefined
+    && Date.now() - budget.startedAtMs >= budget.deadlineMs;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

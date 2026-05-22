@@ -559,7 +559,6 @@ describe("appendHostedDeviceSyncWake", () => {
       resourceCategory: null,
       revokeWarning: null,
       traceId: null,
-      tx: mocks.prismaTx,
       userId: "user-123",
     });
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
@@ -577,7 +576,7 @@ describe("appendHostedDeviceSyncWake", () => {
     });
   });
 
-  it("accepts duplicate due-reconcile wakes without writing duplicate signals or Temporal signals", async () => {
+  it("re-signals duplicate due-reconcile wakes and records the successful due claim", async () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
       dedupeConflict: false,
       duplicate: true,
@@ -602,8 +601,24 @@ describe("appendHostedDeviceSyncWake", () => {
       wakeInserted: false,
     });
 
-    expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_existing",
+      recoveryIntent: "device-sync-reconcile-recovery",
+    });
+    expect(mocks.createSignal).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventType: null,
+      kind: "reconcile_due",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      reason: null,
+      resourceCategory: null,
+      revokeWarning: null,
+      traceId: null,
+      userId: "user-123",
+    });
   });
 
   it("surfaces duplicate due-reconcile dedupe conflicts without writing signals or Temporal signals", async () => {
@@ -626,9 +641,9 @@ describe("appendHostedDeviceSyncWake", () => {
       userId: "user-123",
     })).resolves.toEqual({
       reason: "dedupe_conflict",
-      wakeAccepted: true,
+      wakeAccepted: false,
       wakeAppended: false,
-      wakeDuplicate: true,
+      wakeDuplicate: false,
       wakeInserted: false,
     });
 
@@ -652,6 +667,34 @@ describe("appendHostedDeviceSyncWake", () => {
       });
 
       expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted device-sync wake Temporal signal failed after mailbox append.",
+        {
+          code: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+          mailboxItemIdPresent: true,
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("surfaces scheduled recovery Temporal signal failures before recording the due claim", async () => {
+    mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValue(new Error("Temporal unavailable"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      await expect(appendHostedDeviceSyncScheduledReconcileWake({
+        connectionId: "dsc_123",
+        createdAt: "2026-03-26T12:01:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:abc123",
+        nextReconcileAt: "2026-03-26T12:00:00.000Z",
+        provider: "oura",
+        userId: "user-123",
+      })).rejects.toThrow("Temporal unavailable");
+
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+      expect(mocks.createSignal).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
         "Hosted device-sync wake Temporal signal failed after mailbox append.",
         {

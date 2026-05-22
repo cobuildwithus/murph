@@ -216,10 +216,9 @@ because the web command is retryable and duplicate effective work is bounded by
 dirty revisions, due-reconcile event ids/signals, mailbox dedupe, and recovery
 buckets.
 
-The existing Vercel device-sync dirty-sweeper cron is a temporary migration
-safety net. It may call the same web recovery sweep while parity is measured,
-but it is not a long-term scheduler. The final state keeps the signed/manual
-web sweep command for operator recovery and removes the Vercel cron cadence.
+The Vercel device-sync dirty-sweeper cron is not registered. Temporal is the
+single production owner of recovery cadence, while the signed web sweep command
+remains available for authenticated operator recovery.
 
 Do not fold global dirty/due discovery into `hostedUserRuntimeWorkflow` or
 `readRuntimeDemand`. Per-user workflows remain user-runtime execution loops:
@@ -453,9 +452,8 @@ The hard-cut architecture is accepted when:
 - Temporal has one per-user workflow that reads web demand/status and owns
   sleeps/retries.
 - Temporal has one global device-sync recovery Schedule that starts a
-  short-lived reconciler workflow. The Vercel device-sync dirty-sweeper cron is
-  disabled after migration parity and remains only as a temporary safety net
-  before then.
+  short-lived reconciler workflow. There is no Vercel device-sync dirty-sweeper
+  cron cadence.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   buildHostedExecutionRuntimeControlWake,
@@ -61,6 +61,7 @@ export interface SignalHostedMailboxAppendInput {
 
 export interface SignalHostedDeviceSyncRecoveryInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  eventId?: string | null;
   userId: string;
 }
 
@@ -127,6 +128,7 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
+    eventId: input.eventId ?? null,
     kind: "runtime.device-sync-recovery-requested",
     source: "device-sync-recovery",
     userId: input.userId,
@@ -172,6 +174,10 @@ export async function signalHostedDeviceSyncMailboxRuntime(
   if (shouldSignalRecovery) {
     return signalHostedDeviceSyncRecoveryRuntime({
       client: input.client,
+      eventId: buildHostedDeviceSyncRecoveryRuntimeControlEventId({
+        mailboxItemId: mailboxItem.id,
+        recoveryIntent: input.recoveryIntent ?? null,
+      }),
       userId: mailboxItem.userId,
     });
   }
@@ -192,6 +198,7 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 
 async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
+  eventId?: string | null;
   kind: HostedExecutionRuntimeControlWakeKind;
   source: string;
   userId: string;
@@ -202,7 +209,8 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   const mailboxItem = (await prisma.$transaction((tx) =>
     appendHostedMailboxEnvelopeTx({
       envelope: buildHostedExecutionRuntimeControlWake({
-        eventId: `runtime-control:${input.kind}:${randomUUID()}`,
+        eventId: normalizeHostedRuntimeControlEventId(input.eventId)
+          ?? `runtime-control:${input.kind}:${randomUUID()}`,
         kind: input.kind,
         occurredAt,
         userId: input.userId,
@@ -223,6 +231,33 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
     }),
     userId: input.userId,
   });
+}
+
+function buildHostedDeviceSyncRecoveryRuntimeControlEventId(input: {
+  mailboxItemId: string;
+  recoveryIntent: HostedDeviceSyncRecoverySignalIntent | null;
+}): string {
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({
+      mailboxItemId: input.mailboxItemId,
+      recoveryIntent: input.recoveryIntent,
+      version: 1,
+    }))
+    .digest("hex")
+    .slice(0, 32);
+
+  return `runtime-control:device-sync-recovery:${fingerprint}`;
+}
+
+function normalizeHostedRuntimeControlEventId(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 export async function signalHostedUserRuntimeWorkflow(

@@ -35,40 +35,45 @@ const coreModuleCalls = vi.hoisted(
   }),
 );
 
-vi.mock("@murphai/core", () => ({
-  DEFAULT_TIMEZONE: "UTC",
-  importDocument: async (payload: unknown) => {
-    coreModuleCalls.importDocument.push(payload);
-    return { ok: true, kind: "document" as const };
-  },
-  addMeal: async (payload: unknown) => {
-    coreModuleCalls.addMeal.push(payload);
-    return { ok: true, kind: "meal" as const };
-  },
-  importSamples: async (payload: unknown) => {
-    coreModuleCalls.importSamples.push(payload);
-    return {
-      count: 1,
-      manifestPath: "raw/samples/steps/import_mock/manifest.json",
-      records: [{ id: "smp_mock_01" }],
-      shardPaths: ["ledger/samples/2026/2026-03.jsonl"],
-      transformId: "xfm_mock",
-    };
-  },
-  importDeviceBatch: async (payload: unknown) => {
-    coreModuleCalls.importDeviceBatch.push(payload);
-    return { ok: true, kind: "device-batch" as const };
-  },
-  importAssessmentResponse: async (payload: unknown) => {
-    coreModuleCalls.importAssessmentResponse.push(payload);
-    return { ok: true, kind: "assessment" as const };
-  },
-  loadVault: async () => ({
-    metadata: {
-      timezone: "UTC",
+vi.mock("@murphai/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/core")>();
+
+  return {
+    ...actual,
+    DEFAULT_TIMEZONE: "UTC",
+    importDocument: async (payload: unknown) => {
+      coreModuleCalls.importDocument.push(payload);
+      return { ok: true, kind: "document" as const };
     },
-  }),
-}));
+    addMeal: async (payload: unknown) => {
+      coreModuleCalls.addMeal.push(payload);
+      return { ok: true, kind: "meal" as const };
+    },
+    importSamples: async (payload: unknown) => {
+      coreModuleCalls.importSamples.push(payload);
+      return {
+        count: 1,
+        manifestPath: "raw/samples/steps/import_mock/manifest.json",
+        records: [{ id: "smp_mock_01" }],
+        shardPaths: ["ledger/samples/2026/2026-03.jsonl"],
+        transformId: "xfm_mock",
+      };
+    },
+    importDeviceBatch: async (payload: unknown) => {
+      coreModuleCalls.importDeviceBatch.push(payload);
+      return { ok: true, kind: "device-batch" as const };
+    },
+    importAssessmentResponse: async (payload: unknown) => {
+      coreModuleCalls.importAssessmentResponse.push(payload);
+      return { ok: true, kind: "assessment" as const };
+    },
+    loadVault: async () => ({
+      metadata: {
+        timezone: "UTC",
+      },
+    }),
+  };
+});
 
 test("createImporters builds default registries when options are omitted", () => {
   const importers = createImporters();
