@@ -105,7 +105,8 @@ export async function prepareDeviceProviderSnapshotImport(
     accountId: normalized.accountId ?? request.accountId,
     importedAt: rawObservedAt,
   });
-  const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(basePayload);
+  const payloadWithRawEvidence = ensureProviderRawArtifact(basePayload, rawSnapshot);
+  const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(payloadWithRawEvidence);
   const rawEnvelope = buildWearableRawIngestEnvelope({
     provider: basePayload.provider,
     payload: rawSnapshot,
@@ -172,6 +173,52 @@ function attachSingleLegacyRawArtifactRole(payload: DeviceBatchImportPayload): D
       ? event
       : { ...event, rawArtifactRoles: [rawArtifact.role] }),
   };
+}
+
+function ensureProviderRawArtifact(
+  payload: DeviceBatchImportPayload,
+  rawSnapshot: unknown,
+): DeviceBatchImportPayload {
+  if ((payload.rawArtifacts ?? []).length > 0 || !hasRetainableRawArtifactContent(rawSnapshot)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    rawArtifacts: [buildProviderRawSnapshotArtifact(payload.provider, rawSnapshot)],
+  };
+}
+
+function buildProviderRawSnapshotArtifact(
+  provider: string,
+  rawSnapshot: unknown,
+): DeviceRawArtifactPayload {
+  return {
+    role: "provider-snapshot",
+    fileName: `${sanitizeRawArtifactFileToken(provider)}-provider-snapshot.json`,
+    mediaType: "application/json",
+    content: rawSnapshot,
+  };
+}
+
+function hasRetainableRawArtifactContent(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  if (typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length > 0;
+  }
+
+  return true;
+}
+
+function sanitizeRawArtifactFileToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "") || "provider";
 }
 
 function resolveStableRawEnvelopeObservedAt(
