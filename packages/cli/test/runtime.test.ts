@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { localParallelCliTest as test } from './local-parallel-test.js'
@@ -22,6 +22,9 @@ interface FixtureVault {
   }
   journal: {
     lookupId: string
+  }
+  metricSample: {
+    id: string
   }
   samples: {
     lookupIds: string[]
@@ -65,6 +68,7 @@ test('runtime unavailable error preserves the shared vault runtime guidance payl
 async function makeFixtureVault(): Promise<FixtureVault> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-test-'))
   const csvPath = path.join(vaultRoot, 'samples.csv')
+  const metricSampleId = 'smp_cli_metric_heart_rate_summary'
 
   await writeFile(
     csvPath,
@@ -137,14 +141,49 @@ async function makeFixtureVault(): Promise<FixtureVault> {
       vaultRoot,
     ]),
   )
+  await writeVaultFile(
+    vaultRoot,
+    'ledger/metric-samples/heart_rate/2026/2026-03.jsonl',
+    [
+      JSON.stringify({
+        schemaVersion: 'murph.metric-sample.v1',
+        id: metricSampleId,
+        metric: 'heart_rate',
+        recordedAt: '2026-03-12T21:00:00.000Z',
+        dayKey: '2026-03-12',
+        source: 'manual',
+        quality: 'normalized',
+        qualifiers: { summary: true },
+        value: 69,
+        unit: 'bpm',
+      }),
+      '',
+    ].join('\n'),
+    'utf8',
+  )
 
   return {
     vaultRoot,
     document,
     meal,
     journal,
+    metricSample: {
+      id: metricSampleId,
+    },
     samples,
   }
+}
+
+async function writeVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  contents: string,
+  encoding: BufferEncoding = 'utf8',
+) {
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {
+    recursive: true,
+  })
+  await writeFile(path.join(vaultRoot, relativePath), contents, encoding)
 }
 
 async function makeEmptyVaultFixture(): Promise<EmptyVaultFixture> {
@@ -378,20 +417,45 @@ test(
       assert.equal(requireData(showJournal).entity.id, fixture.journal.lookupId)
       assert.equal(requireData(showJournal).entity.kind, 'journal_day')
 
-      const showSample = await runCli<{
+      const showRawSample = await runCli([
+        'show',
+        fixture.samples.lookupIds[0],
+        '--vault',
+        fixture.vaultRoot,
+      ])
+      assert.equal(showRawSample.ok, false)
+      assert.equal(showRawSample.error?.code, 'not_found')
+
+      const showRawSampleViaSamplesCommand = await runCli<{
+        entity: {
+          id: string
+          kind: string
+        }
+      }>([
+        'samples',
+        'show',
+        fixture.samples.lookupIds[0],
+        '--vault',
+        fixture.vaultRoot,
+      ])
+      assert.equal(showRawSampleViaSamplesCommand.ok, true)
+      assert.equal(requireData(showRawSampleViaSamplesCommand).entity.id, fixture.samples.lookupIds[0])
+      assert.equal(requireData(showRawSampleViaSamplesCommand).entity.kind, 'sample')
+
+      const showMetricSample = await runCli<{
         entity: {
           id: string
           kind: string
         }
       }>([
         'show',
-        fixture.samples.lookupIds[0],
+        fixture.metricSample.id,
         '--vault',
         fixture.vaultRoot,
       ])
-      assert.equal(showSample.ok, true)
-      assert.equal(requireData(showSample).entity.id, fixture.samples.lookupIds[0])
-      assert.equal(requireData(showSample).entity.kind, 'sample')
+      assert.equal(showMetricSample.ok, true)
+      assert.equal(requireData(showMetricSample).entity.id, fixture.metricSample.id)
+      assert.equal(requireData(showMetricSample).entity.kind, 'metric_sample')
 
       const showMeal = await runCli<{
         entity: {
@@ -428,7 +492,7 @@ test(
       const invalidLookups = [
         [
           'xfm_placeholder',
-          'Transform ids identify an import batch, not a query-layer record. Use the returned lookupIds or `list --kind sample` instead.',
+          'Transform ids identify an import batch, not a query-layer record. Use returned sample ids with `samples show` or inspect them with `samples list` instead.',
         ],
         [
           'pack_placeholder',

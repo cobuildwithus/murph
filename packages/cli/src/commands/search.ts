@@ -189,7 +189,7 @@ export function registerSearchCommands(
       stream: z
         .array(z.string().min(1))
         .optional()
-        .describe('Optional sample streams; setting this also opts sample rows into search. Repeat --stream for multiple values.'),
+        .describe('Optional stream filter for stream-carrying records, including query-visible metric samples and summaries. Repeat --stream for multiple values.'),
       experiment: slugSchema
         .optional()
         .describe('Optional experiment slug filter.'),
@@ -362,7 +362,7 @@ export function registerSearchCommands(
         stream: z
           .array(z.string().min(1))
           .optional()
-          .describe('Optional streams; applies to sample summaries and any stream-carrying events. Repeat --stream for multiple values.'),
+          .describe('Optional streams; applies to metric sample summaries and any stream-carrying events. Repeat --stream for multiple values.'),
         entryType: z
           .array(z.string().min(1))
           .optional()
