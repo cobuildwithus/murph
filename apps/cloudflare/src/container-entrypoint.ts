@@ -7,7 +7,7 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -50,11 +50,15 @@ const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH =
   "/internal/deploy-openai-intercept-smoke";
+const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
+  "/internal/deploy-codex-shell-smoke";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
   "/internal/direct-r2-presigned-put-smoke";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
+const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
+const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.4-mini";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -124,6 +128,9 @@ interface HostedContainerRuntimeOptions {
       tlsCaCertificatePem?: string;
     },
   ) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
+  runCodexShellSmoke?: (
+    options: { signal: AbortSignal },
+  ) => Promise<HostedContainerCodexShellSmokeResult>;
   runOpenAiInterceptSmoke?: (
     options: { authority: HostedContainerRuntimeAuthority; signal: AbortSignal },
   ) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
@@ -143,6 +150,8 @@ interface HostedContainerRuntimeDependencies {
       signal: AbortSignal;
       tlsCaCertificatePem?: string;
     }) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
+  runCodexShellSmoke:
+    (options: { signal: AbortSignal }) => Promise<HostedContainerCodexShellSmokeResult>;
   runOpenAiInterceptSmoke:
     (options: {
       authority: HostedContainerRuntimeAuthority;
@@ -155,6 +164,22 @@ interface HostedContainerOpenAiInterceptSmokeResult {
   model: string;
   stderrBytes: number;
   stdoutBytes: number;
+}
+
+interface HostedContainerCodexShellSmokeResult {
+  client: "codex-app-server";
+  murphPathBytes: number;
+  noteAddBytes: number;
+  stderrBytes: number;
+  vaultCliLlmsBytes: number;
+  vaultCliPathBytes: number;
+  vaultShowBytes: number;
+}
+
+interface HostedContainerCodexCommandExecResult {
+  exitCode: number;
+  stderr: string;
+  stdout: string;
 }
 
 interface HostedContainerDirectR2PresignedPutSmokeResult {
@@ -290,6 +315,8 @@ export async function startHostedContainerEntrypoint(input: {
 
       const isOpenAiInterceptSmokeRequest =
         request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH;
+      const isCodexShellSmokeRequest =
+        request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH;
       const isDirectR2PresignedPutSmokeRequest =
         request.method === "POST"
         && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
@@ -299,6 +326,7 @@ export async function startHostedContainerEntrypoint(input: {
       if (
         !isWorkspaceInvocationRequest
         && !isOpenAiInterceptSmokeRequest
+        && !isCodexShellSmokeRequest
         && !isDirectR2PresignedPutSmokeRequest
       ) {
         discardUnreadRequestBody(request);
@@ -332,6 +360,27 @@ export async function startHostedContainerEntrypoint(input: {
         writeJsonResponse(response, 200, {
           ok: true,
           openAiIntercept: result,
+        });
+        return;
+      }
+
+      if (isCodexShellSmokeRequest) {
+        if (activeHostedRunnerJobCount > 0) {
+          discardUnreadRequestBody(request);
+          writeJsonResponse(response, 409, {
+            error: "Hosted runner is busy.",
+          });
+          return;
+        }
+        activeHostedRunnerJobCount += 1;
+        claimedRunnerSlot = true;
+        discardUnreadRequestBody(request);
+        const result = await runtime.runCodexShellSmoke({
+          signal: requestAbort.signal,
+        });
+        writeJsonResponse(response, 200, {
+          codexShell: result,
+          ok: true,
         });
         return;
       }
@@ -781,6 +830,8 @@ function resolveHostedContainerRuntimeDependencies(
     processIsolation: runtime?.processIsolation ?? false,
     runDirectR2PresignedPutSmoke:
       runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
+    runCodexShellSmoke:
+      runtime?.runCodexShellSmoke ?? runHostedContainerCodexShellSmoke,
     runOpenAiInterceptSmoke:
       runtime?.runOpenAiInterceptSmoke ?? runHostedContainerOpenAiInterceptSmoke,
   };
@@ -907,6 +958,449 @@ async function putHostedContainerDirectR2SmokePayload(input: {
     input.payload.once("error", finish);
     input.payload.pipe(clientRequest);
   });
+}
+
+async function runHostedContainerCodexShellSmoke(input: {
+  signal: AbortSignal;
+}): Promise<HostedContainerCodexShellSmokeResult> {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
+  try {
+    const codexHome = path.join(workspaceRoot, ".codex-smoke");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    await mkdir(codexHome, {
+      mode: 0o700,
+      recursive: true,
+    });
+    await chmod(codexHome, 0o700);
+    await mkdir(vaultRoot, {
+      mode: 0o700,
+      recursive: true,
+    });
+    await chmod(vaultRoot, 0o700);
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        createdAt: "2026-05-22T00:00:00.000Z",
+        formatVersion: 1,
+        timezone: "UTC",
+        title: "Hosted Codex Shell Smoke",
+        vaultId: "vault_01JY0000000000000000000000",
+      }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(vaultRoot, "CORE.md"),
+      [
+        "---",
+        "schemaVersion: hv/core@v1",
+        "vaultId: vault_01JY0000000000000000000000",
+        "title: Hosted Codex Shell Smoke",
+        "---",
+        "# Hosted Codex Shell Smoke",
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(codexHome, "config.toml"),
+      buildHostedContainerCodexShellSmokeConfig(),
+      { mode: 0o600 },
+    );
+
+    return await runHostedContainerCodexShellAppServerProbe({
+      codexHome,
+      signal: input.signal,
+      vaultRoot,
+    });
+  } finally {
+    await rm(workspaceRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}
+
+function buildHostedContainerCodexShellSmokeConfig(): string {
+  return [
+    `model = ${JSON.stringify(HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL)}`,
+    'model_provider = "hosted-shell-smoke"',
+    'model_reasoning_effort = "low"',
+    'approval_policy = "never"',
+    'sandbox_mode = "danger-full-access"',
+    "",
+    '[model_providers."hosted-shell-smoke"]',
+    'name = "OpenAI"',
+    'base_url = "https://api.openai.com/v1"',
+    'env_key = "OPENAI_API_KEY"',
+    'wire_api = "responses"',
+    'requires_openai_auth = false',
+    "request_max_retries = 0",
+    "stream_max_retries = 0",
+    "",
+    "[skills]",
+    "include_instructions = false",
+    "",
+    "[skills.bundled]",
+    "enabled = false",
+    "",
+    "[history]",
+    'persistence = "none"',
+    "",
+    "[shell_environment_policy]",
+    'inherit = "all"',
+    'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR"]',
+    "",
+  ].join("\n");
+}
+
+async function runHostedContainerCodexShellAppServerProbe(input: {
+  codexHome: string;
+  signal: AbortSignal;
+  vaultRoot: string;
+}): Promise<HostedContainerCodexShellSmokeResult> {
+  return await new Promise((resolve, reject) => {
+    let stdoutBuffer = "";
+    let stderrBytes = 0;
+    let settled = false;
+    let nextRequestId = 1;
+    let timeout: NodeJS.Timeout | null = null;
+    let abort: () => void = () => {};
+    const pending = new Map<number, {
+      label: string;
+      reject: (error: Error) => void;
+      resolve: (value: Record<string, unknown>) => void;
+    }>();
+    const child = spawn("codex", ["app-server"], {
+      cwd: input.vaultRoot,
+      env: buildHostedContainerCodexShellSmokeProcessEnv(input),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const finish = (error?: Error, result?: HostedContainerCodexShellSmokeResult): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      input.signal.removeEventListener("abort", abort);
+      for (const request of pending.values()) {
+        request.reject(error ?? new Error("Hosted Codex shell smoke stopped."));
+      }
+      pending.clear();
+      try {
+        child.stdin.end();
+      } catch {
+        // Best-effort cleanup for a diagnostic-only smoke process.
+      }
+      child.kill();
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(result ?? {
+        client: "codex-app-server",
+        murphPathBytes: 0,
+        noteAddBytes: 0,
+        stderrBytes,
+        vaultCliLlmsBytes: 0,
+        vaultCliPathBytes: 0,
+        vaultShowBytes: 0,
+      });
+    };
+
+    const fail = (error: Error): void => {
+      finish(error);
+    };
+
+    abort = (): void => {
+      fail(new Error("Hosted Codex shell smoke aborted."));
+    };
+    timeout = setTimeout(() => {
+      fail(new Error(`Hosted Codex shell smoke timed out. stderrBytes=${stderrBytes}`));
+    }, HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS);
+
+    input.signal.addEventListener("abort", abort, { once: true });
+    child.stderr?.on("data", (chunk) => {
+      stderrBytes += Buffer.byteLength(chunk);
+    });
+    child.stdout?.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      const lines = stdoutBuffer.split(/\r?\n/u);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          fail(new Error("Hosted Codex shell smoke app-server emitted malformed JSON."));
+          return;
+        }
+        const message = readHostedContainerCodexRpcMessage(parsed);
+        if (typeof message.id !== "number") {
+          continue;
+        }
+        const request = pending.get(message.id);
+        if (!request) {
+          continue;
+        }
+        pending.delete(message.id);
+        if (message.error !== undefined) {
+          request.reject(new Error(
+            `Hosted Codex shell smoke request failed for ${request.label}. `
+              + `errorBytes=${Buffer.byteLength(JSON.stringify(message.error), "utf8")}`,
+          ));
+          continue;
+        }
+        request.resolve(message);
+      }
+    });
+    child.once("error", fail);
+    child.once("exit", (code, signal) => {
+      if (!settled) {
+        fail(new Error(
+          `Hosted Codex shell smoke app-server exited early with ${code ?? signal ?? "unknown"}. `
+            + `stderrBytes=${stderrBytes}`,
+        ));
+      }
+    });
+
+    const sendRequest = (
+      label: string,
+      method: string,
+      params: Record<string, unknown>,
+    ): Promise<Record<string, unknown>> => {
+      const id = nextRequestId;
+      nextRequestId += 1;
+      return new Promise((requestResolve, requestReject) => {
+        pending.set(id, {
+          label,
+          reject: requestReject,
+          resolve: requestResolve,
+        });
+        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`, (error) => {
+          if (!error) {
+            return;
+          }
+          pending.delete(id);
+          requestReject(error);
+          fail(new Error(`Hosted Codex shell smoke failed to write ${label}.`));
+        });
+      });
+    };
+
+    const sendNotification = (method: string, params: Record<string, unknown>): void => {
+      child.stdin.write(`${JSON.stringify({ method, params })}\n`);
+    };
+
+    const execCommand = async (
+      label: string,
+      command: readonly string[],
+    ): Promise<HostedContainerCodexCommandExecResult> => {
+      const message = await sendRequest(label, "command/exec", {
+        command,
+        timeoutMs: 15_000,
+      });
+      const result = readHostedContainerCodexCommandExecResult(message.result);
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Hosted Codex shell smoke command failed for ${label}. `
+            + `exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} `
+            + `stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
+        );
+      }
+      return result;
+    };
+
+    void (async () => {
+      await sendRequest("initialize", "initialize", {
+        clientInfo: {
+          name: "hosted-codex-shell-smoke",
+          version: "1",
+        },
+      });
+      sendNotification("initialized", {});
+      const environmentProbe = readHostedContainerCodexShellEnvironmentProbe(
+        (await execCommand("environment-probe", [
+          "node",
+          "-e",
+          buildHostedContainerCodexShellEnvironmentProbeScript(),
+          input.vaultRoot,
+        ])).stdout,
+      );
+      const vaultCliLlms = await execCommand("vault-cli-llms", [
+        "vault-cli",
+        "--llms",
+        "--format",
+        "json",
+      ]);
+      const vaultShow = await execCommand("vault-show", [
+        "vault-cli",
+        "vault",
+        "show",
+        "--format",
+        "json",
+      ]);
+      const noteAdd = await execCommand("event-note-add", [
+        "vault-cli",
+        "event",
+        "note",
+        "add",
+        "--note",
+        "Hosted deploy smoke note",
+        "--format",
+        "json",
+      ]);
+      finish(undefined, {
+        client: "codex-app-server",
+        murphPathBytes: environmentProbe.murphPathBytes,
+        noteAddBytes: Buffer.byteLength(noteAdd.stdout, "utf8"),
+        stderrBytes,
+        vaultCliLlmsBytes: Buffer.byteLength(vaultCliLlms.stdout, "utf8"),
+        vaultCliPathBytes: environmentProbe.vaultCliPathBytes,
+        vaultShowBytes: Buffer.byteLength(vaultShow.stdout, "utf8"),
+      });
+    })().catch((error: unknown) => {
+      fail(error instanceof Error ? error : new Error("Hosted Codex shell smoke failed."));
+    });
+  });
+}
+
+function buildHostedContainerCodexShellSmokeProcessEnv(input: {
+  codexHome: string;
+  vaultRoot: string;
+}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    CODEX_HOME: input.codexHome,
+    HOME: path.dirname(input.vaultRoot),
+    OPENAI_API_KEY: "hosted-codex-shell-smoke-secret",
+    PATH: buildHostedRunnerExecutablePath(process.env.PATH),
+    TMPDIR: path.dirname(input.vaultRoot),
+    VAULT: input.vaultRoot,
+  };
+
+  copyOptionalHostedContainerSmokeEnv(env, "CI");
+  copyOptionalHostedContainerSmokeEnv(env, "COLORTERM");
+  copyOptionalHostedContainerSmokeEnv(env, "FORCE_COLOR");
+  copyOptionalHostedContainerSmokeEnv(env, "LANG");
+  copyOptionalHostedContainerSmokeEnv(env, "LC_ALL");
+  copyOptionalHostedContainerSmokeEnv(env, "LC_CTYPE");
+  copyOptionalHostedContainerSmokeEnv(env, "NO_COLOR");
+  copyOptionalHostedContainerSmokeEnv(env, "TERM");
+  return env;
+}
+
+function buildHostedContainerCodexShellEnvironmentProbeScript(): string {
+  return `
+const fs = require("node:fs");
+const path = require("node:path");
+const expectedVaultRoot = process.argv[1];
+function findExecutable(name) {
+  const pathValue = process.env.PATH || "";
+  for (const directory of pathValue.split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  return "";
+}
+process.stdout.write(JSON.stringify({
+  murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
+  providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY),
+  vaultCliPathBytes: Buffer.byteLength(findExecutable("vault-cli"), "utf8"),
+  vaultRootInherited: process.env.VAULT === expectedVaultRoot,
+}));
+`;
+}
+
+function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
+  murphPathBytes: number;
+  vaultCliPathBytes: number;
+} {
+  const record = readHostedContainerJsonObject(stdout, "Hosted Codex shell environment probe");
+  const murphPathBytes = readHostedContainerPositiveNumber(
+    record.murphPathBytes,
+    "Hosted Codex shell environment probe.murphPathBytes",
+  );
+  const vaultCliPathBytes = readHostedContainerPositiveNumber(
+    record.vaultCliPathBytes,
+    "Hosted Codex shell environment probe.vaultCliPathBytes",
+  );
+  if (record.vaultRootInherited !== true) {
+    throw new Error("Hosted Codex shell smoke did not inherit VAULT.");
+  }
+  if (record.providerCredentialPresent === true) {
+    throw new Error("Hosted Codex shell smoke leaked provider credentials into command env.");
+  }
+  return {
+    murphPathBytes,
+    vaultCliPathBytes,
+  };
+}
+
+function readHostedContainerCodexRpcMessage(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted Codex shell smoke RPC message must be an object.");
+  }
+  return value as Record<string, unknown>;
+}
+
+function readHostedContainerCodexCommandExecResult(
+  value: unknown,
+): HostedContainerCodexCommandExecResult {
+  const record = readHostedContainerRecord(value, "Hosted Codex command result");
+  const exitCode = record.exitCode;
+  const stdout = record.stdout;
+  const stderr = record.stderr;
+  if (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode)) {
+    throw new TypeError("Hosted Codex command result.exitCode must be an integer.");
+  }
+  if (typeof stdout !== "string") {
+    throw new TypeError("Hosted Codex command result.stdout must be a string.");
+  }
+  if (typeof stderr !== "string") {
+    throw new TypeError("Hosted Codex command result.stderr must be a string.");
+  }
+  return {
+    exitCode,
+    stderr,
+    stdout,
+  };
+}
+
+function readHostedContainerJsonObject(
+  value: string,
+  label: string,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new SyntaxError(`${label} was not valid JSON.`);
+  }
+  return readHostedContainerRecord(parsed, label);
+}
+
+function readHostedContainerRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function readHostedContainerPositiveNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive number.`);
+  }
+  return value;
 }
 
 async function runHostedContainerOpenAiInterceptSmoke(input: {
