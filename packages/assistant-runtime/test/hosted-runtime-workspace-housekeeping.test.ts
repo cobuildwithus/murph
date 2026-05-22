@@ -26,6 +26,11 @@ vi.mock("@murphai/core", () => ({
 
 import {
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_BYTES_READ,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_CANDIDATES_SCANNED,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_ENVELOPES,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_ARTIFACT_BYTES,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_TOTAL_BYTES,
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON,
   isLegacyWearableReceiptCompactionWakeDue,
   runHostedWorkspaceHousekeepingPhase,
@@ -46,6 +51,9 @@ beforeEach(() => {
     compactedCount: 1,
     hasMore: false,
     mutated: true,
+    oversizedEnvelopeSkippedCount: 0,
+    oversizedEvidenceSkippedCount: 0,
+    scannedCount: 1,
     skippedCount: 0,
     touchedPaths: ["raw/integrations/garmin/2026/04/import_synthetic/receipt.json"],
   });
@@ -85,6 +93,26 @@ describe("hosted workspace housekeeping", () => {
       coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].deadlineMs,
       HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
     );
+    assert.equal(
+      coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxBytesRead,
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_BYTES_READ,
+    );
+    assert.equal(
+      coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxCandidatesScanned,
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_CANDIDATES_SCANNED,
+    );
+    assert.equal(
+      coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxEnvelopes,
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_ENVELOPES,
+    );
+    assert.equal(
+      coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxEvidenceArtifactBytes,
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_ARTIFACT_BYTES,
+    );
+    assert.equal(
+      coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxEvidenceTotalBytes,
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_TOTAL_BYTES,
+    );
   });
 
   it("reschedules the same maintenance wake when bounded compaction has more work", async () => {
@@ -94,6 +122,9 @@ describe("hosted workspace housekeeping", () => {
       compactedCount: 1,
       hasMore: true,
       mutated: true,
+      oversizedEnvelopeSkippedCount: 0,
+      oversizedEvidenceSkippedCount: 0,
+      scannedCount: 5,
       skippedCount: 0,
       touchedPaths: [],
     });
@@ -127,6 +158,9 @@ describe("hosted workspace housekeeping", () => {
       compactedCount: 0,
       hasMore: false,
       mutated: false,
+      oversizedEnvelopeSkippedCount: 0,
+      oversizedEvidenceSkippedCount: 0,
+      scannedCount: 0,
       skippedCount: 0,
       touchedPaths: [],
     });

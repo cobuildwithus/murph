@@ -536,6 +536,7 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
     case "assistant":
     case "assistant_due":
     case "device-sync.reconcile":
+    case "legacy-wearable-receipt-compaction-v1":
     case "mailbox":
     case "runtime.failed":
       return reason;
