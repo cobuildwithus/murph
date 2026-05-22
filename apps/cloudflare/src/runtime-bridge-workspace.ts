@@ -13,7 +13,9 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
+  createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics,
   type HostedWorkspaceSnapshotArchiveExtraPath,
+  type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -171,6 +173,8 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           redactedStatus: checkpointInput.redactedStatus ?? null,
           snapshotRef: null,
         },
+        snapshotDiagnosticsHashSecret:
+          readHostedWorkspaceSnapshotDiagnosticsHashSecret(runtime),
         userId: input.request.userId,
         vaultRoot,
       });
@@ -258,6 +262,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
+  snapshotDiagnosticsHashSecret?: string | null;
   userId: string;
   vaultRoot: string;
 }): Promise<{
@@ -286,6 +291,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
     ...input,
     legacyMaterialization,
     request,
+    snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
   });
 }
 
@@ -318,6 +324,7 @@ interface HostedWorkspaceBridgeV2SnapshotInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceIdleCheckpointRequest;
+  snapshotDiagnosticsHashSecret: string | null;
   userId: string;
   vaultRoot: string;
 }
@@ -357,6 +364,7 @@ async function createHostedWorkspaceV2Snapshot(
   let encryptedByteSize = 0;
   let workspaceSnapshotFileCount = 0;
   let workspaceSnapshotPlainBytes = 0;
+  let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
   let encryptedTemporaryDirectoryPath: string | null = null;
   let snapshotSession: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startSnapshotSession"]>> | null = null;
   let checkpointAttempted = false;
@@ -419,11 +427,17 @@ async function createHostedWorkspaceV2Snapshot(
       key: "snapshotArchiveBuildElapsedMs",
       run: async () => {
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
+          codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           vaultRoot: input.vaultRoot,
         });
+        workspaceSnapshotSizeDiagnostics =
+          createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics({
+            archivePlan,
+            hashSecret: input.snapshotDiagnosticsHashSecret,
+          });
         return await createEncryptedWorkspaceSnapshotFile({
           aad: activeSnapshotSession.encryption.aad,
           archiveEntries: archivePlan.entries,
@@ -458,6 +472,9 @@ async function createHostedWorkspaceV2Snapshot(
           snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           totalPlainBytes: encrypted.totalPlainBytes,
           warnEncryptedBytes,
+          ...createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
+            workspaceSnapshotSizeDiagnostics,
+          ),
         },
         level: "warn",
         message: "Hosted workspace snapshot exceeded the warning threshold.",
@@ -595,6 +612,9 @@ async function createHostedWorkspaceV2Snapshot(
         ...(workspaceSnapshotPlainBytes > 0
           ? { workspaceSnapshotPlainBytes }
           : {}),
+        ...createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
+          workspaceSnapshotSizeDiagnostics,
+        ),
         snapshotElapsedMs: Date.now() - startedAt,
         snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
       },
@@ -638,6 +658,7 @@ async function createHostedWorkspaceV2Snapshot(
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
     snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+    sizeDiagnostics: workspaceSnapshotSizeDiagnostics,
     timingDetails: snapshotTimings,
   });
 
@@ -826,6 +847,36 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 }
 
+function readHostedWorkspaceSnapshotDiagnosticsHashSecret(
+  runtime: Pick<HostedRuntimeBridgeNormalizedRuntime, "platformEnv">,
+): string | null {
+  const rawSecret = runtime.platformEnv.HOSTED_LOG_FINGERPRINT_SECRET ?? null;
+  const secret = rawSecret?.trim() ?? "";
+  return secret.length > 0 ? secret : null;
+}
+
+function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
+  diagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null,
+): HostedRuntimeRedactedJson {
+  if (!diagnostics) {
+    return {};
+  }
+
+  return {
+    workspaceSnapshotClassSummary: diagnostics.workspaceSnapshotClassSummary,
+    workspaceSnapshotExternalArtifactBytes:
+      diagnostics.workspaceSnapshotExternalArtifactBytes,
+    workspaceSnapshotExternalArtifactCount:
+      diagnostics.workspaceSnapshotExternalArtifactCount,
+    workspaceSnapshotFingerprintStatus: diagnostics.workspaceSnapshotFingerprintStatus,
+    workspaceSnapshotIncludedFileCount: diagnostics.workspaceSnapshotIncludedFileCount,
+    workspaceSnapshotInlineBytes: diagnostics.workspaceSnapshotInlineBytes,
+    workspaceSnapshotLargestFiles: diagnostics.workspaceSnapshotLargestFiles,
+    workspaceSnapshotMaxFileBytes: diagnostics.workspaceSnapshotMaxFileBytes,
+    workspaceSnapshotMaxFileClass: diagnostics.workspaceSnapshotMaxFileClass,
+  };
+}
+
 async function writeHostedCheckpointSnapshotMetricLog(input: {
   encryptedByteSize: number;
   fileCount: number;
@@ -836,6 +887,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
+  sizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
   timingDetails: HostedWorkspaceSnapshotTimingDetails;
 }): Promise<void> {
   if (!input.platform.logPort) {
@@ -857,6 +909,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,
     workspaceSnapshotFileCount: input.fileCount,
     workspaceSnapshotPlainBytes: input.plainByteSize,
+    ...createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(input.sizeDiagnostics),
     snapshotMode: input.snapshotMode,
   };
 

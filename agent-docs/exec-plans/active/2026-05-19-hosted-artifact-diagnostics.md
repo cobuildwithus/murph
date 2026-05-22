@@ -36,6 +36,11 @@ bug causing large preserved artifact sets and failed snapshots.
   entries, kind mismatch, or artifact integrity failures.
 - Snapshot counts suggest at least one external artifact is carried forward from
   the base manifest rather than put by the current attempt.
+- 2026-05-22 production v2 direct-R2 snapshots show one slow runtime at about
+  1.095GB plain archive input but about 47MB encrypted/compressed output, with
+  only about 1.2k files. Current v2 logs do not expose class totals or largest
+  file metadata, so the exact source class is not yet provable without
+  sensitive snapshot inspection.
 
 ## Plan
 
@@ -43,11 +48,14 @@ bug causing large preserved artifact sets and failed snapshots.
    validation detail and code detail without raw cause text.
 2. Add focused tests proving `snapshot_failed` logs include the useful safe
    validation clause and still omit sensitive/free-form payloads.
-3. Use parallel investigation findings to isolate the artifact duplication or
+3. Add metadata-only v2 direct snapshot size diagnostics from the archive plan:
+   class totals, largest-file class/root/extension/depth/bytes, and HMAC path
+   hashes when the Worker log fingerprint secret is available.
+4. Use parallel investigation findings to isolate the artifact duplication or
    stale preserved-reference path.
-4. Add the smallest proving integration/e2e-style regression for the identified
+5. Add the smallest proving integration/e2e-style regression for the identified
    bug.
-5. Run focused verification, typecheck, required audits, and a scoped commit.
+6. Run focused verification, typecheck, required audits, and a scoped commit.
 
 ## Verification
 

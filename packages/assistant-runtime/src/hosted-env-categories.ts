@@ -50,10 +50,13 @@ export const HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES = [
 // vars authorize privileged Bot API traffic, and mailbox platform vars fetch
 // and unwrap hosted mailbox payload roots. Junction runtime vars hydrate
 // provider-owned execution credentials without serializing them into user env.
+// The log fingerprint secret enables metadata-only HMAC diagnostics and must
+// not be exposed through forwarded child env or member-supplied user env.
 export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   ...HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES,
   ...HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
   ...HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
+  "HOSTED_LOG_FINGERPRINT_SECRET",
 ] as const;
 
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
