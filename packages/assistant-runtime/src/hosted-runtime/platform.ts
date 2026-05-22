@@ -258,6 +258,11 @@ export interface HostedRuntimeWorkspaceSnapshotSessionCompleteResult {
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }
 
+export interface HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
+  snapshotDirectR2PresignElapsedMs?: number;
+  snapshotDirectR2PutElapsedMs?: number;
+}
+
 export interface HostedRuntimeWorkspaceSnapshotPort {
   abortSnapshotSession(input: {
     objectKey: string;
@@ -273,7 +278,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     objectKey: string;
     sourceFilePath: string;
     snapshotId: string;
-  }): Promise<void>;
+  }): Promise<HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails | void>;
   restoreWorkspaceSnapshot(input: {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;

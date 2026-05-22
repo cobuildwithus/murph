@@ -352,6 +352,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           prunedRuntimeSymlinkCount: 1,
           runtimeSymlinkPruneScope: "operator-home",
           snapshotArchiveBuildElapsedMs: expect.any(Number),
+          snapshotDirectR2PresignElapsedMs: expect.any(Number),
+          snapshotDirectR2PutElapsedMs: expect.any(Number),
           snapshotDirectR2UploadElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
           workspaceSnapshotFileCount: snapshotRef.archive.fileCount,
@@ -1797,6 +1799,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       redactedJson: expect.objectContaining({
         checkpointReason: "idle_shutdown",
         snapshotArchiveBuildElapsedMs: expect.any(Number),
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
         snapshotDirectR2UploadElapsedMs: expect.any(Number),
         snapshotMode: "workspace_snapshot_v2",
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
@@ -2489,6 +2493,10 @@ function createPlatform(input: {
           objectKey: request.objectKey,
           snapshotId: request.snapshotId,
         });
+        return {
+          snapshotDirectR2PresignElapsedMs: 3,
+          snapshotDirectR2PutElapsedMs: 5,
+        };
       },
       abortSnapshotSession: async (request: {
         objectKey: string;
