@@ -1548,6 +1548,46 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
+  it("requires the active write fence before injecting Linq credentials for attachment metadata reads", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/attachments/attachment_metadata_1", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe(
+      "https://api.linqapp.com/api/partner/v3/attachments/attachment_metadata_1",
+    );
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -1763,6 +1803,27 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.linqapp.com/api/partner/v3/phone_numbers", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Linq attachment metadata reads without a valid runtime write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/attachments/attachment_metadata_1", {
         headers: {
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         },
