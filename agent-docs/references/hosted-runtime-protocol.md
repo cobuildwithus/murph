@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-21
+Last verified: 2026-05-22
 
 ## Decision
 
@@ -151,25 +151,23 @@ needed, calls Cloudflare's short-lived `ensure-processing` adapter. There is no
 webhook-to-Cloudflare runner nudge path and no second wake authority. If the
 Temporal signal cannot be accepted after the mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
-ingress fail. The minute hosted mailbox lag sweeper is the bounded recovery
-backstop for missed workflow signals: it compares mailbox high-water rows with
-checkpointed import status, finds the oldest uncheckpointed row for each lagged
-lane, and signals Temporal by opaque user/work pointer only after a freshness
-grace period so normal signal-driven imports can reach their quiet checkpoint.
-Redacted runtime logs remain diagnostic evidence only; they must not be merged
-into checkpointed import status for workflow completion, status projection, or
-sweeper decisions. A DB-backed pending-handoff reconciler remains future
-hardening for exact workflow-signal failure journaling.
+ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
+workflow signal recovery remains future hardening for a DB-backed
+pending-handoff reconciler or Temporal-owned reconciler. Redacted runtime logs
+remain diagnostic evidence only; they must not be merged into checkpointed
+import status for workflow completion, status projection, or recovery decisions.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
 
 Non-conversation control wakes follow the same durable-demand rule. Manual
-runs, browser-vault refreshes, device-sync recovery handoffs, and mailbox-lag
-recovery observations append system-mailbox control rows before Temporal is
-signaled. Temporal signals are wake hints; the demand endpoint reads the pending
-mailbox control row to recover the run source/reason, and the runtime clears the
-request only by importing the row and advancing mailbox watermarks.
+runs, browser-vault refreshes, and device-sync recovery handoffs append
+system-mailbox control rows before Temporal is signaled. Temporal signals are
+wake hints; the demand endpoint reads the pending mailbox control row to recover
+the run source/reason, and the runtime clears the request only by importing the
+row and advancing mailbox watermarks. Historical `runtime.mailbox-lag-observed`
+control rows remain importable for deploy-skew and drain compatibility, but
+there is no active Vercel producer for them.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

@@ -48,6 +48,7 @@ export async function sendHostedProviderTelegramMessage(
 ): Promise<HostedRuntimeTelegramSendResponse> {
   return await sendTelegramMessage(request, {
     env: dependencies.env,
+    fetchImplementation: dependencies.fetchImplementation,
     signal: dependencies.signal,
   });
 }
@@ -61,6 +62,7 @@ export async function sendHostedProviderTelegramChatAction(
     target: request.target,
   }, {
     env: dependencies.env,
+    fetchImplementation: dependencies.fetchImplementation,
     signal: dependencies.signal,
   });
   await handle.stop();
@@ -70,7 +72,10 @@ export async function getHostedProviderTelegramFile(
   request: HostedRuntimeTelegramGetFileRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeTelegramFile | null> {
-  const driver = createHostedTelegramAttachmentDownloadDriver(dependencies.env);
+  const driver = createHostedTelegramAttachmentDownloadDriver({
+    env: dependencies.env,
+    fetchImplementation: dependencies.fetchImplementation,
+  });
   if (!driver) {
     return null;
   }
@@ -82,7 +87,10 @@ export async function downloadHostedProviderTelegramFile(
   request: HostedRuntimeTelegramDownloadFileRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<Uint8Array | null> {
-  const driver = createHostedTelegramAttachmentDownloadDriver(dependencies.env);
+  const driver = createHostedTelegramAttachmentDownloadDriver({
+    env: dependencies.env,
+    fetchImplementation: dependencies.fetchImplementation,
+  });
   if (!driver) {
     return null;
   }
@@ -125,6 +133,7 @@ export async function sendHostedProviderWhatsAppMessage(
 ): Promise<HostedRuntimeWhatsAppSendResponse> {
   return await sendWhatsAppMessage(request, {
     env: dependencies.env,
+    fetchImplementation: dependencies.fetchImplementation,
     signal: dependencies.signal,
   });
 }

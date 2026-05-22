@@ -4,10 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteHostedProviderLinqMessages,
+  downloadHostedProviderTelegramFile,
+  getHostedProviderTelegramFile,
   markHostedProviderLinqRead,
   sendHostedProviderLinqChatAction,
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
+  sendHostedProviderTelegramMessage,
   sendHostedProviderWhatsAppMessage,
 } from "../src/hosted-provider-effects.ts";
 
@@ -48,6 +51,107 @@ describe("hosted provider effects", () => {
       action: "typing",
       chat_id: "12345",
     });
+  });
+
+  it("uses the hosted provider fetch dependency for Telegram effects", async () => {
+    const rawGlobalFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => {
+      throw new Error("raw global fetch should not be used");
+    });
+    vi.stubGlobal("fetch", rawGlobalFetch);
+
+    const fetchImplementation = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/sendChatAction")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/sendMessage")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: {
+            message_id: 123,
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/getFile?file_id=file_123")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: {
+            file_id: "file_123",
+            file_path: "photos/cat.jpg",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/photos/cat.jpg")) {
+        return new Response(Uint8Array.from([1, 2, 3]), {
+          status: 200,
+        });
+      }
+
+      return new Response(null, {
+        status: 500,
+      });
+    });
+    const dependencies = {
+      env: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: fetchImplementation as typeof fetch,
+    };
+
+    await expect(sendHostedProviderTelegramMessage({
+      message: "hello",
+      target: "12345",
+    }, dependencies)).resolves.toEqual({
+      cleanupMessages: [{
+        messageId: "123",
+        target: "12345",
+      }],
+      providerMessageId: "123",
+      target: "12345",
+    });
+    await sendHostedProviderTelegramChatAction({
+      action: "typing",
+      target: "12345",
+    }, dependencies);
+    await expect(getHostedProviderTelegramFile({
+      fileId: "file_123",
+    }, dependencies)).resolves.toEqual({
+      file_id: "file_123",
+      file_path: "photos/cat.jpg",
+    });
+    await expect(downloadHostedProviderTelegramFile({
+      filePath: "/photos/cat.jpg",
+    }, dependencies)).resolves.toEqual(Uint8Array.from([1, 2, 3]));
+
+    expect(rawGlobalFetch).not.toHaveBeenCalled();
+    expect(fetchImplementation.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://api.telegram.example/bottelegram-token/sendMessage",
+      "https://api.telegram.example/bottelegram-token/sendChatAction",
+      "https://api.telegram.example/bottelegram-token/getFile?file_id=file_123",
+      "https://files.telegram.example/bottelegram-token/photos/cat.jpg",
+    ]);
   });
 
   it("recovers stale Linq thread sends inside the provider effect", async () => {
@@ -526,5 +630,49 @@ describe("hosted provider effects", () => {
         preview_url: false,
       },
     });
+  });
+
+  it("uses the hosted provider fetch dependency for WhatsApp effects", async () => {
+    const rawGlobalFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => {
+      throw new Error("raw global fetch should not be used");
+    });
+    vi.stubGlobal("fetch", rawGlobalFetch);
+
+    const fetchImplementation = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(JSON.stringify({
+      contacts: [{ wa_id: "15550100001" }],
+      messages: [{ id: "wamid.MESSAGE_1" }],
+      messaging_product: "whatsapp",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await expect(sendHostedProviderWhatsAppMessage({
+      message: "hello",
+      target: "15550100001",
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: "test-access-token",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      },
+      fetchImplementation,
+    })).resolves.toEqual({
+      providerMessageId: "wamid.MESSAGE_1",
+      providerThreadId: "15550100001",
+      target: "15550100001",
+    });
+
+    expect(rawGlobalFetch).not.toHaveBeenCalled();
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchImplementation.mock.calls[0]?.[0]),
+      "https://graph.facebook.com/v25.0/phone-number-id-1/messages",
+    );
   });
 });

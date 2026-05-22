@@ -10,10 +10,15 @@ const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 
 export function createHostedTelegramAttachmentDownloadDriver(
-  env: Readonly<Record<string, string | undefined>> = process.env,
+  options: {
+    env?: Readonly<Record<string, string | undefined>>;
+    fetchImplementation?: typeof fetch | null;
+  } = {},
 ): TelegramAttachmentDownloadDriver | null {
+  const env = options.env ?? process.env;
   const token = readHostedTelegramString(env, "TELEGRAM_BOT_TOKEN");
-  if (!token || typeof globalThis.fetch !== "function") {
+  const fetchImplementation = resolveHostedTelegramFetchImplementation(options.fetchImplementation);
+  if (!token || !fetchImplementation) {
     return null;
   }
 
@@ -31,7 +36,7 @@ export function createHostedTelegramAttachmentDownloadDriver(
 
   return {
     downloadFile: async (filePath, signal) => {
-      const response = await globalThis.fetch(`${fileBaseUrl}/bot${token}/${stripLeadingSlash(filePath)}`, {
+      const response = await fetchImplementation(`${fileBaseUrl}/bot${token}/${stripLeadingSlash(filePath)}`, {
         method: "GET",
         signal,
       });
@@ -47,7 +52,11 @@ export function createHostedTelegramAttachmentDownloadDriver(
     getFile: async (fileId, signal) => {
       const url = new URL(`${apiBaseUrl}/bot${token}/getFile`);
       url.searchParams.set("file_id", fileId);
-      return readHostedTelegramApiResult<TelegramFile>(url, signal);
+      return readHostedTelegramApiResult<TelegramFile>({
+        fetchImplementation,
+        signal,
+        url,
+      });
     },
   };
 }
@@ -104,10 +113,29 @@ function normalizeHostedTelegramBaseUrl(value: string | null, fallback: string):
   }
 }
 
-async function readHostedTelegramApiResult<T>(url: URL, signal?: AbortSignal): Promise<T> {
-  const response = await globalThis.fetch(url, {
+function resolveHostedTelegramFetchImplementation(
+  fetchImplementation: typeof fetch | null | undefined,
+): typeof fetch | null {
+  if (typeof fetchImplementation === "function") {
+    return fetchImplementation;
+  }
+  if (fetchImplementation === null) {
+    return null;
+  }
+
+  return typeof globalThis.fetch === "function"
+    ? globalThis.fetch.bind(globalThis) as typeof fetch
+    : null;
+}
+
+async function readHostedTelegramApiResult<T>(input: {
+  fetchImplementation: typeof fetch;
+  signal?: AbortSignal;
+  url: URL;
+}): Promise<T> {
+  const response = await input.fetchImplementation(input.url, {
     method: "GET",
-    signal,
+    signal: input.signal,
   });
 
   if (!response.ok) {

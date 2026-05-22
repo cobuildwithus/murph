@@ -42,6 +42,7 @@ import {
 } from "../src/device-providers/garmin-activity-normalizers.ts";
 import {
   buildWearableRawIngestEnvelope,
+  stableStringify,
 } from "../src/device-providers/raw-ingest-envelope.ts";
 import {
   normalizeGarminDailySummaries,
@@ -347,31 +348,37 @@ describe("garmin provider coverage", () => {
         omitted: undefined,
       },
     });
-
-    expect(envelope.payload).toEqual({
-      id: "activity-1",
+    const equivalentEnvelope = buildWearableRawIngestEnvelope({
+      provider: "garmin",
+      payload: {
+        id: "activity-1",
+      },
     });
+
+    expect(envelope.payloadHash).toBe(equivalentEnvelope.payloadHash);
+    expect(Object.hasOwn(envelope, "payload")).toBe(false);
   });
 
-  it("preserves raw ingest prototype-named payload fields as data", () => {
+  it("hashes raw ingest prototype-named payload fields as data without storing the payload", () => {
+    const payload = JSON.parse(
+      '{"id":"activity-1","__proto__":"blocked","nested":{"__proto__":"inner"}}',
+    );
     const envelope = buildWearableRawIngestEnvelope({
       provider: "garmin",
-      payload: JSON.parse(
-        '{"id":"activity-1","__proto__":"blocked","nested":{"__proto__":"inner"}}',
-      ),
+      payload,
+    });
+    const withoutPrototypeNamedFields = buildWearableRawIngestEnvelope({
+      provider: "garmin",
+      payload: {
+        id: "activity-1",
+        nested: {},
+      },
     });
 
-    expect(
-      envelope.payload &&
-      typeof envelope.payload === "object" &&
-      !Array.isArray(envelope.payload),
-    ).toBe(true);
-    const payload = envelope.payload as Record<string, unknown>;
-    const nested = payload.nested as Record<string, unknown>;
-
-    expect(Object.getOwnPropertyDescriptor(payload, "__proto__")?.value).toBe("blocked");
-    expect(Object.getOwnPropertyDescriptor(nested, "__proto__")?.value).toBe("inner");
-    expect(JSON.stringify(envelope.payload)).toContain('"__proto__":"blocked"');
+    expect(stableStringify(payload)).toContain('"__proto__":"blocked"');
+    expect(stableStringify(payload)).toContain('"__proto__":"inner"');
+    expect(envelope.payloadHash).not.toBe(withoutPrototypeNamedFields.payloadHash);
+    expect(Object.hasOwn(envelope, "payload")).toBe(false);
   });
 
   it("covers Garmin health timing fallbacks, sleep stage observations, and aggregate stage durations", () => {

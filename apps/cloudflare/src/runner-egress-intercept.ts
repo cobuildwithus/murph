@@ -59,6 +59,7 @@ const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
+const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
@@ -1514,34 +1515,73 @@ async function maybeHandleTelegramRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(
+  const apiProviderBase = readProviderBaseConfig(
     input.env.TELEGRAM_API_BASE_URL,
     DEFAULT_TELEGRAM_API_BASE_URL,
     input.env,
     { acceptFallbackBaseUrl: true },
   );
-  const pathMatch = readProviderPathMatch(input.url, providerBase);
-  if (!pathMatch) {
-    if (isKnownProviderHost(input.url, providerBase)) {
-      return disallowedProviderEgress();
+  const fileProviderBase = readProviderBaseConfig(
+    input.env.TELEGRAM_FILE_BASE_URL,
+    DEFAULT_TELEGRAM_FILE_BASE_URL,
+    input.env,
+    { acceptFallbackBaseUrl: true },
+  );
+
+  const apiPathMatch = readProviderPathMatch(input.url, apiProviderBase);
+  if (apiPathMatch) {
+    const operation = readTelegramSentinelOperation(apiPathMatch.pathnameSuffix);
+    if (operation) {
+      if (!isAllowedTelegramOperation(operation)) {
+        return disallowedProviderEgress();
+      }
+      return await handleTelegramTokenRewrite(input, apiPathMatch, (token) =>
+        `/bot${token}/${operation}`
+      );
     }
-    return null;
   }
 
-  const operation = readTelegramSentinelOperation(pathMatch.pathnameSuffix);
-  if (!operation || !isAllowedTelegramOperation(operation)) {
+  const filePathMatch = readProviderPathMatch(input.url, fileProviderBase);
+  if (filePathMatch) {
+    const filePath = readTelegramSentinelFilePath(filePathMatch.pathnameSuffix);
+    if (filePath) {
+      if (input.request.method !== "GET") {
+        return disallowedProviderEgress();
+      }
+      return await handleTelegramTokenRewrite(input, filePathMatch, (token) =>
+        `/bot${token}/${filePath}`
+      );
+    }
+  }
+
+  if (
+    isKnownProviderHost(input.url, apiProviderBase)
+    || isKnownProviderHost(input.url, fileProviderBase)
+  ) {
     return disallowedProviderEgress();
   }
 
+  return null;
+}
+
+async function handleTelegramTokenRewrite(
+  input: {
+    env: RunnerOutboundEnvironmentSource;
+    request: Request;
+    url: URL;
+    userId: string | null;
+  },
+  pathMatch: ProviderPathMatch,
+  createPathnameSuffix: (token: string) => string,
+): Promise<Response> {
   const authorized = await requestOwnsRuntimeWriteFence(input);
   if (!authorized) {
     return new Response("Unauthorized", { status: 401 });
   }
-
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
   const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
   const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
-  upstreamUrl.pathname = `${prefix}/bot${token}/${operation}`;
+  upstreamUrl.pathname = `${prefix}${createPathnameSuffix(token)}`;
   return await fetch(
     await createHostedRunnerUpstreamRequest(
       input.request,
@@ -1664,6 +1704,15 @@ function readTelegramSentinelOperation(pathname: string): string | null {
   }
   const operation = pathname.slice(prefix.length);
   return operation.length > 0 && !operation.includes("/") ? operation : null;
+}
+
+function readTelegramSentinelFilePath(pathname: string): string | null {
+  const prefix = `/bot${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/`;
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const filePath = pathname.slice(prefix.length);
+  return filePath.length > 0 ? filePath : null;
 }
 
 function isAllowedTelegramOperation(operation: string): boolean {

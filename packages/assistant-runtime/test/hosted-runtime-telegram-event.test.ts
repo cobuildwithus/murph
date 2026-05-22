@@ -120,6 +120,84 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
     );
   });
 
+  it("uses the provided fetch implementation for metadata and attachment downloads", async () => {
+    const rawGlobalFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => {
+      throw new Error("raw global fetch should not be used");
+    });
+    setFetch(rawGlobalFetch as typeof globalThis.fetch);
+
+    const fetchImplementation = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/getFile?file_id=file_123")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: {
+            file_id: "file_123",
+            file_path: "photos/cat.jpg",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/photos/cat.jpg")) {
+        return new Response(Uint8Array.from([7, 8, 9]), {
+          status: 200,
+        });
+      }
+
+      return new Response(null, {
+        status: 500,
+      });
+    });
+
+    const driver = createHostedTelegramAttachmentDownloadDriver({
+      env: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: fetchImplementation as typeof fetch,
+    });
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123", undefined)).resolves.toEqual({
+      file_id: "file_123",
+      file_path: "photos/cat.jpg",
+    });
+    await expect(driver.downloadFile("/photos/cat.jpg", undefined)).resolves.toEqual(
+      Uint8Array.from([7, 8, 9]),
+    );
+
+    expect(rawGlobalFetch).not.toHaveBeenCalled();
+    expect(fetchImplementation.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://api.telegram.example/bottelegram-token/getFile?file_id=file_123",
+      "https://files.telegram.example/bottelegram-token/photos/cat.jpg",
+    ]);
+  });
+
+  it("fails closed when provider fetch is explicitly unavailable", () => {
+    const rawGlobalFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => {
+      throw new Error("raw global fetch should not be used");
+    });
+    setFetch(rawGlobalFetch as typeof globalThis.fetch);
+
+    assert.equal(createHostedTelegramAttachmentDownloadDriver({
+      env: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      fetchImplementation: null,
+    }), null);
+    expect(rawGlobalFetch).not.toHaveBeenCalled();
+  });
+
   it("downloads attachment bytes, strips leading slashes, and fails closed on bad responses", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
     process.env.TELEGRAM_FILE_BASE_URL = "https://files.telegram.example/";

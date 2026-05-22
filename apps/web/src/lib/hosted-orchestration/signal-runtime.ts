@@ -16,14 +16,9 @@ import {
 
 import {
   appendHostedMailboxEnvelopeTx,
-  readHostedMailboxFirstPendingSystemItemCheckpoint,
   readHostedMailboxItemCheckpointById,
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
-import {
-  readHostedMailboxImportedSeqForLane,
-  readHostedMailboxRedactedStatusRecord,
-} from "../hosted-mailbox/lag";
 import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
@@ -75,11 +70,6 @@ export interface SignalHostedBrowserVaultRefreshInput {
 }
 
 export interface SignalHostedManualRunInput {
-  client?: HostedRuntimeTemporalSignalClient | null;
-  userId: string;
-}
-
-export interface SignalHostedMailboxLagObservedInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   userId: string;
 }
@@ -165,18 +155,6 @@ export async function signalHostedManualRunRuntime(
   });
 }
 
-export async function signalHostedMailboxLagObservedRuntime(
-  input: SignalHostedMailboxLagObservedInput,
-): Promise<HostedRuntimeSignalResult> {
-  return signalHostedRuntimeControlMailboxRequest({
-    coalescePendingSystemKind: "runtime.mailbox-lag-observed",
-    client: input.client,
-    kind: "runtime.mailbox-lag-observed",
-    source: "mailbox-lag",
-    userId: input.userId,
-  });
-}
-
 export async function signalHostedDeviceSyncMailboxRuntime(
   input: SignalHostedDeviceSyncMailboxInput,
 ): Promise<HostedRuntimeSignalResult> {
@@ -214,22 +192,14 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 
 async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
-  coalescePendingSystemKind?: HostedExecutionRuntimeControlWakeKind | null;
   kind: HostedExecutionRuntimeControlWakeKind;
   source: string;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = getPrisma();
-  const workspace = await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
-  const existingControlItem = await readCoalescedHostedRuntimeControlMailboxItem({
-    coalescePendingSystemKind: input.coalescePendingSystemKind ?? null,
-    kind: input.kind,
-    prisma,
-    userId: input.userId,
-    workspace,
-  });
+  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
   const occurredAt = new Date().toISOString();
-  const mailboxItem = existingControlItem ?? (await prisma.$transaction((tx) =>
+  const mailboxItem = (await prisma.$transaction((tx) =>
     appendHostedMailboxEnvelopeTx({
       envelope: buildHostedExecutionRuntimeControlWake({
         eventId: `runtime-control:${input.kind}:${randomUUID()}`,
@@ -253,33 +223,6 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
     }),
     userId: input.userId,
   });
-}
-
-async function readCoalescedHostedRuntimeControlMailboxItem(input: {
-  coalescePendingSystemKind: HostedExecutionRuntimeControlWakeKind | null;
-  kind: HostedExecutionRuntimeControlWakeKind;
-  prisma: ReturnType<typeof getPrisma>;
-  userId: string;
-  workspace: HostedWorkspaceRecord;
-}): Promise<HostedMailboxItemCheckpointRecord | null> {
-  if (input.coalescePendingSystemKind !== input.kind) {
-    return null;
-  }
-
-  const firstPendingSystemItem = await readHostedMailboxFirstPendingSystemItemCheckpoint({
-    afterSeq: readHostedMailboxImportedSeqForLane(
-      readHostedMailboxRedactedStatusRecord(input.workspace.redactedStatusJson),
-      "system",
-    ),
-    prisma: input.prisma,
-    userId: input.userId,
-  });
-
-  if (firstPendingSystemItem?.kind !== input.kind) {
-    return null;
-  }
-
-  return firstPendingSystemItem;
 }
 
 export async function signalHostedUserRuntimeWorkflow(

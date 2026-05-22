@@ -7,10 +7,6 @@
       "schedule": "* * * * *"
     },
     {
-      "path": "/api/internal/hosted-mailbox/lag-sweeper/cron",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/internal/device-sync/dirty-sweeper/cron",
       "schedule": "* * * * *"
     },
