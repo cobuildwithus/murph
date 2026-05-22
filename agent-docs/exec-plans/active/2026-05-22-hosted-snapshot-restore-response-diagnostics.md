@@ -45,6 +45,17 @@ smallest durable fix once the failing branch is proven.
   passed.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts agent-docs/exec-plans/active/2026-05-22-hosted-snapshot-restore-response-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
   passed.
+- `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-restore-codex-continuity.test.ts`
+  passed after adding the v2 continuity repair cases.
+- `pnpm --dir packages/assistant-runtime typecheck` passed.
+- `pnpm --dir packages/hosted-execution typecheck` passed.
+- `git diff --check -- packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts packages/assistant-runtime/test/hosted-runtime-workspace-restore-codex-continuity.test.ts packages/hosted-execution/src/runtime-control.ts agent-docs/exec-plans/active/2026-05-22-hosted-snapshot-restore-response-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+  passed.
+- Privacy scan of the scoped diff for local identifiers, phone numbers, auth
+  headers, bearer tokens, and secret-looking API keys returned no matches.
+- `bash scripts/workspace-verify.sh test:diff packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts packages/assistant-runtime/test/hosted-runtime-workspace-restore-codex-continuity.test.ts packages/hosted-execution/src/runtime-control.ts agent-docs/exec-plans/active/2026-05-22-hosted-snapshot-restore-response-diagnostics.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+  passed. Existing web lint warnings and a Next.js NFT trace warning remain
+  outside this patch.
 
 ## State
 
@@ -59,11 +70,25 @@ smallest durable fix once the failing branch is proven.
 - Adding metadata-only child runtime error-message categories so the next
   production attempt can name the failing class without logging message text,
   paths, object keys, hashes, or payloads.
+- Post-deploy child diagnostics now show corrupted/stale Codex continuity as the
+  dominant restore failure class: missing rollout coverage, unmanifested Codex
+  home files, and one rollout size mismatch. One data-key unwrap 404 also
+  occurred, but data-key/presign routes otherwise completed successfully and the
+  recurring blocker is continuity validation.
+- The newest user text has not reached the local Messages transcript or the
+  production mailbox `conversation.message` lane yet; current repair work is for
+  the earlier post-deploy ping that did reach hosted runtime and failed restore.
+- Current patch intent: on v2 snapshot restore, if only Codex provider continuity
+  validation is corrupt, clear provider resume continuity and continue from the
+  restored vault/mailbox state with a fresh provider session instead of failing
+  the whole hosted run.
+- Local patch verification is complete. Next step is a scoped commit, immediate
+  Cloudflare deploy, and post-deploy production repro/observability check.
 
 ## Open Questions
 
-- Which fixed child restore failure category appears after the next deploy and
-  retry?
+- Does production emit a successful reply after the continuity-repair deploy and
+  next message/retry?
 - Did the user's newest iMessage reach hosted ingress, or is there a separate
   upstream/local Messages delivery gap to investigate after runtime restore is
   observable?
