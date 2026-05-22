@@ -1,6 +1,6 @@
 # Device-sync Temporal single scheduler
 
-Status: active
+Status: completed
 Created: 2026-05-22
 Updated: 2026-05-22
 
@@ -56,4 +56,18 @@ Updated: 2026-05-22
 
 ## Verification
 
-- Pending focused test and typecheck runs.
+- PASS: focused hosted-web Vitest for device-sync wake/sweeper/recovery route,
+  hosted-orchestration signal runtime, and Vercel cron guard tests.
+- PASS: focused hosted-orchestrator-temporal Vitest for the device-sync
+  reconciler workflow/schedule and recovery-sweep activity.
+- PASS: `pnpm typecheck`.
+- PASS: `pnpm test:diff` for the device-sync scheduler/recovery cutover paths,
+  covering hosted-orchestrator Temporal typecheck/test and hosted-web verify.
+- PASS: security/privacy review found no findings.
+- PASS: coverage-write review found no missing high-value proof.
+- PASS with follow-up fix: final task review found deterministic recovery
+  re-signaling could be one-shot after mailbox import; fixed with explicit
+  `device_sync_recovery_requested` signaling and stable mailbox checkpoint
+  occurrence time, then reran focused Vitest, `pnpm typecheck`, and
+  `pnpm test:diff` for the mailbox/signal delta.
+Completed: 2026-05-22
