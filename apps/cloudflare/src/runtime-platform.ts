@@ -1001,13 +1001,20 @@ function createCloudflareHostedInternalFetch(
     }
 
     const headers = new Headers(request.headers);
-    const lease = await options.readCurrentLease?.() ?? null;
-    if (!lease) {
-      throw new Error(
-        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence lease.`,
-      );
+    const hasSuppliedWorkspaceSnapshotWriteFence =
+      url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore
+      && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+      && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
+      && headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+    if (!hasSuppliedWorkspaceSnapshotWriteFence) {
+      const lease = await options.readCurrentLease?.() ?? null;
+      if (!lease) {
+        throw new Error(
+          `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence lease.`,
+        );
+      }
+      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     }
-    writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     if (options.injectBoundUserIdHeader) {
       headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
     }
@@ -1449,53 +1456,76 @@ function createCloudflareWorkspaceSnapshotPort(input: {
   transport: HostedWebControlTransport | null;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
+  const sessionWriteFenceHeaders = new Map<string, Headers>();
+  const readSessionWriteFenceHeaders = async (
+    snapshotId: string,
+    description: string,
+  ): Promise<Headers> => {
+    const stored = sessionWriteFenceHeaders.get(snapshotId);
+    if (stored) {
+      return new Headers(stored);
+    }
+    return await requireHostedRuntimeWriteFenceHeaders(
+      input.workspaceCheckpointBridge,
+      description,
+    );
+  };
   const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
     async abortSnapshotSession(request) {
-      const headers = await requireHostedRuntimeWriteFenceHeaders(
-        input.workspaceCheckpointBridge,
+      const headers = await readSessionWriteFenceHeaders(
+        request.snapshotId,
         "Hosted workspace snapshot session abort",
       );
-      await fetchHostedJson({
-        body: {
-          objectKey: request.objectKey,
-          snapshotId: request.snapshotId,
-        },
-        description: "Hosted workspace snapshot session abort",
-        fetchImpl: input.fetchImpl,
-        headers,
-        redactedLogPath: "/workspace-snapshots/REDACTED",
-        method: "DELETE",
-        timeoutMs: input.timeoutMs,
-        url: new URL(
-          `/workspace-snapshots/${encodeURIComponent(request.snapshotId)}`,
-          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-        ),
-      });
+      try {
+        await fetchHostedJson({
+          body: {
+            objectKey: request.objectKey,
+            snapshotId: request.snapshotId,
+          },
+          description: "Hosted workspace snapshot session abort",
+          fetchImpl: input.fetchImpl,
+          headers,
+          redactedLogPath: "/workspace-snapshots/REDACTED",
+          method: "DELETE",
+          timeoutMs: input.timeoutMs,
+          url: new URL(
+            `/workspace-snapshots/${encodeURIComponent(request.snapshotId)}`,
+            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+          ),
+        });
+      } finally {
+        sessionWriteFenceHeaders.delete(request.snapshotId);
+      }
     },
 
     async completeSnapshotSession(request) {
-      const headers = await requireHostedRuntimeWriteFenceHeaders(
-        input.workspaceCheckpointBridge,
+      const headers = await readSessionWriteFenceHeaders(
+        request.ref.snapshotId,
         "Hosted workspace snapshot complete",
       );
-      const payload = await fetchHostedJson({
-        body: {
-          archive: request.ref.archive,
-          checkpointRequest: request.checkpointRequest,
-          objectKey: request.ref.objectKey,
-          snapshotId: request.ref.snapshotId,
-        },
-        description: "Hosted workspace snapshot complete",
-        fetchImpl: input.fetchImpl,
-        headers,
-        redactedLogPath: "/workspace-snapshots/REDACTED/complete",
-        method: "POST",
-        timeoutMs: input.timeoutMs,
-        url: new URL(
-          `/workspace-snapshots/${encodeURIComponent(request.ref.snapshotId)}/complete`,
-          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-        ),
-      });
+      let payload: unknown;
+      try {
+        payload = await fetchHostedJson({
+          body: {
+            archive: request.ref.archive,
+            checkpointRequest: request.checkpointRequest,
+            objectKey: request.ref.objectKey,
+            snapshotId: request.ref.snapshotId,
+          },
+          description: "Hosted workspace snapshot complete",
+          fetchImpl: input.fetchImpl,
+          headers,
+          redactedLogPath: "/workspace-snapshots/REDACTED/complete",
+          method: "POST",
+          timeoutMs: input.timeoutMs,
+          url: new URL(
+            `/workspace-snapshots/${encodeURIComponent(request.ref.snapshotId)}/complete`,
+            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+          ),
+        });
+      } finally {
+        sessionWriteFenceHeaders.delete(request.ref.snapshotId);
+      }
       const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
       const { checkpoint } = completed;
       if (checkpoint.checkpointed) {
@@ -1520,6 +1550,10 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         encryptedByteSize: request.encryptedByteSize,
         encryptedObjectSha256: request.encryptedObjectSha256,
         fetchImpl: input.fetchImpl,
+        headers: await readSessionWriteFenceHeaders(
+          request.snapshotId,
+          "Hosted workspace snapshot presign PUT",
+        ),
         objectKey: request.objectKey,
         snapshotId: request.snapshotId,
         timeoutMs: input.timeoutMs,
@@ -1675,7 +1709,9 @@ function createCloudflareWorkspaceSnapshotPort(input: {
           `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
         ),
       });
-      return parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
+      const started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
+      sessionWriteFenceHeaders.set(started.snapshotId, new Headers(headers));
+      return started;
     },
   };
   return port;
@@ -1963,15 +1999,17 @@ async function presignWorkspaceSnapshotPut(input: {
   encryptedByteSize: number;
   encryptedObjectSha256: string;
   fetchImpl: typeof fetch;
+  headers?: Headers;
   objectKey: string;
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): Promise<{ expiresAt: string; putUrl: string }> {
-  const headers = await requireHostedRuntimeWriteFenceHeaders(
-    input.workspaceCheckpointBridge,
-    "Hosted workspace snapshot presign PUT",
-  );
+  const headers = input.headers
+    ?? await requireHostedRuntimeWriteFenceHeaders(
+      input.workspaceCheckpointBridge,
+      "Hosted workspace snapshot presign PUT",
+    );
   const payload = await fetchHostedJson({
     body: {
       encryptedByteSize: input.encryptedByteSize,

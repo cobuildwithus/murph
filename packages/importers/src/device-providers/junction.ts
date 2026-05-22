@@ -103,12 +103,6 @@ interface MetricDescriptor {
   paths: readonly string[];
 }
 
-interface SampleStreamDescriptor {
-  stream: string;
-  unit: string;
-  paths: readonly string[];
-}
-
 const junctionSnapshotSchema = z.object({
   accountId: z.union([z.string(), z.number()]).optional(),
   importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
@@ -184,19 +178,6 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "respiratory-rate", unit: "breaths_per_minute", title: "Junction respiratory rate", paths: ["respiratoryRate", "respiratory_rate"] },
   { metric: "spo2", unit: "%", title: "Junction blood oxygen", paths: ["spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
 ];
-
-const TIMESERIES_STREAMS: Readonly<Record<string, SampleStreamDescriptor>> = Object.freeze({
-  steps: { stream: "steps", unit: "count", paths: ["value", "steps", "step_count"] },
-  heartrate: { stream: "heart_rate", unit: "bpm", paths: ["value", "heartRate", "heart_rate", "bpm"] },
-  hrv: { stream: "hrv", unit: "ms", paths: ["value", "hrv", "hrvRmssd", "hrv_rmssd"] },
-  respiratory_rate: {
-    stream: "respiratory_rate",
-    unit: "breaths_per_minute",
-    paths: ["value", "respiratoryRate", "respiratory_rate"],
-  },
-  blood_oxygen: { stream: "spo2", unit: "%", paths: ["value", "spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
-  glucose: { stream: "glucose", unit: "mg_dL", paths: ["value", "glucose", "bloodGlucose", "blood_glucose"] },
-});
 
 const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>> = Object.freeze({
   distance: { metric: "distance", unit: "m", title: "Junction distance", paths: ["value", "distance", "distanceMeters", "distance_meters"] },
@@ -309,7 +290,6 @@ function normalizeTimeseries(
   for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
     const entries = timeseriesResourceEntries(resource, payload);
     const resourceSlug = slugify(resource, "timeseries");
-    const streamDescriptor = TIMESERIES_STREAMS[resource];
     const observationDescriptor = TIMESERIES_OBSERVATION_METRICS[resource];
     pushRawArtifact(
       context.rawArtifacts,
@@ -320,7 +300,7 @@ function normalizeTimeseries(
       ),
     );
 
-    if (!streamDescriptor && !observationDescriptor) {
+    if (!observationDescriptor) {
       continue;
     }
 
@@ -340,55 +320,30 @@ function normalizeTimeseries(
         return;
       }
 
-      const value = firstNumberFromPaths(entry, streamDescriptor?.paths ?? observationDescriptor?.paths ?? []);
+      const value = firstNumberFromPaths(entry, observationDescriptor.paths);
       const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
 
       if (value === undefined || !timestamp.occurredAt) {
         return;
       }
 
-      if (streamDescriptor) {
-        if (!shouldEmitQueryableSample(timestamp)) {
-          return;
-        }
-
-        context.samples.push(stripUndefined({
-          stream: streamDescriptor.stream,
-          recordedAt: timestamp.occurredAt,
-          dayKey: timestamp.dayKey,
-          timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
-          source: "device",
-          quality: "normalized",
-          unit: normalizeTimeseriesUnit(resource, firstStringFromPaths(entry, ["unit"]), streamDescriptor.unit),
-          externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "sample"),
-          dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-          sample: {
-            recordedAt: timestamp.occurredAt,
-            value,
-          },
-        }));
-        return;
-      }
-
-      if (observationDescriptor) {
-        context.events.push(stripUndefined({
-          kind: "observation",
-          occurredAt: timestamp.occurredAt,
-          recordedAt: timestamp.recordedAt,
-          dayKey: timestamp.dayKey,
-          timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
-          source: "device",
-          title: observationDescriptor.title,
-          rawArtifactRoles: resourceContext.rawArtifactRoles,
-          externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, observationDescriptor.metric),
-          dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-          fields: {
-            metric: observationDescriptor.metric,
-            unit: firstStringFromPaths(entry, ["unit"]) ?? observationDescriptor.unit,
-            value,
-          },
-        }));
-      }
+      context.events.push(stripUndefined({
+        kind: "observation",
+        occurredAt: timestamp.occurredAt,
+        recordedAt: timestamp.recordedAt,
+        dayKey: timestamp.dayKey,
+        timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+        source: "device",
+        title: observationDescriptor.title,
+        rawArtifactRoles: resourceContext.rawArtifactRoles,
+        externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, observationDescriptor.metric),
+        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+        fields: {
+          metric: observationDescriptor.metric,
+          unit: firstStringFromPaths(entry, ["unit"]) ?? observationDescriptor.unit,
+          value,
+        },
+      }));
     });
   }
 }
@@ -992,49 +947,6 @@ function readNestedResourceEntries(envelope: PlainObject): PlainObject[] | null 
   }
 
   return null;
-}
-
-function normalizeTimeseriesUnit(resource: string, rawUnit: string | undefined, fallbackUnit: string): string {
-  const normalized = rawUnit?.trim().toLowerCase();
-  if (resource === "hrv" && normalized === "rmssd") {
-    return fallbackUnit;
-  }
-  if (resource === "respiratory_rate" && isRespiratoryRateUnitAlias(normalized)) {
-    return fallbackUnit;
-  }
-  if (resource === "blood_oxygen" && isBloodOxygenUnitAlias(normalized)) {
-    return fallbackUnit;
-  }
-
-  return rawUnit ?? fallbackUnit;
-}
-
-function isRespiratoryRateUnitAlias(unit: string | undefined): boolean {
-  return unit === undefined
-    || unit === "bpm"
-    || unit === "rpm"
-    || unit === "breaths/min"
-    || unit === "breaths/minute"
-    || unit === "breaths per minute"
-    || unit === "breaths_per_minute";
-}
-
-function isBloodOxygenUnitAlias(unit: string | undefined): boolean {
-  return unit === undefined
-    || unit === "spo2"
-    || unit === "sp_o2"
-    || unit === "sp-o2"
-    || unit === "blood_oxygen"
-    || unit === "oxygen_saturation"
-    || unit === "percent"
-    || unit === "percentage"
-    || unit === "spo2_percent";
-}
-
-function shouldEmitQueryableSample(
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-): boolean {
-  return timestamp.timestampSemantics !== "floating";
 }
 
 function listAllowedResourceKeys(

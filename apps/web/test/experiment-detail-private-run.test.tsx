@@ -37,6 +37,7 @@ async function createClient(input: {
   }>;
 }): Promise<BrowserVaultQueryClient> {
   const replica = await createBrowserVaultReplica({
+    metricPoints: [],
     generatedAt: input.generatedAt,
     sourceBundleHash: "a".repeat(64),
     vault: createVaultReadModel({

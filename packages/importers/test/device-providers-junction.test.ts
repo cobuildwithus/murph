@@ -186,11 +186,9 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   const observations = payload.events ?? [];
   const samples = payload.samples ?? [];
   assert.ok(observations.length >= 5);
-  assert.equal(samples.length, 2);
+  assert.equal(samples.length, 0);
   assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
-  assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
   assert.ok(observations.every((event) => !event.externalRef?.resourceType.includes(":")));
-  assert.ok(samples.every((sample) => !sample.externalRef?.resourceType.includes(":")));
 
   const stepEvents = observations.filter((event) => event.fields?.metric === "daily-steps");
   assert.deepEqual(stepEvents.map((event) => event.dataOrigin?.sourceProviderSlug).sort(), ["oura", "withings"]);
@@ -212,10 +210,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   const floatingSample = samples.find((sample) => sample.stream === "spo2");
   assert.equal(floatingSample, undefined);
 
-  const glucoseSample = samples.find((sample) => sample.stream === "glucose");
-  assert.equal(glucoseSample?.unit, "mg_dL");
-  assert.equal(glucoseSample?.dataOrigin?.sourceProviderSlug, "dexcom-v3");
-  assert.equal(glucoseSample?.dataOrigin?.sourceType, "cgm");
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"));
 
   const canonicalRecords = payload.canonicalWearableRecords ?? [];
   assert.ok(canonicalRecords.every((record) => record.source.provider === "junction"));
@@ -253,15 +248,9 @@ test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timesta
     },
   });
 
-  const glucoseSample = payload.samples?.find((sample) => sample.stream === "glucose");
-
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
-  assert.equal(glucoseSample?.unit, "mg_dL");
-  assert.equal(glucoseSample?.dataOrigin?.sourceProviderSlug, "dexcom-v3");
-  assert.equal(glucoseSample?.dataOrigin?.sourceType, "cgm");
-  assert.equal(glucoseSample?.dataOrigin?.observedAtRaw, "2026-04-22T07:16:00Z");
-  assert.equal(glucoseSample?.dataOrigin?.timestampSemantics, "utc");
-  assert.equal(glucoseSample?.recordedAt, "2026-04-22T07:16:00.000Z");
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"));
 });
 
 test("Junction normalizer accepts real nested source provider fields on timeseries entries", () => {
@@ -281,17 +270,9 @@ test("Junction normalizer accepts real nested source provider fields on timeseri
     },
   });
 
-  const sample = payload.samples?.find((entry) => entry.stream === "heart_rate");
-
   assert.deepEqual(payload.provenance?.timeseriesResources, ["heartrate"]);
-  assert.equal(payload.samples?.length, 1);
-  assert.equal(sample?.externalRef?.system, "junction");
-  assert.equal(sample?.externalRef?.resourceType, "junction-oura-heartrate");
-  assert.equal(sample?.dataOrigin?.sourceProviderSlug, "oura");
-  assert.equal(sample?.dataOrigin?.sourceType, "ring");
-  assert.match(sample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
-  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("ring-1"), false);
-  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("oura-cloud"), false);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
 });
 
 test("Junction normalizer keeps grouped fallback source slugs when provider metadata is object-valued", () => {
@@ -325,19 +306,9 @@ test("Junction normalizer keeps grouped fallback source slugs when provider meta
     },
   });
 
-  const sample = payload.samples?.find((entry) => entry.stream === "heart_rate");
-
   assert.deepEqual(payload.provenance?.timeseriesResources, ["heartrate"]);
-  assert.equal(payload.samples?.length, 1);
-  assert.equal(sample?.externalRef?.system, "junction");
-  assert.equal(sample?.externalRef?.resourceType, "junction-polar-heartrate");
-  assert.equal(sample?.dataOrigin?.sourceProviderSlug, "polar");
-  assert.equal(sample?.dataOrigin?.sourceType, "watch");
-  assert.match(sample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
-  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("raw-provider-object"), false);
-  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("raw-polar-watch"), false);
-  assert.equal(sample?.dataOrigin?.sourceInstanceId?.includes("raw-oura-ring"), false);
-  assert.equal(sample?.externalRef?.resourceType.includes("object-object"), false);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
 });
 
 test("Junction summary resource id stays stable when a same-id summary value changes", () => {
@@ -452,7 +423,7 @@ test("Junction summary resource id for explicit ids includes provider, source ty
   assert.notEqual(sourceInstanceVariantEvent?.externalRef?.resourceId, baseEvent?.externalRef?.resourceId);
 });
 
-test("Junction timeseries resource id stays stable when a same-key sample value changes", () => {
+test("Junction timeseries resources stay raw-only when a same-key value changes", () => {
   const buildPayload = (value: number) => normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     timeseries: {
@@ -466,14 +437,16 @@ test("Junction timeseries resource id stays stable when a same-key sample value 
     },
   });
 
-  const firstSample = buildPayload(72).samples?.find((sample) => sample.stream === "steps");
-  const correctedSample = buildPayload(91).samples?.find((sample) => sample.stream === "steps");
+  const firstPayload = buildPayload(72);
+  const correctedPayload = buildPayload(91);
 
-  assert.equal(correctedSample?.externalRef?.resourceId, firstSample?.externalRef?.resourceId);
-  assert.equal(correctedSample?.externalRef?.facet, "sample");
+  assert.equal(firstPayload.samples?.length ?? 0, 0);
+  assert.equal(correctedPayload.samples?.length ?? 0, 0);
+  assert.ok(firstPayload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-steps"));
+  assert.ok(correctedPayload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-steps"));
 });
 
-test("Junction timeseries resource id changes when the source device changes", () => {
+test("Junction timeseries source device changes remain raw-only", () => {
   const buildPayload = (sourceDeviceId: string) => normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     timeseries: {
@@ -487,13 +460,16 @@ test("Junction timeseries resource id changes when the source device changes", (
     },
   });
 
-  const firstSample = buildPayload("ring-a").samples?.find((sample) => sample.stream === "steps");
-  const secondSample = buildPayload("ring-b").samples?.find((sample) => sample.stream === "steps");
+  const firstPayload = buildPayload("ring-a");
+  const secondPayload = buildPayload("ring-b");
 
-  assert.notEqual(secondSample?.externalRef?.resourceId, firstSample?.externalRef?.resourceId);
+  assert.equal(firstPayload.samples?.length ?? 0, 0);
+  assert.equal(secondPayload.samples?.length ?? 0, 0);
+  assert.ok(firstPayload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-steps"));
+  assert.ok(secondPayload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-steps"));
 });
 
-test("Junction timeseries resource id changes when the resource changes", () => {
+test("Junction timeseries resource changes remain raw-only", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     timeseries: {
@@ -514,10 +490,9 @@ test("Junction timeseries resource id changes when the resource changes", () => 
     },
   });
 
-  const stepSample = payload.samples?.find((sample) => sample.stream === "steps");
-  const heartRateSample = payload.samples?.find((sample) => sample.stream === "heart_rate");
-
-  assert.notEqual(heartRateSample?.externalRef?.resourceId, stepSample?.externalRef?.resourceId);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-steps"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
 });
 
 test("Junction normalizer flattens grouped timeseries payloads for activity and vitals", () => {
@@ -588,28 +563,15 @@ test("Junction normalizer flattens grouped timeseries payloads for activity and 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["steps", "distance", "heartrate", "hrv"]);
 
   const samples = payload.samples ?? [];
-  const stepSample = samples.find((sample) => sample.stream === "steps");
-  const heartRateSample = samples.find((sample) => sample.stream === "heart_rate");
-  const hrvSample = samples.find((sample) => sample.stream === "hrv");
   const distanceEvent = payload.events?.find((event) => event.fields?.metric === "distance");
   const rawTimeseriesArtifacts = JSON.stringify(
     payload.rawArtifacts?.filter((artifact) => artifact.role.startsWith("junction-timeseries-")),
   );
 
-  assert.equal(samples.length, 3);
+  assert.equal(samples.length, 0);
   assert.doesNotMatch(rawTimeseriesArtifacts, /Oura Ring|device-oura-ring-1|app-oura-cloud-1/u);
   assert.match(rawTimeseriesArtifacts, /"provider":"oura"/u);
   assert.match(rawTimeseriesArtifacts, /"type":"ring"/u);
-  assert.equal(stepSample?.recordedAt, "2026-04-22T14:57:24.000Z");
-  assert.equal(stepSample?.dataOrigin?.sourceProviderSlug, "oura");
-  assert.equal(stepSample?.dataOrigin?.sourceType, "ring");
-  assert.match(stepSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
-  assert.equal(stepSample?.dataOrigin?.sourceInstanceId?.includes("device-oura-ring-1"), false);
-  assert.equal(stepSample?.dataOrigin?.sourceInstanceId?.includes("app-oura-cloud-1"), false);
-  assert.equal(heartRateSample?.unit, "bpm");
-  assert.equal(heartRateSample?.sample.value, 70);
-  assert.equal(hrvSample?.unit, "ms");
-  assert.equal(hrvSample?.sample.value, 48);
   assert.equal(distanceEvent?.occurredAt, "2026-04-22T14:57:24.000Z");
   assert.equal(distanceEvent?.fields?.unit, "m");
   assert.equal(distanceEvent?.fields?.value, 5.6);
@@ -653,9 +615,6 @@ test("Junction normalizer maps respiratory rate unit aliases to the canonical sa
       },
     });
 
-    const respiratoryRateSample = payload.samples?.find((sample) =>
-      sample.stream === "respiratory_rate"
-    );
     const canonicalRecord = payload.canonicalWearableRecords?.find((record) =>
       record.kind === "sample" && record.metric === "respiratoryRate"
     );
@@ -665,11 +624,8 @@ test("Junction normalizer maps respiratory rate unit aliases to the canonical sa
     const rawRespiratoryRateArtifactText = JSON.stringify(rawRespiratoryRateArtifact?.content);
 
     assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
-    assert.equal(respiratoryRateSample?.unit, "breaths_per_minute");
-    assert.equal(respiratoryRateSample?.sample.value, 14.8);
-    assert.equal(respiratoryRateSample?.dataOrigin?.sourceProviderSlug, "garmin");
-    assert.ok(canonicalRecord && canonicalRecord.kind === "sample");
-    assert.equal(canonicalRecord.unit, "breaths_per_minute");
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(canonicalRecord, undefined);
 
     if (unit === undefined) {
       assert.doesNotMatch(rawRespiratoryRateArtifactText, /"unit":/u);
@@ -718,16 +674,13 @@ test("Junction normalizer maps blood oxygen unit aliases to the canonical sample
       },
     });
 
-    const spo2Sample = payload.samples?.find((sample) => sample.stream === "spo2");
     const canonicalRecord = payload.canonicalWearableRecords?.find((record) =>
       record.kind === "sample" && record.metric === "spo2"
     );
 
     assert.deepEqual(payload.provenance?.timeseriesResources, ["blood_oxygen"]);
-    assert.equal(spo2Sample?.unit, "%");
-    assert.equal(spo2Sample?.sample.value, 97.2);
-    assert.ok(canonicalRecord && canonicalRecord.kind === "sample");
-    assert.equal(canonicalRecord.unit, "%");
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(canonicalRecord, undefined);
   }
 });
 
@@ -807,7 +760,6 @@ test("Junction snapshot import minimizes grouped source identifiers in raw envel
 
   const rawEnvelopeText = JSON.stringify(payload.rawIngestEnvelopes?.[0]?.payload);
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);
-  const stepSample = payload.samples?.find((sample) => sample.stream === "steps");
 
   assert.doesNotMatch(
     rawEnvelopeText,
@@ -820,9 +772,7 @@ test("Junction snapshot import minimizes grouped source identifiers in raw envel
   assert.match(rawEnvelopeText, /"provider":"oura"/u);
   assert.match(rawEnvelopeText, /"sourceProviderSlug":"oura"/u);
   assert.match(rawEnvelopeText, /"sourceType":"ring"/u);
-  assert.equal(stepSample?.dataOrigin?.sourceProviderSlug, "oura");
-  assert.equal(stepSample?.dataOrigin?.sourceType, "ring");
-  assert.match(stepSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until timezone conversion exists", async () => {
@@ -997,11 +947,8 @@ test("Junction normalizer resolves nested source and provider slug origin fields
   assert.equal(bodyEvent?.dataOrigin?.sourceProviderSlug, "withings");
   assert.equal(bodyEvent?.dataOrigin?.sourceType, "scale");
 
-  const heartRateSample = payload.samples?.find((sample) => sample.stream === "heart_rate");
-  assert.equal(heartRateSample?.dataOrigin?.sourceProviderSlug, "polar");
-  assert.equal(heartRateSample?.dataOrigin?.sourceType, "watch");
-  assert.match(heartRateSample?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
-  assert.equal(heartRateSample?.dataOrigin?.sourceInstanceId?.includes("raw-polar-watch"), false);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
 });
 
 test("Junction normalizer defaults to the PR3 resource allowlist", () => {
@@ -1032,9 +979,8 @@ test("Junction normalizer defaults to the PR3 resource allowlist", () => {
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));
-  assert.ok(payload.samples?.every((sample) => sample.externalRef?.system === "junction"));
   assert.ok(payload.events?.some((event) => event.fields?.metric === "weight"));
-  assert.equal(payload.samples?.some((sample) => sample.stream === "weight"), false);
+  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("Junction normalizer does not inherit device attribution from non-unique provider slug fallback", () => {

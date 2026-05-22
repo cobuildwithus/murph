@@ -81,7 +81,7 @@ That split is the main guardrail for provider contributions. Treat shared metada
 - Keep provider credentials outside the canonical vault.
 - Keep stored runtime metadata shallow and sanitized; do not persist large nested profile payloads into account metadata.
 - Preserve useful upstream evidence as raw artifacts when it helps replay, audit, or future re-normalization.
-- Reuse existing canonical event kinds, sample streams, and metric names before inventing new ones.
+- Reuse existing canonical event kinds and metric names before inventing new ones. Treat generic sample streams as explicit CSV/import/debug ledgers, not provider firehose output.
 - If a provider supports webhooks, treat them as routing or freshness hints that enqueue work; normalization still happens through importer snapshots.
 - Reuse the shared descriptor and shared registry helper; do not reintroduce provider metadata drift between `device-syncd` and `importers`.
 - If you need a hosted or alternate HTTP surface, build it on top of `@murphai/device-syncd/public-ingress` rather than duplicating callback or webhook verification logic.
@@ -204,7 +204,7 @@ The adapter should:
 - import and spread the shared descriptor
 - validate the upstream snapshot at the boundary, ideally with `zod`
 - preserve useful raw upstream payloads
-- emit normalized events, samples, and provenance
+- emit normalized events, compact display-grade metrics, raw artifacts, and provenance
 - create stable provider-specific `externalRef` values
 - avoid synthesizing precision the provider did not actually send
 
@@ -212,8 +212,8 @@ Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` raw artifacts instead of silently discarding them.
 - Prefer existing event kinds such as `observation`, `sleep_session`, and `activity_session`.
-- Prefer existing sample streams such as `heart_rate`, `hrv`, `respiratory_rate`, `sleep_stage`, `steps`, and `temperature`.
-- If you need a new metric family or stream, update the compatibility matrix in the same patch.
+- Keep high-frequency provider timeseries raw unless a product surface has an explicit deep-inspection API.
+- If you need a new metric family or raw/debug stream, update the compatibility matrix in the same patch.
 
 ### 5. Wire config, defaults, exports, and tests
 
@@ -314,7 +314,7 @@ of quietly branching generic code.
 
 - [ ] Snapshot parsing validates the provider boundary.
 - [ ] Raw upstream evidence is retained when it supports replay or future re-normalization.
-- [ ] Canonical event kinds and sample streams reuse existing Murph names whenever possible.
+- [ ] Canonical event kinds and compact metric names reuse existing Murph names whenever possible.
 - [ ] `externalRef` values are stable and provider-specific.
 - [ ] Unsupported-but-useful sections are retained as raw artifacts instead of silently discarded.
 - [ ] Profile or account metadata does not copy large nested provider payloads into runtime metadata.

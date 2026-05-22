@@ -30,11 +30,11 @@ If one of these is still unclear, keep the first slice smaller rather than encod
 | Family | `device-syncd` expectation | `importers` target | Evidence + provenance expectation | Current examples |
 | --- | --- | --- | --- | --- |
 | Account/profile identity | Resolve a stable `externalAccountId` during connect. Fetch profile data only when it materially helps later routing, display, or provenance. | Usually provenance plus a raw `profile` artifact, not a standalone canonical event by itself. | Retain profile payloads only as raw evidence when they are operator-useful. Keep stored runtime metadata shallow. | Garmin/Fitbit through Junction, WHOOP, Oura, Strava |
-| Daily activity totals | Backfill or reconcile bounded day windows. Webhooks optional. | `observation` metrics such as `daily-steps`, `distance`, `active-calories` (including provider `energy-burned` aliases when only kilojoules are available), and `floors-climbed`; optional `steps` samples when true timeseries exists. | Retain raw daily summary payloads and record imported sections in provenance. | Garmin/Fitbit through Junction, Oura, Strava |
+| Daily activity totals | Backfill or reconcile bounded day windows. Webhooks optional. | `observation` metrics such as `daily-steps`, `distance`, `active-calories` (including provider `energy-burned` aliases when only kilojoules are available), and `floors-climbed`. | Retain raw daily summary payloads and record imported sections in provenance. | Garmin/Fitbit through Junction, Oura, Strava |
 | Sleep summary/session | Fetch daily or rolling sleep windows; webhook hints optional. | `sleep_session` events plus `observation` metrics such as `sleep-total-minutes`, `time-in-bed-minutes`, `sleep-efficiency`, `sleep-score`, and `sleep-latency-minutes`. | Retain raw sleep summaries or sessions. Do not invent stages or durations the provider did not send. | Garmin/Fitbit through Junction, Oura, WHOOP |
-| Sleep stage timelines | Use the same windowing as sleep summary. | `sleep_stage` samples keyed to the provider's recorded stage windows. | Retain the stage-bearing raw payload. Avoid coercing vague summary buckets into staged samples. | Garmin/Fitbit through Junction, Oura |
+| Sleep stage timelines | Use the same windowing as sleep summary. | Compact `observation` metrics only when the provider supplies display-grade stage durations; high-frequency stage timelines stay raw evidence. | Retain the stage-bearing raw payload. Avoid coercing vague summary buckets into staged samples. | Garmin/Fitbit through Junction, Oura |
 | Recovery / readiness | Reconcile recent daily windows; webhook hints optional. | `observation` metrics such as `recovery-score`, `readiness-score`, `sleep-score-delta`, `readiness-score-delta`, `stress-level`, and `body-battery`. | Retain the raw recovery or readiness payload and day-level provenance. | WHOOP, Oura, Garmin through Junction |
-| Continuous vitals / timeseries | Fetch bounded windows only. Keep reconcile windows small enough to avoid duplicate churn. | Sample streams such as `heart_rate`, `hrv`, `respiratory_rate`, `temperature`, and `steps`. | Retain the raw timeseries payload or upstream aggregate section that justified the normalized samples. | Garmin/Fitbit through Junction, WHOOP, Oura, Strava |
+| Continuous vitals / timeseries | Fetch bounded windows only. Keep reconcile windows small enough to avoid duplicate churn. | Raw evidence plus compact daily/session `observation` metrics when the upstream payload already provides display-grade facts. Do not normalize provider firehose points into canonical sample rows. | Retain the raw timeseries payload or upstream aggregate section that justified any compact metric. | Garmin/Fitbit through Junction, WHOOP, Oura, Strava |
 | Workout / activity sessions | Fetch list and detail endpoints. Use webhooks only when the provider offers reliable session updates or deletes. | `activity_session` events plus supporting observations such as `distance`, `average-heart-rate`, `max-heart-rate`, `workout-strain`, `percent-recorded`, `active-calories`, `altitude-gain`, and `altitude-change`. | Retain raw activity or workout payloads. When files or assets exist, retain descriptors rather than synthesizing fake binary content. | Garmin/Fitbit through Junction, WHOOP, Oura, Strava |
 | Body measurements / composition | Poll or fetch stable body endpoints only. When the provider returns current body state without a measurement id or timestamp, normalize it as an import-day snapshot instead of inventing history. | `observation` metrics such as `weight`, `bmi`, `body-fat-percentage`, `systolic-blood-pressure`, `diastolic-blood-pressure`, and `spo2`. | Retain the raw measurement payload and record the effective measurement day in provenance when the provider omits a timestamp. | WHOOP body measurement, Oura daily SpO2, Junction-backed sources when configured |
 | Cycle / women-health | Fetch bounded historical windows. | `observation` metrics such as `cycle-day`, `period-day`, `cycle-length-days`, `period-length-days`, and `pregnancy-week`. | Retain the raw women-health payload. Avoid turning probabilistic upstream state into certainty. | Garmin |
@@ -52,7 +52,7 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 - `sleep_session`
 - `activity_session`
 
-### Sample streams
+### Raw/debug sample streams
 
 - `heart_rate`
 - `hrv`
@@ -60,6 +60,8 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 - `sleep_stage`
 - `steps`
 - `temperature`
+
+These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer raw artifacts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples.
 
 ### Observation metrics already in active use
 

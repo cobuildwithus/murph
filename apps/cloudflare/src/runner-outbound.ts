@@ -48,6 +48,7 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
+  requireRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
@@ -1154,12 +1155,16 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  const writeFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!writeFence) {
+  let writeFence;
+  try {
+    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return unauthorized();
+    }
+    throw error;
+  }
+  if (!writeFence.workspaceVersion) {
     return unauthorized();
   }
 
@@ -1195,12 +1200,9 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
   }
 
   if (
-    Date.parse(session.expiresAt) > Date.now()
-    && (
-      session.attemptId !== writeFence.attemptId
-      || session.leaseGeneration !== writeFence.generation
-      || session.workspaceVersion !== writeFence.workspaceVersion
-    )
+    session.attemptId !== writeFence.attemptId
+    || session.leaseGeneration !== writeFence.generation
+    || session.workspaceVersion !== writeFence.workspaceVersion
   ) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
@@ -1228,12 +1230,16 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  const writeFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!writeFence) {
+  let writeFence;
+  try {
+    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return unauthorized();
+    }
+    throw error;
+  }
+  if (!writeFence.workspaceVersion) {
     return unauthorized();
   }
   const body = await readJsonObject(input.request, {
@@ -1252,6 +1258,23 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!session) {
     return notFound();
   }
+  if (
+    session.userId !== input.userId
+    || session.snapshotId !== input.snapshotId
+    || session.objectKey !== requestedObjectKey
+    || session.encryption.aad.objectKey !== requestedObjectKey
+    || session.encryption.aad.snapshotId !== input.snapshotId
+  ) {
+    return jsonError("Hosted workspace snapshot ref is outside the bound user namespace.", 403);
+  }
+  if (
+    session.attemptId !== writeFence.attemptId
+    || session.leaseGeneration !== writeFence.generation
+    || session.workspaceVersion !== writeFence.workspaceVersion
+  ) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+
   if (Date.parse(session.expiresAt) <= Date.now()) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
@@ -1263,38 +1286,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot upload session expired.", 410);
   }
-  if (
-    session.attemptId !== writeFence.attemptId
-    || session.leaseGeneration !== writeFence.generation
-    || session.workspaceVersion !== writeFence.workspaceVersion
-  ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
-      env: input.env,
-      objectKey: session.objectKey,
-      snapshotId: input.snapshotId,
-      userId: input.userId,
-    });
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-  if (
-    session.userId !== input.userId
-    || session.snapshotId !== input.snapshotId
-    || session.objectKey !== requestedObjectKey
-    || session.encryption.aad.objectKey !== requestedObjectKey
-    || session.encryption.aad.snapshotId !== input.snapshotId
-  ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: true,
-      env: input.env,
-      objectKey: session.objectKey,
-      snapshotId: input.snapshotId,
-      userId: input.userId,
-    });
-    return jsonError("Hosted workspace snapshot ref is outside the bound user namespace.", 403);
-  }
+
   const snapshotRef = parseHostedWorkspaceSnapshotV2Ref(
     buildHostedWorkspaceSnapshotRefFromUploadSession({
       archive: body.archive,
@@ -1418,6 +1410,24 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot checkpoint write fence is stale.", 409);
   }
+
+  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!currentWriteFence) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+
   const retireAfterAmbiguousCheckpoint = async () => {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,

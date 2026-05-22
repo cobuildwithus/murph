@@ -12,11 +12,20 @@ import {
   selectBrowserVaultOverview,
   selectBrowserVaultTrackedExperiments,
 } from "../src/browser.ts";
+import { buildMetricProjection } from "../src/index.ts";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
+
+async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
+  return createBrowserVaultReplica({
+    ...input,
+    metricPoints: buildMetricProjection(input.vault).metricPoints,
+  });
+}
 
 test("browser vault replicas round-trip and expose the query-client selectors", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "a".repeat(64),
     vault: createVaultReadModel({
@@ -90,7 +99,7 @@ test("browser vault overview experiment summary is uncapped and completed-status
       title: `Active ${index}`,
     });
   });
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-31T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -146,12 +155,12 @@ test("browser vault replica dataVersion stays stable when only generatedAt chang
     vaultRoot: "browser://vault",
   });
 
-  const first = await createBrowserVaultReplica({
+  const first = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "b".repeat(64),
     vault,
   });
-  const second = await createBrowserVaultReplica({
+  const second = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-21T12:00:00.000Z",
     sourceBundleHash: "b".repeat(64),
     vault,
@@ -172,12 +181,12 @@ test("browser vault replica dataVersion changes when only sourceBundleHash chang
     vaultRoot: "browser://vault",
   });
 
-  const first = await createBrowserVaultReplica({
+  const first = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "b".repeat(64),
     vault,
   });
-  const second = await createBrowserVaultReplica({
+  const second = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "c".repeat(64),
     vault,
@@ -187,7 +196,7 @@ test("browser vault replica dataVersion changes when only sourceBundleHash chang
 });
 
 test("browser vault query client freezes the exposed replica graph", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "e".repeat(64),
     vault: createVaultReadModel({
@@ -228,7 +237,7 @@ test("browser vault replicas validate schema", () => {
 });
 
 test("browser vault replica keeps only browser-supported adherence targets", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "c".repeat(64),
     vault: createVaultReadModel({
@@ -291,7 +300,7 @@ test("browser vault replica keeps only browser-supported adherence targets", asy
 });
 
 test("browser vault replica projects experiment event fields only for relevant event kinds", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "d".repeat(64),
     vault: createVaultReadModel({

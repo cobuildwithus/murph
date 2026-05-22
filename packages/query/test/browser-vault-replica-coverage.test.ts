@@ -11,7 +11,17 @@ import {
   type BrowserVaultReplica,
 } from "../src/browser.ts";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
+import { buildMetricProjection } from "../src/index.ts";
 import { createVaultReadModel } from "../src/model.ts";
+
+type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
+
+async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
+  return createBrowserVaultReplica({
+    ...input,
+    metricPoints: buildMetricProjection(input.vault).metricPoints,
+  });
+}
 
 test("browser vault query clients parse final metric-key replicas and filter metrics", () => {
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplicaFixture()));
@@ -38,7 +48,7 @@ test("browser vault replica parsing requires final goal progress rows", () => {
 });
 
 test("browser vault replica creation emits metric-key rows from wearable and vault evidence", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({

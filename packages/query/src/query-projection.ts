@@ -29,7 +29,6 @@ import {
   type SearchFilters,
   type SearchResult,
 } from "./search-shared.ts";
-import { summarizeDailySamples } from "./summaries.ts";
 import {
   normalizeMetricKey,
   resolveMetricDefinition,
@@ -44,7 +43,7 @@ import {
 import {
   buildMetricProjection,
 } from "./metrics/projection.ts";
-import { parseGoalMetricTargets } from "./metrics/index.ts";
+import { isDisplayGradeMetricSampleEntity, parseGoalMetricTargets } from "./metrics/index.ts";
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
@@ -66,7 +65,7 @@ export type {
 } from "./query-projection-types.ts";
 
 const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-const QUERY_PROJECTION_SQLITE_VERSION = 2;
+const QUERY_PROJECTION_SQLITE_VERSION = 3;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -78,19 +77,6 @@ interface QueryProjectionLocation {
 
 interface QueryProjectionEntityRow {
   entity_json: string;
-}
-
-interface QueryProjectionSamplePointRow {
-  sample_id: string;
-  stream: string;
-  status: string | null;
-  occurred_at: string | null;
-  date: string | null;
-  path: string;
-  title: string | null;
-  tags_json: string;
-  sample_json: string;
-  experiment_slug: string | null;
 }
 
 interface QueryProjectionSearchDocumentRow {
@@ -155,24 +141,6 @@ function expectEnumString<TValue extends string>(
 function decodeQueryProjectionEntityRow(row: SqliteRow): QueryProjectionEntityRow {
   return {
     entity_json: expectString(row.entity_json, "query_entities.entity_json"),
-  };
-}
-
-function decodeQueryProjectionSamplePointRow(row: SqliteRow): QueryProjectionSamplePointRow {
-  return {
-    sample_id: expectString(row.sample_id, "query_sample_points.sample_id"),
-    stream: expectString(row.stream, "query_sample_points.stream"),
-    status: expectNullableString(row.status, "query_sample_points.status"),
-    occurred_at: expectNullableString(row.occurred_at, "query_sample_points.occurred_at"),
-    date: expectNullableString(row.date, "query_sample_points.date"),
-    path: expectString(row.path, "query_sample_points.path"),
-    title: expectNullableString(row.title, "query_sample_points.title"),
-    tags_json: expectString(row.tags_json, "query_sample_points.tags_json"),
-    sample_json: expectString(row.sample_json, "query_sample_points.sample_json"),
-    experiment_slug: expectNullableString(
-      row.experiment_slug,
-      "query_sample_points.experiment_slug",
-    ),
   };
 }
 
@@ -333,8 +301,7 @@ async function rebuildQueryProjectionWithManifest(
 ): Promise<RebuildQueryProjectionResult> {
   await resetUnsupportedQueryProjection(location);
   const snapshot = await readVaultSourceStrict(vaultRoot);
-  const projectedEntities = snapshot.entities.filter((entity) => entity.family !== "sample");
-  const sampleEntities = snapshot.entities.filter((entity) => entity.family === "sample");
+  const projectedEntities = snapshot.entities.filter(isProjectedQueryEntity);
   const snapshotReadModel = createVaultReadModel({
     metadata: snapshot.metadata,
     vaultRoot,
@@ -355,7 +322,6 @@ async function rebuildQueryProjectionWithManifest(
     const builtAt = withImmediateTransaction(database, () => {
       database.exec(`
         DELETE FROM query_entities;
-        DELETE FROM query_sample_points;
         DELETE FROM query_metric_points;
         DELETE FROM query_metric_targets;
         DELETE FROM query_source_manifest;
@@ -387,21 +353,6 @@ async function rebuildQueryProjectionWithManifest(
           size_bytes,
           mtime_ms
         ) VALUES (?, ?, ?)
-      `);
-      const insertSamplePoint = database.prepare(`
-        INSERT INTO query_sample_points (
-          sample_id,
-          sort_rank,
-          stream,
-          status,
-          occurred_at,
-          date,
-          path,
-          title,
-          tags_json,
-          sample_json,
-          experiment_slug
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertMetricPoint = database.prepare(`
         INSERT INTO query_metric_points (
@@ -489,22 +440,6 @@ async function rebuildQueryProjectionWithManifest(
           entity.title,
           JSON.stringify(entity.tags),
           JSON.stringify(entity),
-        );
-      });
-
-      sampleEntities.forEach((entity, index) => {
-        insertSamplePoint.run(
-          entity.entityId,
-          index,
-          entity.stream ?? "",
-          entity.status,
-          entity.occurredAt,
-          entity.date,
-          entity.path,
-          entity.title,
-          JSON.stringify(entity.tags),
-          JSON.stringify(entity.attributes),
-          entity.experimentSlug,
         );
       });
 
@@ -604,16 +539,12 @@ async function rebuildQueryProjectionWithManifest(
   }
 }
 
-function materializeSampleSummarySearchDocuments(
-  snapshot: VaultSourceSnapshot,
-): SearchDocument[] {
-  const vault = createVaultReadModel({
-    metadata: snapshot.metadata,
-    vaultRoot: "",
-    entities: snapshot.entities,
-  });
+function isProjectedQueryEntity(entity: CanonicalEntity): boolean {
+  if (entity.family !== "sample") {
+    return true;
+  }
 
-  return materializeSummaryDocuments(summarizeDailySamples(vault));
+  return entity.kind === "metric_sample" && isDisplayGradeMetricSampleEntity(entity);
 }
 
 async function resetUnsupportedQueryProjection(
@@ -723,30 +654,13 @@ function readStoredVaultSource(
       FROM query_entities
       ORDER BY sort_rank ASC
     `).all().map((row) => decodeQueryProjectionEntityRow(row));
-    const sampleRows = database.prepare(`
-      SELECT
-        sample_id,
-        stream,
-        status,
-        occurred_at,
-        date,
-        path,
-        title,
-        tags_json,
-        sample_json,
-        experiment_slug
-      FROM query_sample_points
-      ORDER BY COALESCE(occurred_at, '') ASC, sample_id ASC
-    `).all().map((row) => decodeQueryProjectionSamplePointRow(row));
 
     return {
       metadata: parseJsonValue<QueryRecordData | null>(readMeta(database, "metadata_json"), null),
-      entities: [
-        ...entityRows
-          .map((row) => parseJsonValue<CanonicalEntity | null>(row.entity_json, null))
-          .filter((entity): entity is CanonicalEntity => entity !== null),
-        ...sampleRows.map(samplePointRowToEntity),
-      ].sort(compareCanonicalEntities),
+      entities: entityRows
+        .map((row) => parseJsonValue<CanonicalEntity | null>(row.entity_json, null))
+        .filter((entity): entity is CanonicalEntity => entity !== null)
+        .sort(compareCanonicalEntities),
     };
   } finally {
     database.close();
@@ -1067,7 +981,6 @@ function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
   if (
     !tableExists(database, "query_meta") ||
     !tableExists(database, "query_entities") ||
-    !tableExists(database, "query_sample_points") ||
     !tableExists(database, "query_metric_points") ||
     !tableExists(database, "query_metric_targets") ||
     !tableExists(database, "query_source_manifest") ||
@@ -1135,25 +1048,6 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_entities_experiment_idx ON query_entities(experiment_slug);
     CREATE INDEX IF NOT EXISTS query_entities_date_idx ON query_entities(date);
     CREATE INDEX IF NOT EXISTS query_entities_occurred_at_idx ON query_entities(occurred_at);
-
-    CREATE TABLE IF NOT EXISTS query_sample_points (
-      sample_id TEXT PRIMARY KEY,
-      sort_rank INTEGER NOT NULL,
-      stream TEXT NOT NULL,
-      status TEXT,
-      occurred_at TEXT,
-      date TEXT,
-      path TEXT NOT NULL,
-      title TEXT,
-      tags_json TEXT NOT NULL,
-      sample_json TEXT NOT NULL,
-      experiment_slug TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS query_sample_points_stream_idx ON query_sample_points(stream);
-    CREATE INDEX IF NOT EXISTS query_sample_points_date_idx ON query_sample_points(date);
-    CREATE INDEX IF NOT EXISTS query_sample_points_occurred_at_idx ON query_sample_points(occurred_at);
-    CREATE INDEX IF NOT EXISTS query_sample_points_experiment_idx ON query_sample_points(experiment_slug);
 
     CREATE TABLE IF NOT EXISTS query_metric_points (
       id TEXT PRIMARY KEY,
@@ -1247,7 +1141,6 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
 function hasQueryProjectionTables(database: DatabaseSync): boolean {
   return (
     tableExists(database, "query_entities") &&
-    tableExists(database, "query_sample_points") &&
     tableExists(database, "query_metric_points") &&
     tableExists(database, "query_metric_targets") &&
     tableExists(database, "query_source_manifest") &&
@@ -1331,31 +1224,6 @@ function mapRowToSearchDocument(
     bodyText: row.body_text,
     tagsText: row.tags_text,
     structuredText: row.structured_text,
-  };
-}
-
-function samplePointRowToEntity(row: QueryProjectionSamplePointRow): CanonicalEntity {
-  const tags = parseStringArray(row.tags_json);
-  return {
-    entityId: row.sample_id,
-    primaryLookupId: row.sample_id,
-    lookupIds: [row.sample_id],
-    family: "sample",
-    recordClass: "sample",
-    kind: "sample",
-    status: row.status,
-    occurredAt: row.occurred_at,
-    date: row.date,
-    path: row.path,
-    title: row.title,
-    body: null,
-    attributes: parseJsonValue<Record<string, unknown>>(row.sample_json, {}),
-    frontmatter: null,
-    links: [],
-    relatedIds: [],
-    stream: row.stream,
-    experimentSlug: row.experiment_slug,
-    tags,
   };
 }
 

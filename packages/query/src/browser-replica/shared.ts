@@ -12,6 +12,7 @@ import type {
   MetricConfidence,
   MetricGoalProgressStatus,
   MetricGrain,
+  MetricPoint,
   MetricSelectionStatus,
   MetricStatistic,
 } from "@murphai/health-metrics";
@@ -216,6 +217,7 @@ export interface BrowserVaultReplica {
 
 export interface CreateBrowserVaultReplicaInput {
   generatedAt?: string;
+  metricPoints: readonly MetricPoint[];
   sourceBundleHash: string;
   vault: VaultReadModel;
 }

@@ -35,7 +35,7 @@ import type { QueryRecordData } from "./query-record-data.ts";
 export type { QueryRecordData } from "./query-record-data.ts";
 
 type FrontmatterRecordType = "core" | "experiment" | "journal" | "protocol";
-type JsonRecordType = "audit" | "event" | "metric_sample" | "sample";
+type JsonRecordType = "audit" | "event" | "metric_sample";
 
 export interface VaultSourceSnapshot {
   metadata: QueryRecordData | null;
@@ -299,7 +299,6 @@ async function readBaseEntities(
   const journalEntries = await readJournalEntities(vaultRoot);
   const events = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, "event");
   const metricSamples = await readMetricSampleEntities(vaultRoot);
-  const samples = await readSampleEntities(vaultRoot);
   const audits = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.auditDirectory, "audit");
 
   return [
@@ -309,7 +308,6 @@ async function readBaseEntities(
     ...journalEntries,
     ...events,
     ...metricSamples,
-    ...samples,
     ...audits,
   ];
 }
@@ -630,54 +628,6 @@ async function readMetricSampleEntities(vaultRoot: string): Promise<CanonicalEnt
         links,
         relatedIds: linkTargetIds(links),
         stream: metric,
-        experimentSlug: pickString(payload, ["experimentSlug"]),
-        tags: normalizeTags(payload.tags),
-      };
-    },
-  );
-}
-
-async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  return readSortedJsonlRecords(
-    vaultRoot,
-    VAULT_LAYOUT.sampleLedgerDirectory,
-    (sourcePath, lineNumber, rawPayload) => {
-      const payload = normalizeJsonRecordPayload("sample", rawPayload);
-      const rawRecordId = requireCanonicalString(
-        payload,
-        "id",
-        `sample record at ${sourcePath}:${lineNumber}`,
-      );
-      const occurredAt = requireCanonicalString(
-        payload,
-        "recordedAt",
-        `sample record at ${sourcePath}:${lineNumber}`,
-      );
-      const stream = requireCanonicalString(
-        payload,
-        "stream",
-        `sample record at ${sourcePath}:${lineNumber}`,
-      );
-      const links: CanonicalEntity["links"] = [];
-
-      return {
-        entityId: rawRecordId,
-        primaryLookupId: rawRecordId,
-        lookupIds: uniqueStrings([rawRecordId]),
-        family: "sample",
-        recordClass: resolveCanonicalRecordClass("sample"),
-        kind: "sample",
-        status: pickString(payload, ["quality"]),
-        occurredAt,
-        date: pickString(payload, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
-        path: sourcePath,
-        title: `${stream} sample`,
-        body: null,
-        attributes: payload,
-        frontmatter: null,
-        links,
-        relatedIds: linkTargetIds(links),
-        stream,
         experimentSlug: pickString(payload, ["experimentSlug"]),
         tags: normalizeTags(payload.tags),
       };
