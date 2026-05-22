@@ -211,6 +211,10 @@ owner-watchdog recheck aligned to the expected idle checkpoint horizon or active
 write-fence expiry rather than a short durable-lag polling loop. A confirmed
 non-wakeable child is replaced after the startup grace window when a later
 ensure command observes it, instead of waiting for the full write-fence timeout.
+Cloudflare worker config fails closed when `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`
+is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus the
+owner-watchdog recheck margin, so env overrides cannot make Temporal re-read
+demand before the runtime has had a fair idle-checkpoint window.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint

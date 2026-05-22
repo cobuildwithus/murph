@@ -13,6 +13,9 @@ minute cron recovery loop.
 - Remove dead web signal helper code that only supported the deleted sweeper.
 - Update durable architecture/protocol docs so they no longer describe the
   Vercel lag sweeper as an active recovery backstop.
+- Add a Cloudflare timing invariant so runner timeout overrides cannot make the
+  Temporal owner-watchdog recheck fire before the runtime idle checkpoint
+  window plus margin.
 
 ## Constraints
 
@@ -28,3 +31,6 @@ minute cron recovery loop.
 - Focused stale-reference checks.
 - Scoped app/repo verification for touched files.
 - Required completion audits for runtime/trust-boundary code/config changes.
+Status: completed
+Updated: 2026-05-22
+Completed: 2026-05-22

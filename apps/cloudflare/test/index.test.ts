@@ -1783,7 +1783,7 @@ describe("cloudflare worker routes", () => {
 
       expect(response).toEqual({
         kind: "runtime_wake_sent",
-        recommendedRecheckAt: "2026-04-27T00:03:05.000Z",
+        recommendedRecheckAt: "2026-04-27T00:00:59.000Z",
         runtimeAttemptId: token?.attemptId,
       });
       expect(ensureProcessing).toHaveBeenCalledWith({
@@ -2588,7 +2588,7 @@ function createRuntimeControlRunnerHarness(input: {
       },
     } satisfies DurableObjectStateLike,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "60000",
     })),
     createBucketStore().api,

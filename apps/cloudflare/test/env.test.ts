@@ -25,6 +25,7 @@ describe("readHostedExecutionEnvironment", () => {
     );
     expect(environment.hostedCrypto.HOSTED_CRYPTO_ENV).toBe("test");
     expect(environment.maxEventAttempts).toBe(3);
+    expect(environment.idleCheckpointDelayMs).toBe(180_000);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
     expect(environment.runnerTimeoutMs).toBe(600_000);
@@ -177,10 +178,22 @@ describe("readHostedExecutionEnvironment", () => {
 
   it("reads the runner timeout when configured", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "15000",
     }));
 
     expect(environment.runnerTimeoutMs).toBe(15_000);
+  });
+
+  it("rejects a runner timeout that can recheck before the idle checkpoint margin", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "185000",
+      })),
+    ).toThrow(
+      /HOSTED_EXECUTION_RUNNER_TIMEOUT_MS must be greater than HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS plus 5000ms/u,
+    );
   });
 
   it("keeps the hosted-web control timeout separate from the runner timeout", () => {
