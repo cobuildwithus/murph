@@ -394,6 +394,33 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("offers reconnect for active sources whose latest sync failed when a connect target is available", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+        lastErrorMessage: "WHOOP token request failed.",
+        lastSyncCompletedAt: "2026-03-28T07:00:00.000Z",
+        lastSyncErrorAt: "2026-04-02T08:00:00.000Z",
+        nextReconcileAt: "2026-04-03T16:00:00.000Z",
+      })],
+      connectTargets: [{
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "oura",
+      }],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      guidance: "Reconnect this source to refresh access, or disconnect it if you no longer need it.",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      statusLabel: "Needs attention",
+      tone: "attention",
+    });
+  });
+
   it("keeps unavailable connections visible when a provider is no longer configured here", () => {
     const sources = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({

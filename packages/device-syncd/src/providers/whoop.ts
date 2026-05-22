@@ -381,7 +381,10 @@ function resolveWhoopTokenRequestAccountStatus(input: {
       input.oauthErrorCode === "invalid_request"
       && input.clientCredentialPresent === true
       && input.refreshCredentialPresent === true
-      && isWhoopRefreshTokenInvalidRequest(input.oauthErrorDescription)
+      && (
+        isWhoopRefreshTokenInvalidRequest(input.oauthErrorDescription)
+        || isWhoopGenericRefreshTokenInvalidRequest(input.oauthErrorDescription)
+      )
     );
 
   if ((input.response.status === 400 || input.response.status === 401) && tokenSpecificRefreshFailure) {
@@ -389,6 +392,21 @@ function resolveWhoopTokenRequestAccountStatus(input: {
   }
 
   return null;
+}
+
+function isWhoopGenericRefreshTokenInvalidRequest(description: string | null | undefined): boolean {
+  if (!description) {
+    return false;
+  }
+
+  const normalized = description.toLowerCase();
+  return [
+    "invalid parameter value",
+    "missing a required parameter",
+    "otherwise malformed",
+    "parameter more than once",
+    "token request is malformed",
+  ].some((marker) => normalized.includes(marker));
 }
 
 function isWhoopRefreshTokenInvalidRequest(description: string | null | undefined): boolean {
