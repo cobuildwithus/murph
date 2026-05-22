@@ -252,10 +252,6 @@ Hosted AI usage metering:
 - Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
-Hosted runner cleanup:
-
-- `HOSTED_STALE_RUNNER_USER_IDS` is an operator-only, comma or whitespace separated list of stale hosted member ids whose Cloudflare runner Durable Objects should be cleaned up by the cron path. Leave it unset during normal operation. The cleanup checks `HostedMember` first and skips any candidate id that still exists in Postgres.
-
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
 Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
@@ -387,7 +383,6 @@ deploys `apps/web`. Production is the minimum.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
-- Set `HOSTED_STALE_RUNNER_USER_IDS` only during a targeted stale-runner cleanup, then unset it after the Cloudflare runner objects have been cleared.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
@@ -488,8 +483,8 @@ Notes:
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` use `apps/web/.next`.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as
   generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted stale-runner cleanup, retention, and Stripe recovery cron paths accept
-  only Vercel cron bearer auth via `CRON_SECRET`.
+- Hosted internal cron paths accept only Vercel cron bearer auth via
+  `CRON_SECRET`.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning.
@@ -534,7 +529,6 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/runtime/apply`
 - `POST /api/internal/device-sync/runtime/dirty-pending`
 - `POST /api/internal/device-sync/runtime/dirty-ack`
-- `GET /api/internal/hosted-execution/stale-runner-cleanup/cron`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
