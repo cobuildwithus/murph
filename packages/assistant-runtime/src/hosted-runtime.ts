@@ -58,7 +58,6 @@ import {
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_GRACE_MS,
-  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON,
   runHostedWorkspaceHousekeepingPhase,
   scheduleLegacyWearableReceiptCompactionWakeIfNeeded,
 } from "./hosted-runtime/workspace-housekeeping.ts";
@@ -1436,6 +1435,10 @@ function projectHostedWorkspaceWakeForForegroundPass(input: {
 function shouldReplaceHostedWorkspaceInvocationWake(
   result: HostedWorkspaceRunnerResult,
 ): boolean {
+  if (result.housekeepingPhaseResult?.handled === true) {
+    return true;
+  }
+
   return Boolean(
     result.assistantPhaseResult
       && result.assistantPhaseResult.progressed === true

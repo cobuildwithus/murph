@@ -384,7 +384,7 @@ async function writeRawJsonArtifact(input: {
 
 async function readRawJson(vaultRoot: string, fileName: string): Promise<Record<string, unknown>> {
   const parsed: unknown = JSON.parse(await readRawText(vaultRoot, fileName));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new Error(`Expected raw JSON object in ${fileName}.`);
   }
   return parsed;
@@ -442,6 +442,10 @@ function readEnvelopeArtifact(manifest: RawImportManifest): RawImportManifestArt
     throw new Error("Expected wearable raw envelope artifact in manifest.");
   }
   return artifact;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function sha256Hex(content: string | Buffer): string {
