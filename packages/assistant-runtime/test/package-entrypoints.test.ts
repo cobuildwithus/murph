@@ -157,7 +157,16 @@ test("hosted-assistant-env-constants subpath stays wired to the hosted env const
       "HOSTED_WEB_BASE_URL",
     ),
   );
-  assert.ok(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC.includes("TELEGRAM_BOT_TOKEN"));
+  assert.ok(
+    (HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC as readonly string[]).includes(
+      "TELEGRAM_BOT_TOKEN",
+    ),
+  );
+  assert.ok(
+    (HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES_PUBLIC as readonly string[]).includes(
+      "HOSTED_LOG_FINGERPRINT_SECRET",
+    ),
+  );
 });
 
 test("hosted-email subpath export stays wired to the hosted email source surface", () => {

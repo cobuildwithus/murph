@@ -148,6 +148,29 @@ export interface HostedWorkspaceSnapshotArchiveExtraPath {
   root: "operator-home" | "vault";
 }
 
+export function createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics(input: {
+  archivePlan: HostedWorkspaceSnapshotArchivePlan;
+  hashSecret?: string | null;
+}): HostedWorkspaceSnapshotSizeDiagnostics {
+  const collector = createHostedWorkspaceSnapshotSizeDiagnosticsCollector({
+    hashSecret: normalizeHostedCodexHomeSnapshotHashSecret(input.hashSecret),
+  });
+
+  for (const entry of input.archivePlan.entries) {
+    if (entry.kind !== "file") {
+      continue;
+    }
+    collector.recordFile({
+      bytes: entry.size ?? 0,
+      externalized: false,
+      path: entry.relativePath,
+      root: entry.root,
+    });
+  }
+
+  return collector.finish();
+}
+
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
   ref: HostedBundleArtifactRef;
 }
@@ -2654,6 +2677,12 @@ function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
   hashSecret: string | null;
 }): {
   finish(): HostedWorkspaceSnapshotSizeDiagnostics;
+  recordFile(input: {
+    bytes: number;
+    externalized: boolean;
+    path: string;
+    root: string;
+  }): void;
   recordArchive(input: HostedBundleSnapshotArchiveDiagnostics): void;
   record(input: {
     artifact: HostedBundleArtifactSnapshotInput;
@@ -2669,6 +2698,59 @@ function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
   let maxFileBytes = 0;
   let maxFileClass: string | null = null;
   let archiveDiagnostics: HostedBundleSnapshotArchiveDiagnostics | null = null;
+
+  const recordFile = (recordInput: {
+    bytes: number;
+    externalized: boolean;
+    path: string;
+    root: string;
+  }): void => {
+    const className = classifyHostedWorkspaceSnapshotArtifact({
+      path: recordInput.path,
+      root: recordInput.root,
+    });
+    const metrics = classMetrics.get(className) ?? {
+      externalBytes: 0,
+      externalCount: 0,
+      fileCount: 0,
+      inlineBytes: 0,
+    };
+    metrics.fileCount += 1;
+    if (recordInput.externalized) {
+      metrics.externalBytes += recordInput.bytes;
+      metrics.externalCount += 1;
+      externalArtifactBytes += recordInput.bytes;
+      externalArtifactCount += 1;
+    } else {
+      metrics.inlineBytes += recordInput.bytes;
+      inlineBytes += recordInput.bytes;
+    }
+    classMetrics.set(className, metrics);
+
+    fileCount += 1;
+    if (recordInput.bytes > maxFileBytes) {
+      maxFileBytes = recordInput.bytes;
+      maxFileClass = className;
+    }
+
+    largestFiles.push({
+      bytes: recordInput.bytes,
+      className,
+      depth: hostedWorkspaceSnapshotPathDepth(recordInput.path),
+      externalized: recordInput.externalized,
+      extension: hostedWorkspaceSnapshotSafeExtension(recordInput.path),
+      relHash: input.hashSecret
+        ? fingerprintHostedWorkspaceSnapshotRelativePath({
+            hashSecret: input.hashSecret,
+            relativePath: recordInput.path,
+            root: recordInput.root,
+          })
+        : null,
+      root: recordInput.root,
+    });
+    largestFiles.sort((left, right) => right.bytes - left.bytes);
+    largestFiles.splice(HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT);
+  };
 
   return {
     finish() {
@@ -2700,50 +2782,14 @@ function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
       archiveDiagnostics = input;
     },
     record({ artifact, externalized }) {
-      const bytes = artifact.bytes.byteLength;
-      const className = classifyHostedWorkspaceSnapshotArtifact(artifact);
-      const metrics = classMetrics.get(className) ?? {
-        externalBytes: 0,
-        externalCount: 0,
-        fileCount: 0,
-        inlineBytes: 0,
-      };
-      metrics.fileCount += 1;
-      if (externalized) {
-        metrics.externalBytes += bytes;
-        metrics.externalCount += 1;
-        externalArtifactBytes += bytes;
-        externalArtifactCount += 1;
-      } else {
-        metrics.inlineBytes += bytes;
-        inlineBytes += bytes;
-      }
-      classMetrics.set(className, metrics);
-
-      fileCount += 1;
-      if (bytes > maxFileBytes) {
-        maxFileBytes = bytes;
-        maxFileClass = className;
-      }
-
-      largestFiles.push({
-        bytes,
-        className,
-        depth: hostedWorkspaceSnapshotPathDepth(artifact.path),
+      recordFile({
+        bytes: artifact.bytes.byteLength,
         externalized,
-        extension: hostedWorkspaceSnapshotSafeExtension(artifact.path),
-        relHash: input.hashSecret
-          ? fingerprintHostedWorkspaceSnapshotRelativePath({
-              hashSecret: input.hashSecret,
-              relativePath: artifact.path,
-              root: artifact.root,
-            })
-          : null,
+        path: artifact.path,
         root: artifact.root,
       });
-      largestFiles.sort((left, right) => right.bytes - left.bytes);
-      largestFiles.splice(HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT);
     },
+    recordFile,
   };
 }
 
@@ -2784,9 +2830,10 @@ function summarizeHostedWorkspaceSnapshotLargestFiles(
       ].join(","));
 }
 
-function classifyHostedWorkspaceSnapshotArtifact(
-  artifact: HostedBundleArtifactSnapshotInput,
-): string {
+function classifyHostedWorkspaceSnapshotArtifact(artifact: {
+  path: string;
+  root: string;
+}): string {
   const relativePath = normalizeWorkspaceSnapshotRelativePath(artifact.path);
 
   if (artifact.root === WORKSPACE_OPERATOR_HOME_ROOT) {

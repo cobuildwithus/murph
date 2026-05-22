@@ -1883,7 +1883,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceVersion: "7",
       },
       runtime: {
-        forwardedEnv: {
+        platformEnv: {
           HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
         },
       },
@@ -1944,9 +1944,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const writeLog = vi.fn(async (request) => ({
       loggedCount: request.entries.length,
     }));
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         putArtifact: async () => {},
+        workspaceSnapshotLimits: {
+          warnEncryptedBytes: 1,
+        },
         writeLog,
       }),
       readCurrentLease: () => ({
@@ -1963,7 +1967,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceVersion: "7",
       },
       runtime: {
-        forwardedEnv: {
+        platformEnv: {
           HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
         },
       },
@@ -1991,11 +1995,113 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
         workspaceSnapshotFileCount: snapshotRef.archive.fileCount,
         workspaceSnapshotPlainBytes: snapshotRef.archive.totalPlainBytes,
+        workspaceSnapshotClassSummary: expect.arrayContaining([
+          `class=raw,files=1,inlineBytes=${rawArtifactBytes},externalBytes=0,externalCount=0`,
+          expect.stringMatching(
+            /^class=runtime-assistant,files=1,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
+          ),
+        ]),
+        workspaceSnapshotExternalArtifactBytes: 0,
+        workspaceSnapshotExternalArtifactCount: 0,
+        workspaceSnapshotFingerprintStatus: "enabled",
+        workspaceSnapshotIncludedFileCount: snapshotRef.archive.fileCount,
+        workspaceSnapshotInlineBytes: snapshotRef.archive.totalPlainBytes,
+        workspaceSnapshotLargestFiles: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=raw,root=vault,bytes=307200,external=0,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+        ]),
+        workspaceSnapshotMaxFileBytes: rawArtifactBytes,
+        workspaceSnapshotMaxFileClass: "raw",
       }),
     }));
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("session.json");
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("state.json");
+    const warningLogs = consoleWarn.mock.calls
+      .map(([payload]) => typeof payload === "string" ? JSON.parse(payload) as unknown : null)
+      .filter((payload) =>
+        typeof payload === "object"
+        && payload !== null
+        && "message" in payload
+        && payload.message === "Hosted workspace snapshot exceeded the warning threshold."
+      );
+    expect(warningLogs).toContainEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        workspaceSnapshotClassSummary: expect.arrayContaining([
+          `class=raw,files=1,inlineBytes=${rawArtifactBytes},externalBytes=0,externalCount=0`,
+        ]),
+        workspaceSnapshotFingerprintStatus: "enabled",
+        workspaceSnapshotIncludedFileCount: snapshotRef.archive.fileCount,
+        workspaceSnapshotLargestFiles: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=raw,root=vault,bytes=307200,external=0,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+        ]),
+        workspaceSnapshotMaxFileBytes: rawArtifactBytes,
+        workspaceSnapshotMaxFileClass: "raw",
+      }),
+      level: "warn",
+    }));
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("large-video");
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("session.json");
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("state.json");
+  });
+
+  it("does not enable snapshot path fingerprints from forwarded runtime env", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "raw", "captures", "large-video.bin"), "raw\n", "utf8");
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact: async () => {},
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {
+        forwardedEnv: {
+          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
+        },
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const snapshotLog = writeLog.mock.calls
+      .flatMap(([request]) => request.entries)
+      .find((entry) =>
+        typeof entry === "object"
+        && entry !== null
+        && "eventCode" in entry
+        && entry.eventCode === "checkpoint.snapshot_finished");
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      redactedJson: expect.objectContaining({
+        workspaceSnapshotFingerprintStatus: "disabled",
+        workspaceSnapshotLargestFiles: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=raw,root=vault,bytes=4,external=0,ext=\.bin,depth=3,relHash=disabled$/u,
+          ),
+        ]),
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
   });
 
   it("decrypts sidecar mailbox payloads through the bridge using the sidecar payload schema", async () => {
