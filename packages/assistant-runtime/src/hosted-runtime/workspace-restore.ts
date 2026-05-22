@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -38,6 +38,10 @@ import type {
   HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
+  buildHostedRuntimeLogContextFields,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
+import {
   readHostedCanonicalWriteReceiptLogEntries,
 } from "./canonical-write-receipt-log.ts";
 
@@ -66,6 +70,19 @@ const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-re
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
 const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
+
+type HostedCodexContinuityRepairReason =
+  | "manifest_invalid_json"
+  | "manifest_invalid_rollout_path"
+  | "manifest_missing"
+  | "manifest_missing_rollout"
+  | "manifest_missing_rollout_state"
+  | "manifest_schema_mismatch"
+  | "manifest_thread_invalid"
+  | "rollout_missing"
+  | "rollout_sha_mismatch"
+  | "rollout_size_mismatch"
+  | "unmanifested_home_file";
 
 export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
@@ -130,9 +147,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
       createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
     ]);
-    await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
-      assistantStateRoot: restored.assistantStateRoot,
-      missingManifest: "preserve",
+    await verifyOrRepairRestoredHostedCodexContinuity({
+      logContext: input.logContext ?? null,
+      platform: input.platform,
+      restored,
     });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
@@ -284,6 +302,226 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     mode: "snapshot",
     restoreWasCold,
   };
+}
+
+async function verifyOrRepairRestoredHostedCodexContinuity(input: {
+  logContext: HostedRuntimeLogContext | null;
+  platform: HostedRuntimePlatform;
+  restored: HostedRestoredExecutionContext;
+}): Promise<void> {
+  try {
+    await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot, {
+      assistantStateRoot: input.restored.assistantStateRoot,
+      missingManifest: "preserve",
+    });
+    return;
+  } catch (error) {
+    const reason = classifyRepairableHostedCodexContinuityRestoreError(error);
+    if (!reason) {
+      throw error;
+    }
+
+    const repair = await repairRestoredHostedCodexContinuity({
+      assistantStateRoot: input.restored.assistantStateRoot,
+      operatorHomeRoot: input.restored.operatorHomeRoot,
+    });
+    await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot, {
+      assistantStateRoot: input.restored.assistantStateRoot,
+    });
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields(input.logContext),
+        component: "runner",
+        eventCode: "workspace.codex_continuity_repaired",
+        level: "warn",
+        phase: "restore",
+        redactedJson: {
+          codexContinuityRepairReason: reason,
+          codexContinuitySessionFilesRepaired: repair.sessionFilesRepaired,
+          codexContinuitySessionFilesScanned: repair.sessionFilesScanned,
+        },
+      },
+      platform: input.platform,
+    });
+  }
+}
+
+async function repairRestoredHostedCodexContinuity(input: {
+  assistantStateRoot: string;
+  operatorHomeRoot: string;
+}): Promise<{
+  sessionFilesRepaired: number;
+  sessionFilesScanned: number;
+}> {
+  const sessionsRoot = path.join(input.assistantStateRoot, "sessions");
+  let sessionFilesRepaired = 0;
+  let sessionFilesScanned = 0;
+
+  async function visit(directoryPath: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+      throw error;
+    }
+
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolutePath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      sessionFilesScanned += 1;
+      const repaired = await clearHostedAssistantSessionCodexResume(absolutePath);
+      if (repaired) {
+        sessionFilesRepaired += 1;
+      }
+    }
+  }
+
+  await visit(sessionsRoot);
+  await clearHostedCodexContinuityRestoreRoot(input.operatorHomeRoot);
+
+  return {
+    sessionFilesRepaired,
+    sessionFilesScanned,
+  };
+}
+
+async function clearHostedAssistantSessionCodexResume(filePath: string): Promise<boolean> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    return false;
+  }
+  const repaired = clearHostedAssistantSessionCodexResumeRecord(parsed);
+  if (!repaired.changed) {
+    return false;
+  }
+  await writeFile(filePath, `${JSON.stringify(repaired.value)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  return true;
+}
+
+function clearHostedAssistantSessionCodexResumeRecord(value: unknown): {
+  changed: boolean;
+  value: unknown;
+} {
+  if (!isPlainObject(value) || !hasHostedAssistantSessionCodexResumeRequirement(value)) {
+    return {
+      changed: false,
+      value,
+    };
+  }
+
+  const next: Record<string, unknown> = { ...value };
+  let changed = false;
+  for (const key of ["codexResume", "resumeState"] as const) {
+    if (Object.hasOwn(next, key) && next[key] !== null) {
+      next[key] = null;
+      changed = true;
+    }
+  }
+  for (const key of ["codexThreadId", "providerSessionId", "resumeRouteId", "routeFingerprint"] as const) {
+    if (Object.hasOwn(next, key)) {
+      delete next[key];
+      changed = true;
+    }
+  }
+
+  return {
+    changed,
+    value: changed ? next : value,
+  };
+}
+
+function hasHostedAssistantSessionCodexResumeRequirement(record: Record<string, unknown>): boolean {
+  const target =
+    readRecordProperty(record, "codexTarget") ?? readRecordProperty(record, "target");
+  const targetAdapter = readRecordStringProperty(target, "adapter");
+  if (targetAdapter && targetAdapter !== "codex-cli") {
+    return false;
+  }
+
+  const resumeState =
+    readRecordProperty(record, "codexResume") ?? readRecordProperty(record, "resumeState");
+  const providerSessionId =
+    readRecordStringProperty(resumeState, "threadId")
+    ?? readRecordStringProperty(resumeState, "providerSessionId")
+    ?? readRecordStringProperty(record, "codexThreadId")
+    ?? readRecordStringProperty(record, "providerSessionId");
+  if (!providerSessionId) {
+    return false;
+  }
+
+  const routeFingerprint =
+    readRecordStringProperty(resumeState, "routeFingerprint")
+    ?? readRecordStringProperty(resumeState, "resumeRouteId")
+    ?? readRecordStringProperty(record, "routeFingerprint")
+    ?? readRecordStringProperty(record, "resumeRouteId");
+  return Boolean(routeFingerprint);
+}
+
+function classifyRepairableHostedCodexContinuityRestoreError(
+  error: unknown,
+): HostedCodexContinuityRepairReason | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  switch (error.message) {
+    case "Hosted Codex continuity manifest is missing after restore.":
+      return "manifest_missing";
+    case "Hosted Codex continuity manifest contains an invalid rollout path.":
+      return "manifest_invalid_rollout_path";
+    case "Hosted Codex continuity rollout was not restored as a regular file.":
+      return "rollout_missing";
+    case "Hosted Codex continuity rollout byte size mismatch after restore.":
+      return "rollout_size_mismatch";
+    case "Hosted Codex continuity rollout SHA-256 mismatch after restore.":
+      return "rollout_sha_mismatch";
+    case "Hosted Codex continuity manifest is missing restored session rollout state.":
+      return "manifest_missing_rollout_state";
+    case "Hosted Codex continuity manifest is missing a restored session rollout.":
+      return "manifest_missing_rollout";
+    case "Hosted Codex continuity restore included an unmanifested Codex home file.":
+      return "unmanifested_home_file";
+    case "Hosted Codex continuity manifest is not valid JSON.":
+      return "manifest_invalid_json";
+    case "Hosted Codex continuity manifest schema mismatch.":
+      return "manifest_schema_mismatch";
+    case "Hosted Codex continuity manifest thread entry is invalid.":
+      return "manifest_thread_invalid";
+    default:
+      return null;
+  }
+}
+
+function readRecordProperty(
+  value: unknown,
+  propertyName: string,
+): unknown {
+  return isPlainObject(value) ? value[propertyName] : null;
+}
+
+function readRecordStringProperty(
+  value: unknown,
+  propertyName: string,
+): string | null {
+  const propertyValue = readRecordProperty(value, propertyName);
+  return typeof propertyValue === "string" && propertyValue.trim().length > 0
+    ? propertyValue
+    : null;
 }
 
 export async function tryOpenExistingWarmWorkspaceForIdleCheckpoint(input: {

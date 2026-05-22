@@ -258,7 +258,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("rejects legacy v2 Codex continuity when the manifest and rollout are missing", async () => {
+  test("repairs v2 Codex continuity when the manifest and rollout are missing", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-restore-"));
 
     try {
@@ -267,49 +267,68 @@ describe("hosted workspace restore Codex continuity", () => {
       const rolloutRelativePath =
         `sessions/2026/05/20/rollout-2026-05-20T01-02-03-${providerSessionId}.jsonl`;
       const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const logRequests: HostedRuntimeLogRequest[] = [];
 
-      await assert.rejects(
-        () => restoreHostedWorkspaceRuntimeJobWorkspace({
-          platform: createRestorePlatform({
-            artifactBytesByHash: new Map(),
-            workspaceSnapshotPort: {
-              async abortSnapshotSession() {
-                throw new Error("abortSnapshotSession is not used during v2 restore.");
-              },
-              async completeSnapshotSession() {
-                throw new Error("completeSnapshotSession is not used during v2 restore.");
-              },
-              async putSnapshotObjectDirect() {
-                throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
-              },
-              async restoreWorkspaceSnapshot(request) {
-                await mkdir(path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions"), {
-                  recursive: true,
-                });
-                await writeFile(
-                  path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions", "session.json"),
-                  JSON.stringify({
-                    resumeState: {
-                      codexRolloutRelativePath: rolloutRelativePath,
-                      providerSessionId,
-                      resumeRouteId: "route-ready",
-                    },
-                  }) + "\n",
-                  "utf8",
-                );
-              },
-              async startSnapshotSession() {
-                throw new Error("startSnapshotSession is not used during v2 restore.");
-              },
+      const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          logRequests,
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
             },
-          }),
-          vaultRoot: restoredVaultRoot,
-          workspace: createWorkspaceState({
-            snapshotRef,
-          }),
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              await mkdir(path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions"), {
+                recursive: true,
+              });
+              await writeFile(
+                path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions", "session.json"),
+                JSON.stringify({
+                  resumeState: {
+                    codexRolloutRelativePath: rolloutRelativePath,
+                    providerSessionId,
+                    resumeRouteId: "route-ready",
+                  },
+                }) + "\n",
+                "utf8",
+              );
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
         }),
-        /Hosted Codex continuity rollout was not restored as a regular file/u,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+
+      assert.equal(restored.mode, "snapshot");
+      const repairedSession = JSON.parse(
+        await readFile(
+          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      assert.deepEqual(repairedSession, {
+        resumeState: null,
+      });
+      await assert.rejects(
+        readFile(path.join(workspaceRoot, "durable", "home", ".codex-hosted", rolloutRelativePath), "utf8"),
+        { code: "ENOENT" },
       );
+      const repairLog = flattenLogEntries(logRequests).find((entry) =>
+        entry.eventCode === "workspace.codex_continuity_repaired"
+      );
+      assert.equal(repairLog?.redactedJson?.codexContinuityRepairReason, "rollout_missing");
+      assert.equal(repairLog?.redactedJson?.codexContinuitySessionFilesRepaired, 1);
     } finally {
       await rm(workspaceRoot, {
         force: true,
@@ -318,7 +337,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("rejects v2 Codex continuity when the manifest rollout digest does not match", async () => {
+  test("repairs v2 Codex continuity when the manifest rollout digest does not match", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-restore-"));
 
     try {
@@ -329,76 +348,219 @@ describe("hosted workspace restore Codex continuity", () => {
       const actualRollout = "actual-rollout\n";
       const expectedRollout = "expect-rollout\n";
       const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const logRequests: HostedRuntimeLogRequest[] = [];
 
-      await assert.rejects(
-        () => restoreHostedWorkspaceRuntimeJobWorkspace({
-          platform: createRestorePlatform({
-            artifactBytesByHash: new Map(),
-            workspaceSnapshotPort: {
-              async abortSnapshotSession() {
-                throw new Error("abortSnapshotSession is not used during v2 restore.");
-              },
-              async completeSnapshotSession() {
-                throw new Error("completeSnapshotSession is not used during v2 restore.");
-              },
-              async putSnapshotObjectDirect() {
-                throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
-              },
-              async restoreWorkspaceSnapshot(request) {
-                await mkdir(path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions"), {
-                  recursive: true,
-                });
-                await mkdir(path.join(request.durableRoot, "home", ".codex-hosted", path.dirname(rolloutRelativePath)), {
-                  recursive: true,
-                });
-                await mkdir(path.join(request.durableRoot, "home", ".murph"), {
-                  recursive: true,
-                });
-                await writeFile(
-                  path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions", "session.json"),
-                  JSON.stringify({
-                    resumeState: {
-                      codexRolloutRelativePath: rolloutRelativePath,
-                      providerSessionId,
-                      resumeRouteId: "route-ready",
-                    },
-                  }) + "\n",
-                  "utf8",
-                );
-                await writeFile(
-                  path.join(request.durableRoot, "home", ".codex-hosted", rolloutRelativePath),
-                  actualRollout,
-                  "utf8",
-                );
-                await writeFile(
-                  path.join(request.durableRoot, "home", ".murph", "hosted-codex-continuity.json"),
-                  JSON.stringify({
-                    schema: "murph.hosted-codex-continuity.v1",
-                    threads: [{
-                      codexRolloutRelativePath: rolloutRelativePath,
-                      providerSessionId,
-                      rolloutBlob: {
-                        byteSize: Buffer.byteLength(actualRollout),
-                        sha256: sha256HostedBundleHex(Buffer.from(expectedRollout)),
-                        storage: "hosted-bundle.v1",
-                      },
-                    }],
-                  }) + "\n",
-                  "utf8",
-                );
-              },
-              async startSnapshotSession() {
-                throw new Error("startSnapshotSession is not used during v2 restore.");
-              },
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          logRequests,
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
             },
-          }),
-          vaultRoot: restoredVaultRoot,
-          workspace: createWorkspaceState({
-            snapshotRef,
-          }),
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              await mkdir(path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions"), {
+                recursive: true,
+              });
+              await mkdir(path.join(request.durableRoot, "home", ".codex-hosted", path.dirname(rolloutRelativePath)), {
+                recursive: true,
+              });
+              await mkdir(path.join(request.durableRoot, "home", ".murph"), {
+                recursive: true,
+              });
+              await writeFile(
+                path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions", "session.json"),
+                JSON.stringify({
+                  resumeState: {
+                    codexRolloutRelativePath: rolloutRelativePath,
+                    providerSessionId,
+                    resumeRouteId: "route-ready",
+                  },
+                }) + "\n",
+                "utf8",
+              );
+              await writeFile(
+                path.join(request.durableRoot, "home", ".codex-hosted", rolloutRelativePath),
+                actualRollout,
+                "utf8",
+              );
+              await writeFile(
+                path.join(request.durableRoot, "home", ".murph", "hosted-codex-continuity.json"),
+                JSON.stringify({
+                  schema: "murph.hosted-codex-continuity.v1",
+                  threads: [{
+                    codexRolloutRelativePath: rolloutRelativePath,
+                    providerSessionId,
+                    rolloutBlob: {
+                      byteSize: Buffer.byteLength(actualRollout),
+                      sha256: sha256HostedBundleHex(Buffer.from(expectedRollout)),
+                      storage: "hosted-bundle.v1",
+                    },
+                  }],
+                }) + "\n",
+                "utf8",
+              );
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
         }),
-        /Hosted Codex continuity rollout SHA-256 mismatch after restore/u,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+
+      const repairedSession = JSON.parse(
+        await readFile(
+          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      assert.deepEqual(repairedSession, {
+        resumeState: null,
+      });
+      await assert.rejects(
+        readFile(path.join(workspaceRoot, "durable", "home", ".murph", "hosted-codex-continuity.json"), "utf8"),
+        { code: "ENOENT" },
       );
+      await assert.rejects(
+        readFile(path.join(workspaceRoot, "durable", "home", ".codex-hosted", rolloutRelativePath), "utf8"),
+        { code: "ENOENT" },
+      );
+      const repairLog = flattenLogEntries(logRequests).find((entry) =>
+        entry.eventCode === "workspace.codex_continuity_repaired"
+      );
+      assert.equal(repairLog?.redactedJson?.codexContinuityRepairReason, "rollout_sha_mismatch");
+    } finally {
+      await rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("repairs v2 Codex continuity when restored Codex home has unmanifested files", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-restore-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "durable", "vault");
+      const providerSessionId = "00000000-0000-4000-8000-000000000054";
+      const rolloutRelativePath =
+        `sessions/2026/05/20/rollout-2026-05-20T01-02-03-${providerSessionId}.jsonl`;
+      const rollout = "rollout-ok\n";
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const logRequests: HostedRuntimeLogRequest[] = [];
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          logRequests,
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              await mkdir(path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions"), {
+                recursive: true,
+              });
+              await mkdir(path.join(request.durableRoot, "home", ".codex-hosted", path.dirname(rolloutRelativePath)), {
+                recursive: true,
+              });
+              await mkdir(path.join(request.durableRoot, "home", ".codex-hosted", "sessions", "2026", "05", "21"), {
+                recursive: true,
+              });
+              await mkdir(path.join(request.durableRoot, "home", ".murph"), {
+                recursive: true,
+              });
+              await writeFile(
+                path.join(request.durableRoot, "vault", ".runtime", "operations", "assistant", "sessions", "session.json"),
+                JSON.stringify({
+                  resumeState: {
+                    codexRolloutRelativePath: rolloutRelativePath,
+                    providerSessionId,
+                    resumeRouteId: "route-ready",
+                  },
+                }) + "\n",
+                "utf8",
+              );
+              await writeFile(
+                path.join(request.durableRoot, "home", ".codex-hosted", rolloutRelativePath),
+                rollout,
+                "utf8",
+              );
+              await writeFile(
+                path.join(
+                  request.durableRoot,
+                  "home",
+                  ".codex-hosted",
+                  "sessions",
+                  "2026",
+                  "05",
+                  "21",
+                  `rollout-2026-05-21T01-02-03-${providerSessionId}.jsonl`,
+                ),
+                "extra-rollout\n",
+                "utf8",
+              );
+              await writeFile(
+                path.join(request.durableRoot, "home", ".murph", "hosted-codex-continuity.json"),
+                JSON.stringify({
+                  schema: "murph.hosted-codex-continuity.v1",
+                  threads: [{
+                    codexRolloutRelativePath: rolloutRelativePath,
+                    providerSessionId,
+                    rolloutBlob: {
+                      byteSize: Buffer.byteLength(rollout),
+                      sha256: sha256HostedBundleHex(Buffer.from(rollout)),
+                      storage: "hosted-bundle.v1",
+                    },
+                  }],
+                }) + "\n",
+                "utf8",
+              );
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+
+      const repairedSession = JSON.parse(
+        await readFile(
+          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      assert.deepEqual(repairedSession, {
+        resumeState: null,
+      });
+      await assert.rejects(
+        readFile(path.join(workspaceRoot, "durable", "home", ".codex-hosted", rolloutRelativePath), "utf8"),
+        { code: "ENOENT" },
+      );
+      const repairLog = flattenLogEntries(logRequests).find((entry) =>
+        entry.eventCode === "workspace.codex_continuity_repaired"
+      );
+      assert.equal(repairLog?.redactedJson?.codexContinuityRepairReason, "unmanifested_home_file");
     } finally {
       await rm(workspaceRoot, {
         force: true,
