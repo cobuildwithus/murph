@@ -273,10 +273,15 @@ describe("hosted local Linq webhook e2e", () => {
       await createActiveLinqWebhookMember("image");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const attachmentId = `att_image_${userId}`;
+    const expectedAttachmentMetadataPath = `/attachments/${encodeURIComponent(attachmentId)}`;
     const expectedAttachmentDownloadPath =
       `/attachment-downloads/${encodeURIComponent(attachmentId)}.png`;
     const expectedAttachmentDownloadUrl =
       `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.png`;
+    const attachmentMetadataCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentMetadataPath,
+    });
     const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
       expectedMethod: "GET",
       expectedPath: expectedAttachmentDownloadPath,
@@ -309,6 +314,13 @@ describe("hosted local Linq webhook e2e", () => {
     });
 
     await requireScenario().waitForLatestPendingWake(userId);
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: attachmentMetadataCountBeforeReply,
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentMetadataPath,
+      scenario: requireScenario(),
+      userId,
+    });
     await requireLinqStub().waitForAdditionalRequest({
       baselineCount: attachmentDownloadCountBeforeReply,
       expectedMethod: "GET",

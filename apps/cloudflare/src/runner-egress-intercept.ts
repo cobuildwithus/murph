@@ -1638,6 +1638,9 @@ function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
   if (method === "GET" && pathnameSuffix === "/phone_numbers") {
     return true;
   }
+  if (method === "GET" && /^\/attachments\/[^/]+$/u.test(pathnameSuffix)) {
+    return true;
+  }
   if (method === "POST" && pathnameSuffix === "/chats") {
     return true;
   }
