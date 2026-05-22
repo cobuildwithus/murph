@@ -9,14 +9,12 @@ import {
   buildSyntheticDeletionResourceId,
   createRawArtifact,
   emitObservationMetrics,
-  emitSampleMetrics,
   finiteNumber,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   minutesBetween,
   pushDeletionObservation as pushSharedDeletionObservation,
   pushRawArtifact,
-  pushSample,
   slugify,
   stringId,
   toIso,
@@ -32,7 +30,6 @@ import type {
 import type {
   ObservationMetricDescriptor,
   PlainObject,
-  SampleMetricDescriptor,
 } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 import { OURA_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
@@ -238,28 +235,28 @@ const OURA_DAILY_SPO2_METRICS: readonly ObservationMetricDescriptor<PlainObject>
   },
 ];
 
-const OURA_SLEEP_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject>[] = [
+const OURA_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
   {
-    stream: "respiratory_rate",
+    metric: "respiratory-rate",
     value: (sleep) => sleep.average_breath,
     unit: "breaths_per_minute",
+    title: "Oura respiratory rate",
     facet: "respiratory-rate",
   },
   {
-    stream: "hrv",
+    metric: "hrv",
     value: (sleep) => sleep.average_hrv,
     unit: "ms",
+    title: "Oura average HRV",
     facet: "average-hrv",
   },
   {
-    stream: "heart_rate",
+    metric: "average-heart-rate",
     value: (sleep) => sleep.average_heart_rate,
     unit: "bpm",
+    title: "Oura average heart rate",
     facet: "average-heart-rate",
   },
-];
-
-const OURA_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
   {
     metric: "sleep-efficiency",
     value: (sleep) => sleep.efficiency,
@@ -346,17 +343,19 @@ const OURA_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<Plain
   },
 ];
 
-const OURA_SESSION_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject>[] = [
+const OURA_SESSION_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
   {
-    stream: "heart_rate",
+    metric: "average-heart-rate",
     value: (session) => session.heart_rate,
     unit: "bpm",
+    title: "Oura session average heart rate",
     facet: "heart-rate",
   },
   {
-    stream: "hrv",
+    metric: "hrv",
     value: (session) => session.heart_rate_variability,
     unit: "ms",
+    title: "Oura session HRV",
     facet: "hrv",
   },
 ];
@@ -614,17 +613,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       );
     }
 
-    emitSampleMetrics(
-      samples,
-      {
-        source: sleep,
-        recordedAt,
-        dayKey,
-        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
-      },
-      OURA_SLEEP_SAMPLE_METRICS,
-    );
-
     emitObservationMetrics(
       events,
       {
@@ -685,15 +673,17 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       );
     }
 
-    emitSampleMetrics(
-      samples,
+    emitObservationMetrics(
+      events,
       {
         source: session,
+        occurredAt,
         recordedAt,
         dayKey,
+        rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("session", sessionId, version, facet),
       },
-      OURA_SESSION_SAMPLE_METRICS,
+      OURA_SESSION_OBSERVATION_METRICS,
     );
   }
 
@@ -768,20 +758,8 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     );
   }
 
-  for (const point of heartrate) {
-    const pointId = stringId(point.id) ?? stringId(point.timestamp) ?? `heartrate-${samples.length + 1}`;
-    const recordedAt = firstIso(point.timestamp, point.recorded_at, point.recordedAt) ?? importedAt;
-    const version = recordedAt;
-    const bpm = firstNumber(point.bpm, point.heart_rate, point.value);
-
-    pushSample(samples, {
-      stream: "heart_rate",
-      value: bpm,
-      unit: "bpm",
-      recordedAt,
-      dayKey: firstDayKey(recordedAt),
-      externalRef: makeExternalRef("heartrate", pointId, version, slugify(point.source, "sample")),
-    });
+  if (heartrate.length > 0) {
+    pushRawArtifact(rawArtifacts, createRawArtifact("heartrate", "heartrate.json", heartrate));
   }
 
   for (const deletion of deletions) {

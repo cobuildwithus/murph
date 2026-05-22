@@ -15,12 +15,20 @@ import {
   createVaultReadModel,
   parseBrowserVaultReplica,
 } from "../src/browser.ts";
-import { rebuildQueryProjection } from "../src/index.ts";
+import { buildMetricProjection, rebuildQueryProjection } from "../src/index.ts";
 
 type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
+
+async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
+  return createBrowserVaultReplica({
+    ...input,
+    metricPoints: buildMetricProjection(input.vault).metricPoints,
+  });
+}
 
 test("browser-vault metric points project manual measurements, metric samples, and blood-test results through one primitive", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-02T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -202,7 +210,7 @@ test("browser-vault metric points project manual measurements, metric samples, a
 });
 
 test("browser-vault metric rows preserve same-day lab record ids for anchored experiment lookups", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-24T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -251,7 +259,7 @@ test("browser-vault metric rows preserve same-day lab record ids for anchored ex
 });
 
 test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-30T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -324,7 +332,7 @@ test("browser-vault metric goal targets honor startAt when selecting rolling-win
 });
 
 test("browser-vault metric goal targets honor selectionPolicyOverride from goal frontmatter", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-30T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -419,7 +427,7 @@ test("browser-vault metric goal targets honor selectionPolicyOverride from goal 
 });
 
 test("browser-vault metric selections can use old requested points while metric rows stay lookback bounded", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-02T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -506,7 +514,7 @@ test("browser-vault metric selections can use old requested points while metric 
 });
 
 test("browser-vault metric rows keep old lab points when experiment measurement anchors request them", async () => {
-  const replica = await createBrowserVaultReplica({
+  const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-02T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
@@ -643,7 +651,7 @@ test("query projection rebuild stores shared event and wearable metric points in
         [rows.find((row) => row.metricKey === "apob")?.sourceRecordId],
         ["evt_projection_test"],
       );
-      assert.equal(rows.find((row) => row.metricKey === "steps")?.sourceKind, "activity-summary");
+      assert.equal(rows.find((row) => row.metricKey === "steps")?.sourceKind, "metric-sample");
       assert.deepEqual(
         [rows.find((row) => row.metricKey === "steps")?.sourceRecordId],
         ["smp_projection_steps"],
@@ -653,7 +661,7 @@ test("query projection rebuild stores shared event and wearable metric points in
       ) as { context?: { contributingRecordIds?: unknown }; source?: { recordId?: string } } | null;
       assert.ok(stepsPoint);
       assert.equal(stepsPoint.source?.recordId, "smp_projection_steps");
-      assert.deepEqual(stepsPoint.context?.contributingRecordIds, ["smp_projection_steps"]);
+      assert.equal(stepsPoint.context?.contributingRecordIds, undefined);
     } finally {
       database.close();
     }
@@ -727,11 +735,11 @@ async function createMetricPointProjectionVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-metric-points-"));
   const eventsDir = path.join(vaultRoot, "ledger/events/2026");
   const metricSamplesDir = path.join(vaultRoot, "ledger/metric-samples/resting-heart-rate/2026");
-  const stepsDir = path.join(vaultRoot, "ledger/samples/steps/2026");
+  const stepsMetricSamplesDir = path.join(vaultRoot, "ledger/metric-samples/steps/2026");
 
   await mkdir(eventsDir, { recursive: true });
   await mkdir(metricSamplesDir, { recursive: true });
-  await mkdir(stepsDir, { recursive: true });
+  await mkdir(stepsMetricSamplesDir, { recursive: true });
   await writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify(
@@ -804,12 +812,12 @@ async function createMetricPointProjectionVault(): Promise<string> {
     ].join("\n"),
   );
   await writeFile(
-    path.join(stepsDir, "2026-05.jsonl"),
+    path.join(stepsMetricSamplesDir, "2026-05.jsonl"),
     [
       JSON.stringify({
-        schemaVersion: "murph.sample.v1",
+        schemaVersion: "murph.metric-sample.v1",
         id: "smp_projection_steps",
-        stream: "steps",
+        metric: "steps",
         recordedAt: "2026-05-01T21:00:00.000Z",
         dayKey: "2026-05-01",
         externalRef: {
@@ -817,8 +825,9 @@ async function createMetricPointProjectionVault(): Promise<string> {
           resourceType: "daily_summary",
           system: "garmin",
         },
-        source: "device",
+        source: "import",
         quality: "summary",
+        qualifiers: { summary: true },
         value: 9234,
         unit: "count",
       }),

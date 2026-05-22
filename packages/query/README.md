@@ -2,9 +2,9 @@
 
 Workspace-private read-helper, filter, derived-retrieval, and export-pack surface over canonical vault state. Query code must not mutate canonical vault data. It owns the rebuildable local query projection at `.runtime/projections/query.sqlite`, which backs both canonical read materialization and lexical search.
 
-The first retrieval milestone now lives here too: lexical `searchVault()` over the read model plus `buildTimeline()` for descending journal/event/sample-summary context.
+The first retrieval milestone now lives here too: lexical `searchVault()` over the sparse read model plus `buildTimeline()` for descending journal/event/display-grade sample-summary context.
 
-It also owns Murph's semantic wearable read model: deduplicated daily sleep, activity, recovery, body-state, source-health, and assistant-facing day summaries derived from imported wearable evidence.
+It also owns Murph's semantic wearable read model: deduplicated daily sleep, activity, recovery, body-state, source-health, compact metric points, and assistant-facing day summaries derived from imported wearable evidence. Dense provider telemetry stays in raw evidence or explicit sample-debug ledgers and is not hydrated by default `readVault()` calls.
 
 Shared query entity-family metadata now lives on the dedicated `@murphai/query/entity-families` subpath so CLI and contract callers do not need the full query root barrel just to validate record-family flags.
 

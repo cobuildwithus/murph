@@ -387,6 +387,7 @@ async function createFixtureClient(input: {
   metricRows?: BrowserVaultMetricRow[];
 } = {}) {
   const replica = await createBrowserVaultReplica({
+    metricPoints: [],
     generatedAt: "2026-04-20T12:00:00.000Z",
     sourceBundleHash: "fixture-source",
     vault: createVaultReadModel({

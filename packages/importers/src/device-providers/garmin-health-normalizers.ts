@@ -2,7 +2,6 @@ import { stripUndefined } from "../shared.ts";
 import {
   minutesBetween,
   pushObservationEvent,
-  pushSample,
 } from "./shared-normalization.ts";
 import {
   asObjectArray,
@@ -122,58 +121,6 @@ function pushGarminObservation(
   });
 }
 
-function pushSleepStageSample(
-  samples: DeviceSamplePayload[],
-  sleepId: string,
-  version: string | undefined,
-  stageRecord: PlainObject,
-): void {
-  const stage = normalizeSleepStage(
-    firstStringFromPaths(stageRecord, ["stage", "sleepStage", "level", "name"]),
-  );
-  const startAt = firstIsoFromPaths(stageRecord, [
-    "startTime",
-    "startAt",
-    "start_timestamp",
-  ]);
-  const endAt = firstIsoFromPaths(stageRecord, [
-    "endTime",
-    "endAt",
-    "end_timestamp",
-  ]);
-  const durationMinutes =
-    normalizePositiveIntegerMinutes(firstNumberFromPaths(stageRecord, ["durationMinutes"])) ??
-    normalizePositiveIntegerMinutes(
-      secondsToMinutes(firstNumberFromPaths(stageRecord, ["durationSeconds", "durationInSeconds"])),
-    ) ??
-    normalizePositiveIntegerMinutes(
-      millisecondsToMinutes(firstNumberFromPaths(stageRecord, ["durationMillis", "durationInMilliseconds"])),
-    ) ??
-    normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
-
-  if (!stage || !startAt || !endAt || durationMinutes === undefined) {
-    return;
-  }
-
-  samples.push(
-    stripUndefined({
-      stream: "sleep_stage",
-      recordedAt: startAt,
-      source: "device",
-      quality: "normalized",
-      unit: "stage",
-      externalRef: makeGarminExternalRef("sleep", sleepId, version, `sleep-stage-${stage}`),
-      sample: {
-        recordedAt: startAt,
-        stage,
-        startAt,
-        endAt,
-        durationMinutes,
-      },
-    }),
-  );
-}
-
 function stageMinutes(
   sleep: PlainObject,
   stages: readonly PlainObject[],
@@ -210,7 +157,11 @@ function stageMinutes(
     const durationMinutes =
       firstNumberFromPaths(stage, ["durationMinutes"]) ??
       secondsToMinutes(firstNumberFromPaths(stage, ["durationSeconds", "durationInSeconds"])) ??
-      millisecondsToMinutes(firstNumberFromPaths(stage, ["durationMillis", "durationInMilliseconds"]));
+      millisecondsToMinutes(firstNumberFromPaths(stage, ["durationMillis", "durationInMilliseconds"])) ??
+      minutesBetween(
+        firstIsoFromPaths(stage, ["startTime", "startAt", "start_timestamp"]),
+        firstIsoFromPaths(stage, ["endTime", "endAt", "end_timestamp"]),
+      );
 
     if (durationMinutes === undefined) {
       continue;
@@ -472,13 +423,7 @@ export function normalizeGarminEpochSummaries(
   for (const epoch of asObjectArray(epochSummaries)) {
     const epochId =
       firstIdentifierFromPaths(epoch, ["epochId", "id", "timestamp", "startTime", "startAt"]) ??
-      `epoch-${context.samples.length + 1}`;
-    const recordedAt =
-      firstIsoFromPaths(epoch, ["timestamp", "recordedAt", "startTime", "startAt"]) ??
-      context.importedAt;
-    const version =
-      firstIsoFromPaths(epoch, ["updatedAt", "timestamp", "recordedAt"]) ??
-      recordedAt;
+      `epoch-${context.rawArtifacts.length + 1}`;
     const role = `epoch-summary:${epochId}`;
 
     pushGarminArtifact(
@@ -487,83 +432,6 @@ export function normalizeGarminEpochSummaries(
       `epoch-summary-${epochId}.json`,
       epoch,
     );
-
-    pushSample(context.samples, {
-      stream: "heart_rate",
-      value: firstNumberFromPaths(epoch, ["heartRate", "heartRateInBeatsPerMinute", "heart_rate"]),
-      unit: "bpm",
-      recordedAt,
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "heart-rate"),
-    });
-    pushSample(context.samples, {
-      stream: "steps",
-      value: firstNumberFromPaths(epoch, ["steps", "stepCount", "stepsInEpoch"]),
-      unit: "count",
-      recordedAt,
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "steps"),
-    });
-    pushSample(context.samples, {
-      stream: "respiratory_rate",
-      value: firstNumberFromPaths(epoch, ["respirationRate", "respiration_rate", "breathingRate"]),
-      unit: "breaths_per_minute",
-      recordedAt,
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "respiratory-rate"),
-    });
-    pushSample(context.samples, {
-      stream: "temperature",
-      value: firstNumberFromPaths(epoch, ["temperatureCelsius", "temperature", "temperature.celsius"]),
-      unit: "celsius",
-      recordedAt,
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "temperature"),
-    });
-    pushSample(context.samples, {
-      stream: "hrv",
-      value: firstNumberFromPaths(epoch, ["hrvMs", "hrv", "heartRateVariabilityMs"]),
-      unit: "ms",
-      recordedAt,
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "hrv"),
-    });
-
-    pushObservationEvent(context.events, {
-      metric: "stress-level",
-      value: firstNumberFromPaths(epoch, ["stressLevel", "stress", "stressLevelValue"]),
-      unit: "score",
-      occurredAt: recordedAt,
-      recordedAt,
-      title: "Garmin stress level",
-      rawArtifactRoles: [role],
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "stress-level"),
-    });
-    pushObservationEvent(context.events, {
-      metric: "body-battery",
-      value: firstNumberFromPaths(epoch, ["bodyBattery", "bodyBatteryLevel"]),
-      unit: "score",
-      occurredAt: recordedAt,
-      recordedAt,
-      title: "Garmin body battery",
-      rawArtifactRoles: [role],
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "body-battery"),
-    });
-    pushObservationEvent(context.events, {
-      metric: "spo2",
-      value: firstNumberFromPaths(epoch, ["spo2", "pulseOx", "pulseOxPercent"]),
-      unit: "%",
-      occurredAt: recordedAt,
-      recordedAt,
-      title: "Garmin Pulse Ox",
-      rawArtifactRoles: [role],
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "spo2"),
-    });
-    pushObservationEvent(context.events, {
-      metric: "active-calories",
-      value: firstNumberFromPaths(epoch, ["activeCalories", "calories", "activeKilocalories"]),
-      unit: "kcal",
-      occurredAt: recordedAt,
-      recordedAt,
-      title: "Garmin active calories",
-      rawArtifactRoles: [role],
-      externalRef: makeGarminExternalRef("epoch-summary", epochId, version, "active-calories"),
-    });
   }
 }
 
@@ -619,24 +487,26 @@ export function normalizeGarminSleeps(
       );
     }
 
-    pushSample(context.samples, {
-      stream: "respiratory_rate",
+    pushObservationEvent(context.events, {
+      metric: "respiratory-rate",
       value: firstNumberFromPaths(sleep, ["averageRespirationRate", "averageBreathsPerMinute", "respiration.average"]),
       unit: "breaths_per_minute",
+      occurredAt,
       recordedAt,
+      title: "Garmin respiratory rate",
+      rawArtifactRoles: [role],
       externalRef: makeGarminExternalRef("sleep", sleepId, version, "respiratory-rate"),
     });
-    pushSample(context.samples, {
-      stream: "hrv",
+    pushObservationEvent(context.events, {
+      metric: "hrv",
       value: firstNumberFromPaths(sleep, ["averageHrvMs", "averageHrv", "hrv.average"]),
       unit: "ms",
+      occurredAt,
       recordedAt,
+      title: "Garmin HRV",
+      rawArtifactRoles: [role],
       externalRef: makeGarminExternalRef("sleep", sleepId, version, "hrv"),
     });
-
-    for (const stage of stages) {
-      pushSleepStageSample(context.samples, sleepId, version, stage);
-    }
 
     const awakeMinutes = stageMinutes(
       sleep,

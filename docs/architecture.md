@@ -108,7 +108,7 @@ repo/
 - Append-only JSONL ledgers:
   - `ledger/inbox-captures/*.jsonl`
   - `ledger/events/*.jsonl`
-  - `ledger/samples/**.jsonl`
+  - `ledger/samples/**.jsonl` for explicit raw/debug sample inspection, not default query hydration
   - `audit/*.jsonl`
 - Immutable imported raw artifacts:
   - `raw/**`

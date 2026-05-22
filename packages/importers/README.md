@@ -1,6 +1,6 @@
 # `@murphai/importers`
 
-Workspace-private ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murphai/core`.
+Workspace-private ingestion adapters for documents, meals, explicit CSV sample ledgers, and provider snapshots. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murphai/core`.
 
 Adding a new wearable provider? Pair the importer work with the transport half described in `docs/device-provider-contribution-kit.md` at the repo root, and use the scaffolds listed in `docs/templates/README.md` so the provider lands through both seams together.
 
@@ -8,14 +8,14 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 
 - `document` import reads file metadata only and forwards a normalized document payload.
 - `meal` import inspects photo/audio attachments and forwards a normalized meal payload.
-- `samples` CSV import parses tabular sample rows and forwards a normalized batch payload.
+- `samples` CSV import parses tabular sample rows and forwards an explicit raw/debug sample-ledger batch payload.
 - No OCR, transcription, or structured lab parsing is performed in the baseline.
 
 ## Built-in Device Providers
 
 `createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, `garmin`, and `strava`.
 
-Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves the upstream payloads as raw artifacts, and only promotes fields that fit the current canonical device batch surface.
+Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves the upstream payloads as raw artifacts, and only promotes fields that fit the current canonical device batch surface. High-frequency provider telemetry should remain raw evidence unless it is reduced to compact display-grade events or metric facts.
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 

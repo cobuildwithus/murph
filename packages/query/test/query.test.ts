@@ -1068,7 +1068,7 @@ test(
       assert.equal(vault.experiments.length, 1);
       assert.equal(vault.journalEntries.length, 2);
       assert.equal(vault.events.length, 3);
-      assert.equal(vault.samples.length, 5);
+      assert.equal(vault.samples.length, 0);
       assert.equal(vault.audits.length, 1);
       assert.deepEqual(vault.byFamily.core?.map((record) => record.entityId), [
         vault.coreDocument?.entityId,
@@ -1086,7 +1086,7 @@ test(
         vault.events.map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.sample?.map((record) => record.entityId),
+        (vault.byFamily.sample ?? []).map((record) => record.entityId),
         vault.samples.map((record) => record.entityId),
       );
       assert.deepEqual(
@@ -1243,13 +1243,9 @@ test("list helpers apply date, tag, text, and kind filters against contract data
       marchRecords.map((record) => record.entityId),
       [
         "journal:2026-03-10",
-        "smp_01JNV4GLU000000000000001",
-        "smp_01JNV4HR0000000000000001",
         "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
         "var_01JNW7YJ7MNE7M9Q2QWQK4Z400",
         "meal_01JNV4MEAL00000000000001",
-        "smp_01JNV4GLU000000000000002",
-        "smp_01JNV4HR0000000000000002",
       ],
     );
 
@@ -1281,33 +1277,70 @@ test("list helpers apply date, tag, text, and kind filters against contract data
   }
 });
 
-test("summarizeDailySamples groups by day and stream with stable numeric aggregates", async () => {
-  const vaultRoot = await createFixtureVault();
+test("summarizeDailySamples groups explicit in-memory sample records with stable numeric aggregates", () => {
+  const vault = createEmptyReadModel();
+  vault.samples = [
+    createSampleRecord({
+      id: "smp_01JNV4GLU000000000000001",
+      occurredAt: "2026-03-10T08:00:00Z",
+      date: "2026-03-10",
+      stream: "glucose",
+      sourcePath: "ledger/samples/glucose/2026/2026-03.jsonl",
+      data: { value: 92, unit: "mg_dL" },
+    }),
+    createSampleRecord({
+      id: "smp_01JNV4GLU000000000000002",
+      occurredAt: "2026-03-10T12:15:00Z",
+      date: "2026-03-10",
+      stream: "glucose",
+      sourcePath: "ledger/samples/glucose/2026/2026-03.jsonl",
+      data: { value: 100, unit: "mg_dL" },
+    }),
+    createSampleRecord({
+      id: "smp_01JNV4HR0000000000000001",
+      occurredAt: "2026-03-10T08:30:00Z",
+      date: "2026-03-10",
+      stream: "heart_rate",
+      sourcePath: "ledger/samples/heart_rate/2026/2026-03.jsonl",
+      data: { value: 68, unit: "bpm" },
+    }),
+    createSampleRecord({
+      id: "smp_01JNV4HR0000000000000002",
+      occurredAt: "2026-03-10T21:30:00Z",
+      date: "2026-03-10",
+      stream: "heart_rate",
+      sourcePath: "ledger/samples/heart_rate/2026/2026-03.jsonl",
+      data: { value: 72, unit: "bpm" },
+    }),
+    createSampleRecord({
+      id: "smp_01JNV4HR0000000000000003",
+      occurredAt: "2026-03-11T08:30:00Z",
+      date: "2026-03-11",
+      stream: "heart_rate",
+      sourcePath: "ledger/samples/heart_rate/2026/2026-03.jsonl",
+      data: { value: 70, unit: "bpm" },
+    }),
+  ];
 
-  try {
-    const vault = await readVault(vaultRoot);
-    const summaries = summarizeDailySamples(vault, {
-      from: "2026-03-10",
-      to: "2026-03-11",
-    });
+  const summaries = summarizeDailySamples(vault, {
+    from: "2026-03-10",
+    to: "2026-03-11",
+  });
 
-    assert.deepEqual(
-      summaries.map((summary) => [summary.date, summary.stream, summary.sampleCount]),
-      [
-        ["2026-03-10", "glucose", 2],
-        ["2026-03-10", "heart_rate", 2],
-        ["2026-03-11", "heart_rate", 1],
-      ],
-    );
+  assert.deepEqual(
+    summaries.map((summary) => [summary.date, summary.stream, summary.sampleCount]),
+    [
+      ["2026-03-10", "glucose", 2],
+      ["2026-03-10", "heart_rate", 2],
+      ["2026-03-11", "heart_rate", 1],
+    ],
+  );
 
-    const glucoseSummary = summaries.find((summary) => summary.stream === "glucose");
-    assert.equal(glucoseSummary?.averageValue, 96);
-    assert.equal(glucoseSummary?.minValue, 92);
-    assert.equal(glucoseSummary?.maxValue, 100);
-    assert.equal(glucoseSummary?.unit, "mg_dL");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
+  const glucoseSummary = summaries.find((summary) => summary.stream === "glucose");
+  assert.equal(glucoseSummary?.averageValue, 96);
+  assert.equal(glucoseSummary?.minValue, 92);
+  assert.equal(glucoseSummary?.maxValue, 100);
+  assert.equal(glucoseSummary?.unit, "mg_dL");
 });
 
 test("summarizeDailySamples streams dense numeric groups without retaining value arrays", () => {
@@ -3465,10 +3498,10 @@ test("rebuildQueryProjection materializes the shared query projection and status
     assert.equal(rebuilt.exists, true);
     assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
     assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-    assert.equal(rebuilt.entityCount, vault.entities.filter((entity) => entity.family !== "sample").length);
+    assert.equal(rebuilt.entityCount, vault.entities.length);
     assert.equal(
       rebuilt.searchDocumentCount,
-      vault.entities.filter((entity) => entity.family !== "sample").length + summarizeDailySamples(vault).length,
+      vault.entities.length + summarizeDailySamples(vault).length,
     );
     assert.equal(rebuilt.fresh, true);
     assert.equal(existsSync(runtimeDatabasePath), true);
@@ -3759,7 +3792,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
   }
 });
 
-test("rebuildQueryProjection keeps dense sample points out of generic entities and search", async () => {
+test("rebuildQueryProjection ignores dense sample ledgers in default read and search paths", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
   const heartRateLedgerPath = path.join(vaultRoot, "ledger/samples/heart_rate/2026/2026-03.jsonl");
@@ -3793,9 +3826,9 @@ test("rebuildQueryProjection keeps dense sample points out of generic entities a
       const sampleEntityCount = database
         .prepare("SELECT COUNT(*) AS count FROM query_entities WHERE family = 'sample'")
         .get() as { count: number };
-      const samplePointCount = database
-        .prepare("SELECT COUNT(*) AS count FROM query_sample_points")
-        .get() as { count: number };
+      const samplePointTable = database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'query_sample_points'")
+        .get() as { name: string } | undefined;
       const sampleSearchDocumentCount = database
         .prepare(`
           SELECT COUNT(*) AS count
@@ -3804,13 +3837,31 @@ test("rebuildQueryProjection keeps dense sample points out of generic entities a
         `)
         .get() as { count: number };
 
+      assert.equal(vault.samples.length, 0);
       assert.equal(sampleEntityCount.count, 0);
-      assert.equal(samplePointCount.count, vault.samples.length);
-      assert.equal(sampleSearchDocumentCount.count, summarizeDailySamples(vault).length);
-      assert.ok(samplePointCount.count > sampleSearchDocumentCount.count);
+      assert.equal(samplePointTable, undefined);
+      assert.equal(sampleSearchDocumentCount.count, 0);
     } finally {
       database.close();
     }
+
+    await writeFile(
+      heartRateLedgerPath,
+      `${await readFile(heartRateLedgerPath, "utf8")}${JSON.stringify({
+        schemaVersion: "murph.sample.v1",
+        id: "smp_01JNV4HRDENSE_FRESHNESS",
+        stream: "heart_rate",
+        recordedAt: "2026-03-12T12:00:00Z",
+        dayKey: "2026-03-12",
+        source: "device",
+        quality: "raw",
+        value: 75,
+        unit: "bpm",
+      })}\n`,
+    );
+
+    const statusAfterSampleEdit = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusAfterSampleEdit.fresh, true);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -3897,7 +3948,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 3);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3941,7 +3992,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 3);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -4004,7 +4055,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 2);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 3);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4066,7 +4117,7 @@ test("searchVaultRuntime rebuilds the projection automatically and only returns 
       requestedSampleResult.hits.some(
         (hit) => hit.recordType === "sample" && hit.kind === "sample_summary" && hit.stream === "heart_rate",
       ),
-      true,
+      false,
     );
 
     const kindOnlySampleResult = await searchVaultRuntime(vaultRoot, "heart_rate", {
@@ -4076,7 +4127,7 @@ test("searchVaultRuntime rebuilds the projection automatically and only returns 
       kindOnlySampleResult.hits.some(
         (hit) => hit.recordType === "sample" && hit.kind === "sample_summary" && hit.stream === "heart_rate",
       ),
-      true,
+      false,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

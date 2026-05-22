@@ -10,7 +10,7 @@ This guide is the downstream integration reference for extending the Murph vault
 - Treat `vault-cli` as the raw explicit-vault/operator surface for development, automation, assistant/runtime integration, and the OpenClaw plugin.
 - Keep canonical vault writes inside `@murphai/core` only.
 - Keep human-facing truth in Markdown (`CORE.md`, `journal/`, `bank/`).
-- Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, `ledger/samples`, `audit`).
+- Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, `audit`).
 - Keep imported source artifacts immutable under `raw/`.
 - Keep SQLite out of canonical storage. SQLite is allowed only for explicit owners under `.runtime/projections/**` or `.runtime/operations/**`, with schema migration/versioning and owner classification documented through `@murphai/runtime-state`.
 - Keep assistant or session runtime state under `vault/.runtime/operations/assistant/**`, and keep durable user-facing memory plus scheduled assistant configuration in canonical vault records rather than assistant runtime state.
@@ -72,9 +72,9 @@ Assistant runtime is for sessions, transcripts, receipts, outbox state, diagnost
 
 1. Model the provider behind a small adapter in `@murphai/importers` that normalizes upstream payloads into shared device-batch payloads.
 2. Preserve immutable provider snapshots under `raw/integrations/<provider>/**` through `@murphai/core`; do not write those files directly from importer code.
-3. Attach upstream provenance with shared `externalRef` fields on canonical events/samples so retries dedupe by provider resource id, version, and optional facet.
+3. Attach upstream provenance with shared `externalRef` fields on canonical events and compact metrics so retries dedupe by provider resource id, version, and optional facet.
 4. Keep provider secrets, OAuth tokens, and background sync state outside the vault; only immutable payload evidence and canonical normalized records belong in the vault.
-5. Avoid inventing unsupported time series. If the upstream API only exposes summaries, normalize summaries into current observations or samples instead of fabricating minute-level streams.
+5. Avoid inventing unsupported time series. If the upstream API only exposes summaries, normalize summaries into current observations or compact metric facts instead of fabricating minute-level streams.
 
 ### Add a new query or export
 

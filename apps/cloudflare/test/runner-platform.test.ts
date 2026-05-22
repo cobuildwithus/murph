@@ -373,6 +373,182 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("reuses the snapshot session write fence when aborting after the runtime lease changes", async () => {
+    const snapshotId = "snapshot_runner_platform";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot session fetch");
+      if (request.url.includes("/workspace-snapshots/start")) {
+        return new Response(
+          JSON.stringify({
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey,
+                snapshotId,
+                userId: "member_123",
+              }),
+              dataKeyBase64,
+              ivBase64: "AQIDBAUGBwgJCgsM",
+              rootKeyId: "root_key_test",
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+              wrappedDataKey: "wrapped_data_key_test",
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+              warnEncryptedBytes: 128 * 1024 * 1024,
+            },
+            objectKey,
+            snapshotId,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}`)) {
+        return new Response(JSON.stringify({ aborted: true, ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+      },
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    currentLease = {
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+      userId: "member_123",
+      workspaceVersion: "5",
+    };
+    await platform.workspaceSnapshotPort!.abortSnapshotSession({
+      objectKey,
+      snapshotId,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const abortRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot abort");
+    expect(abortRequest.method).toBe("DELETE");
+    expect(abortRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(abortRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(abortRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+  });
+
+  it("reuses the snapshot session write fence when completing after the runtime lease changes", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot session fetch");
+      if (request.url.includes("/workspace-snapshots/start")) {
+        return new Response(
+          JSON.stringify({
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey: ref.objectKey,
+                snapshotId: ref.snapshotId,
+                userId: "member_123",
+              }),
+              dataKeyBase64,
+              ivBase64: ref.encryption.ivBase64,
+              rootKeyId: ref.encryption.rootKeyId,
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+              wrappedDataKey: ref.encryption.wrappedDataKey,
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+              warnEncryptedBytes: 128 * 1024 * 1024,
+            },
+            objectKey: ref.objectKey,
+            snapshotId: ref.snapshotId,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        return new Response(JSON.stringify({ error: "stale" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 409,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+      },
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    currentLease = {
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+      userId: "member_123",
+      workspaceVersion: "5",
+    };
+    await expect(platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: {
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "idle_shutdown",
+        snapshotRef: ref,
+      },
+      ref,
+    })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 409.");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot complete");
+    expect(completeRequest.method).toBe("POST");
+    expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+  });
+
   it("rejects workspace snapshot start payloads whose AAD user is not the bound runner user", async () => {
     const snapshotId = "snapshot_runner_platform_start";
     const objectKey =

@@ -7,7 +7,6 @@ import {
   buildSyntheticDeletionResourceId,
   createRawArtifact,
   emitObservationMetrics,
-  emitSampleMetrics,
   finiteNumber,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
@@ -29,7 +28,6 @@ import type {
 import type {
   ObservationMetricDescriptor,
   PlainObject,
-  SampleMetricDescriptor,
 } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
@@ -146,16 +144,14 @@ interface WhoopBodyMeasurementMetricSource {
   bmi?: number;
 }
 
-const WHOOP_SLEEP_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject | undefined>[] = [
+const WHOOP_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject | undefined>[] = [
   {
-    stream: "respiratory_rate",
+    metric: "respiratory-rate",
     value: (score) => score?.respiratory_rate,
     unit: "breaths_per_minute",
+    title: "WHOOP respiratory rate",
     facet: "respiratory-rate",
   },
-];
-
-const WHOOP_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject | undefined>[] = [
   {
     metric: "sleep-performance",
     value: (score) => score?.sleep_performance_percentage,
@@ -214,21 +210,6 @@ const WHOOP_SLEEP_STAGE_METRICS: readonly ObservationMetricDescriptor<PlainObjec
   },
 ];
 
-const WHOOP_RECOVERY_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject | undefined>[] = [
-  {
-    stream: "hrv",
-    value: (score) => score?.hrv_rmssd_milli,
-    unit: "ms",
-    facet: "hrv",
-  },
-  {
-    stream: "temperature",
-    value: (score) => score?.skin_temp_celsius,
-    unit: "celsius",
-    facet: "skin-temperature",
-  },
-];
-
 const WHOOP_RECOVERY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject | undefined>[] = [
   {
     metric: "recovery-score",
@@ -250,6 +231,20 @@ const WHOOP_RECOVERY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<P
     unit: "%",
     title: "WHOOP SpO2",
     facet: "spo2",
+  },
+  {
+    metric: "hrv",
+    value: (score) => score?.hrv_rmssd_milli,
+    unit: "ms",
+    title: "WHOOP HRV",
+    facet: "hrv",
+  },
+  {
+    metric: "temperature",
+    value: (score) => score?.skin_temp_celsius,
+    unit: "celsius",
+    title: "WHOOP skin temperature",
+    facet: "skin-temperature",
   },
 ];
 
@@ -479,16 +474,6 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       );
     }
 
-    emitSampleMetrics(
-      samples,
-      {
-        source: score,
-        recordedAt,
-        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
-      },
-      WHOOP_SLEEP_SAMPLE_METRICS,
-    );
-
     emitObservationMetrics(
       events,
       {
@@ -527,16 +512,6 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     pushRawArtifact(
       rawArtifacts,
       createRawArtifact(recoveryRole, `recovery-${sleepId}.json`, recovery),
-    );
-
-    emitSampleMetrics(
-      samples,
-      {
-        source: score,
-        recordedAt,
-        externalRef: (facet) => makeExternalRef("recovery", sleepId, version, facet),
-      },
-      WHOOP_RECOVERY_SAMPLE_METRICS,
     );
 
     emitObservationMetrics(

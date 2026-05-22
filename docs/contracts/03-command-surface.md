@@ -295,7 +295,7 @@ Read surfaces intentionally separate summary from detail:
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
 - Machine-stable callers that need metadata or CTA suggestions should prefer `--full-output --format json`. The payload examples below describe the `data` body emitted by plain JSON mode.
-- Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags.
+- Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags. `sample_summary` refers to display-grade metric/sample summaries, not raw generic `ledger/samples` telemetry.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
 - Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use the canonical read id rather than a batch id or internal provenance id.
@@ -566,11 +566,11 @@ When `--include-summary` is supplied, the command summarizes the planned numeric
 }
 ```
 
-Source hints are advisory only. They may describe familiar export shapes, but durable records remain normal canonical `samples`; this command must not introduce device-specific sample records or a device-specific importer family.
+Source hints are advisory only. They may describe familiar export shapes, but durable rows remain explicit raw/debug sample-ledger records; this command must not introduce device-specific sample records or a device-specific importer family.
 
 ### `samples summarize`
 
-`samples summarize` reads stored canonical samples for one stream and one timestamp window, then runs the same generic summary engine used by pre-write CSV profiling.
+`samples summarize` reads the explicit raw/debug sample ledger for one stream and one timestamp window, then runs the same generic summary engine used by pre-write CSV profiling. It does not use the default `readVault()` read model.
 
 ```json
 {
@@ -855,7 +855,7 @@ The query text may be passed either positionally as `vault-cli search query <que
       "kind": "sample_summary",
       "stream": "heart_rate",
       "experimentSlug": null,
-      "path": "ledger/samples/heart_rate/2026/2026-03.jsonl",
+      "path": "ledger/metric-samples/heart_rate/2026/2026-03.jsonl",
       "relatedIds": ["smp_123", "smp_124"],
       "tags": ["sample_summary", "heart_rate"],
       "data": {
@@ -890,6 +890,8 @@ The query text may be passed either positionally as `vault-cli search query <que
 
 Export packs are derived outputs and do not create canonical vault records.
 The five-file pack shape stays stable; health extensions enrich `manifest.json`, `question-pack.json`, and `assistant-context.md` with assessments, memory/wiki/preferences context, health-event context, and registry context while keeping `records.json` as the main exported records array.
+
+`vault-cli samples list/show/summarize` is the explicit raw sample-ledger inspection surface. Those commands read `ledger/samples/**` directly with filters and limits; default `readVault()`, search, assistant setup, and browser-vault refresh do not hydrate generic sample rows.
 
 ## Boundary Rules
 

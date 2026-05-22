@@ -540,13 +540,13 @@ const vaultFamilyDescriptors = [
   },
   {
     id: VAULT_FAMILY_IDS.samples,
-    description: "Sample ledger shards.",
+    description: "Explicit sample ledger shards for import/debug inspection.",
     owner: "core",
     storageKind: "jsonl-directory",
     directory: SAMPLE_LEDGER_DIRECTORY,
     fileExtension: ".jsonl",
     shardPattern: "ledger/samples/<stream>/YYYY/YYYY-MM.jsonl",
-    querySource: "jsonl-root",
+    querySource: "none",
     validation: {
       kind: "jsonl",
       issueCode: "SAMPLE_INVALID",

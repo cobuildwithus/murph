@@ -398,6 +398,38 @@ test('sample import helper resets its runtime cache after an invalid module shap
 })
 
 test('sample query helpers reject non-sample lookups and filter list results by quality', async () => {
+  const vaultRoot = await createTempDir('murph-cli-sample-query-')
+  const ledgerPath = path.join(vaultRoot, 'ledger/samples/heart_rate/2026/2026-04.jsonl')
+  await mkdir(path.dirname(ledgerPath), { recursive: true })
+  await writeFile(
+    ledgerPath,
+    [
+      {
+        schemaVersion: 1,
+        id: 'smp_raw',
+        stream: 'heart_rate',
+        value: 65,
+        unit: 'bpm',
+        recordedAt: '2026-04-08T03:00:00.000Z',
+        dayKey: '2026-04-08',
+        source: 'import',
+        quality: 'raw',
+      },
+      {
+        schemaVersion: 1,
+        id: 'smp_curated',
+        stream: 'heart_rate',
+        value: 70,
+        unit: 'bpm',
+        recordedAt: '2026-04-07T03:00:00.000Z',
+        dayKey: '2026-04-07',
+        source: 'import',
+        quality: 'curated',
+      },
+    ].map((record) => JSON.stringify(record)).join('\n') + '\n',
+    'utf8',
+  )
+
   vi.doMock('@murphai/vault-usecases/helpers', async () => {
     const actual = await vi.importActual<typeof import('@murphai/vault-usecases/helpers')>(
       '@murphai/vault-usecases/helpers',
@@ -405,44 +437,6 @@ test('sample query helpers reject non-sample lookups and filter list results by 
 
     return {
       ...actual,
-      async loadQueryRuntime() {
-        return {
-          async readVault() {
-            return { kind: 'vault' }
-          },
-          lookupEntityById(_vault: unknown, sampleId: string) {
-            if (sampleId === 'smp_missing') {
-              return null
-            }
-
-            return {
-              entityId: sampleId,
-              family: sampleId === 'evt_not_sample' ? 'event' : 'sample',
-              status: 'raw',
-              occurredAt: '2026-04-08T03:00:00.000Z',
-              title: `Title ${sampleId}`,
-            }
-          },
-          listEntities() {
-            return [
-              {
-                entityId: 'smp_raw',
-                family: 'sample',
-                status: 'raw',
-                occurredAt: '2026-04-08T03:00:00.000Z',
-                title: 'Raw sample',
-              },
-              {
-                entityId: 'smp_curated',
-                family: 'sample',
-                status: 'curated',
-                occurredAt: '2026-04-07T03:00:00.000Z',
-                title: 'Curated sample',
-              },
-            ]
-          },
-        }
-      },
       toCommandShowEntity(record: { entityId: string; family: string }) {
         return {
           id: record.entityId,
@@ -463,18 +457,18 @@ test('sample query helpers reject non-sample lookups and filter list results by 
   )
 
   await assert.rejects(
-    () => showSample('/tmp/vault', 'evt_not_sample'),
+    () => showSample(vaultRoot, 'evt_not_sample'),
     (error) =>
       isVaultCliErrorWithCode(error, 'not_found', 'evt_not_sample'),
   )
 
-  const shown = await showSample('/tmp/vault', 'smp_raw')
+  const shown = await showSample(vaultRoot, 'smp_raw')
   assert.deepEqual(shown, {
     id: 'smp_raw',
     kind: 'sample',
   })
 
-  const items = await listSamples('/tmp/vault', {
+  const items = await listSamples(vaultRoot, {
     limit: 5,
     quality: 'curated',
   })

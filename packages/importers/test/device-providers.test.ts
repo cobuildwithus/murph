@@ -192,9 +192,10 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "day-strain"));
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "weight"));
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "bmi"));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "respiratory_rate"));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "hrv"));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "temperature"));
+  assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "respiratory-rate"));
+  assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "hrv"));
+  assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "temperature"));
+  assert.equal(payload.samples?.length ?? 0, 0);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "profile"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
@@ -202,7 +203,7 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
-  const hrvSample = payload.samples?.find((sample) => sample.stream === "hrv");
+  const hrvEvent = payload.events?.find((event) => event.fields?.metric === "hrv");
   const bmiEvent = payload.events?.find((event) => event.fields?.metric === "bmi");
 
   assert.deepEqual(sleepEvent?.fields, {
@@ -212,8 +213,8 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   });
   assert.equal(workoutEvent?.fields?.activityType, "run");
   assert.equal(workoutEvent?.fields?.distanceKm, 7.25);
-  assert.equal(hrvSample?.sample.value, 42.5);
-  assert.equal(hrvSample?.externalRef?.facet, "hrv");
+  assert.equal(hrvEvent?.fields?.value, 42.5);
+  assert.equal(hrvEvent?.externalRef?.facet, "hrv");
   assert.equal(bmiEvent?.dayKey, "2026-03-16");
 });
 
@@ -361,16 +362,18 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
     ),
   );
   assert.ok(
-    payload.samples?.some(
-      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.8,
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "respiratory-rate" && event.fields?.value === 13.8,
     ),
   );
-  assert.ok(payload.samples?.some((sample) => sample.stream === "hrv" && sample.sample.value === 41.2));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 64));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 41.2));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
+  assert.equal(payload.samples?.length ?? 0, 0);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "personal-info"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "session:session-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"));
   assert.ok(
     payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
@@ -380,8 +383,8 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   const activityScoreEvent = payload.events?.find(
     (event) => event.fields?.metric === "activity-score",
   );
-  const sleepSummarySample = payload.samples?.find(
-    (sample) => sample.stream === "respiratory_rate",
+  const sleepRespiratoryEvent = payload.events?.find(
+    (event) => event.fields?.metric === "respiratory-rate",
   );
 
   assert.deepEqual(sleepEvent?.fields, {
@@ -390,7 +393,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
     durationMinutes: 495,
   });
   assert.equal(activityScoreEvent?.dayKey, "2026-03-15");
-  assert.equal(sleepSummarySample?.dayKey, "2026-03-15");
+  assert.equal(sleepRespiratoryEvent?.dayKey, "2026-03-15");
   assert.equal(workoutEvent?.fields?.activityType, "running");
   assert.equal(workoutEvent?.fields?.distanceKm, 6.8);
 });
@@ -450,8 +453,8 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
   const ouraSpo2Event = ouraPayload.events?.find((event) => event.externalRef?.facet === "spo2-average");
   const ouraNonWearEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "non-wear-minutes");
   const whoopRemEvent = whoopPayload.events?.find((event) => event.externalRef?.facet === "sleep-rem-minutes");
-  const whoopTemperatureSample = whoopPayload.samples?.find(
-    (sample) => sample.externalRef?.facet === "skin-temperature",
+  const whoopTemperatureEvent = whoopPayload.events?.find(
+    (event) => event.externalRef?.facet === "skin-temperature",
   );
 
   assert.equal(ouraStepsEvent?.fields?.metric, "daily-steps");
@@ -462,7 +465,7 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
   assert.equal(ouraNonWearEvent?.fields?.unit, "minutes");
   assert.equal(whoopRemEvent?.fields?.metric, "sleep-rem-minutes");
   assert.equal(whoopRemEvent?.fields?.unit, "minutes");
-  assert.equal(whoopTemperatureSample?.unit, "celsius");
+  assert.equal(whoopTemperatureEvent?.fields?.unit, "celsius");
 });
 
 test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {
@@ -555,12 +558,13 @@ test("prepareDeviceProviderSnapshotImport handles Oura string numerics through s
     ),
   );
   assert.ok(
-    payload.samples?.some(
-      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.8,
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "respiratory-rate" && event.fields?.value === 13.8,
     ),
   );
-  assert.ok(payload.samples?.some((sample) => sample.stream === "hrv" && sample.sample.value === 41.2));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 64));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 41.2));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
+  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias precedence through the shared tombstone builder", async () => {
@@ -684,6 +688,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
           timestamp: "2026-03-15T06:50:00.000Z",
           sleepScore: 84,
           averageRespirationRate: 13.6,
+          averageHrvMs: 51.2,
           averageSpo2: 97.5,
           averageHeartRate: 56,
           awakeMinutes: 20,
@@ -790,20 +795,14 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
         event.fields?.resourceType === "activity",
     ),
   );
-  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 64));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "steps" && sample.sample.value === 42));
   assert.ok(
-    payload.samples?.some(
-      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.9,
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "respiratory-rate" && event.fields?.value === 13.6,
     ),
   );
-  assert.ok(payload.samples?.some((sample) => sample.stream === "temperature" && sample.sample.value === 36.7));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "hrv" && sample.sample.value === 51.2));
-  assert.ok(
-    payload.samples?.some(
-      (sample) => sample.stream === "sleep_stage" && sample.sample.stage === "deep" && sample.sample.durationMinutes === 90,
-    ),
-  );
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 51.2));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "sleep-deep-minutes" && event.fields?.value === 90));
+  assert.equal(payload.samples?.length ?? 0, 0);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "profile"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "daily-summary:2026-03-15"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "epoch-summary:epoch-1"));
@@ -837,7 +836,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   assert.equal(activityFile?.metadata?.checksum, "abc123");
 });
 
-test("prepareDeviceProviderSnapshotImport rounds fractional integer sample streams", async () => {
+test("prepareDeviceProviderSnapshotImport keeps Garmin epoch summaries raw-only", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
     snapshot: {
@@ -855,13 +854,9 @@ test("prepareDeviceProviderSnapshotImport rounds fractional integer sample strea
     },
   });
 
-  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 65));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "steps" && sample.sample.value === 43));
-  assert.ok(
-    payload.samples?.some(
-      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.9,
-    ),
-  );
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(payload.events?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "epoch-summary:epoch-1"));
 });
 
 test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, unsupported legacy file sections, and string numerics", async () => {
@@ -940,12 +935,8 @@ test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, unsu
       (event) => event.kind === "observation" && event.fields?.metric === "total-calories" && event.fields?.value === 2200,
     ),
   );
-  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 61));
-  assert.ok(
-    payload.events?.some(
-      (event) => event.kind === "observation" && event.fields?.metric === "body-battery" && event.fields?.value === 70,
-    ),
-  );
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "epoch-summary:9"));
   assert.ok(
     payload.events?.some(
       (event) => event.kind === "activity_session" && event.fields?.activityType === "walking" && event.fields?.distanceKm === 2.1,
@@ -1078,11 +1069,11 @@ test("prepareDeviceProviderSnapshotImport rounds Garmin duration fields before t
 
   const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
-  const sleepStage = payload.samples?.find((sample) => sample.stream === "sleep_stage");
+  const sleepStage = payload.events?.find((event) => event.fields?.metric === "sleep-light-minutes");
 
   assert.equal(activityEvent?.fields?.durationMinutes, 2);
   assert.equal(sleepEvent?.fields?.durationMinutes, 2);
-  assert.equal(sleepStage?.sample.durationMinutes, 2);
+  assert.equal(sleepStage?.fields?.value, 95 / 60);
 });
 
 test("prepareDeviceProviderSnapshotImport drops unsupported Garmin sleep stage labels", async () => {
@@ -1112,20 +1103,17 @@ test("prepareDeviceProviderSnapshotImport drops unsupported Garmin sleep stage l
     },
   });
 
-  assert.equal(
-    payload.samples?.filter((sample) => sample.stream === "sleep_stage").length,
-    1,
-  );
   assert.ok(
-    payload.samples?.some(
-      (sample) => sample.stream === "sleep_stage" && sample.sample.stage === "light",
+    payload.events?.some(
+      (event) => event.fields?.metric === "sleep-light-minutes" && event.fields?.value === 30,
     ),
   );
   assert.ok(
-    !payload.samples?.some(
-      (sample) => sample.stream === "sleep_stage" && sample.sample.stage === "mystery-phase",
+    !payload.events?.some(
+      (event) => typeof event.fields?.metric === "string" && event.fields.metric.includes("mystery"),
     ),
   );
+  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("prepareDeviceProviderSnapshotImport keeps metadata-only Garmin activityFiles on first-class asset roles and links them from the activity event", async () => {
@@ -1414,7 +1402,6 @@ test("importDeviceProviderSnapshot round-trips Garmin date buckets through real 
   );
 
   type ResultEventRecord = (typeof result.events)[number];
-  type ResultSampleRecord = (typeof result.samples)[number];
   const dailySteps = result.events.find(
     (
       event: ResultEventRecord,
@@ -1426,20 +1413,18 @@ test("importDeviceProviderSnapshot round-trips Garmin date buckets through real 
       event: ResultEventRecord,
     ): event is Extract<ResultEventRecord, { kind: "sleep_session" }> => event.kind === "sleep_session",
   );
-  const sleepStage = result.samples.find(
+  const sleepStage = result.events.find(
     (
-      sample: ResultSampleRecord,
-    ): sample is Extract<ResultSampleRecord, { stream: "sleep_stage" }> => sample.stream === "sleep_stage",
+      event: ResultEventRecord,
+    ): event is Extract<ResultEventRecord, { kind: "observation" }> =>
+      event.kind === "observation" && event.metric === "sleep-light-minutes",
   );
 
   assert.equal(dailySteps?.dayKey, "2026-03-15");
   assert.equal(dailySteps?.timeZone, "America/Los_Angeles");
   assert.equal(sleepEvent?.durationMinutes, 2);
-  assert.equal(sleepStage?.durationMinutes, 1);
-  assert.equal(
-    result.samples.filter((sample: ResultSampleRecord) => sample.stream === "sleep_stage").length,
-    1,
-  );
+  assert.equal(sleepStage?.value, 65 / 60);
+  assert.equal(result.samples.length, 0);
 });
 
 
@@ -1873,8 +1858,9 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
         event.fields?.value === 191,
     ),
   );
-  assert.ok(payload.samples?.some((sample) => sample.stream === "respiratory_rate" && sample.sample.value === 14.6));
-  assert.ok(payload.samples?.some((sample) => sample.stream === "temperature" && sample.sample.value === 36.7));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "respiratory-rate" && event.fields?.value === 14.6));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "temperature" && event.fields?.value === 36.7));
+  assert.equal(payload.samples?.length ?? 0, 0);
   assert.ok(
     payload.events?.some(
       (event) => event.kind === "observation" && event.fields?.metric === "day-strain" && event.fields?.value === 13.7,

@@ -8,6 +8,7 @@ import path from "node:path";
 
 import {
   hashCanonicalQuerySources,
+  listMetricPoints,
   readVault,
 } from "@murphai/query";
 import type {
@@ -123,10 +124,14 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   sourceStateHash: string;
   vaultRoot: string;
 }): Promise<BrowserVaultReplica> {
+  const vault = await readVault(input.vaultRoot);
+  const metricPoints = await listMetricPoints(input.vaultRoot, { limit: null });
+
   return await createBrowserVaultReplica({
     generatedAt: input.generatedAt,
+    metricPoints,
     sourceBundleHash: input.sourceStateHash,
-    vault: await readVault(input.vaultRoot),
+    vault,
   });
 }
 

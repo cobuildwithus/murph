@@ -87,7 +87,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
 - Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
-- Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`.
+- Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`. These shards are explicit import/debug ledgers; default query/read/browser paths use sparse entities and compact metric rows instead.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
 - `bank/memory.md` is the durable freeform current-state document for user-facing context that should stay small enough to read whole.

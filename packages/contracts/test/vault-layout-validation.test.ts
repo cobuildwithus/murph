@@ -336,7 +336,6 @@ describe("vault layout exports", () => {
         ASSESSMENT_LEDGER_DIRECTORY,
         EVENT_LEDGER_DIRECTORY,
         METRIC_SAMPLE_LEDGER_DIRECTORY,
-        SAMPLE_LEDGER_DIRECTORY,
         AUDIT_DIRECTORY,
       ],
     });

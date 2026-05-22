@@ -35,6 +35,16 @@ async function loadSampleQueryHelpers() {
   return await import('../src/commands/sample-query-command-helpers.js')
 }
 
+async function writeSampleLedger(vaultRoot: string, records: readonly Record<string, unknown>[]) {
+  const ledgerPath = path.join(vaultRoot, 'ledger/samples/heart_rate/2026/2026-04.jsonl')
+  await mkdir(path.dirname(ledgerPath), { recursive: true })
+  await writeFile(
+    ledgerPath,
+    `${records.map((record) => JSON.stringify(record)).join('\n')}\n`,
+    'utf8',
+  )
+}
+
 test('importCsvSamples normalizes runtime output and reuses the loaded importer runtime', async () => {
   const loadRuntimeModule = vi.fn(async () => ({
     createImporters() {
@@ -425,37 +435,35 @@ test('showSampleBatch reports not-found and listSampleBatches tolerates a missin
   )
 })
 
-test('showSample and listSamples use the query runtime helpers for filtering and not-found handling', async () => {
-  const loadQueryRuntime = vi.fn(async () => ({
-    async readVault(vaultRoot: string) {
-      return {
-        vaultRoot,
-      }
-    },
-    lookupEntityById(_vault: unknown, sampleId: string) {
-      if (sampleId === 'smp_missing') {
-        return null
-      }
+test('showSample and listSamples read explicit raw sample ledgers for filtering and not-found handling', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-query-'))
+  cleanupPaths.push(vaultRoot)
 
-      return {
-        family: sampleId === 'evt_01' ? 'event' : 'sample',
-        entityId: sampleId,
-      }
+  await writeSampleLedger(vaultRoot, [
+    {
+      schemaVersion: 1,
+      id: 'smp_low',
+      stream: 'heart_rate',
+      value: 65,
+      unit: 'bpm',
+      recordedAt: '2026-04-02T00:00:00.000Z',
+      dayKey: '2026-04-02',
+      source: 'import',
+      quality: 'draft',
     },
-    listEntities(_vault: unknown, input: Record<string, unknown>) {
-      assert.deepEqual(input, {
-        from: '2026-04-01',
-        families: ['sample'],
-        streams: ['heart_rate'],
-        to: '2026-04-08',
-      })
+    {
+      schemaVersion: 1,
+      id: 'smp_good',
+      stream: 'heart_rate',
+      value: 71,
+      unit: 'bpm',
+      recordedAt: '2026-04-03T00:00:00.000Z',
+      dayKey: '2026-04-03',
+      source: 'import',
+      quality: 'accepted',
+    },
+  ])
 
-      return [
-        { entityId: 'smp_low', status: 'draft', latestAt: '2026-04-02T00:00:00.000Z' },
-        { entityId: 'smp_good', status: 'accepted', latestAt: '2026-04-03T00:00:00.000Z' },
-      ]
-    },
-  }))
   const toCommandShowEntity = vi.fn((record: { entityId: string }) => ({
     id: record.entityId,
     kind: 'sample',
@@ -465,20 +473,22 @@ test('showSample and listSamples use the query runtime helpers for filtering and
     status: record.entityId === 'smp_good' ? 'accepted' : 'draft',
   }))
 
-  vi.doMock('@murphai/vault-usecases/helpers', () => ({
-    applyLimit: <T>(items: T[], limit?: number) =>
-      typeof limit === 'number' ? items.slice(0, limit) : items,
-    compareByLatest: (left: { latestAt: string }, right: { latestAt: string }) =>
-      right.latestAt.localeCompare(left.latestAt),
-    loadQueryRuntime,
-    toCommandShowEntity,
-    toSampleCommandListItem,
-  }))
+  vi.doMock('@murphai/vault-usecases/helpers', async () => {
+    const actual = await vi.importActual<typeof import('@murphai/vault-usecases/helpers')>(
+      '@murphai/vault-usecases/helpers',
+    )
+
+    return {
+      ...actual,
+      toCommandShowEntity,
+      toSampleCommandListItem,
+    }
+  })
 
   const { listSamples, showSample } = await loadSampleQueryHelpers()
 
-  const shown = await showSample('/vaults/main', 'smp_good')
-  const listed = await listSamples('/vaults/main', {
+  const shown = await showSample(vaultRoot, 'smp_good')
+  const listed = await listSamples(vaultRoot, {
     from: '2026-04-01',
     limit: 1,
     quality: 'accepted',
@@ -496,12 +506,11 @@ test('showSample and listSamples use the query runtime helpers for filtering and
       status: 'accepted',
     },
   ])
-  assert.equal(loadQueryRuntime.mock.calls.length, 2)
   assert.equal(toCommandShowEntity.mock.calls.length, 1)
   assert.equal(toSampleCommandListItem.mock.calls.length, 1)
 
   await assert.rejects(
-    () => showSample('/vaults/main', 'evt_01'),
+    () => showSample(vaultRoot, 'evt_01'),
     (error) =>
       error instanceof Error &&
       'code' in error &&
@@ -509,7 +518,7 @@ test('showSample and listSamples use the query runtime helpers for filtering and
       error.message === 'No sample found for "evt_01".',
   )
   await assert.rejects(
-    () => showSample('/vaults/main', 'smp_missing'),
+    () => showSample(vaultRoot, 'smp_missing'),
     (error) =>
       error instanceof Error &&
       'code' in error &&
@@ -518,43 +527,37 @@ test('showSample and listSamples use the query runtime helpers for filtering and
   )
 })
 
-test('summarizeSampleWindow delegates to the query runtime summary helper', async () => {
-  const loadQueryRuntime = vi.fn(async () => ({
-    async readVault(vaultRoot: string) {
-      return {
-        vaultRoot,
-        samples: [],
-      }
-    },
-    summarizeSampleWindow(vault: { vaultRoot: string }, input: Record<string, unknown>) {
-      assert.equal(vault.vaultRoot, '/vaults/main')
-      assert.deepEqual(input, {
-        stream: 'spo2',
-        from: '2026-04-17T00:00:00.000Z',
-        to: '2026-04-17T08:00:00.000Z',
-        thresholdsBelow: [92, 90],
-        gapSeconds: 3,
-        profile: 'oxygen-night',
-      })
+test('summarizeSampleWindow summarizes explicit raw sample ledger records', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-summary-'))
+  cleanupPaths.push(vaultRoot)
 
-      return {
-        stream: 'spo2',
-        unit: '%',
-        sampleCount: 2,
-      }
+  await writeSampleLedger(vaultRoot, [
+    {
+      schemaVersion: 1,
+      id: 'smp_spo2_a',
+      stream: 'spo2',
+      value: 91,
+      unit: '%',
+      recordedAt: '2026-04-17T01:00:00.000Z',
+      dayKey: '2026-04-17',
+      source: 'import',
+      quality: 'raw',
     },
-  }))
-
-  vi.doMock('@murphai/vault-usecases/helpers', () => ({
-    applyLimit: <T>(items: T[]) => items,
-    compareByLatest: () => 0,
-    loadQueryRuntime,
-    toCommandShowEntity: vi.fn(),
-    toSampleCommandListItem: vi.fn(),
-  }))
+    {
+      schemaVersion: 1,
+      id: 'smp_spo2_b',
+      stream: 'spo2',
+      value: 94,
+      unit: '%',
+      recordedAt: '2026-04-17T02:00:00.000Z',
+      dayKey: '2026-04-17',
+      source: 'import',
+      quality: 'raw',
+    },
+  ])
 
   const { summarizeSampleWindow } = await loadSampleQueryHelpers()
-  const summary = await summarizeSampleWindow('/vaults/main', {
+  const summary = await summarizeSampleWindow(vaultRoot, {
     stream: 'spo2',
     from: '2026-04-17T00:00:00.000Z',
     to: '2026-04-17T08:00:00.000Z',
@@ -563,9 +566,8 @@ test('summarizeSampleWindow delegates to the query runtime summary helper', asyn
     profile: 'oxygen-night',
   })
 
-  assert.deepEqual(summary, {
-    stream: 'spo2',
-    unit: '%',
-    sampleCount: 2,
-  })
+  assert.equal(summary.stream, 'spo2')
+  assert.equal(summary.unit, '%')
+  assert.equal(summary.sampleCount, 2)
+  assert.equal(summary.thresholds[0]?.below, 92)
 })

@@ -57,6 +57,7 @@ describe("hosted browser vault replica store", () => {
       source: "browser",
     };
     const replica = await createBrowserVaultReplica({
+      metricPoints: [],
       generatedAt: "2026-04-17T00:00:00.000Z",
       sourceBundleHash: "a".repeat(64),
       vault: createVaultReadModel({
@@ -160,6 +161,7 @@ describe("hosted browser vault replica store", () => {
       userId: "user_123",
     });
     const replica = await createBrowserVaultReplica({
+      metricPoints: [],
       generatedAt: "2026-04-17T00:00:00.000Z",
       sourceBundleHash: "a".repeat(64),
       vault: createVaultReadModel({
@@ -193,6 +195,7 @@ describe("hosted browser vault replica store", () => {
       userId,
     });
     const replica = await createBrowserVaultReplica({
+      metricPoints: [],
       generatedAt: "2026-04-17T00:00:00.000Z",
       sourceBundleHash: "a".repeat(64),
       vault: createVaultReadModel({
@@ -238,6 +241,7 @@ describe("hosted browser vault replica store", () => {
 
     const firstRef = await store.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({
+        metricPoints: [],
         generatedAt: "2026-04-17T00:00:00.000Z",
         sourceBundleHash: "b".repeat(64),
         vault: createVaultReadModel({
@@ -250,6 +254,7 @@ describe("hosted browser vault replica store", () => {
     });
     const secondRef = await store.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({
+        metricPoints: [],
         generatedAt: "2026-04-18T00:00:00.000Z",
         sourceBundleHash: "c".repeat(64),
         vault: createVaultReadModel({
@@ -278,6 +283,7 @@ describe("hosted browser vault replica store", () => {
 
   it("derives replica object keys independently of root-key bytes", async () => {
     const replica = await createBrowserVaultReplica({
+      metricPoints: [],
       generatedAt: "2026-04-17T00:00:00.000Z",
       sourceBundleHash: "g".repeat(64),
       vault: createVaultReadModel({
@@ -326,6 +332,7 @@ describe("hosted browser vault replica store", () => {
     });
     const ref = await store.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({
+        metricPoints: [],
         generatedAt: "2026-04-17T00:00:00.000Z",
         sourceBundleHash: "h".repeat(64),
         vault: createVaultReadModel({
@@ -368,6 +375,7 @@ describe("hosted browser vault replica store", () => {
 
     const foreignRef = await store.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({
+        metricPoints: [],
         generatedAt: "2026-04-17T00:00:00.000Z",
         sourceBundleHash: "d".repeat(64),
         vault: createVaultReadModel({
@@ -414,6 +422,7 @@ describe("hosted browser vault replica store", () => {
 
     const foreignRef = await ownerStore.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({
+        metricPoints: [],
         generatedAt: "2026-04-17T00:00:00.000Z",
         sourceBundleHash: "e".repeat(64),
         vault: createVaultReadModel({
@@ -456,6 +465,7 @@ describe("hosted browser vault replica store", () => {
     });
     const ref = await ownerStore.writeBrowserVaultReplica({
       replica: await createBrowserVaultReplica({
+        metricPoints: [],
         generatedAt: "2026-04-17T00:00:00.000Z",
         sourceBundleHash: "f".repeat(64),
         vault: createVaultReadModel({

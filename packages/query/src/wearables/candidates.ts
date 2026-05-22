@@ -48,7 +48,7 @@ export function collectWearableDataset(
     ? new Set(filters.providers.map((provider) => provider.trim().toLowerCase()).filter(Boolean))
     : null;
 
-  for (const entity of [...vault.events, ...vault.samples]) {
+  for (const entity of [...vault.events, ...vault.samples.filter((sample) => sample.kind !== "metric_sample")]) {
     const externalRef = readExternalRef(entity.attributes.externalRef);
     const provider = normalizeLowercaseString(externalRef?.system);
     const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);

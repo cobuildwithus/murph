@@ -18,7 +18,6 @@ import {
   type GoalMetricTarget,
   type MetricPoint,
 } from "../metrics/index.ts";
-import { buildMetricProjection } from "../metrics/projection.ts";
 import {
   BODY_PREVIEW_CHARS,
   BROWSER_VAULT_REPLICA_POLICY_ID,
@@ -60,7 +59,7 @@ export async function createBrowserVaultReplica(
   const timelineRows = buildTimeline(input.vault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
-  const allMetricPoints = buildMetricProjection(input.vault).metricPoints;
+  const allMetricPoints = input.metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
   const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(input.vault.entities);
   const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(input.vault.entities);

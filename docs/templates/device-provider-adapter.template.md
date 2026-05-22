@@ -23,7 +23,6 @@ import {
   makeProviderExternalRef,
   pushObservationEvent,
   pushRawArtifact,
-  pushSample,
   stringId,
   toIso,
 } from "./shared-normalization.ts";
@@ -70,7 +69,6 @@ export function normalizeAcmeSnapshot(
   const importedAt = toIso(request.importedAt) ?? new Date().toISOString();
   const accountId = stringId(request.accountId);
   const events = [];
-  const samples = [];
   const rawArtifacts = [];
   const dailySummaries = asArray(request.dailySummaries)
     .map((entry) => asPlainObject(entry))
@@ -128,14 +126,6 @@ export function normalizeAcmeSnapshot(
       externalRef: makeAcmeExternalRef("daily-summary", summaryId, "readiness-score"),
     });
 
-    pushSample(samples, {
-      stream: "steps",
-      value: summary.steps,
-      unit: "count",
-      recordedAt,
-      dayKey,
-      externalRef: makeAcmeExternalRef("daily-summary", summaryId, "steps-sample"),
-    });
   }
 
   return makeNormalizedDeviceBatch({
@@ -143,7 +133,6 @@ export function normalizeAcmeSnapshot(
     accountId,
     importedAt,
     events,
-    samples,
     rawArtifacts,
     provenance: {
       importedSections: {
