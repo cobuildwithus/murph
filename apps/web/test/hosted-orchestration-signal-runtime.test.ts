@@ -253,6 +253,45 @@ describe("hosted runtime Temporal signaling", () => {
     ]);
   });
 
+  it("re-signals device-sync recovery when the durable control item already exists", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_existing_recovery_control",
+        kind: "runtime.device-sync-recovery-requested",
+        lane: "system",
+        laneSeq: "77",
+        userId: "member_123",
+      },
+    });
+
+    await signalHostedDeviceSyncMailboxRuntime({
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+      recoveryIntent: "device-sync-dirty-recovery",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u),
+        kind: "runtime.device-sync-recovery-requested",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "device_sync_recovery_requested",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+  });
+
   it("persists browser-vault refresh as durable control demand before signaling", async () => {
     await signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),

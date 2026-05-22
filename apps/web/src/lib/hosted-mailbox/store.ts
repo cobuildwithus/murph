@@ -517,6 +517,7 @@ export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
       kind: true,
       lane: true,
       laneSeq: true,
+      occurredAt: true,
       userId: true,
     },
     where: {
@@ -534,6 +535,7 @@ export async function readHostedMailboxFirstPendingSystemItemCheckpoint(input: {
       kind: requireHostedMailboxKind(row.kind),
       lane: requireHostedMailboxLane(row.lane),
       laneSeq: row.laneSeq.toString(),
+      occurredAt: row.occurredAt.toISOString(),
       userId: row.userId,
     }
     : null;
