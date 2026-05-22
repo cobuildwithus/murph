@@ -42,6 +42,7 @@ import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
@@ -95,6 +96,8 @@ const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS = 60 * 60 * 1000;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS = 10 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS = 60 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
+const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
+const hostedRunnerDiagnosticTextEncoder = new TextEncoder();
 
 export async function handleRunnerOutboundRequest(
   request: Request,
@@ -768,6 +771,7 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
+  const startedAt = Date.now();
   const writeFence = await requireWorkspaceSnapshotWriteFence({
     env: input.env,
     request: input.request,
@@ -780,6 +784,30 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
   const body = await readJsonObject(input.request, {
     limitBytes: 16 * 1024,
   });
+  const logDetails = {
+    method: readHostedRunnerDiagnosticMethod(input.request.method),
+    operation: "workspace_snapshot_data_key_unwrap",
+    userIdPresent: input.userId.length > 0,
+    workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
+  } satisfies HostedExecutionStructuredLogDetails;
+  const emitDataKeyDiagnostic = (
+    message: string,
+    level: "info" | "warn",
+    details: HostedExecutionStructuredLogDetails,
+  ) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        ...details,
+      },
+      level,
+      message,
+      phase: "wake.running",
+      userId: null,
+    });
+  };
   const expectedObjectKey = await hostedWorkspaceSnapshotObjectKey({
     snapshotId: input.snapshotId,
     userId: input.userId,
@@ -792,39 +820,235 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
+  const cryptoContextDetails = readWorkspaceSnapshotDataKeyCryptoContextLogDetails({
+    cacheMaxAgeMs: cryptoContext.cacheMaxAgeMs,
+    cryptoContextVersion: cryptoContext.cryptoContextVersion,
+    fetchedAtMs: cryptoContext.fetchedAtMs,
+  });
 
   const aad = readWorkspaceSnapshotAad(body.aad, "aad");
-  if (
-    aad.objectKey !== expectedObjectKey
-    || aad.snapshotId !== input.snapshotId
-    || aad.userId !== input.userId
-  ) {
+  const aadObjectKeyMatchesExpected = aad.objectKey === expectedObjectKey;
+  const aadSnapshotIdMatchesRoute = aad.snapshotId === input.snapshotId;
+  const aadUserMatchesBoundUser = aad.userId === input.userId;
+  if (!aadObjectKeyMatchesExpected || !aadSnapshotIdMatchesRoute || !aadUserMatchesBoundUser) {
+    emitDataKeyDiagnostic(
+      "Hosted workspace snapshot data key unwrap rejected.",
+      "warn",
+      {
+        ...cryptoContextDetails,
+        aadMatchesExpected: false,
+        aadObjectKeyMatchesExpected,
+        aadSnapshotIdMatchesRoute,
+        aadUserMatchesBoundUser,
+      },
+    );
     return jsonError("Hosted workspace snapshot AAD is outside the bound user namespace.", 403);
   }
   const wrappedDataKey = requireSnapshotDataKeyString(body.wrappedDataKey, "wrappedDataKey");
   const rootKeyId = requireSnapshotDataKeyString(body.rootKeyId, "rootKeyId");
-  if (readHostedWorkspaceSnapshotV2DataKeyWrapRootKeyId(wrappedDataKey) !== rootKeyId) {
+  const wrappedRootMatchesBody =
+    readHostedWorkspaceSnapshotV2DataKeyWrapRootKeyId(wrappedDataKey) === rootKeyId;
+  if (!wrappedRootMatchesBody) {
+    emitDataKeyDiagnostic(
+      "Hosted workspace snapshot data key unwrap rejected.",
+      "warn",
+      {
+        ...cryptoContextDetails,
+        aadMatchesExpected: true,
+        wrappedRootMatchesBody,
+      },
+    );
     return jsonError("Hosted workspace snapshot wrapped data key rootKeyId mismatch.", 400);
   }
-  const rootKey = rootKeyId === cryptoContext.rootKeyId
-    ? cryptoContext.rootKey
-    : await cryptoContext.resolveKeyById(rootKeyId);
+  const rootKeyMatchesCryptoContext = rootKeyId === cryptoContext.rootKeyId;
+  const rootResolutionStartedAt = Date.now();
+  let rootKey: Uint8Array | null;
+  try {
+    rootKey = rootKeyMatchesCryptoContext
+      ? cryptoContext.rootKey
+      : await cryptoContext.resolveKeyById(rootKeyId);
+  } catch (error) {
+    const errorName = readHostedExecutionSafeErrorName(error);
+    emitDataKeyDiagnostic(
+      "Hosted workspace snapshot data key root resolution failed.",
+      "warn",
+      {
+        ...cryptoContextDetails,
+        aadMatchesExpected: true,
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+        ...(errorName ? { errorName } : {}),
+        rootKeyMatchesCryptoContext,
+        rootLookupAttempted: !rootKeyMatchesCryptoContext,
+        rootResolutionDurationMs: Date.now() - rootResolutionStartedAt,
+        rootResolved: false,
+        wrappedRootMatchesBody,
+      },
+    );
+    throw error;
+  }
+  const rootResolutionDurationMs = Date.now() - rootResolutionStartedAt;
   if (!rootKey) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        ...(await buildWorkspaceSnapshotDataKeyRootUnavailableLogDetails({
+          cryptoContextRootKeyId: cryptoContext.rootKeyId,
+          env: input.env,
+          rootKeyId,
+          rootKeyMatchesCryptoContext,
+          snapshotId: input.snapshotId,
+        })),
+        ...cryptoContextDetails,
+        aadMatchesExpected: true,
+        rootResolutionDurationMs,
+        rootResolved: false,
+        wrappedRootMatchesBody,
+      },
+      level: "warn",
+      message: "Hosted workspace snapshot data key root unavailable.",
+      phase: "wake.running",
+      userId: null,
+    });
     return notFound();
   }
   let dataKey: Uint8Array | null = null;
+  const unwrapStartedAt = Date.now();
   try {
     dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
       aad,
       rootKey,
       wrappedDataKey,
     });
+    emitDataKeyDiagnostic(
+      "Hosted workspace snapshot data key unwrap completed.",
+      "info",
+      {
+        ...cryptoContextDetails,
+        aadMatchesExpected: true,
+        rootKeyMatchesCryptoContext,
+        rootLookupAttempted: !rootKeyMatchesCryptoContext,
+        rootResolutionDurationMs,
+        rootResolved: true,
+        unwrapDurationMs: Date.now() - unwrapStartedAt,
+        unwrapSucceeded: true,
+        wrappedRootMatchesBody,
+      },
+    );
 
     return json({
       dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
     });
+  } catch (error) {
+    const errorName = readHostedExecutionSafeErrorName(error);
+    emitDataKeyDiagnostic(
+      "Hosted workspace snapshot data key unwrap failed.",
+      "warn",
+      {
+        ...cryptoContextDetails,
+        aadMatchesExpected: true,
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+        ...(errorName ? { errorName } : {}),
+        rootKeyMatchesCryptoContext,
+        rootLookupAttempted: !rootKeyMatchesCryptoContext,
+        rootResolutionDurationMs,
+        rootResolved: true,
+        unwrapDurationMs: Date.now() - unwrapStartedAt,
+        unwrapSucceeded: false,
+        wrappedRootMatchesBody,
+      },
+    );
+    throw error;
   } finally {
     dataKey?.fill(0);
+  }
+}
+
+function readWorkspaceSnapshotDataKeyCryptoContextLogDetails(input: {
+  cacheMaxAgeMs: number;
+  cryptoContextVersion: string | null;
+  fetchedAtMs: number;
+}): HostedExecutionStructuredLogDetails {
+  const fetchedAgeMs = Number.isFinite(input.fetchedAtMs)
+    ? Math.max(0, Date.now() - input.fetchedAtMs)
+    : null;
+  return {
+    cryptoContextCacheMaxAgeMs: input.cacheMaxAgeMs,
+    cryptoContextFetchedAgeMs: fetchedAgeMs,
+    cryptoContextVersionPresent: input.cryptoContextVersion !== null,
+  };
+}
+
+async function buildWorkspaceSnapshotDataKeyRootUnavailableLogDetails(input: {
+  cryptoContextRootKeyId: string;
+  env: RunnerOutboundEnvironmentSource;
+  rootKeyId: string;
+  rootKeyMatchesCryptoContext: boolean;
+  snapshotId: string;
+}): Promise<Record<string, boolean | string>> {
+  const [
+    snapshotFingerprint,
+    rootKeyFingerprint,
+    cryptoContextRootKeyFingerprint,
+  ] = await Promise.all([
+    createHostedRunnerDiagnosticFingerprint(input.env, `workspace-snapshot:${input.snapshotId}`),
+    createHostedRunnerDiagnosticFingerprint(input.env, `runtime-root:${input.rootKeyId}`),
+    createHostedRunnerDiagnosticFingerprint(
+      input.env,
+      `runtime-root:${input.cryptoContextRootKeyId}`,
+    ),
+  ]);
+
+  return {
+    cryptoContextRootKeyFingerprintPresent: cryptoContextRootKeyFingerprint !== null,
+    diagnosticFingerprintKind:
+      snapshotFingerprint || rootKeyFingerprint || cryptoContextRootKeyFingerprint
+        ? "hmac-sha256-96"
+        : "none",
+    operation: "workspace_snapshot_data_key_unwrap",
+    rootKeyFingerprintPresent: rootKeyFingerprint !== null,
+    rootKeyMatchesCryptoContext: input.rootKeyMatchesCryptoContext,
+    rootLookupAttempted: !input.rootKeyMatchesCryptoContext,
+    snapshotFingerprintPresent: snapshotFingerprint !== null,
+    ...(snapshotFingerprint ? { snapshotFingerprint } : {}),
+    ...(rootKeyFingerprint ? { rootKeyFingerprint } : {}),
+    ...(cryptoContextRootKeyFingerprint ? { cryptoContextRootKeyFingerprint } : {}),
+  };
+}
+
+async function createHostedRunnerDiagnosticFingerprint(
+  env: RunnerOutboundEnvironmentSource,
+  value: string,
+): Promise<string | null> {
+  const secret = env.HOSTED_LOG_FINGERPRINT_SECRET?.trim();
+  if (!secret) {
+    return null;
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      hostedRunnerDiagnosticTextEncoder.encode(secret),
+      {
+        hash: "SHA-256",
+        name: "HMAC",
+      },
+      false,
+      ["sign"],
+    );
+    const signature = new Uint8Array(await crypto.subtle.sign(
+      "HMAC",
+      key,
+      hostedRunnerDiagnosticTextEncoder.encode(value),
+    ));
+    return Array.from(signature.slice(0, HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return null;
   }
 }
 
