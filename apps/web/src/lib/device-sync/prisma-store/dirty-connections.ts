@@ -236,11 +236,19 @@ export class PrismaHostedDirtyConnectionStore {
         "user_id",
         count(*)::bigint as "dirty_connection_count",
         max("latest_dirty_at") as "latest_dirty_at"
-      from "device_sync_dirty_connection"
-      where "dirty_revision" > "processed_revision"
-        and "latest_dirty_at" <= ${input.staleBefore}
-      group by "user_id"
-      order by max("latest_dirty_at") asc, "user_id" asc
+      from "device_sync_dirty_connection" as "dirty"
+      join "device_connection" as "connection"
+        on "connection"."id" = "dirty"."connection_id"
+        and "connection"."user_id" = "dirty"."user_id"
+      join "hosted_member" as "member"
+        on "member"."id" = "dirty"."user_id"
+      where "dirty"."dirty_revision" > "dirty"."processed_revision"
+        and "dirty"."latest_dirty_at" <= ${input.staleBefore}
+        and "connection"."status" = 'active'
+        and "member"."billing_status" = 'active'
+        and "member"."suspended_at" is null
+      group by "dirty"."user_id"
+      order by max("dirty"."latest_dirty_at") asc, "dirty"."user_id" asc
       limit ${limit}
     `);
 
@@ -284,10 +292,18 @@ export class PrismaHostedDirtyConnectionStore {
         "latest_trace_id",
         "provider",
         "user_id"
-      from "device_sync_dirty_connection"
-      where "dirty_revision" > "processed_revision"
-        and "latest_dirty_at" <= ${input.staleBefore}
-      order by "latest_dirty_at" asc, "connection_id" asc
+      from "device_sync_dirty_connection" as "dirty"
+      join "device_connection" as "connection"
+        on "connection"."id" = "dirty"."connection_id"
+        and "connection"."user_id" = "dirty"."user_id"
+      join "hosted_member" as "member"
+        on "member"."id" = "dirty"."user_id"
+      where "dirty"."dirty_revision" > "dirty"."processed_revision"
+        and "dirty"."latest_dirty_at" <= ${input.staleBefore}
+        and "connection"."status" = 'active'
+        and "member"."billing_status" = 'active'
+        and "member"."suspended_at" is null
+      order by "dirty"."latest_dirty_at" asc, "dirty"."connection_id" asc
       limit ${limit}
     `);
 

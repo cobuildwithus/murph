@@ -399,7 +399,7 @@ export async function readHostedDeviceSyncPendingDirtyState(input: {
     items: pending.items.map((dirty) =>
       mapHostedDeviceSyncDirtyStateResponse(dirty, input.trustedUserId)
     ),
-    nextWakeAt: pending.hasMore ? new Date().toISOString() : null,
+    nextWakeAt: pending.hasMore || pending.items.length > 1 ? new Date().toISOString() : null,
     userId: input.trustedUserId,
   };
 }

@@ -161,11 +161,42 @@ test("compactLegacyWearableReceiptEnvelopes resumes bounded batches without a du
   );
   assert.deepEqual(
     [third.compactedCount, third.hasMore],
-    [1, false],
+    [1, true],
   );
   assert.deepEqual(
     [fourth.compactedCount, fourth.hasMore],
     [0, false],
+  );
+});
+
+test("compactLegacyWearableReceiptEnvelopes drains later candidates after prior batches compact", async () => {
+  const vaultRoot = await createLegacyWearableFixture({
+    envelopeCount: 30,
+  });
+  let totalCompacted = 0;
+  let hasMore = true;
+
+  for (let run = 1; run <= 10 && hasMore; run += 1) {
+    const result = await compactLegacyWearableReceiptEnvelopes({
+      maxEnvelopes: 5,
+      now: COMPACTION_NOW,
+      vaultRoot,
+    });
+
+    assert.notDeepEqual(
+      [result.compactedCount, result.hasMore],
+      [0, true],
+      `run ${run} stalled with no progress`,
+    );
+    totalCompacted += result.compactedCount;
+    hasMore = result.hasMore;
+  }
+
+  assert.equal(hasMore, false);
+  assert.equal(totalCompacted, 30);
+  assert.equal(
+    (await detectLegacyWearableReceiptCompaction({ vaultRoot })).hasWork,
+    false,
   );
 });
 
@@ -201,15 +232,33 @@ test("compactLegacyWearableReceiptEnvelopes honors deadline and candidate byte b
   assert.deepEqual(await snapshotVaultFiles(byteBoundVault), byteBoundBefore);
 });
 
+test("compactLegacyWearableReceiptEnvelopes terminally skips an envelope larger than total read budget", async () => {
+  const vaultRoot = await createLegacyWearableFixture();
+  const before = await snapshotVaultFiles(vaultRoot);
+  const result = await compactLegacyWearableReceiptEnvelopes({
+    maxBytesRead: 1,
+    maxCandidateBytes: 1024 * 1024,
+    now: COMPACTION_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(result.mutated, false);
+  assert.equal(result.compactedCount, 0);
+  assert.equal(result.skippedCount, 1);
+  assert.equal(result.oversizedEnvelopeSkippedCount, 1);
+  assert.equal(result.hasMore, false);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+});
+
 test("compactLegacyWearableReceiptEnvelopes bounds scanned skipped candidates", async () => {
   const vaultRoot = await createLegacyWearableFixture({
     envelopeCount: 3,
-    envelopePayloadPresent: false,
+    rawArtifactRoles: ["missing-provider-snapshot"],
   });
   const before = await snapshotVaultFiles(vaultRoot);
   const detection = await detectLegacyWearableReceiptCompaction({ vaultRoot });
 
-  assert.equal(detection.hasWork, false);
+  assert.equal(detection.hasWork, true);
 
   const result = await compactLegacyWearableReceiptEnvelopes({
     maxCandidatesScanned: 2,
@@ -223,6 +272,36 @@ test("compactLegacyWearableReceiptEnvelopes bounds scanned skipped candidates", 
   assert.equal(result.scannedCount, 2);
   assert.equal(result.hasMore, true);
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+});
+
+test("compactLegacyWearableReceiptEnvelopes advances past already compacted scan prefixes", async () => {
+  const vaultRoot = await createLegacyWearableFixture({
+    envelopeCount: 30,
+  });
+  let totalCompacted = 0;
+  let lastResult: Awaited<ReturnType<typeof compactLegacyWearableReceiptEnvelopes>> | null = null;
+
+  for (let index = 0; index < 10; index += 1) {
+    lastResult = await compactLegacyWearableReceiptEnvelopes({
+      maxCandidatesScanned: 25,
+      maxEnvelopes: 5,
+      now: COMPACTION_NOW,
+      vaultRoot,
+    });
+    totalCompacted += lastResult.compactedCount;
+    if (!lastResult.hasMore) {
+      break;
+    }
+  }
+
+  assert.ok(lastResult);
+  assert.equal(totalCompacted, 30);
+  assert.equal(lastResult.hasMore, false);
+  assert.deepEqual(await detectLegacyWearableReceiptCompaction({ vaultRoot }), {
+    hasWork: false,
+    largestSuspectByteSize: undefined,
+    suspectedCount: 0,
+  });
 });
 
 test("compactLegacyWearableReceiptEnvelopes bounds evidence proof reads", async () => {

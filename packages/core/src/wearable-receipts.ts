@@ -126,7 +126,7 @@ type ReadManifestArtifactFileOutcome =
     };
 
 const DEFAULT_MAX_ENVELOPES = 25;
-const DEFAULT_MAX_CANDIDATES_SCANNED = 100;
+const DEFAULT_MAX_CANDIDATES_SCANNED = Number.POSITIVE_INFINITY;
 const DEFAULT_MAX_CANDIDATE_BYTES = 100 * 1024 * 1024;
 const DEFAULT_MAX_BYTES_READ = 512 * 1024 * 1024;
 const DEFAULT_MAX_DETECTION_CANDIDATE_BYTES = 1024 * 1024;
@@ -146,13 +146,13 @@ export async function detectLegacyWearableReceiptCompaction({
       if (!isLegacyWearableRawEnvelopeArtifact(artifact)) {
         continue;
       }
-      const hasLikelyPayload = await isPayloadBearingLegacyWearableEnvelopeCandidate({
+      const payloadStatus = await readLegacyWearableEnvelopePayloadStatus({
         artifact,
         manifest,
         maxCandidateBytes,
         vaultRoot,
       });
-      if (!hasLikelyPayload) {
+      if (payloadStatus !== "payload_bearing") {
         continue;
       }
 
@@ -224,6 +224,24 @@ export async function compactLegacyWearableReceiptEnvelopes({
 
     const references = candidates[index];
     if (!references) {
+      continue;
+    }
+    const [firstReference] = references;
+    if (!firstReference) {
+      continue;
+    }
+    const payloadStatus = await readLegacyWearableEnvelopePayloadStatus({
+      artifact: firstReference.artifact,
+      manifest: firstReference.manifest,
+      maxCandidateBytes: Math.min(maxCandidateBytes, DEFAULT_MAX_DETECTION_CANDIDATE_BYTES),
+      vaultRoot,
+    });
+    if (payloadStatus === "deadline") {
+      hasMore = true;
+      break;
+    }
+    if (payloadStatus !== "payload_bearing") {
+      skippedCount += 1;
       continue;
     }
     scannedCount += 1;
@@ -407,23 +425,36 @@ function collectLegacyEnvelopeCandidates(
   }
 
   return [...byEnvelopePath.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([leftPath, leftReferences], [rightPath, rightReferences]) => {
+      const byteSizeDelta = readLargestLegacyEnvelopeReferenceByteSize(rightReferences)
+        - readLargestLegacyEnvelopeReferenceByteSize(leftReferences);
+      return byteSizeDelta || leftPath.localeCompare(rightPath);
+    })
     .map(([, references]) =>
       references.sort((left, right) => left.manifestPath.localeCompare(right.manifestPath))
     );
 }
 
-async function isPayloadBearingLegacyWearableEnvelopeCandidate(input: {
+function readLargestLegacyEnvelopeReferenceByteSize(
+  references: readonly LegacyEnvelopeReference[],
+): number {
+  return references.reduce(
+    (largest, reference) => Math.max(largest, reference.artifact.byteSize),
+    0,
+  );
+}
+
+async function readLegacyWearableEnvelopePayloadStatus(input: {
   artifact: RawImportManifestArtifact;
   manifest: RawImportManifest;
   maxCandidateBytes: number;
   vaultRoot: string;
-}): Promise<boolean> {
+}): Promise<"deadline" | "not_payload_bearing" | "payload_bearing"> {
   if (!artifactPathBelongsToRawDirectory(input.artifact, input.manifest.rawDirectory)) {
-    return false;
+    return "not_payload_bearing";
   }
   if (input.artifact.byteSize > input.maxCandidateBytes) {
-    return true;
+    return "payload_bearing";
   }
 
   const envelopeRead = await readManifestArtifactFileOutcome(
@@ -431,12 +462,17 @@ async function isPayloadBearingLegacyWearableEnvelopeCandidate(input: {
     input.artifact,
     { maxBytes: input.maxCandidateBytes },
   );
+  if (envelopeRead.kind === "total_budget_exhausted") {
+    return "deadline";
+  }
   if (envelopeRead.kind !== "read") {
-    return false;
+    return "not_payload_bearing";
   }
 
   const envelope = parseJsonObject(envelopeRead.file.content);
-  return envelope !== null && hasOwn(envelope, "payload");
+  return envelope !== null && hasOwn(envelope, "payload")
+    ? "payload_bearing"
+    : "not_payload_bearing";
 }
 
 async function prepareLegacyEnvelopeCompaction(input: {
@@ -698,6 +734,9 @@ async function readManifestArtifactFileOutcome(
     if (options.maxBytes !== undefined && artifact.byteSize > options.maxBytes) {
       return { kind: "oversized" };
     }
+    if (options.totalBudget && artifact.byteSize > options.totalBudget.maxBytes) {
+      return { kind: "oversized" };
+    }
     if (
       options.cumulativeBudget
       && options.cumulativeBudget.usedBytes + artifact.byteSize
@@ -716,6 +755,9 @@ async function readManifestArtifactFileOutcome(
     if (options.maxBytes !== undefined && stats.size > options.maxBytes) {
       return { kind: "oversized" };
     }
+    if (options.totalBudget && stats.size > options.totalBudget.maxBytes) {
+      return { kind: "oversized" };
+    }
     if (
       options.cumulativeBudget
       && options.cumulativeBudget.usedBytes + stats.size > options.cumulativeBudget.maxBytes
@@ -731,6 +773,12 @@ async function readManifestArtifactFileOutcome(
 
     const contentBuffer = await fs.readFile(resolved.absolutePath);
     if (options.maxBytes !== undefined && contentBuffer.byteLength > options.maxBytes) {
+      return { kind: "oversized" };
+    }
+    if (
+      options.totalBudget
+      && contentBuffer.byteLength > options.totalBudget.maxBytes
+    ) {
       return { kind: "oversized" };
     }
     if (
