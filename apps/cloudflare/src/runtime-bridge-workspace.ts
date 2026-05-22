@@ -105,6 +105,8 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
 type HostedWorkspaceIdleCheckpointRequest =
   HostedWorkspaceCheckpointRequest & { reason: "idle_shutdown" };
 
+const HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN = /^[a-f0-9]{64}$/u;
+
 export type HostedWorkspaceMailboxPayloadDecodeInput = HostedMailboxPayloadDecodeInput;
 export type HostedWorkspaceMailboxPayloadDecodeResult = HostedMailboxPayloadDecodeResult;
 
@@ -125,6 +127,7 @@ export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   requireMailboxPayloadDecoder?: boolean;
   request: HostedWorkspaceInvocationRequest;
   runtime: HostedAssistantRuntimeConfig;
+  snapshotDiagnosticsHashSecret?: string | null;
   vaultRoot: string;
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
@@ -174,7 +177,9 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           snapshotRef: null,
         },
         snapshotDiagnosticsHashSecret:
-          readHostedWorkspaceSnapshotDiagnosticsHashSecret(runtime),
+          normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(
+            input.snapshotDiagnosticsHashSecret,
+          ),
         userId: input.request.userId,
         vaultRoot,
       });
@@ -847,12 +852,13 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 }
 
-function readHostedWorkspaceSnapshotDiagnosticsHashSecret(
-  runtime: Pick<HostedRuntimeBridgeNormalizedRuntime, "platformEnv">,
+function normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(
+  value: string | null | undefined,
 ): string | null {
-  const rawSecret = runtime.platformEnv.HOSTED_LOG_FINGERPRINT_SECRET ?? null;
-  const secret = rawSecret?.trim() ?? "";
-  return secret.length > 0 ? secret : null;
+  const normalized = value?.trim() ?? "";
+  return HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN.test(normalized)
+    ? normalized
+    : null;
 }
 
 function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(

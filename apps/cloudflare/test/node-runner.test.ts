@@ -15,6 +15,8 @@ import {
 import type { HostedExecutionWorkspaceInvocationJobInput } from "../src/runner-job-transport.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
+const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
+
 describe("createHostedWorkspaceInvocationRunner", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -38,6 +40,9 @@ describe("createHostedWorkspaceInvocationRunner", () => {
     });
 
     await expect(runHostedWorkspaceInvocation({
+      diagnostics: {
+        workspaceSnapshotPathHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
+      },
       kind: "workspace-invocation",
       request,
       runtime: {
@@ -57,6 +62,9 @@ describe("createHostedWorkspaceInvocationRunner", () => {
     expect(runIsolated).toHaveBeenCalledWith(
       expect.objectContaining({
         job: {
+          diagnostics: {
+            workspaceSnapshotPathHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
+          },
           kind: "workspace-invocation",
           request,
           runtime: {

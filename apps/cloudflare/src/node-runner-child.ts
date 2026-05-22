@@ -381,6 +381,8 @@ async function runWorkspaceChildJob(input: {
     requireMailboxPayloadDecoder: true,
     request: input.job.request,
     runtime: input.job.runtime ?? {},
+    snapshotDiagnosticsHashSecret:
+      input.job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
     vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
     webControlAllowHttpHosts: [
       CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
