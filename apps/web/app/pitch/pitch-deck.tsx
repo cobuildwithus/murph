@@ -93,7 +93,7 @@ export function PitchDeck() {
   return (
     <main
       data-pitch-deck
-      className="h-svh snap-y snap-mandatory overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[#f5f0e8]"
+      className="h-svh overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[#f5f0e8] md:snap-y md:snap-mandatory"
     >
       <DeckChrome active={active} dark={dark} onJump={goTo} />
 

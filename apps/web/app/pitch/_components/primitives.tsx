@@ -73,23 +73,28 @@ export function DeckChrome({
       <nav
         aria-label="Slides"
         data-pitch-chrome
-        className="fixed right-5 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex lg:right-8"
+        className="fixed right-5 top-1/2 z-40 hidden -translate-y-1/2 flex-col md:flex lg:right-8"
       >
         {TONES.map((_, index) => {
           const current = index === active;
           return (
+            // Wide, transparent hit area with the visible dash centered.
             <button
               key={index}
               type="button"
               onClick={() => onJump(index)}
               aria-label={`Go to slide ${index + 1}`}
               aria-current={current ? "true" : undefined}
-              className={`w-[3px] rounded-full transition-all duration-300 ${
-                current
-                  ? "h-6 bg-[#7a8c6e]"
-                  : `h-2.5 ${dark ? "bg-[#f5f0e8]/25" : "bg-[#2d3436]/15"}`
-              }`}
-            />
+              className="flex w-7 items-center justify-center rounded py-1"
+            >
+              <span
+                className={`w-[3px] rounded-full transition-all duration-300 ${
+                  current
+                    ? "h-6 bg-[#7a8c6e]"
+                    : `h-2.5 ${dark ? "bg-[#f5f0e8]/25" : "bg-[#2d3436]/15"}`
+                }`}
+              />
+            </button>
           );
         })}
       </nav>

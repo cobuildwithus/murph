@@ -50,7 +50,7 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
           </button>
         </div>
         <ChatMock
-          channel="iMessage group"
+          sentBubble="blue"
           members={6}
           messages={[
             { kind: "you", text: "lowest step count this month buys dinner" },
@@ -115,7 +115,7 @@ export function ProblemSlide() {
         </div>
 
         {/* Seven jobs — hard to run */}
-        <div className="flex flex-col rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
+        <div className="flex flex-col rounded-2xl border border-[#c4a882]/30 bg-[#ebe4d4] p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
             Seven jobs
           </p>
@@ -128,13 +128,19 @@ export function ProblemSlide() {
               "Remind the group",
               "Keep score",
               "Figure out what changed",
-            ].map((job) => (
+            ].map((job, index) => (
               <li key={job} className="flex items-center gap-2.5">
+                <span
+                  aria-hidden="true"
+                  className="font-mono text-[11px] tabular-nums text-[#b0a085]"
+                >
+                  {index + 1}
+                </span>
                 <span
                   aria-hidden="true"
                   className="size-4 shrink-0 rounded-[5px] border-[1.5px] border-[#c4a882]"
                 />
-                <span className="text-[14px] leading-[1.4] text-[#2d3436]">
+                <span className="text-[14px] leading-[1.4] text-[#5f5746]">
                   {job}
                 </span>
               </li>
@@ -167,7 +173,8 @@ export function InsightSlide() {
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
         Murph turns health data into a social loop: a challenge, shared
-        progress, and a reason to show up tomorrow.
+        progress, and a reason to show up tomorrow — right in the
+        messaging apps you already use.
       </p>
 
       {/* The contrast: inert dashboard vs motivating challenge */}
