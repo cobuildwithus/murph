@@ -78,6 +78,7 @@ vi.mock("../src/web-control-plane.ts", async () => {
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 const WORKSPACE_NEXT_WAKE_AT = "2026-04-27T00:02:00.000Z";
 const RUNNER_TIMEOUT_AT = "2026-04-27T00:01:00.000Z";
+const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:00:59.000Z";
 const TEST_USER_ID = "member_123";
 const RUNNER_STATUS_REASON_CASES = [
   "manual",
@@ -172,7 +173,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: RUNNER_TIMEOUT_AT,
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
 
@@ -302,7 +303,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "woken",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: RUNNER_TIMEOUT_AT,
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
       runtimeAttemptId: token?.attemptId,
     });
 
@@ -339,7 +340,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:02:01.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:00.000Z",
       runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
     });
 
@@ -391,7 +392,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "already_running",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: RUNNER_TIMEOUT_AT,
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
       runtimeAttemptId: token?.attemptId,
     });
 
@@ -434,7 +435,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:01:30.000Z",
       runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
     });
 
@@ -1022,7 +1023,7 @@ function createRunnerHarness(input: {
   const runner = new HostedUserRunner(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "60000",
     })),

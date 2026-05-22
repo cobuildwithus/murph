@@ -67,6 +67,9 @@ import { withSerializedLock } from "./serialized-lock.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
+import {
+  computeHostedRuntimeProcessingRecheckDelayMs,
+} from "./runtime-processing-timing.ts";
 import type {
   RunnerWriteFenceToken,
 } from "./user-runner/runner-state-store.js";
@@ -93,7 +96,6 @@ import {
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const ACTIVE_RUNTIME_WAKE_RECHECK_MARGIN_MS = 5_000;
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_RECHECK_MS = 5_000;
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
@@ -1288,7 +1290,9 @@ export class HostedUserRunner {
 
   private computeActiveRuntimeWakeRecheckAt(): string {
     return new Date(
-      Date.now() + this.env.idleCheckpointDelayMs + ACTIVE_RUNTIME_WAKE_RECHECK_MARGIN_MS,
+      Date.now() + computeHostedRuntimeProcessingRecheckDelayMs({
+        idleCheckpointDelayMs: this.env.idleCheckpointDelayMs,
+      }),
     ).toISOString();
   }
 

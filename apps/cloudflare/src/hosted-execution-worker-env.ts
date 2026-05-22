@@ -3,6 +3,9 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
+import {
+  assertHostedRuntimeProcessingTimingInvariants,
+} from "./runtime-processing-timing.ts";
 
 export interface HostedExecutionWorkerEnvironment {
   allowedRunnerSecretKeys: string | null;
@@ -54,6 +57,20 @@ export function readHostedExecutionWorkerEnvironment(
     300_000,
     "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
   );
+  const idleCheckpointDelayMs = parsePositiveInteger(
+    normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS),
+    180_000,
+    "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
+  );
+  const runnerTimeoutMs = parsePositiveInteger(
+    normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
+    600_000,
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+  );
+  assertHostedRuntimeProcessingTimingInvariants({
+    idleCheckpointDelayMs,
+    runnerTimeoutMs,
+  });
 
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
@@ -92,11 +109,7 @@ export function readHostedExecutionWorkerEnvironment(
         rejectHttpLoopbackInProduction: isProduction,
       },
     ),
-    idleCheckpointDelayMs: parsePositiveInteger(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS),
-      180_000,
-      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
-    ),
+    idleCheckpointDelayMs,
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
       3,
@@ -113,11 +126,7 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
     ),
     runnerIdleTtlMs,
-    runnerTimeoutMs: parsePositiveInteger(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
-      600_000,
-      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-    ),
+    runnerTimeoutMs,
     webControlTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS),
       30_000,
