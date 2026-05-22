@@ -10275,7 +10275,7 @@
                           }
                         },
                         "stream": {
-                          "description": "Optional sample streams; setting this also opts sample rows into search. Repeat --stream for multiple values.",
+                          "description": "Optional stream filter for stream-carrying records, including query-visible metric samples and summaries. Repeat --stream for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -10418,7 +10418,7 @@
                   }
                 },
                 "stream": {
-                  "description": "Optional streams; applies to sample summaries and any stream-carrying events. Repeat --stream for multiple values.",
+                  "description": "Optional streams; applies to metric sample summaries and any stream-carrying events. Repeat --stream for multiple values.",
                   "type": "array",
                   "items": {
                     "type": "string",
