@@ -501,6 +501,9 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_web_checkpoint",
       userId: input.userId,
     });
+    if (input.consumePendingRuntimeWake?.() === true) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError();
+    }
 
     snapshotRef = {
       archive: {

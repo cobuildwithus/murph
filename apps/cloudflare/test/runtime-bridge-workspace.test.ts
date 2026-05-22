@@ -1522,6 +1522,97 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("encryptedObjectSha256");
   });
 
+  it("aborts an in-flight direct R2 snapshot when a foreground message wakes after lease revalidation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    let leaseReadCount = 0;
+    let wakeCheckCount = 0;
+    let runtimeWakePending = false;
+    const consumePendingRuntimeWake = vi.fn(() => {
+      wakeCheckCount += 1;
+      if (wakeCheckCount === 1) {
+        return false;
+      }
+      const pending = runtimeWakePending;
+      runtimeWakePending = false;
+      return pending;
+    });
+    const workspaceSnapshotDirectPuts = vi.fn(() => {
+      runtimeWakePending = true;
+    });
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      consumePendingRuntimeWake,
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => {
+        leaseReadCount += 1;
+        return {
+          attemptId: "attempt_1",
+          leaseGeneration: "4",
+          userId: "member_1",
+          workspaceVersion: "7",
+        };
+      },
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toBeInstanceOf(HostedRuntimeCheckpointInterruptedByWakeError);
+
+    expect(consumePendingRuntimeWake).toHaveBeenCalledTimes(2);
+    expect(leaseReadCount).toBe(3);
+    expect(workspaceSnapshotDirectPuts).toHaveBeenCalledOnce();
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(putArtifact).not.toHaveBeenCalled();
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).not.toContainEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_finished",
+    }));
+    expect(entries).toContainEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_failed",
+      redactedJson: expect.objectContaining({
+        errorCode: "checkpoint_error",
+        errorCodeDetail: "runtime_wake_during_checkpoint",
+        leaseCheckCount: 3,
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
+        snapshotMode: "workspace_snapshot_v2",
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("snapshot_test_");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("workspace-snapshots");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("encryptedObjectSha256");
+  });
+
   it("compacts legacy working refs during idle shutdown into a direct full snapshot", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));

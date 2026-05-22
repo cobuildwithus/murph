@@ -1,6 +1,6 @@
 # Hosted snapshot abort E2E
 
-Status: active
+Status: completed
 Created: 2026-05-22
 Updated: 2026-05-22
 
@@ -60,3 +60,4 @@ Updated: 2026-05-22
 
 - Commands to run: focused `apps/cloudflare` Vitest for the bridge test, `apps/cloudflare` typecheck or truthful scoped alternative, and whitespace/diff checks.
 - Expected outcomes: regression passes, no raw snapshot ids/object keys appear in logs, and unrelated dirty web files are untouched.
+Completed: 2026-05-22
