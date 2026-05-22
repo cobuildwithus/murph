@@ -671,9 +671,10 @@ test("ConnectPage surfaces reauthorization-required sources as reconnectable", a
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop needs reconnect/);
+  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
   assert.match(markup, /data-connection-state="needs-access"/u);
   assert.match(markup, /aria-label="Reconnect Whoop"/u);
-  assert.match(markup, /aria-label="Disconnect Whoop"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
@@ -698,9 +699,10 @@ test("ConnectPage surfaces disconnected sources as reconnectable", async () => {
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop needs reconnect/);
+  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
   assert.match(markup, /data-connection-state="needs-access"/u);
   assert.match(markup, /aria-label="Reconnect Whoop"/u);
-  assert.match(markup, /aria-label="Disconnect Whoop"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
@@ -729,9 +731,10 @@ test("ConnectPage surfaces active sources with reconnect action as reconnectable
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, /Whoop needs reconnect/);
+  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
   assert.match(markup, /data-connection-state="needs-access"/u);
   assert.match(markup, /aria-label="Reconnect Whoop"/u);
-  assert.match(markup, /aria-label="Disconnect Whoop"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
   assert.doesNotMatch(markup, /Whoop connected/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
@@ -1312,14 +1315,16 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid clears reconnect state after local disconnect", async () => {
+test("ConnectSourcesGrid shows reconnect guidance without a disconnect action", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
     _init?: RequestInit,
   ) => {
     void _input;
     void _init;
-    return Response.json({});
+    return Response.json({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -1343,30 +1348,32 @@ test("ConnectSourcesGrid clears reconnect state after local disconnect", async (
     ],
   }));
 
-  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Whoop']");
-  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+  assert.match(rendered.container.textContent ?? "", /Please reconnect Whoop to resume syncing\./);
+  assert.equal(rendered.container.querySelector("button[aria-label='Disconnect Whoop']"), null);
+  const reconnectButton = rendered.container.querySelector("button[aria-label='Reconnect Whoop']");
+  assert.ok(reconnectButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(reconnectButton.textContent, "Reconnect");
 
   await act(async () => {
-    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  const confirmButton = [...rendered.container.querySelectorAll("button")]
-    .filter((button) => button.textContent === "Disconnect")
-    .at(-1);
-  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
-
-  await act(async () => {
-    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    reconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Whoop not connected/);
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://provider.example.test/oauth/start");
   });
 
-  assert.equal(rendered.container.querySelector("button[aria-label='Connect Whoop']")?.textContent, "Connect");
-  assert.equal(rendered.container.querySelector("button[aria-label='Reconnect Whoop']"), null);
-  assert.equal(rendered.container.querySelector("[data-connection-state='idle']") !== null, true);
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
+  assert.deepEqual(fetch.mock.calls[0]?.[1], {
+    body: JSON.stringify({ connectTarget: "whoop" }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+    keepalive: false,
+  });
 
   await rendered.cleanup();
 });

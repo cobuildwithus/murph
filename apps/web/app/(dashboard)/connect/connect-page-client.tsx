@@ -473,6 +473,11 @@ function SourceCard({
         </div>
       ) : (
         <div className="mt-auto flex flex-col items-start gap-2">
+          {source.requiresReconnect ? (
+            <p className="max-w-[22rem] text-sm leading-relaxed text-destructive">
+              Please reconnect {source.name} to resume syncing.
+            </p>
+          ) : null}
           {!authenticated ? (
             <AuthButton aria-label={`Sign in to connect ${source.name}`}>
               Sign in
@@ -489,17 +494,6 @@ function SourceCard({
               {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
             </Button>
           )}
-          {source.requiresReconnect && canDisconnect ? (
-            <button
-              type="button"
-              aria-label={`Disconnect ${source.name}`}
-              disabled={pending || pendingDisconnect}
-              onClick={() => onDisconnectTargetChange(source)}
-              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-            >
-              {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
-            </button>
-          ) : null}
           {errorMessage ? (
             <p role="alert" className="text-xs leading-snug text-destructive">
               {errorMessage}
