@@ -167,6 +167,31 @@ test("hosted Codex runtime env exposes bundled CLI bins on PATH", async () => {
   assert.equal(config.split("\n").includes(`PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`), true);
 });
 
+test("hosted Codex config pins PATH after shell snapshots are sourced", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const reducedSystemPath = "/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games";
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "test-openai-key",
+      PATH: reducedSystemPath,
+    },
+  });
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  const lines = config.split("\n");
+  const shellPolicyIndex = lines.indexOf("[shell_environment_policy]");
+  const shellSetIndex = lines.indexOf("[shell_environment_policy.set]");
+
+  assert.notEqual(shellPolicyIndex, -1);
+  assert.notEqual(shellSetIndex, -1);
+  assert.equal(shellSetIndex > shellPolicyIndex, true);
+  assert.equal(lines[shellSetIndex + 1], `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`);
+  assert.equal(HOSTED_RUNNER_EXECUTABLE_PATH.startsWith("/app/node_modules/.bin:"), true);
+  assert.equal(result.runtimeEnv.PATH.startsWith("/app/node_modules/.bin:"), true);
+});
+
 test("hosted Cloudflare Codex config injects the hosted auto-compaction limit", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
