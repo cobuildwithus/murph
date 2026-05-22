@@ -182,6 +182,100 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     assert.equal(createHostedLinqAttachmentDownloadDriver(), null);
   });
 
+  it("uses hosted provider fetch for metadata and downloaded bytes when available", async () => {
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const globalFetchMock = vi.fn(async () => {
+      throw new Error("global fetch should not be used for hosted Linq attachments");
+    });
+    setFetch(globalFetchMock as typeof globalThis.fetch);
+
+    const providerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.linqapp.com/api/partner/v3/attachments/att_image_123") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url: "https://cdn.linqapp.com/files/fresh-image.png",
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
+      if (url === "https://cdn.linqapp.com/files/fresh-image.png") {
+        return new Response(Uint8Array.from([1, 2, 3]), { status: 200 });
+      }
+
+      throw new Error(`Unexpected provider fetch url: ${url}`);
+    });
+
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        ...createLogPlatform([]),
+        providerFetch: providerFetch as typeof fetch,
+      },
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart({
+      attachmentId: "att_image_123",
+      mimeType: "image/png",
+      type: "media",
+    }, undefined)).resolves.toEqual(Uint8Array.from([1, 2, 3]));
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(globalFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses hosted provider fetch for direct attachment downloads when available", async () => {
+    const globalFetchMock = vi.fn(async () => {
+      throw new Error("global fetch should not be used for hosted Linq attachments");
+    });
+    setFetch(globalFetchMock as typeof globalThis.fetch);
+
+    const providerFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://cdn.linqapp.com/files/direct-url.png") {
+        return new Response(Uint8Array.from([4, 5, 6]), { status: 200 });
+      }
+
+      if (url === "https://cdn.linqapp.com/files/direct-part.png") {
+        return new Response(Uint8Array.from([7, 8, 9]), { status: 200 });
+      }
+
+      throw new Error(`Unexpected provider fetch url: ${url}`);
+    });
+
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        ...createLogPlatform([]),
+        providerFetch: providerFetch as typeof fetch,
+      },
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(
+      driver.downloadUrl("https://cdn.linqapp.com/files/direct-url.png", undefined),
+    ).resolves.toEqual(Uint8Array.from([4, 5, 6]));
+    await expect(driver.downloadPart({
+      attachmentId: "att_direct_image",
+      mimeType: "image/png",
+      type: "media",
+      url: "https://cdn.linqapp.com/files/direct-part.png",
+    }, undefined)).resolves.toEqual(Uint8Array.from([7, 8, 9]));
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(globalFetchMock).not.toHaveBeenCalled();
+  });
+
   it("skips unsupported urls without hitting fetch", async () => {
     const fetchMock = vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 }));
     setFetch(fetchMock as typeof globalThis.fetch);
