@@ -46,6 +46,18 @@ describe("resolveSmokeWorkerBaseUrl", () => {
   });
 });
 
+function createCodexShellSmokeResult() {
+  return {
+    client: "codex-app-server",
+    murphPathBytes: 28,
+    noteAddBytes: 128,
+    stderrBytes: 0,
+    vaultCliLlmsBytes: 4096,
+    vaultCliPathBytes: 32,
+    vaultShowBytes: 256,
+  };
+}
+
 describe("buildVersionOverrideHeaders", () => {
   it("formats the Cloudflare version override header when the worker name and version id are present", () => {
     expect(buildVersionOverrideHeaders({
@@ -295,6 +307,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
             ok: true,
             runnerBundle: {
               buildSkipped: false,
@@ -362,6 +375,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
             ok: true,
             openAiIntercept: {
               client: "codex",
@@ -444,6 +458,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
             directR2PresignedPut: {
               byteLength: 160 * 1024 * 1024,
               ok: true,
@@ -618,6 +633,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
             ok: true,
             runnerBundle: smokeAttempt === 1
               ? {
@@ -699,6 +715,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
             ok: true,
             runnerBundle: {
               buildSkipped: false,

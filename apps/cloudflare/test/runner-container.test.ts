@@ -575,6 +575,18 @@ describe("RunnerContainer", () => {
   it("starts a managed shell for deploy smoke health and stops it afterward", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
         expect(url).toBe("http://container/health");
         return new Response(JSON.stringify({
           ok: true,
@@ -598,6 +610,7 @@ describe("RunnerContainer", () => {
     const result = await container.smokeHealth();
 
     expect(result).toEqual({
+      codexShell: createCodexShellSmokeResult(),
       ok: true,
       runnerBundle: {
         buildSkipped: false,
@@ -610,7 +623,7 @@ describe("RunnerContainer", () => {
       status: 200,
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(containerFetch).toHaveBeenCalledTimes(1);
+    expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(destroy).toHaveBeenCalledTimes(1);
   });
@@ -622,6 +635,18 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify({
             ok: true,
             service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
           }), {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -664,7 +689,8 @@ describe("RunnerContainer", () => {
       stderrBytes: 0,
       stdoutBytes: 256,
     });
-    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(result.codexShell).toEqual(createCodexShellSmokeResult());
+    expect(containerFetch).toHaveBeenCalledTimes(3);
     const smokeCall = containerFetch.mock.calls.find(([url]) =>
       String(url).endsWith("/internal/deploy-openai-intercept-smoke")
     );
@@ -685,6 +711,18 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify({
             ok: true,
             service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
           }), {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -728,7 +766,8 @@ describe("RunnerContainer", () => {
       responseBodyBytes: 2,
       status: 200,
     });
-    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(result.codexShell).toEqual(createCodexShellSmokeResult());
+    expect(containerFetch).toHaveBeenCalledTimes(3);
     const smokeCall = containerFetch.mock.calls.find(([url]) =>
       String(url).endsWith("/internal/direct-r2-presigned-put-smoke")
     );
@@ -3301,6 +3340,18 @@ function createContainerDouble(input: {
       });
     }
 
+    if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+      return new Response(JSON.stringify({
+        codexShell: createCodexShellSmokeResult(),
+        ok: true,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    }
+
     return new Response(JSON.stringify(createRunnerResult()), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -3332,6 +3383,18 @@ function createContainerDouble(input: {
     destroy,
     getState,
     startAndWaitForPorts,
+  };
+}
+
+function createCodexShellSmokeResult() {
+  return {
+    client: "codex-app-server",
+    murphPathBytes: 28,
+    noteAddBytes: 128,
+    stderrBytes: 0,
+    vaultCliLlmsBytes: 4096,
+    vaultCliPathBytes: 32,
+    vaultShowBytes: 256,
   };
 }
 

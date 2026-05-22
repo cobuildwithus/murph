@@ -617,6 +617,53 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("runs the managed-container Codex shell smoke through the app-server hook", async () => {
+    const runCodexShellSmoke = vi.fn(async () => ({
+      client: "codex-app-server" as const,
+      murphPathBytes: 28,
+      noteAddBytes: 128,
+      stderrBytes: 0,
+      vaultCliLlmsBytes: 4096,
+      vaultCliPathBytes: 32,
+      vaultShowBytes: 256,
+    }));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runCodexShellSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: "",
+      path: "/internal/deploy-codex-shell-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json).toEqual({
+      codexShell: {
+        client: "codex-app-server",
+        murphPathBytes: 28,
+        noteAddBytes: 128,
+        stderrBytes: 0,
+        vaultCliLlmsBytes: 4096,
+        vaultCliPathBytes: 32,
+        vaultShowBytes: 256,
+      },
+      ok: true,
+    });
+    expect(runCodexShellSmoke).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it("runs the managed-container direct R2 presigned PUT smoke through the container network", async () => {
     const runDirectR2PresignedPutSmoke = vi.fn(async () => ({
       byteLength: 4096,

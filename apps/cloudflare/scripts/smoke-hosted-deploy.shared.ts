@@ -62,6 +62,16 @@ interface SmokeOpenAiInterceptResult {
   stdoutBytes?: unknown;
 }
 
+interface SmokeCodexShellResult {
+  client?: unknown;
+  murphPathBytes?: unknown;
+  noteAddBytes?: unknown;
+  stderrBytes?: unknown;
+  vaultCliLlmsBytes?: unknown;
+  vaultCliPathBytes?: unknown;
+  vaultShowBytes?: unknown;
+}
+
 interface SmokeDirectR2PresignedPutResult {
   byteLength?: unknown;
   ok?: unknown;
@@ -321,6 +331,7 @@ async function readRunnerContainerSmoke(input: {
   const responsePayload = await response.json() as {
     ok?: unknown;
     runnerContainer?: {
+      codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
       ok?: unknown;
       openAiIntercept?: SmokeOpenAiInterceptResult | null;
@@ -337,6 +348,7 @@ async function readRunnerContainerSmoke(input: {
     throw new Error("runner container smoke did not return the expected service id.");
   }
 
+  assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
   if (input.expectOpenAiIntercept) {
     assertSmokeOpenAiInterceptResult(responsePayload.runnerContainer.openAiIntercept);
   }
@@ -403,6 +415,31 @@ function assertSmokeOpenAiInterceptResult(
   }
   if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
     throw new Error("runner container OpenAI intercept smoke reported invalid stderr bytes.");
+  }
+}
+
+function assertSmokeCodexShellResult(
+  value: SmokeCodexShellResult | null | undefined,
+): void {
+  if (!value || typeof value !== "object") {
+    throw new Error("runner container smoke did not return Codex shell metadata.");
+  }
+  if (value.client !== "codex-app-server") {
+    throw new Error("runner container Codex shell smoke did not use the Codex app-server client.");
+  }
+  for (const [key, rawValue] of Object.entries({
+    murphPathBytes: value.murphPathBytes,
+    noteAddBytes: value.noteAddBytes,
+    vaultCliLlmsBytes: value.vaultCliLlmsBytes,
+    vaultCliPathBytes: value.vaultCliPathBytes,
+    vaultShowBytes: value.vaultShowBytes,
+  })) {
+    if (typeof rawValue !== "number" || rawValue <= 0) {
+      throw new Error(`runner container Codex shell smoke reported invalid ${key}.`);
+    }
+  }
+  if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
+    throw new Error("runner container Codex shell smoke reported invalid stderr bytes.");
   }
 }
 

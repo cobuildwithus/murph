@@ -43,6 +43,8 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
   "http://container/internal/deploy-openai-intercept-smoke";
+const RUNNER_CODEX_SHELL_SMOKE_URL =
+  "http://container/internal/deploy-codex-shell-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
@@ -133,6 +135,15 @@ interface RunnerContainerLogContext {
 }
 
 interface HostedExecutionContainerSmokeHealthResult {
+  codexShell?: {
+    client: string | null;
+    murphPathBytes: number | null;
+    noteAddBytes: number | null;
+    stderrBytes: number | null;
+    vaultCliLlmsBytes: number | null;
+    vaultCliPathBytes: number | null;
+    vaultShowBytes: number | null;
+  } | null;
   directR2PresignedPut?: {
     byteLength: number | null;
     durationMs: number | null;
@@ -421,11 +432,13 @@ export class RunnerContainer extends Container {
         const openAiIntercept = input.openAiIntercept === true
           ? await this.smokeOpenAiIntercept(readyTimeoutMs, input.openAiInterceptAuthority)
           : undefined;
+        const codexShell = await this.smokeCodexShell(readyTimeoutMs);
         const directR2PresignedPut = input.directR2PresignedPut
           ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
           : undefined;
 
         return {
+          codexShell,
           ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
           ok: true,
           ...(openAiIntercept === undefined ? {} : { openAiIntercept }),
@@ -437,6 +450,43 @@ export class RunnerContainer extends Container {
         await this.stopWarmContainer({ failClosed: false });
       }
     });
+  }
+
+  private async smokeCodexShell(
+    readyTimeoutMs: number,
+  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["codexShell"]>> {
+    const response = await this.containerFetch(
+      RUNNER_CODEX_SHELL_SMOKE_URL,
+      {
+        method: "POST",
+        signal: AbortSignal.timeout(readyTimeoutMs),
+      },
+    );
+    const payload = await response.json() as {
+      codexShell?: {
+        client?: unknown;
+        murphPathBytes?: unknown;
+        noteAddBytes?: unknown;
+        stderrBytes?: unknown;
+        vaultCliLlmsBytes?: unknown;
+        vaultCliPathBytes?: unknown;
+        vaultShowBytes?: unknown;
+      } | null;
+      ok?: unknown;
+    };
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(`Hosted runner container Codex shell smoke failed with HTTP ${response.status}.`);
+    }
+    const result = payload.codexShell ?? {};
+    return {
+      client: typeof result.client === "string" ? result.client : null,
+      murphPathBytes: typeof result.murphPathBytes === "number" ? result.murphPathBytes : null,
+      noteAddBytes: typeof result.noteAddBytes === "number" ? result.noteAddBytes : null,
+      stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : null,
+      vaultCliLlmsBytes: typeof result.vaultCliLlmsBytes === "number" ? result.vaultCliLlmsBytes : null,
+      vaultCliPathBytes: typeof result.vaultCliPathBytes === "number" ? result.vaultCliPathBytes : null,
+      vaultShowBytes: typeof result.vaultShowBytes === "number" ? result.vaultShowBytes : null,
+    };
   }
 
   private async smokeDirectR2PresignedPut(

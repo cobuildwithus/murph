@@ -239,6 +239,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       runnerContainer: {
+        codexShell: createCodexShellSmokeResult(),
         ok: true,
         runnerBundle: {
           buildSkipped: false,
@@ -2640,6 +2641,7 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
         },
         async smokeHealth() {
           return {
+            codexShell: createCodexShellSmokeResult(),
             ok: true,
             runnerBundle: {
               buildSkipped: false,
@@ -2654,6 +2656,18 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
         },
       };
     },
+  };
+}
+
+function createCodexShellSmokeResult() {
+  return {
+    client: "codex-app-server",
+    murphPathBytes: 28,
+    noteAddBytes: 128,
+    stderrBytes: 0,
+    vaultCliLlmsBytes: 4096,
+    vaultCliPathBytes: 32,
+    vaultShowBytes: 256,
   };
 }
 
