@@ -24,3 +24,6 @@ Harden hosted Telegram attachment downloads so every hosted fallback path uses t
 - `pnpm test:diff` on touched files.
 - `pnpm typecheck`.
 - Required coverage, security/privacy, and finish reviews for hosted provider egress changes.
+Status: completed
+Updated: 2026-05-22
+Completed: 2026-05-22
