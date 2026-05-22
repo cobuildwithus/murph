@@ -226,7 +226,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
 
   const handled =
     await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleMapboxRequest({ env, request, url, userId })
+    ?? await maybeHandleMapboxRequest({ env, request, url })
     ?? await maybeHandleLinqRequest({ env, request, url, userId })
     ?? await maybeHandleTelegramRequest({ env, request, url, userId })
     ?? await maybeHandleWhatsAppRequest({ env, request, url, userId });
@@ -375,7 +375,6 @@ export async function handleHostedRunnerMapboxOutbound(
       env,
       request,
       url,
-      userId: readHostedRunnerBoundUserId(request),
     }),
   );
 }
@@ -1439,7 +1438,6 @@ async function maybeHandleMapboxRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
-  userId: string | null;
 }): Promise<Response | null> {
   const providerBase = readProviderBaseConfig(undefined, DEFAULT_MAPBOX_API_BASE_URL, input.env);
   const pathMatch = readProviderPathMatch(input.url, providerBase);
@@ -1578,6 +1576,9 @@ async function maybeHandleWhatsAppRequest(input: {
     input.request.method !== "POST"
     || !/^\/v[0-9]+\.[0-9]+\/__cloudflare_injected__\/messages$/u.test(pathnameSuffix)
   ) {
+    return disallowedProviderEgress();
+  }
+  if (!hasBearerCredentialSentinel(input.request.headers)) {
     return disallowedProviderEgress();
   }
 
