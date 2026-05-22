@@ -247,12 +247,13 @@ async function normalizeHostedConversationMessageWake(input: {
         createHostedTelegramEffectsAttachmentDownloadDriver({
           effectsPort: input.runtime.platform.effectsPort,
         })
-        ?? createHostedTelegramAttachmentDownloadDriver(
-          buildHostedTelegramChannelEnv({
+        ?? createHostedTelegramAttachmentDownloadDriver({
+          env: buildHostedTelegramChannelEnv({
             forwardedEnv: input.runtime.forwardedEnv,
             platformEnv: input.runtime.platformEnv,
           }),
-        ),
+          fetchImplementation: input.runtime.platform.providerFetch ?? null,
+        }),
       externalId: input.wake.eventId,
       message: input.wake.message.telegramMessage,
       occurredAt: input.wake.occurredAt,

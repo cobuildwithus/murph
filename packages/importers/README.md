@@ -17,6 +17,8 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 
 Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves the upstream payloads as raw artifacts, and only promotes fields that fit the current canonical device batch surface. High-frequency provider telemetry should remain raw evidence unless it is reduced to compact display-grade events or metric facts.
 
+The wearable raw ingest envelope is only a receipt: it stores the payload hash and the raw artifact roles for replay/audit, but it must not store another copy of the provider payload. Raw provider data belongs in the adapter's raw artifacts, and product/query surfaces should consume canonical records or derived metric read models instead.
+
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
 For the next provider, importers should only need:

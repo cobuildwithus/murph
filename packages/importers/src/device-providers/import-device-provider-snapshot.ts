@@ -105,9 +105,11 @@ export async function prepareDeviceProviderSnapshotImport(
     accountId: normalized.accountId ?? request.accountId,
     importedAt: rawObservedAt,
   });
+  const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(basePayload);
   const rawEnvelope = buildWearableRawIngestEnvelope({
     provider: basePayload.provider,
     payload: rawSnapshot,
+    rawArtifactRoles: (payloadWithLegacyRawRole.rawArtifacts ?? []).map((artifact) => artifact.role),
     userId: request.userId,
     accountId: basePayload.accountId,
     connectionId: request.connectionId,
@@ -124,7 +126,6 @@ export async function prepareDeviceProviderSnapshotImport(
     cursor: request.cursor,
     signatureVerified: request.signatureVerified,
   });
-  const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(basePayload);
   const canonicalWearableRecords = canonicalizeDeviceBatchPayload(payloadWithLegacyRawRole, {
     rawEnvelope,
     connectionId: request.connectionId,

@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => ({
     ),
     kind: "prisma",
   },
-  readHostedMailboxFirstPendingSystemItemCheckpoint: vi.fn(),
   readHostedMailboxItemCheckpointById: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   signalWithStart: vi.fn(),
@@ -35,8 +34,6 @@ const defaultWorkflowOptions = {
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
-  readHostedMailboxFirstPendingSystemItemCheckpoint:
-    mocks.readHostedMailboxFirstPendingSystemItemCheckpoint,
   readHostedMailboxItemCheckpointById:
     mocks.readHostedMailboxItemCheckpointById,
 }));
@@ -57,7 +54,6 @@ import {
   sanitizeHostedRuntimeSignalSource,
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
-  signalHostedMailboxLagObservedRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -67,7 +63,6 @@ describe("hosted runtime Temporal signaling", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
-    mocks.readHostedMailboxFirstPendingSystemItemCheckpoint.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.signalWithStart.mockResolvedValue(undefined);
     mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => ({
@@ -289,111 +284,6 @@ describe("hosted runtime Temporal signaling", () => {
       memberId: "member_123",
       prisma: mocks.prisma,
     });
-  });
-
-  it("persists mailbox-lag recovery as durable control demand when no matching pending row exists", async () => {
-    await signalHostedMailboxLagObservedRuntime({
-      client: buildClient(),
-      userId: "member_123",
-    });
-
-    expect(mocks.readHostedMailboxFirstPendingSystemItemCheckpoint).toHaveBeenCalledWith({
-      afterSeq: 0n,
-      prisma: mocks.prisma,
-      userId: "member_123",
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        kind: "runtime.mailbox-lag-observed",
-        userId: "member_123",
-      }),
-      tx: { kind: "tx" },
-    });
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.mailbox-lag-observed",
-          source: "mailbox-lag",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
-  });
-
-  it("reuses a pending mailbox-lag control row instead of appending duplicates", async () => {
-    mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord({
-      redactedStatusJson: {
-        importedSystemSeq: "54",
-      },
-    }));
-    mocks.readHostedMailboxFirstPendingSystemItemCheckpoint.mockResolvedValueOnce({
-      id: "mailbox_existing_lag",
-      kind: "runtime.mailbox-lag-observed",
-      lane: "system",
-      laneSeq: "55",
-      userId: "member_123",
-    });
-
-    await signalHostedMailboxLagObservedRuntime({
-      client: buildClient(),
-      userId: "member_123",
-    });
-
-    expect(mocks.readHostedMailboxFirstPendingSystemItemCheckpoint).toHaveBeenCalledWith({
-      afterSeq: 54n,
-      prisma: mocks.prisma,
-      userId: "member_123",
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [{
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "55",
-          mailboxItemId: "mailbox_existing_lag",
-          source: "mailbox-lag",
-        }],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
-  });
-
-  it("does not coalesce mailbox-lag control behind another pending system kind", async () => {
-    mocks.readHostedMailboxFirstPendingSystemItemCheckpoint.mockResolvedValueOnce({
-      id: "mailbox_existing_manual",
-      kind: "runtime.manual-requested",
-      lane: "system",
-      laneSeq: "55",
-      userId: "member_123",
-    });
-
-    await signalHostedMailboxLagObservedRuntime({
-      client: buildClient(),
-      userId: "member_123",
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        kind: "runtime.mailbox-lag-observed",
-        userId: "member_123",
-      }),
-      tx: { kind: "tx" },
-    });
-    expect(mocks.signalWithStart).toHaveBeenCalledWith(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      expect.objectContaining({
-        signalArgs: [expect.objectContaining({
-          mailboxItemId: "mailbox_runtime.mailbox-lag-observed",
-        })],
-        workflowId: "hosted-user-runtime:member_123",
-      }),
-    );
   });
 
   it("ensures workspace before device-sync mailbox pointer signals", async () => {

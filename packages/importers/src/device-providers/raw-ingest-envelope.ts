@@ -35,12 +35,14 @@ export interface WearableRawIngestEnvelope {
   cursor?: string;
   signatureVerified?: boolean;
   payloadHash: string;
-  payload: WearableRawIngestJsonValue;
+  rawArtifactRoles: string[];
+  rawArtifactCount: number;
 }
 
 export interface BuildWearableRawIngestEnvelopeInput {
   provider: string;
   payload: unknown;
+  rawArtifactRoles?: readonly string[];
   userId?: string;
   accountId?: string;
   connectionId?: string;
@@ -64,6 +66,7 @@ export function buildWearableRawIngestEnvelope(
   const observedAt = input.observedAt ?? new Date().toISOString();
   const payload = normalizeWearableRawIngestJsonPayload(input.payload);
   const payloadHash = sha256Hex(stableStringify(payload));
+  const rawArtifactRoles = normalizeRawArtifactRoles(input.rawArtifactRoles);
   const id = buildWearableRawIngestEnvelopeId({
     provider: input.provider,
     accountId: input.accountId,
@@ -94,8 +97,13 @@ export function buildWearableRawIngestEnvelope(
     cursor: input.cursor,
     signatureVerified: input.signatureVerified,
     payloadHash,
-    payload,
+    rawArtifactRoles,
+    rawArtifactCount: rawArtifactRoles.length,
   });
+}
+
+function normalizeRawArtifactRoles(rawArtifactRoles: readonly string[] | undefined): string[] {
+  return [...(rawArtifactRoles ?? [])];
 }
 
 function buildWearableRawIngestEnvelopeId(input: {

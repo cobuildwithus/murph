@@ -172,11 +172,17 @@ afterEach(() => {
 
 describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
   it("normalizes each hosted conversation wake directly before parsed inbox persistence", async () => {
+    const baseRuntime = createRuntime();
+    const providerFetch = vi.fn<typeof fetch>();
     const runtime = {
-      ...createRuntime(),
+      ...baseRuntime,
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
+      },
+      platform: {
+        ...baseRuntime.platform,
+        providerFetch,
       },
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
@@ -327,9 +333,12 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     });
     expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledWith({
-      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-      TELEGRAM_BOT_TOKEN: "telegram-token",
-      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      env: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: providerFetch,
     });
     expect(mocks.normalizeHostedTelegramConversationCapture).toHaveBeenCalledWith({
       accountId: "bot",

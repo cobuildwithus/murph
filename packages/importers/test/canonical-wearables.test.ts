@@ -633,6 +633,9 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
   assert.equal(rawEnvelope?.connectionId, "conn_polar_01");
   assert.equal(rawEnvelope?.sourceKind, "webhook");
   assert.equal(rawEnvelope?.deliveryMode, "full_payload");
+  assert.equal(Object.hasOwn(rawEnvelope, "payload"), false);
+  assert.deepEqual(rawEnvelope?.rawArtifactRoles, ["daily-summary"]);
+  assert.equal(rawEnvelope?.rawArtifactCount, 1);
   assert.equal(canonicalRecords.length, 1);
   assert.equal(canonicalRecords[0]?.kind, "observation");
   assert.equal(canonicalRecords[0] && "metric" in canonicalRecords[0] ? canonicalRecords[0].metric : null, "steps");

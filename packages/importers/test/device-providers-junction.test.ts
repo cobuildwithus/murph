@@ -758,20 +758,40 @@ test("Junction snapshot import minimizes grouped source identifiers in raw envel
     },
   });
 
-  const rawEnvelopeText = JSON.stringify(payload.rawIngestEnvelopes?.[0]?.payload);
+  const rawEnvelope = payload.rawIngestEnvelopes?.[0];
+  assert.ok(rawEnvelope);
+  const rawEnvelopeArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role === `wearable-raw-envelope:${rawEnvelope.id}`
+  );
+  const rawEnvelopeText = JSON.stringify(rawEnvelope);
+  const rawEnvelopeArtifactText = JSON.stringify(rawEnvelopeArtifact?.content);
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);
 
+  assert.equal(Object.hasOwn(rawEnvelope, "payload"), false);
+  assert.ok(rawEnvelopeArtifact);
+  assert.deepEqual(rawEnvelope.rawArtifactRoles, [
+    "junction-summary-profile",
+    "junction-summary-activity",
+    "junction-timeseries-steps",
+  ]);
+  assert.equal(rawEnvelope.rawArtifactCount, 3);
   assert.doesNotMatch(
     rawEnvelopeText,
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u,
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
+  );
+  assert.equal(rawEnvelopeArtifact?.content, rawEnvelope);
+  assert.doesNotMatch(
+    rawEnvelopeArtifactText,
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
   );
   assert.doesNotMatch(
     rawArtifactText,
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u,
   );
-  assert.match(rawEnvelopeText, /"provider":"oura"/u);
-  assert.match(rawEnvelopeText, /"sourceProviderSlug":"oura"/u);
-  assert.match(rawEnvelopeText, /"sourceType":"ring"/u);
+  assert.match(rawEnvelopeText, /"provider":"junction"/u);
+  assert.match(rawArtifactText, /"sourceProviderSlug":"oura"/u);
+  assert.match(rawArtifactText, /"sourceType":"ring"/u);
+  assert.match(rawArtifactText, /"value":123/u);
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
