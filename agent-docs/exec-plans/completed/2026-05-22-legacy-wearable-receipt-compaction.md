@@ -1,6 +1,6 @@
 # Legacy wearable receipt compaction
 
-Status: active
+Status: completed
 Created: 2026-05-22
 Updated: 2026-05-22
 
@@ -72,3 +72,4 @@ Updated: 2026-05-22
 4. Add hosted housekeeping lane, scheduling integration, and runtime tests.
 5. Document the narrow raw receipt rewrite exception.
 6. Run required verification/audits and close with a scoped commit if safe.
+Completed: 2026-05-22
