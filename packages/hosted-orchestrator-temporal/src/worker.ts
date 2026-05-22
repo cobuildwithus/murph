@@ -114,12 +114,12 @@ function buildNativeConnectionOptions(
 
 function resolveHostedUserRuntimeWorkflowsPath(): string {
   const sourcePath = fileURLToPath(
-    new URL("./workflows/hosted-user-runtime.ts", import.meta.url),
+    new URL("./workflows/index.ts", import.meta.url),
   );
   if (existsSync(sourcePath)) {
     return sourcePath;
   }
-  return require.resolve("./workflows/hosted-user-runtime.js");
+  return require.resolve("./workflows/index.js");
 }
 
 function resolveHostedUserRuntimeWorkflowBundlePath(

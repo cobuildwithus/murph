@@ -25,7 +25,9 @@ import { log } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
+const DEFAULT_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
+const MAX_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS = 120_000;
 const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
 const HOSTED_WEB_CALLBACK_SIGNING_IMPORT_ALGORITHM: EcKeyImportParams = {
   name: "ECDSA",
@@ -41,6 +43,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export interface HostedOrchestratorTemporalActivityEnvironment {
   cloudflareHostedControlBaseUrl: string;
   cloudflareHostedControlSigning: HostedWebCallbackSigningEnvironment;
+  deviceSyncRecoverySweepTimeoutMs: number;
   ensureCloudflareExecutionHttpTimeoutMs: number;
   ensureRuntimeProcessingHttpTimeoutMs: number;
   hostedWebBaseUrl: string;
@@ -70,6 +73,7 @@ const privateKeyCache = new Map<string, Promise<CryptoKey>>();
 
 export interface HostedTemporalActivityObservation {
   activity:
+    | "runHostedDeviceSyncRecoverySweep"
     | "readRuntimeDemand"
     | "ensureRuntimeProcessing"
     | "ensureCloudflareExecution";
@@ -92,6 +96,8 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
+    deviceSyncRecoverySweepTimeoutMs:
+      readHostedDeviceSyncRecoverySweepTimeoutMs(source),
     ensureCloudflareExecutionHttpTimeoutMs:
       ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
     ensureRuntimeProcessingHttpTimeoutMs:
@@ -141,7 +147,10 @@ export function readHostedOrchestratorTemporalWebEnvironment(
   source: EnvSource = process.env,
 ): Pick<
   HostedOrchestratorTemporalActivityEnvironment,
-  "hostedWebBaseUrl" | "hostedWebCallbackSigning" | "readRuntimeDemandTimeoutMs"
+  | "deviceSyncRecoverySweepTimeoutMs"
+  | "hostedWebBaseUrl"
+  | "hostedWebCallbackSigning"
+  | "readRuntimeDemandTimeoutMs"
 > {
   const hostedWebBaseUrl = requireWebOriginBaseUrl(
     source.HOSTED_WEB_BASE_URL,
@@ -149,6 +158,8 @@ export function readHostedOrchestratorTemporalWebEnvironment(
   );
 
   return {
+    deviceSyncRecoverySweepTimeoutMs:
+      readHostedDeviceSyncRecoverySweepTimeoutMs(source),
     hostedWebBaseUrl,
     hostedWebCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
     readRuntimeDemandTimeoutMs: parseBoundedPositiveInteger(
@@ -491,6 +502,19 @@ function readHostedWebCallbackSigningEnvironment(
       "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
     ),
   };
+}
+
+function readHostedDeviceSyncRecoverySweepTimeoutMs(
+  source: EnvSource,
+): number {
+  return parseBoundedPositiveInteger(
+    normalizeHostedExecutionString(
+      source.HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS,
+    ),
+    DEFAULT_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS,
+    MAX_HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS,
+    "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_TIMEOUT_MS",
+  );
 }
 
 async function createHostedWebCallbackSignatureHeaders(input: {
