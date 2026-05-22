@@ -45,6 +45,9 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     };
     expect(query.text).toContain('"connection"."status" = \'active\'');
     expect(query.text).toContain('"connection"."next_reconcile_at" <= $1');
+    expect(query.text).toContain('join "hosted_member" as "member"');
+    expect(query.text).toContain('"member"."billing_status" = \'active\'');
+    expect(query.text).toContain('"member"."suspended_at" is null');
     expect(query.text).toContain("not exists");
     expect(query.text).toContain('"dirty"."connection_id" = "connection"."id"');
     expect(query.text).toContain('"dirty"."dirty_revision" > "dirty"."processed_revision"');

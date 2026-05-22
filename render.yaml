@@ -7,7 +7,7 @@ services:
     autoDeployTrigger: "off"
     maxShutdownDelaySeconds: 300
     buildCommand: "pnpm install --frozen-lockfile && pnpm --dir packages/hosted-orchestrator-temporal build"
-    startCommand: "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod"
+    startCommand: "pnpm --dir packages/hosted-orchestrator-temporal temporal:ensure-device-sync-reconciler-schedule:prod && pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod"
     envVars:
       - key: NODE_VERSION
         value: "24.14.1"

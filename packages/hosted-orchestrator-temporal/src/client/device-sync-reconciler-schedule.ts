@@ -86,9 +86,7 @@ export function readHostedDeviceSyncReconcilerScheduleConfig(
       HOSTED_DEVICE_SYNC_RECONCILER_MAX_INTERVAL_MS,
       "HOSTED_DEVICE_SYNC_RECONCILER_INTERVAL_MS",
     ),
-    scheduleId: readOptionalString(
-      source.HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID,
-    ) ?? HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
+    scheduleId: HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
     taskQueue: readOptionalString(source.HOSTED_TEMPORAL_TASK_QUEUE)
       ?? readOptionalString(source.TEMPORAL_TASK_QUEUE)
       ?? HOSTED_USER_RUNTIME_TASK_QUEUE,

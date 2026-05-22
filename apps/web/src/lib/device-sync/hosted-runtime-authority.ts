@@ -399,7 +399,7 @@ export async function readHostedDeviceSyncPendingDirtyState(input: {
     items: pending.items.map((dirty) =>
       mapHostedDeviceSyncDirtyStateResponse(dirty, input.trustedUserId)
     ),
-    nextWakeAt: pending.hasMore || pending.items.length > 1 ? new Date().toISOString() : null,
+    nextWakeAt: pending.hasMore ? new Date().toISOString() : null,
     userId: input.trustedUserId,
   };
 }
@@ -418,16 +418,20 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
     processedRevision: BigInt(parsed.processedRevision),
     userId: input.trustedUserId,
   });
+  const stillDirty = dirty ? dirty.dirtyRevision > dirty.processedRevision : false;
+  const hasPendingDirty = stillDirty
+    || (await controlPlane.store.listPendingDirtyConnectionsForUser({
+      limit: 1,
+      userId: input.trustedUserId,
+    })).items.length > 0;
 
   return {
     connectionId: parsed.connectionId,
     dirtyRevision: dirty?.dirtyRevision.toString() ?? null,
-    nextWakeAt: dirty && dirty.dirtyRevision > dirty.processedRevision
-      ? new Date().toISOString()
-      : null,
+    nextWakeAt: hasPendingDirty ? new Date().toISOString() : null,
     processedRevision: dirty?.processedRevision.toString() ?? null,
     recorded: dirty !== null,
-    stillDirty: dirty ? dirty.dirtyRevision > dirty.processedRevision : false,
+    stillDirty,
     userId: input.trustedUserId,
   };
 }

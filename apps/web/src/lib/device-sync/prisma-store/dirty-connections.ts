@@ -233,9 +233,9 @@ export class PrismaHostedDirtyConnectionStore {
       user_id: string;
     }>>(Prisma.sql`
       select
-        "user_id",
+        "dirty"."user_id",
         count(*)::bigint as "dirty_connection_count",
-        max("latest_dirty_at") as "latest_dirty_at"
+        max("dirty"."latest_dirty_at") as "latest_dirty_at"
       from "device_sync_dirty_connection" as "dirty"
       join "device_connection" as "connection"
         on "connection"."id" = "dirty"."connection_id"
@@ -284,14 +284,14 @@ export class PrismaHostedDirtyConnectionStore {
       user_id: string;
     }>>(Prisma.sql`
       select
-        "connection_id",
-        "dirty_revision",
-        "latest_dirty_at",
-        "latest_event_type",
-        "latest_resource_category",
-        "latest_trace_id",
-        "provider",
-        "user_id"
+        "dirty"."connection_id",
+        "dirty"."dirty_revision",
+        "dirty"."latest_dirty_at",
+        "dirty"."latest_event_type",
+        "dirty"."latest_resource_category",
+        "dirty"."latest_trace_id",
+        "dirty"."provider",
+        "dirty"."user_id"
       from "device_sync_dirty_connection" as "dirty"
       join "device_connection" as "connection"
         on "connection"."id" = "dirty"."connection_id"
