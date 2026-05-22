@@ -64,6 +64,7 @@ export async function summarizeSampleWindow(
 ) {
   const records = (await listRawSampleRecords(vaultRoot))
     .filter((record) => record.stream === options.stream)
+    .filter((record) => matchesSampleSummaryWindow(record, options))
   const units = [...new Set(records.map((record) => getString(record.attributes.unit)).filter(isString))].sort()
 
   return summarizeSampleSeries({
@@ -81,6 +82,28 @@ export async function summarizeSampleWindow(
     gapSeconds: options.gapSeconds,
     profile: options.profile,
   })
+}
+
+function matchesSampleSummaryWindow(
+  record: QueryRecord,
+  options: Pick<SampleSummarizeOptions, 'from' | 'to'>,
+): boolean {
+  const epochMs = Date.parse(record.occurredAt ?? record.date ?? '')
+  if (!Number.isFinite(epochMs)) {
+    return matchesDateRange(record.date, options.from, options.to)
+  }
+
+  const fromMs = options.from ? Date.parse(options.from) : null
+  if (fromMs !== null && Number.isFinite(fromMs) && epochMs < fromMs) {
+    return false
+  }
+
+  const toMs = options.to ? Date.parse(options.to) : null
+  if (toMs !== null && Number.isFinite(toMs) && epochMs > toMs) {
+    return false
+  }
+
+  return true
 }
 
 type JsonObject = Record<string, unknown>

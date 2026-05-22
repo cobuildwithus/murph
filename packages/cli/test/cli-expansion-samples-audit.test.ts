@@ -310,11 +310,40 @@ test.sequential('samples commands support richer import options plus show/list/b
     assert.equal(requireData(imported).lookupIds.length, 2)
     await access(path.join(vaultRoot, requireData(imported).imports[0]?.manifestFile ?? ''))
 
+    await mkdir(path.join(vaultRoot, 'ledger/samples/heart_rate/2026'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'ledger/samples/heart_rate/2026/out-of-window.jsonl'),
+      [
+        JSON.stringify({
+          id: 'sample_out_of_window_before_different_unit',
+          stream: 'heart_rate',
+          recordedAt: '2026-03-10T08:00:00.000Z',
+          dayKey: '2026-03-10',
+          source: 'manual',
+          quality: 'raw',
+          unit: 'count',
+          value: 1,
+        }),
+        JSON.stringify({
+          id: 'sample_out_of_window_after_different_unit',
+          stream: 'heart_rate',
+          recordedAt: '2026-03-13T08:06:00.000Z',
+          dayKey: '2026-03-13',
+          source: 'manual',
+          quality: 'raw',
+          unit: 'percent',
+          value: 1,
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    )
+
     const summarized = await runSliceCli<{
       summary: {
         sampleCount: number
         stream: string
         thresholds: Array<{ below: number }>
+        unit: string | null
       }
     }>([
       'samples',
@@ -334,6 +363,7 @@ test.sequential('samples commands support richer import options plus show/list/b
     assert.equal(summarized.meta?.command, 'samples summarize')
     assert.equal(requireData(summarized).summary.stream, 'heart_rate')
     assert.equal(requireData(summarized).summary.sampleCount, 2)
+    assert.equal(requireData(summarized).summary.unit, 'bpm')
     assert.deepEqual(requireData(summarized).summary.thresholds.map((entry) => entry.below), [62])
 
     const csvMetadataColumns = await runSliceCli([
