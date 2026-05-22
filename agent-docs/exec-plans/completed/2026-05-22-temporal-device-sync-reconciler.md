@@ -1,6 +1,6 @@
 # Temporal device-sync reconciler
 
-Status: active
+Status: completed
 Created: 2026-05-22
 Updated: 2026-05-22
 
@@ -100,3 +100,17 @@ Updated: 2026-05-22
 - Results so far:
   - PASS: `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-device-sync-dirty-sweeper-route.test.ts apps/web/test/hosted-device-sync-recovery-sweep-route.test.ts apps/web/test/hosted-device-sync-dirty-sweeper.test.ts apps/web/test/hosted-device-sync-due-reconcile-sweeper.test.ts`
   - PASS: `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-device-sync-recovery-sweep-activity.test.ts test/hosted-device-sync-reconciler.test.ts test/worker.test.ts test/workflow-contracts.test.ts`
+  - PASS: `pnpm --dir packages/hosted-execution test`
+  - PASS: `pnpm --dir packages/hosted-orchestrator-temporal typecheck`
+  - PASS: `pnpm --dir packages/hosted-orchestrator-temporal test:coverage`
+  - PASS: `pnpm --dir apps/web typecheck`
+  - PASS: `pnpm --filter @murphai/hosted-execution build`
+  - PASS: `pnpm test:smoke`
+  - PASS: `pnpm test:diff apps/web/app/api/internal/device-sync/dirty-sweeper/cron/route.ts apps/web/app/api/internal/device-sync/recovery-sweep/route.ts apps/web/src/lib/device-sync/recovery-sweeper.ts apps/web/test/hosted-device-sync-dirty-sweeper-route.test.ts apps/web/test/hosted-device-sync-recovery-sweep-route.test.ts packages/hosted-execution/src/routes.ts packages/hosted-execution/test/hosted-execution.test.ts packages/hosted-orchestrator-temporal/src/activities/http-client.ts packages/hosted-orchestrator-temporal/src/activities/run-device-sync-recovery-sweep.ts packages/hosted-orchestrator-temporal/src/client/device-sync-reconciler-schedule.ts packages/hosted-orchestrator-temporal/src/workflows/hosted-device-sync-reconciler.ts packages/hosted-orchestrator-temporal/test/hosted-device-sync-recovery-sweep-activity.test.ts packages/hosted-orchestrator-temporal/test/hosted-device-sync-reconciler.test.ts`
+  - PASS: `git diff --check`
+  - PASS: `security-privacy-review` audit found no findings.
+  - PASS: `simplify` audit findings were applied.
+  - PASS: `coverage-write` audit requested no test changes.
+  - BLOCKED: root `pnpm typecheck` fails in unrelated dirty wearable receipt
+    test work under `packages/core/test/wearable-receipts.test.ts`.
+Completed: 2026-05-22
