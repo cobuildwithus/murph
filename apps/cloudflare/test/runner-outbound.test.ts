@@ -2707,12 +2707,14 @@ describe("handleRunnerOutboundRequest", () => {
     const startBody = requireTestObject(await startResponse.json(), "workspace snapshot start response");
     const encryption = requireTestObject(startBody.encryption, "workspace snapshot start encryption");
     const rawAad = requireTestObject(encryption.aad, "workspace snapshot start AAD");
+    const objectKey = requireTestString(rawAad.objectKey, "workspace snapshot start AAD objectKey");
     const aad = buildHostedWorkspaceSnapshotV2Aad({
-      objectKey: requireTestString(rawAad.objectKey, "workspace snapshot start AAD objectKey"),
+      objectKey,
       snapshotId: requireTestString(rawAad.snapshotId, "workspace snapshot start AAD snapshotId"),
       userId: requireTestString(rawAad.userId, "workspace snapshot start AAD userId"),
     });
     const snapshotId = requireTestString(startBody.snapshotId, "workspace snapshot start snapshotId");
+    const wrappedDataKey = requireTestString(encryption.wrappedDataKey, "wrappedDataKey");
     hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
 
     const response = await handleRunnerOutboundRequest(
@@ -2720,7 +2722,7 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           aad,
           rootKeyId: encryption.rootKeyId,
-          wrappedDataKey: encryption.wrappedDataKey,
+          wrappedDataKey,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -2764,7 +2766,9 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(serializedLogs).not.toContain("member_123");
     expect(serializedLogs).not.toContain(snapshotId);
+    expect(serializedLogs).not.toContain(objectKey);
     expect(serializedLogs).not.toContain(requireTestString(encryption.rootKeyId, "rootKeyId"));
+    expect(serializedLogs).not.toContain(wrappedDataKey);
     hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
 
     const rejected = await handleRunnerOutboundRequest(
@@ -2775,7 +2779,7 @@ describe("handleRunnerOutboundRequest", () => {
             objectKey: "users/hsn_other/workspace-snapshots/snapshot_other.snapshot.enc",
           },
           rootKeyId: encryption.rootKeyId,
-          wrappedDataKey: encryption.wrappedDataKey,
+          wrappedDataKey,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -2813,7 +2817,9 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(serializedLogs).not.toContain("member_123");
     expect(serializedLogs).not.toContain(snapshotId);
+    expect(serializedLogs).not.toContain(objectKey);
     expect(serializedLogs).not.toContain("snapshot_other");
+    expect(serializedLogs).not.toContain(wrappedDataKey);
   });
 
   it("logs keyed diagnostics when workspace snapshot data key root lookup misses", async () => {
@@ -2870,8 +2876,9 @@ describe("handleRunnerOutboundRequest", () => {
     const startBody = requireTestObject(await startResponse.json(), "workspace snapshot start response");
     const encryption = requireTestObject(startBody.encryption, "workspace snapshot start encryption");
     const rawAad = requireTestObject(encryption.aad, "workspace snapshot start AAD");
+    const objectKey = requireTestString(rawAad.objectKey, "workspace snapshot start AAD objectKey");
     const aad = buildHostedWorkspaceSnapshotV2Aad({
-      objectKey: requireTestString(rawAad.objectKey, "workspace snapshot start AAD objectKey"),
+      objectKey,
       snapshotId: requireTestString(rawAad.snapshotId, "workspace snapshot start AAD snapshotId"),
       userId: requireTestString(rawAad.userId, "workspace snapshot start AAD userId"),
     });
@@ -2949,6 +2956,63 @@ describe("handleRunnerOutboundRequest", () => {
     expect(serializedDiagnostic).not.toContain(missingRootKeyId);
     expect(serializedDiagnostic).not.toContain(fixture.context.envelopes.runtime.rootKeyId);
     expect(serializedDiagnostic).not.toContain("member_123");
+    expect(serializedDiagnostic).not.toContain(objectKey);
+    expect(serializedDiagnostic).not.toContain(wrappedDataKey);
+
+    hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
+    const envWithoutFingerprint = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const responseWithoutFingerprint = await handleRunnerOutboundRequest(
+      new Request(`http://workspace-snapshots.worker/workspace-snapshots/${snapshotId}/data-key/unwrap`, {
+        body: JSON.stringify({
+          aad,
+          rootKeyId: missingRootKeyId,
+          wrappedDataKey,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      envWithoutFingerprint,
+      "member_123",
+    );
+
+    expect(responseWithoutFingerprint.status).toBe(404);
+    const noFingerprintDiagnostic = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input.message === "Hosted workspace snapshot data key root unavailable."
+      );
+    expect(noFingerprintDiagnostic).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        cryptoContextRootKeyFingerprintPresent: false,
+        diagnosticFingerprintKind: "none",
+        rootKeyFingerprintPresent: false,
+        snapshotFingerprintPresent: false,
+      }),
+    }));
+    const noFingerprintDetails = requireTestObject(
+      noFingerprintDiagnostic?.details,
+      "root unavailable no-fingerprint diagnostic details",
+    );
+    expect(noFingerprintDetails).not.toHaveProperty("snapshotFingerprint");
+    expect(noFingerprintDetails).not.toHaveProperty("rootKeyFingerprint");
+    expect(noFingerprintDetails).not.toHaveProperty("cryptoContextRootKeyFingerprint");
+    const serializedNoFingerprintDiagnostic = JSON.stringify(noFingerprintDiagnostic);
+    expect(serializedNoFingerprintDiagnostic).not.toContain(snapshotId);
+    expect(serializedNoFingerprintDiagnostic).not.toContain(missingRootKeyId);
+    expect(serializedNoFingerprintDiagnostic).not.toContain(fixture.context.envelopes.runtime.rootKeyId);
+    expect(serializedNoFingerprintDiagnostic).not.toContain("member_123");
+    expect(serializedNoFingerprintDiagnostic).not.toContain(objectKey);
+    expect(serializedNoFingerprintDiagnostic).not.toContain(wrappedDataKey);
   });
 
   it("rejects workspace snapshot data-key unwrap without a fresh workspace version fence", async () => {
