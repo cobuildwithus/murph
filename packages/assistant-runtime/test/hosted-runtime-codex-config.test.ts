@@ -130,6 +130,8 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /include_only = \[/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
+  assert.match(config, /\[shell_environment_policy\.set\]/u);
+  assert.equal(config.split("\n").includes(`PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`), true);
   assert.doesNotMatch(config, /"PDFTOTEXT_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_MODEL_PATH"/u);
@@ -161,6 +163,8 @@ test("hosted Codex runtime env exposes bundled CLI bins on PATH", async () => {
       .length,
     1,
   );
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.equal(config.split("\n").includes(`PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`), true);
 });
 
 test("hosted Cloudflare Codex config injects the hosted auto-compaction limit", async () => {
@@ -1236,6 +1240,9 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "[shell_environment_policy]",
       'inherit = "all"',
       'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      "",
+      "[shell_environment_policy.set]",
+      `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
       "",
     ].join("\n"),
   );

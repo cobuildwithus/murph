@@ -24,6 +24,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedRunnerExecutablePath,
+  HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedExecutionRunnerJobInput,
@@ -966,19 +967,19 @@ async function runHostedContainerCodexShellSmoke(input: {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
   try {
     const codexHome = path.join(workspaceRoot, ".codex-smoke");
-    const vaultRoot = path.join(workspaceRoot, "vault");
+    const smokeVaultRoot = path.join(workspaceRoot, "vault");
     await mkdir(codexHome, {
       mode: 0o700,
       recursive: true,
     });
     await chmod(codexHome, 0o700);
-    await mkdir(vaultRoot, {
+    await mkdir(smokeVaultRoot, {
       mode: 0o700,
       recursive: true,
     });
-    await chmod(vaultRoot, 0o700);
+    await chmod(smokeVaultRoot, 0o700);
     await writeFile(
-      path.join(vaultRoot, "vault.json"),
+      path.join(smokeVaultRoot, "vault.json"),
       `${JSON.stringify({
         createdAt: "2026-05-22T00:00:00.000Z",
         formatVersion: 1,
@@ -989,7 +990,7 @@ async function runHostedContainerCodexShellSmoke(input: {
       { mode: 0o600 },
     );
     await writeFile(
-      path.join(vaultRoot, "CORE.md"),
+      path.join(smokeVaultRoot, "CORE.md"),
       [
         "---",
         "schemaVersion: hv/core@v1",
@@ -1010,7 +1011,7 @@ async function runHostedContainerCodexShellSmoke(input: {
     return await runHostedContainerCodexShellAppServerProbe({
       codexHome,
       signal: input.signal,
-      vaultRoot,
+      smokeVaultRoot,
     });
   } finally {
     await rm(workspaceRoot, {
@@ -1050,13 +1051,16 @@ function buildHostedContainerCodexShellSmokeConfig(): string {
     'inherit = "all"',
     'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR"]',
     "",
+    "[shell_environment_policy.set]",
+    `PATH = ${JSON.stringify(HOSTED_RUNNER_EXECUTABLE_PATH)}`,
+    "",
   ].join("\n");
 }
 
 async function runHostedContainerCodexShellAppServerProbe(input: {
   codexHome: string;
   signal: AbortSignal;
-  vaultRoot: string;
+  smokeVaultRoot: string;
 }): Promise<HostedContainerCodexShellSmokeResult> {
   return await new Promise((resolve, reject) => {
     let stdoutBuffer = "";
@@ -1071,7 +1075,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
       resolve: (value: Record<string, unknown>) => void;
     }>();
     const child = spawn("codex", ["app-server"], {
-      cwd: input.vaultRoot,
+      cwd: input.smokeVaultRoot,
       env: buildHostedContainerCodexShellSmokeProcessEnv(input),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1230,7 +1234,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
           "node",
           "-e",
           buildHostedContainerCodexShellEnvironmentProbeScript(),
-          input.vaultRoot,
+          input.smokeVaultRoot,
         ])).stdout,
       );
       const vaultCliLlms = await execCommand("vault-cli-llms", [
@@ -1273,15 +1277,15 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
 
 function buildHostedContainerCodexShellSmokeProcessEnv(input: {
   codexHome: string;
-  vaultRoot: string;
+  smokeVaultRoot: string;
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     CODEX_HOME: input.codexHome,
-    HOME: path.dirname(input.vaultRoot),
+    HOME: path.dirname(input.smokeVaultRoot),
     OPENAI_API_KEY: "hosted-codex-shell-smoke-secret",
     PATH: buildHostedRunnerExecutablePath(process.env.PATH),
-    TMPDIR: path.dirname(input.vaultRoot),
-    VAULT: input.vaultRoot,
+    TMPDIR: path.dirname(input.smokeVaultRoot),
+    VAULT: input.smokeVaultRoot,
   };
 
   copyOptionalHostedContainerSmokeEnv(env, "CI");
