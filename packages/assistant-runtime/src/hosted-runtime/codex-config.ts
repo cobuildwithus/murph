@@ -34,6 +34,7 @@ import {
 } from "./codex-shell-env-policy.ts";
 import {
   buildHostedRunnerExecutablePath,
+  HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "./environment.ts";
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
@@ -357,6 +358,9 @@ export function buildHostedCodexConfigToml(input: {
     "[shell_environment_policy]",
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
+    "",
+    "[shell_environment_policy.set]",
+    `PATH = ${tomlString(HOSTED_RUNNER_EXECUTABLE_PATH)}`,
     "",
   ].join("\n");
 }
