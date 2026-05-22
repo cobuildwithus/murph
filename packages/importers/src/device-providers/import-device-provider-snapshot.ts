@@ -11,7 +11,7 @@ import {
 
 import { canonicalizeDeviceBatchPayload } from "./canonical-wearable-records.ts";
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
-import { buildWearableRawIngestEnvelope } from "./raw-ingest-envelope.ts";
+import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 
 import type { DeviceProviderRegistry } from "./registry.ts";
@@ -98,7 +98,7 @@ export async function prepareDeviceProviderSnapshotImport(
   const rawSnapshot = adapter.sanitizeRawSnapshot
     ? adapter.sanitizeRawSnapshot(snapshot)
     : request.snapshot;
-  const rawObservedAt = resolveStableRawEnvelopeObservedAt(request, normalized);
+  const rawObservedAt = resolveStableRawReceiptObservedAt(request, normalized);
   const basePayload = stripUndefined({
     vaultRoot: request.vaultRoot,
     ...normalized,
@@ -107,9 +107,9 @@ export async function prepareDeviceProviderSnapshotImport(
   });
   const payloadWithRawEvidence = ensureProviderRawArtifact(basePayload, rawSnapshot);
   const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(payloadWithRawEvidence);
-  const rawEnvelope = buildWearableRawIngestEnvelope({
+  const rawReceipt = buildWearableRawIngestReceipt({
     provider: basePayload.provider,
-    payload: rawSnapshot,
+    payloadForHash: rawSnapshot,
     rawArtifactRoles: (payloadWithLegacyRawRole.rawArtifacts ?? []).map((artifact) => artifact.role),
     userId: request.userId,
     accountId: basePayload.accountId,
@@ -128,28 +128,27 @@ export async function prepareDeviceProviderSnapshotImport(
     signatureVerified: request.signatureVerified,
   });
   const canonicalWearableRecords = canonicalizeDeviceBatchPayload(payloadWithLegacyRawRole, {
-    rawEnvelope,
+    rawReceipt,
     connectionId: request.connectionId,
     normalizerVersion: request.normalizerVersion,
-    observedAt: rawEnvelope.observedAt,
+    observedAt: rawReceipt.observedAt,
   });
 
   return stripUndefined({
     ...payloadWithLegacyRawRole,
     rawArtifacts: [
       ...(payloadWithLegacyRawRole.rawArtifacts ?? []),
-      buildRawEnvelopeArtifact(rawEnvelope),
-      buildCanonicalWearableRecordsArtifact(basePayload.provider, rawEnvelope.id, canonicalWearableRecords),
+      buildRawReceiptArtifact(rawReceipt),
     ],
-    rawIngestEnvelopes: [rawEnvelope],
+    rawIngestReceipts: [rawReceipt],
     canonicalWearableRecords,
     provenance: stripUndefined({
       ...(payloadWithLegacyRawRole.provenance ?? {}),
-      wearableRawEnvelope: {
-        id: rawEnvelope.id,
-        deliveryMode: rawEnvelope.deliveryMode,
-        payloadHash: rawEnvelope.payloadHash,
-        sourceKind: rawEnvelope.sourceKind,
+      wearableRawReceipt: {
+        id: rawReceipt.id,
+        deliveryMode: rawReceipt.deliveryMode,
+        payloadHash: rawReceipt.payloadHash,
+        sourceKind: rawReceipt.sourceKind,
       },
       canonicalWearableRecordCount: canonicalWearableRecords.length,
       normalizerVersion: request.normalizerVersion,
@@ -221,7 +220,7 @@ function sanitizeRawArtifactFileToken(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "") || "provider";
 }
 
-function resolveStableRawEnvelopeObservedAt(
+function resolveStableRawReceiptObservedAt(
   request: DeviceProviderSnapshotImportInput,
   payload: DeviceBatchImportPayload,
 ): string {
@@ -261,39 +260,17 @@ function firstValidTimestamp(...candidates: Array<string | undefined>): string |
   return validCandidates[0];
 }
 
-function buildRawEnvelopeArtifact(
-  rawEnvelope: ReturnType<typeof buildWearableRawIngestEnvelope>,
+function buildRawReceiptArtifact(
+  rawReceipt: ReturnType<typeof buildWearableRawIngestReceipt>,
 ): DeviceRawArtifactPayload {
   return {
-    role: `wearable-raw-envelope:${rawEnvelope.id}`,
-    fileName: `${rawEnvelope.provider}-raw-ingest-envelope-${rawEnvelope.id}.json`,
+    role: `wearable-raw-receipt:${rawReceipt.id}`,
+    fileName: `${rawReceipt.provider}-raw-ingest-receipt-${rawReceipt.id}.json`,
     mediaType: "application/json",
-    content: rawEnvelope,
+    content: rawReceipt,
     metadata: {
-      schemaVersion: rawEnvelope.schemaVersion,
-      payloadHash: rawEnvelope.payloadHash,
-    },
-  };
-}
-
-function buildCanonicalWearableRecordsArtifact(
-  provider: string,
-  rawEnvelopeId: string,
-  records: readonly unknown[],
-): DeviceRawArtifactPayload {
-  return {
-    role: `wearable-canonical-records:${rawEnvelopeId}`,
-    fileName: `${provider}-canonical-wearable-records-${rawEnvelopeId}.json`,
-    mediaType: "application/json",
-    content: {
-      schemaVersion: "wearable.canonical_record_batch.v1",
-      rawEnvelopeId,
-      records,
-    },
-    metadata: {
-      schemaVersion: "wearable.canonical_record_batch.v1",
-      rawEnvelopeId,
-      recordCount: records.length,
+      schemaVersion: rawReceipt.schemaVersion,
+      payloadHash: rawReceipt.payloadHash,
     },
   };
 }

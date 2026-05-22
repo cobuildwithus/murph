@@ -149,7 +149,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
   });
 
-  assert.equal(result.importId, "xfm_VEENN6TG6H7NCF8DSKM5JX386M");
+  assert.equal(result.importId, "xfm_FKXWJ9CRVED58RA9QVF2QHA1WE");
   assert.equal(result.events.length, 2);
   assert.equal(result.samples.length, 1);
   assert.equal(result.rawArtifacts.length, 2);
@@ -162,8 +162,17 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.deepEqual(result.samples.map((record) => record.id), ["smp_VJ3AZR2JBQVE89Z6B84EA60H0G"]);
   assert.equal(
     result.rawArtifacts[0]?.relativePath,
-    "raw/integrations/whoop/2026/03/xfm_VEENN6TG6H7NCF8DSKM5JX386M/01-sleep-sleep-1.json",
+    "raw/integrations/whoop/2026/03/xfm_FKXWJ9CRVED58RA9QVF2QHA1WE/01-sleep-sleep-1.json",
   );
+  const sleepRawText = await fs.readFile(
+    path.join(vaultRoot, result.rawArtifacts[0]?.relativePath ?? ""),
+    "utf8",
+  );
+  assert.equal(
+    sleepRawText,
+    '{"end":"2026-03-16T07:00:00.000Z","id":"sleep-1","start":"2026-03-15T22:00:00.000Z"}\n',
+  );
+  assert.equal(sleepRawText.includes("\n  "), false);
 
   const eventRecords = (await readJsonlRecords({
     vaultRoot,
@@ -191,7 +200,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
       source: "device",
       title: "WHOOP sleep",
       rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_VEENN6TG6H7NCF8DSKM5JX386M/01-sleep-sleep-1.json",
+        "raw/integrations/whoop/2026/03/xfm_FKXWJ9CRVED58RA9QVF2QHA1WE/01-sleep-sleep-1.json",
       ],
       externalRef: {
         system: "whoop",
@@ -214,7 +223,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
       source: "device",
       title: "WHOOP recovery score",
       rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_VEENN6TG6H7NCF8DSKM5JX386M/02-recovery-sleep-1.json",
+        "raw/integrations/whoop/2026/03/xfm_FKXWJ9CRVED58RA9QVF2QHA1WE/02-recovery-sleep-1.json",
       ],
       externalRef: {
         system: "whoop",
@@ -616,7 +625,7 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
   assert.equal(first.importId, second.importId);
   assert.equal(first.events[0]?.id, second.events[0]?.id);
   assert.equal(first.samples[0]?.id, second.samples[0]?.id);
-  assert.equal(first.importId, "xfm_BP6SP2P5FJ4YNF8PY8H0QZQT32");
+  assert.equal(first.importId, "xfm_RHGFGAXGDZ3G4JXMSCZVWQSV2E");
   assert.equal(first.events[0]?.id, "evt_30XC16ZG27S0ZM4TMPHDKJX7KP");
   assert.equal(first.samples[0]?.id, "smp_VJ3AZR2JBQVE89Z6B84EA60H0G");
   assert.equal(eventRecords.length, 1);
@@ -654,7 +663,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   })) as EventRecord[];
   const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
-  assert.equal(result.importId, "xfm_E8RCCMNW9E4JGGQRXAK42GRACG");
+  assert.equal(result.importId, "xfm_SE4B94MXKQGEHK68NEVFXAFY4K");
   assert.equal(result.events[0]?.id, "evt_2TSF1SDWFHHSQ8503JWDHCF47K");
   assert.equal(eventRecords[0]?.kind, "note");
   assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
@@ -670,7 +679,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
       source: "device",
       title: "note",
       note: "single raw fallback",
-      rawRefs: ["raw/integrations/whoop/2026/03/xfm_E8RCCMNW9E4JGGQRXAK42GRACG/01-whoop-01.json"],
+      rawRefs: ["raw/integrations/whoop/2026/03/xfm_SE4B94MXKQGEHK68NEVFXAFY4K/01-whoop-01.json"],
     },
   ]);
   assert.equal(manifest.artifacts[0]?.role, "artifact-1");

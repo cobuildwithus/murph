@@ -41,9 +41,9 @@ import {
   type GarminActivityNormalizationContext,
 } from "../src/device-providers/garmin-activity-normalizers.ts";
 import {
-  buildWearableRawIngestEnvelope,
+  buildWearableRawIngestReceipt,
   stableStringify,
-} from "../src/device-providers/raw-ingest-envelope.ts";
+} from "../src/device-providers/raw-ingest-receipt.ts";
 import {
   normalizeGarminDailySummaries,
   normalizeGarminSleeps,
@@ -332,44 +332,45 @@ describe("garmin provider coverage", () => {
 
   it("rejects non-JSON raw ingest payloads before hashing", () => {
     expect(() =>
-      buildWearableRawIngestEnvelope({
+      buildWearableRawIngestReceipt({
         provider: "garmin",
-        payload: {
+        payloadForHash: {
           id: "activity-1",
           binary: new Uint8Array([1, 2, 3]),
         },
       }),
     ).toThrow(/JSON-serializable/u);
 
-    const envelope = buildWearableRawIngestEnvelope({
+    const receipt = buildWearableRawIngestReceipt({
       provider: "garmin",
-      payload: {
+      payloadForHash: {
         id: "activity-1",
         omitted: undefined,
       },
     });
-    const equivalentEnvelope = buildWearableRawIngestEnvelope({
+    const equivalentReceipt = buildWearableRawIngestReceipt({
       provider: "garmin",
-      payload: {
+      payloadForHash: {
         id: "activity-1",
       },
     });
 
-    expect(envelope.payloadHash).toBe(equivalentEnvelope.payloadHash);
-    expect(Object.hasOwn(envelope, "payload")).toBe(false);
+    expect(receipt.schemaVersion).toBe("wearable.raw_ingest_receipt.v1");
+    expect(receipt.payloadHash).toBe(equivalentReceipt.payloadHash);
+    expect(Object.hasOwn(receipt, "payload")).toBe(false);
   });
 
   it("hashes raw ingest prototype-named payload fields as data without storing the payload", () => {
     const payload = JSON.parse(
       '{"id":"activity-1","__proto__":"blocked","nested":{"__proto__":"inner"}}',
     );
-    const envelope = buildWearableRawIngestEnvelope({
+    const receipt = buildWearableRawIngestReceipt({
       provider: "garmin",
-      payload,
+      payloadForHash: payload,
     });
-    const withoutPrototypeNamedFields = buildWearableRawIngestEnvelope({
+    const withoutPrototypeNamedFields = buildWearableRawIngestReceipt({
       provider: "garmin",
-      payload: {
+      payloadForHash: {
         id: "activity-1",
         nested: {},
       },
@@ -377,8 +378,8 @@ describe("garmin provider coverage", () => {
 
     expect(stableStringify(payload)).toContain('"__proto__":"blocked"');
     expect(stableStringify(payload)).toContain('"__proto__":"inner"');
-    expect(envelope.payloadHash).not.toBe(withoutPrototypeNamedFields.payloadHash);
-    expect(Object.hasOwn(envelope, "payload")).toBe(false);
+    expect(receipt.payloadHash).not.toBe(withoutPrototypeNamedFields.payloadHash);
+    expect(Object.hasOwn(receipt, "payload")).toBe(false);
   });
 
   it("covers Garmin health timing fallbacks, sleep stage observations, and aggregate stage durations", () => {

@@ -12,7 +12,7 @@ import {
   resolveWearableCanonicalMetricKey,
   type WearableCanonicalMetricKey,
 } from "./metric-catalog.ts";
-import { stableStringify, type WearableRawIngestEnvelope } from "./raw-ingest-envelope.ts";
+import { stableStringify, type WearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 
 export type CanonicalWearableRecordKind = "observation" | "sample" | "session" | "tombstone";
 export type CanonicalWearableSchemaVersion = "wearable.canonical_record.v1";
@@ -23,7 +23,7 @@ export interface CanonicalWearableSource {
   provider: string;
   connectionId?: string;
   dataSourceId: string;
-  rawEnvelopeId?: string;
+  rawReceiptId?: string;
   providerResourceType?: string;
   providerResourceId?: string;
   providerAccountIdHash?: string;
@@ -86,7 +86,7 @@ export type CanonicalWearableRecord =
   | CanonicalWearableTombstoneRecord;
 
 export interface CanonicalizeDeviceBatchOptions {
-  rawEnvelope?: WearableRawIngestEnvelope;
+  rawReceipt?: WearableRawIngestReceipt;
   connectionId?: string;
   dataOrigin?: DeviceDataOrigin;
   normalizerVersion?: string;
@@ -94,7 +94,7 @@ export interface CanonicalizeDeviceBatchOptions {
 }
 
 type CanonicalizeContext = Required<Pick<CanonicalizeDeviceBatchOptions, "observedAt" | "normalizerVersion">> &
-  Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "dataOrigin" | "rawEnvelope">;
+  Pick<CanonicalizeDeviceBatchOptions, "connectionId" | "dataOrigin" | "rawReceipt">;
 
 export function canonicalizeDeviceBatchPayload(
   payload: DeviceBatchImportPayload,
@@ -107,14 +107,14 @@ export function canonicalizeDeviceBatchPayload(
     ...(payload.events ?? []).flatMap((event) => canonicalizeEvent(event, payload, {
       observedAt,
       normalizerVersion,
-      rawEnvelope: options.rawEnvelope,
+      rawReceipt: options.rawReceipt,
       connectionId: options.connectionId,
       dataOrigin: options.dataOrigin,
     })),
     ...(payload.samples ?? []).flatMap((sample) => canonicalizeSample(sample, payload, {
       observedAt,
       normalizerVersion,
-      rawEnvelope: options.rawEnvelope,
+      rawReceipt: options.rawReceipt,
       connectionId: options.connectionId,
       dataOrigin: options.dataOrigin,
     })),
@@ -148,7 +148,7 @@ function canonicalizeEvent(
     id: buildCanonicalRecordId("observation", payload, event, {
       metric: normalizedMetric.key,
       value: normalizedMetric.value,
-      envelopeId: context.rawEnvelope?.id,
+      envelopeId: context.rawReceipt?.id,
     }),
     kind: "observation" as const,
     schemaVersion: "wearable.canonical_record.v1" as const,
@@ -190,7 +190,7 @@ function canonicalizeSample(
     id: buildCanonicalRecordId("sample", payload, sample, {
       metric: canonicalMetric,
       value,
-      envelopeId: context.rawEnvelope?.id,
+      envelopeId: context.rawReceipt?.id,
     }),
     kind: "sample" as const,
     schemaVersion: "wearable.canonical_record.v1" as const,
@@ -229,7 +229,7 @@ function canonicalizeSleepStageSample(
       metric: canonicalMetric,
       stage: sample.sample.stage,
       value,
-      envelopeId: context.rawEnvelope?.id,
+      envelopeId: context.rawReceipt?.id,
     }),
     kind: "sample" as const,
     schemaVersion: "wearable.canonical_record.v1" as const,
@@ -252,7 +252,7 @@ function buildSessionRecord(
 ): CanonicalWearableSessionRecord {
   return stripUndefined({
     id: buildCanonicalRecordId("session", payload, event, {
-      envelopeId: context.rawEnvelope?.id,
+      envelopeId: context.rawReceipt?.id,
     }),
     kind: "session" as const,
     schemaVersion: "wearable.canonical_record.v1" as const,
@@ -285,7 +285,7 @@ function buildTombstoneRecord(
 
   return stripUndefined({
     id: buildCanonicalRecordId("tombstone", payload, event, {
-      envelopeId: context.rawEnvelope?.id,
+      envelopeId: context.rawReceipt?.id,
       providerResourceType,
       providerResourceId,
     }),
@@ -327,7 +327,7 @@ function buildCanonicalSource(
     provider,
     connectionId: context.connectionId,
     dataSourceId,
-    rawEnvelopeId: context.rawEnvelope?.id,
+    rawReceiptId: context.rawReceipt?.id,
     providerResourceType,
     providerResourceId,
     providerAccountIdHash,

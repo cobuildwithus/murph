@@ -571,7 +571,7 @@ test("wearable metric normalization converts energy-burned to total calories and
   ]);
 });
 
-test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wearable artifacts", async () => {
+test("prepareDeviceProviderSnapshotImport emits raw receipts and in-memory canonical wearable records", async () => {
   const registry = createDeviceProviderRegistry([
     makeTestDeviceProviderAdapter({
       provider: "polar",
@@ -626,36 +626,29 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
     providerRegistry: registry,
   });
 
-  const rawEnvelope = payload.rawIngestEnvelopes?.[0];
+  const rawReceipt = payload.rawIngestReceipts?.[0];
   const canonicalRecords = payload.canonicalWearableRecords ?? [];
 
-  assert.ok(rawEnvelope);
-  assert.equal(rawEnvelope?.connectionId, "conn_polar_01");
-  assert.equal(rawEnvelope?.sourceKind, "webhook");
-  assert.equal(rawEnvelope?.deliveryMode, "full_payload");
-  assert.equal(Object.hasOwn(rawEnvelope, "payload"), false);
-  assert.deepEqual(rawEnvelope?.rawArtifactRoles, ["daily-summary"]);
-  assert.equal(rawEnvelope?.rawArtifactCount, 1);
+  assert.ok(rawReceipt);
+  assert.equal(rawReceipt?.connectionId, "conn_polar_01");
+  assert.equal(rawReceipt?.sourceKind, "webhook");
+  assert.equal(rawReceipt?.deliveryMode, "full_payload");
+  assert.equal(rawReceipt?.schemaVersion, "wearable.raw_ingest_receipt.v1");
+  assert.equal(Object.hasOwn(rawReceipt, "payload"), false);
+  assert.deepEqual(rawReceipt?.rawArtifactRoles, ["daily-summary"]);
+  assert.equal(rawReceipt?.rawArtifactCount, 1);
   assert.equal(canonicalRecords.length, 1);
   assert.equal(canonicalRecords[0]?.kind, "observation");
   assert.equal(canonicalRecords[0] && "metric" in canonicalRecords[0] ? canonicalRecords[0].metric : null, "steps");
   assert.equal(canonicalRecords[0]?.source.origin?.version, 1);
   assert.equal(canonicalRecords[0]?.source.origin?.sourceProviderSlug, "polar");
   assert.equal(canonicalRecords[0]?.source.origin?.sourceInstanceId, "source-polar-watch-1");
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-raw-envelope:${rawEnvelope?.id}`));
-  const canonicalArtifact = payload.rawArtifacts?.find(
-    (artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope?.id}`,
+  assert.equal(canonicalRecords[0]?.source.rawReceiptId, rawReceipt?.id);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-raw-receipt:${rawReceipt?.id}`));
+  assert.equal(
+    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
+    false,
   );
-  assert.ok(canonicalArtifact);
-  const canonicalArtifactContent = canonicalArtifact.content as {
-    records?: Array<{
-      source?: {
-        normalizerVersion?: string;
-        origin?: DeviceDataOrigin;
-      };
-    }>;
-  };
-  assert.equal(canonicalArtifactContent.records?.[0]?.source?.origin?.sourceInstanceId, "source-polar-watch-1");
 });
 
 test("prepareDeviceProviderSnapshotImport preserves timestamp origin semantics in canonical provenance", async () => {
@@ -734,32 +727,15 @@ test("prepareDeviceProviderSnapshotImport preserves timestamp origin semantics i
   assert.equal(recordOrigin?.normalizerVersion, "junction-normalizer.v2");
   assert.equal(payload.provenance?.normalizerVersion, "junction-normalizer.v2");
 
-  const rawEnvelope = payload.rawIngestEnvelopes?.[0];
-  assert.ok(rawEnvelope);
-  const canonicalArtifact = payload.rawArtifacts?.find(
-    (artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope.id}`,
+  const rawReceipt = payload.rawIngestReceipts?.[0];
+  assert.ok(rawReceipt);
+  assert.equal(
+    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
+    false,
   );
-  assert.ok(canonicalArtifact);
-  const canonicalArtifactContent = canonicalArtifact.content as {
-    records?: Array<{
-      source?: {
-        normalizerVersion?: string;
-        origin?: DeviceDataOrigin;
-      };
-    }>;
-  };
-  const artifactOrigin = canonicalArtifactContent.records?.[0]?.source?.origin;
-  assert.equal(canonicalArtifactContent.records?.[0]?.source?.normalizerVersion, "junction-normalizer.v2");
-  assert.equal(artifactOrigin?.aggregatorProvider, "junction");
-  assert.equal(artifactOrigin?.sourceProviderSlug, "withings");
-  assert.equal(artifactOrigin?.observedAtRaw, "2026-04-22 17:00:00");
-  assert.equal(artifactOrigin?.timeZoneOffsetMinutes, null);
-  assert.equal(artifactOrigin?.timestampSemantics, "floating");
-  assert.equal(artifactOrigin?.originConfidence, "medium");
-  assert.equal(artifactOrigin?.normalizerVersion, "junction-normalizer.v2");
 });
 
-test("prepareDeviceProviderSnapshotImport keeps raw envelope identity stable across replayed payloads", async () => {
+test("prepareDeviceProviderSnapshotImport keeps raw receipt identity stable across replayed payloads", async () => {
   let importCounter = 0;
   const registry = createDeviceProviderRegistry([
     makeTestDeviceProviderAdapter({
@@ -806,14 +782,14 @@ test("prepareDeviceProviderSnapshotImport keeps raw envelope identity stable acr
 
   const first = await prepareDeviceProviderSnapshotImport(request, { providerRegistry: registry });
   const second = await prepareDeviceProviderSnapshotImport(request, { providerRegistry: registry });
-  const firstEnvelope = first.rawIngestEnvelopes?.[0];
-  const secondEnvelope = second.rawIngestEnvelopes?.[0];
+  const firstReceipt = first.rawIngestReceipts?.[0];
+  const secondReceipt = second.rawIngestReceipts?.[0];
 
-  assert.ok(firstEnvelope);
-  assert.ok(secondEnvelope);
-  assert.equal(firstEnvelope.id, secondEnvelope.id);
-  assert.equal(firstEnvelope.observedAt, "2026-04-20T09:00:00.000Z");
-  assert.equal(secondEnvelope.observedAt, "2026-04-20T09:00:00.000Z");
+  assert.ok(firstReceipt);
+  assert.ok(secondReceipt);
+  assert.equal(firstReceipt.id, secondReceipt.id);
+  assert.equal(firstReceipt.observedAt, "2026-04-20T09:00:00.000Z");
+  assert.equal(secondReceipt.observedAt, "2026-04-20T09:00:00.000Z");
   assert.equal(first.importedAt, second.importedAt);
   assert.deepEqual(
     first.rawArtifacts?.map((artifact) => artifact.fileName),

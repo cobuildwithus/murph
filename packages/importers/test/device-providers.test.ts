@@ -1637,18 +1637,23 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
     },
   ]);
   assert.equal(Object.hasOwn(calls[0] ?? {}, "snapshot"), false);
-  assert.equal(calls[0]?.rawIngestEnvelopes?.length, 1);
+  assert.equal(calls[0]?.rawIngestReceipts?.length, 1);
   assert.equal(calls[0]?.canonicalWearableRecords?.length, 1);
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"));
-  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-envelope:")));
-  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")));
+  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
+  assert.equal(
+    calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
+    false,
+  );
   const fallbackRawArtifact = calls[0]?.rawArtifacts?.find((artifact) => artifact.role === "provider-snapshot");
-  const rawEnvelope = calls[0]?.rawIngestEnvelopes?.[0];
+  const rawReceipt = calls[0]?.rawIngestReceipts?.[0];
   assert.deepEqual(fallbackRawArtifact?.content, {
     importedAt: "2026-03-16T12:05:00.000Z",
   });
-  assert.deepEqual(rawEnvelope?.rawArtifactRoles, ["provider-snapshot"]);
-  assert.equal(rawEnvelope?.rawArtifactCount, 1);
+  assert.equal(rawReceipt?.schemaVersion, "wearable.raw_ingest_receipt.v1");
+  assert.deepEqual(rawReceipt?.rawArtifactRoles, ["provider-snapshot"]);
+  assert.equal(rawReceipt?.rawArtifactCount, 1);
+  assert.equal(rawReceipt?.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
   assert.equal(calls[0]?.vaultRoot, undefined);
 });
 
