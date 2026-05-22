@@ -11,7 +11,7 @@ import {
   type BrowserVaultReplica,
 } from "../src/browser.ts";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
-import { buildMetricProjection } from "../src/index.ts";
+import { buildMetricProjection, type MetricPoint } from "../src/index.ts";
 import { createVaultReadModel } from "../src/model.ts";
 
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
@@ -70,6 +70,34 @@ test("browser vault replica creation emits metric-key rows from wearable and vau
   assert.equal(Object.hasOwn(replica, "metricDayRows"), false);
 });
 
+test("browser vault replica creation uses supplied metric points with a sparse vault", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    metricPoints: [
+      createMetricPoint({
+        biomarkerKey: "biomarker:apob",
+        metricKey: "apob",
+        recordId: "evt_projection_test",
+        sourceKind: "test-result",
+        value: 87,
+        unit: "mg/dL",
+      }),
+    ],
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [],
+      metadata: { title: "Sparse browser vault" },
+      vaultRoot: "browser://sparse",
+    }),
+  });
+
+  assert.equal(replica.entities.length, 0);
+  assert.deepEqual(replica.metricRows.map((row) => [row.metricKey, row.value, row.unit]), [
+    ["apob", 87, "mg/dL"],
+  ]);
+  assert.equal(replica.metricSelectionRows.some((row) => row.metricKey === "apob" && row.value === 87), true);
+});
+
 function createReplicaFixture(): BrowserVaultReplica {
   return {
     assistantSummary: { highlights: ["Keep it light."], latestDate: "2026-04-20" },
@@ -94,6 +122,51 @@ function createReplicaFixture(): BrowserVaultReplica {
 
 function metricRow(metricKey: string, date: string, value: number, unit: string) {
   return { biomarkerKey: null, confidence: "high" as const, context: {}, date, grain: "day" as const, id: `metric-row:${metricKey}:${date}`, metricKey, observedAt: `${date}T00:00:00.000Z`, pointIds: [`p_${metricKey}_${date}`], recordIds: [`r_${metricKey}_${date}`], rowSchema: "murph.browser-vault.metric-row.v1" as const, sourceFamily: "derived", sourceKind: "wearable-summary", sourceLabel: "Wearable summary", statistic: "value" as const, unit, value, valueLabel: String(value) };
+}
+
+function createMetricPoint(input: {
+  biomarkerKey: string | null;
+  metricKey: string;
+  recordId: string;
+  sourceKind: MetricPoint["source"]["kind"];
+  unit: string;
+  value: number;
+}): MetricPoint {
+  return {
+    biomarkerKey: input.biomarkerKey,
+    canonicalUnit: input.unit,
+    canonicalValue: input.value,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    effectiveDate: "2026-04-20",
+    grain: "day",
+    id: `metric-point:${input.metricKey}:2026-04-20`,
+    metricKey: input.metricKey,
+    observedAt: "2026-04-20T08:00:00.000Z",
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: null,
+      rawRefs: [],
+      sourceLabel: "Blood panel",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point.v1",
+    source: {
+      family: "event",
+      kind: input.sourceKind,
+      path: "ledger/events/2026/2026-04.jsonl",
+      recordId: input.recordId,
+      resultIndex: 0,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: input.unit,
+    value: input.value,
+  };
 }
 
 function createCanonicalEntity(family: CanonicalEntity["family"], entityId: string, overrides: Partial<CanonicalEntity> = {}): CanonicalEntity {

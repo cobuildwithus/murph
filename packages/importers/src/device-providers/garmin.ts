@@ -33,7 +33,6 @@ import {
 import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
-  DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
@@ -191,7 +190,6 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
   const womenHealth = asObjectArray(request.womenHealth ?? request.womenHealthSummaries);
   const deletions = asObjectArray(request.deletions);
   const events: DeviceEventPayload[] = [];
-  const samples: DeviceSamplePayload[] = [];
   const rawArtifacts: DeviceRawArtifactPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
@@ -207,13 +205,13 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
 
   pushGarminArtifact(rawArtifacts, "profile", "profile.json", request.profile);
 
-  normalizeGarminDailySummaries({ importedAt, events, samples, rawArtifacts }, dailySummaries);
-  normalizeGarminEpochSummaries({ importedAt, events, samples, rawArtifacts }, epochSummaries);
-  normalizeGarminSleeps({ importedAt, events, samples, rawArtifacts }, sleeps);
+  normalizeGarminDailySummaries({ importedAt, events, rawArtifacts }, dailySummaries);
+  normalizeGarminEpochSummaries({ importedAt, events, rawArtifacts }, epochSummaries);
+  normalizeGarminSleeps({ importedAt, events, rawArtifacts }, sleeps);
 
   const activityFileRoles = normalizeGarminActivityFiles(rawArtifacts, explicitActivityFiles);
   normalizeGarminActivities({ importedAt, events, rawArtifacts }, activities, activityFileRoles);
-  normalizeGarminWomenHealth({ importedAt, events, samples, rawArtifacts }, womenHealth);
+  normalizeGarminWomenHealth({ importedAt, events, rawArtifacts }, womenHealth);
 
   const retainedSections = pushGarminSnapshotSectionArtifacts(rawArtifacts, request, {
     ...(unsupportedExplicitActivityFiles.length > 0 ? { activityFiles: unsupportedExplicitActivityFiles } : {}),
@@ -243,7 +241,6 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
     accountId,
     importedAt,
     events,
-    samples,
     rawArtifacts,
     provenance,
   });

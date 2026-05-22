@@ -25,7 +25,6 @@ import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
-  DeviceSamplePayload,
 } from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
@@ -453,7 +452,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     .map((entry) => asPlainObject(entry))
     .filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
-  const samples: DeviceSamplePayload[] = [];
   const rawArtifacts: DeviceRawArtifactPayload[] = [];
   const accountId =
     stringId(request.accountId) ?? stringId(personalInfo?.id ?? personalInfo?.user_id ?? personalInfo?.userId);
@@ -758,10 +756,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     );
   }
 
-  if (heartrate.length > 0) {
-    pushRawArtifact(rawArtifacts, createRawArtifact("heartrate", "heartrate.json", heartrate));
-  }
-
   for (const deletion of deletions) {
     pushDeletionObservation(events, rawArtifacts, importedAt, deletion);
   }
@@ -787,7 +781,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     accountId,
     importedAt,
     events,
-    samples,
     rawArtifacts,
     provenance,
   });

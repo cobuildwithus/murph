@@ -28,7 +28,6 @@ import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
-  DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
@@ -88,7 +87,6 @@ interface NormalizationContext {
   connectionsByKey: ReadonlyMap<string, PlainObject>;
   rawArtifacts: DeviceRawArtifactPayload[];
   events: DeviceEventPayload[];
-  samples: DeviceSamplePayload[];
 }
 
 interface JunctionResourceEntry {
@@ -194,7 +192,6 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
   const rawArtifacts: DeviceRawArtifactPayload[] = [];
   const events: DeviceEventPayload[] = [];
-  const samples: DeviceSamplePayload[] = [];
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -206,7 +203,6 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     connectionsByKey: buildConnectionsByKey(connections),
     rawArtifacts,
     events,
-    samples,
   };
 
   normalizeSummaries(snapshot.summaries, context);
@@ -217,7 +213,6 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     accountId: stringId(snapshot.accountId),
     importedAt,
     events,
-    samples,
     rawArtifacts,
     provenance: stripUndefined({
       schema: "junction.snapshot.v1",

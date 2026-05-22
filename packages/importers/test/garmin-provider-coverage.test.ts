@@ -62,7 +62,6 @@ function makeHealthContext(importedAt = "2026-03-17T10:00:00.000Z"): GarminHealt
   return {
     importedAt,
     events: [],
-    samples: [],
     rawArtifacts: [],
   };
 }
@@ -375,7 +374,7 @@ describe("garmin provider coverage", () => {
     expect(JSON.stringify(envelope.payload)).toContain('"__proto__":"blocked"');
   });
 
-  it("covers Garmin health timing fallbacks, sleep stage sampling, and aggregate stage durations", () => {
+  it("covers Garmin health timing fallbacks, sleep stage observations, and aggregate stage durations", () => {
     const dailyContext = makeHealthContext("2026-03-16T12:00:00.000Z");
     normalizeGarminDailySummaries(dailyContext, [
       {
@@ -489,7 +488,9 @@ describe("garmin provider coverage", () => {
     const awakeMinutes = sleepContext.events.find(
       (event) => event.externalRef?.facet === "sleep-awake-minutes",
     );
-    const sleepStageSamples = sleepContext.samples.filter((sample) => sample.stream === "sleep_stage");
+    const stageMinuteEvents = sleepContext.events.filter(
+      (event) => event.kind === "observation" && String(event.fields?.metric).startsWith("sleep-"),
+    );
 
     expect(sleepSession).toMatchObject({
       occurredAt: "2026-03-15T22:00:00.000Z",
@@ -507,14 +508,19 @@ describe("garmin provider coverage", () => {
         unit: "minutes",
       },
     });
-    expect(sleepStageSamples).toHaveLength(4);
-    expect(sleepStageSamples[0]).toMatchObject({
-      stream: "sleep_stage",
-      sample: {
-        stage: "awake",
-        durationMinutes: 15,
-      },
-    });
-    expect(sleepStageSamples.some((sample) => sample.sample.stage === "awake")).toBe(true);
+    expect(stageMinuteEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fields: expect.objectContaining({ metric: "sleep-awake-minutes", value: 15 }) }),
+        expect.objectContaining({ fields: expect.objectContaining({ metric: "sleep-light-minutes", value: 165 }) }),
+        expect.objectContaining({ fields: expect.objectContaining({ metric: "sleep-deep-minutes", value: 120 }) }),
+        expect.objectContaining({ fields: expect.objectContaining({ metric: "sleep-rem-minutes", value: 180 }) }),
+      ]),
+    );
+    expect(sleepContext).not.toHaveProperty("samples");
+    expect(sleepContext.rawArtifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "sleep:sleep-1",
+      }),
+    ]));
   });
 });

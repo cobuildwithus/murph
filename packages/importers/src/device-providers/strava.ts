@@ -21,7 +21,6 @@ import {
 import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
-  DeviceSamplePayload,
 } from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
@@ -270,7 +269,6 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
   const deletions = asObjectArray(request.deletions);
   const sourceWindow = asPlainObject(request.sourceWindow);
   const events: DeviceEventPayload[] = [];
-  const samples: DeviceSamplePayload[] = [];
   const rawArtifacts: DeviceRawArtifactPayload[] = [];
   const accountId =
     stringId(request.accountId) ??
@@ -403,7 +401,6 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
     accountId,
     importedAt,
     events,
-    samples,
     rawArtifacts,
     provenance,
   });
