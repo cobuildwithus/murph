@@ -33,12 +33,11 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
         <div className="animate-fade-up">
           <Eyebrow dark>Murph · Pitch Deck</Eyebrow>
           <h1 className="mt-6 max-w-[15ch] font-serif text-[clamp(2.3rem,5.4vw,4.2rem)] font-semibold leading-[1.03] tracking-[-0.04em] text-[#f5f0e8]">
-            Murph turns group chats into health challenges.
+            The social layer for health experiments.
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-            Murph lets people run health challenges together across
-            different wearables. Start one in a group chat, join a public
-            cohort, or compare with people like you.
+            Private groups and public cohorts test protocols together,
+            track real outcomes, and learn what actually works.
           </p>
           <button
             type="button"
@@ -158,7 +157,7 @@ export function InsightSlide() {
     <Slide index={2} tone="dark" label="The insight">
       <Eyebrow dark>The Insight</Eyebrow>
       <SlideHeading dark>
-        The next health app is not an app. It is a group chat.
+        The next health app is not another dashboard. It is a social loop.
       </SlideHeading>
       <p className="mt-5 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
         Health apps are great at measurement. They are still weak at
