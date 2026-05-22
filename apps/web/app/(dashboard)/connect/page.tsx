@@ -58,11 +58,13 @@ type ConnectSettingsSourceMatch = Pick<
   "connectSourceId" | "connectTarget" | "provider" | "state" | "upstreamSources"
 > & {
   connectionId?: string | null;
+  primaryAction?: HostedDeviceSyncSettingsSource["primaryAction"];
 };
 type ConnectSourceConnectionState = {
   connectionId: string | null;
   connectProvider: string | null;
   connectTarget: string | null;
+  requiresReconnect: boolean;
   sourceId: string;
   state: "active" | "disconnected" | "reauthorization_required";
 };
@@ -253,15 +255,15 @@ export default async function ConnectPage({
       });
       for (const connection of resolveConnectSourceConnectionStates(CONNECT_SOURCES, response.sources)) {
         const sourceId = connection.sourceId;
-        if (connection.state === "active") {
-          connectedSourceIds.add(sourceId);
-        } else if (isReconnectableConnectSourceState(connection.state)) {
+        if (connection.requiresReconnect) {
           reconnectSourceIds.add(sourceId);
+        } else if (connection.state === "active") {
+          connectedSourceIds.add(sourceId);
         }
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
         }
-        if (isReconnectableConnectSourceState(connection.state)) {
+        if (connection.requiresReconnect) {
           if (connection.connectProvider) {
             reconnectProviderBySourceId.set(sourceId, connection.connectProvider);
           }
@@ -431,6 +433,8 @@ function resolveConnectSourceConnectionMatches(
     )
       ? source.state
       : null;
+    const requiresReconnect = source.primaryAction?.kind === "reconnect"
+      || isReconnectableConnectSourceState(source.state);
     const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
       ? source.connectionId
       : null;
@@ -444,6 +448,7 @@ function resolveConnectSourceConnectionMatches(
         connectionId,
         connectProvider: provider,
         connectTarget,
+        requiresReconnect,
         sourceId: configuredSourceId,
         state: sourceState,
       });
@@ -456,6 +461,7 @@ function resolveConnectSourceConnectionMatches(
           connectionId,
           connectProvider: provider,
           connectTarget,
+          requiresReconnect,
           sourceId,
           state: sourceState,
         });
@@ -480,6 +486,7 @@ function resolveConnectSourceConnectionMatches(
           connectionId,
           connectProvider: provider,
           connectTarget,
+          requiresReconnect,
           sourceId,
           state: sourceState,
         });
@@ -495,24 +502,28 @@ function upsertConnectSourceConnection(
   next: ConnectSourceConnectionState,
 ): void {
   const existing = connections.get(next.sourceId);
-  if (!existing || compareConnectSourceStatePriority(next.state, existing.state) > 0) {
+  if (!existing || compareConnectSourceStatePriority(next, existing) > 0) {
     connections.set(next.sourceId, next);
   }
 }
 
 function compareConnectSourceStatePriority(
-  left: ConnectSourceConnectionState["state"],
-  right: ConnectSourceConnectionState["state"],
+  left: ConnectSourceConnectionState,
+  right: ConnectSourceConnectionState,
 ): number {
   return connectSourceStatePriority(left) - connectSourceStatePriority(right);
 }
 
-function connectSourceStatePriority(state: ConnectSourceConnectionState["state"]): number {
-  if (state === "active") {
+function connectSourceStatePriority(connection: ConnectSourceConnectionState): number {
+  if (connection.state === "active" && !connection.requiresReconnect) {
+    return 4;
+  }
+
+  if (connection.state === "active") {
     return 3;
   }
 
-  return state === "reauthorization_required" ? 2 : 1;
+  return connection.state === "disconnected" ? 1 : 2;
 }
 
 function isReconnectableConnectSourceState(

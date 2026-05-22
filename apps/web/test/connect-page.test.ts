@@ -704,6 +704,38 @@ test("ConnectPage surfaces disconnected sources as reconnectable", async () => {
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
+test("ConnectPage surfaces active sources with reconnect action as reconnectable", async () => {
+  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_whoop_123",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "whoop",
+        state: "active",
+        upstreamSources: [],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Whoop needs reconnect/);
+  assert.match(markup, /data-connection-state="needs-access"/u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
+  assert.doesNotMatch(markup, /Whoop connected/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
+});
+
 test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
@@ -732,6 +764,67 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
       connectionId: "dsc_whoop_active",
       connectProvider: "whoop",
       connectTarget: null,
+      requiresReconnect: false,
+      sourceId: "whoop",
+      state: "active",
+    }],
+  );
+});
+
+test("ConnectPage preserves reconnect action on active source matches", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "whoop" }], [
+      {
+        connectionId: "dsc_whoop_active_error",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "whoop",
+        state: "active",
+        upstreamSources: [],
+      },
+    ]),
+    [{
+      connectionId: "dsc_whoop_active_error",
+      connectProvider: "whoop",
+      connectTarget: null,
+      requiresReconnect: true,
+      sourceId: "whoop",
+      state: "active",
+    }],
+  );
+});
+
+test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "whoop" }], [
+      {
+        connectionId: "dsc_whoop_reauth",
+        provider: "whoop",
+        state: "reauthorization_required",
+        upstreamSources: [],
+      },
+      {
+        connectionId: "dsc_whoop_active_error",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "whoop",
+        state: "active",
+        upstreamSources: [],
+      },
+    ]),
+    [{
+      connectionId: "dsc_whoop_active_error",
+      connectProvider: "whoop",
+      connectTarget: null,
+      requiresReconnect: true,
       sourceId: "whoop",
       state: "active",
     }],
