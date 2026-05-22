@@ -26,11 +26,7 @@ vi.mock("@murphai/core", () => ({
 
 import {
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
-  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_BYTES_READ,
-  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_CANDIDATE_BYTES,
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_ENVELOPES,
-  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_ARTIFACT_BYTES,
-  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_TOTAL_BYTES,
   HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON,
   isLegacyWearableReceiptCompactionWakeDue,
   runHostedWorkspaceHousekeepingPhase,
@@ -95,11 +91,11 @@ describe("hosted workspace housekeeping", () => {
     );
     assert.equal(
       coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxBytesRead,
-      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_BYTES_READ,
+      0,
     );
     assert.equal(
       coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxCandidateBytes,
-      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_CANDIDATE_BYTES,
+      Number.POSITIVE_INFINITY,
     );
     assert.equal(
       Object.hasOwn(
@@ -114,11 +110,11 @@ describe("hosted workspace housekeeping", () => {
     );
     assert.equal(
       coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxEvidenceArtifactBytes,
-      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_ARTIFACT_BYTES,
+      Number.POSITIVE_INFINITY,
     );
     assert.equal(
       coreMocks.compactLegacyWearableReceiptEnvelopes.mock.calls[0]?.[0].maxEvidenceTotalBytes,
-      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_TOTAL_BYTES,
+      Number.POSITIVE_INFINITY,
     );
   });
 

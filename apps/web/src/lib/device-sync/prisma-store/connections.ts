@@ -529,9 +529,13 @@ export class PrismaHostedConnectionStore {
         "connection"."provider",
         "connection"."user_id"
       from "device_connection" as "connection"
+      join "hosted_member" as "member"
+        on "member"."id" = "connection"."user_id"
       where "connection"."status" = 'active'
         and "connection"."next_reconcile_at" is not null
         and "connection"."next_reconcile_at" <= ${input.dueAt}
+        and "member"."billing_status" = 'active'
+        and "member"."suspended_at" is null
         and not exists (
           select 1
           from "device_sync_dirty_connection" as "dirty"

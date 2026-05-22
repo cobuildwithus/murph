@@ -6,6 +6,7 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
 } from "../src/index.js";
 import {
+  HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
   ensureHostedDeviceSyncReconcilerSchedule,
   readHostedDeviceSyncReconcilerScheduleConfig,
 } from "../src/client/device-sync-reconciler-schedule.js";
@@ -83,12 +84,17 @@ describe("hosted device-sync reconciler Temporal Schedule", () => {
     expect(readHostedDeviceSyncReconcilerScheduleConfig({}).enabled).toBe(true);
   });
 
+  it("keeps the reconciler schedule id fixed", () => {
+    expect(readHostedDeviceSyncReconcilerScheduleConfig({
+      HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID: "renamed-device-sync-test",
+    }).scheduleId).toBe(HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID);
+  });
+
   it("builds an enabled interval schedule for the global reconciler workflow", async () => {
     const config = readHostedDeviceSyncReconcilerScheduleConfig({
       HOSTED_DEVICE_SYNC_RECONCILER_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS: "45000",
       HOSTED_DEVICE_SYNC_RECONCILER_INTERVAL_MS: "120000",
       HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED: "true",
-      HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID: "device-sync-test",
       HOSTED_TEMPORAL_TASK_QUEUE: "hosted-test-queue",
     });
     const client = buildScheduleClient();
@@ -98,7 +104,7 @@ describe("hosted device-sync reconciler Temporal Schedule", () => {
       config,
     })).resolves.toEqual({
       created: true,
-      scheduleId: "device-sync-test",
+      scheduleId: HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
       updated: false,
     });
 
@@ -112,13 +118,13 @@ describe("hosted device-sync reconciler Temporal Schedule", () => {
           }],
           taskQueue: "hosted-test-queue",
           type: "startWorkflow",
-          workflowId: "device-sync-test:workflow",
+          workflowId: `${HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID}:workflow`,
           workflowType: HOSTED_DEVICE_SYNC_RECONCILER_WORKFLOW_TYPE,
         }),
         policies: expect.objectContaining({
           overlap: "SKIP",
         }),
-        scheduleId: "device-sync-test",
+        scheduleId: HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
         spec: {
           intervals: [{
             every: 120_000,
@@ -134,11 +140,13 @@ describe("hosted device-sync reconciler Temporal Schedule", () => {
   it("updates an existing schedule instead of failing schedule ensure", async () => {
     const client = buildScheduleClient();
     client.schedule.create.mockRejectedValueOnce(
-      new ScheduleAlreadyRunning("already exists", "device-sync-test"),
+      new ScheduleAlreadyRunning(
+        "already exists",
+        HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
+      ),
     );
     const config = readHostedDeviceSyncReconcilerScheduleConfig({
       HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED: "false",
-      HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID: "device-sync-test",
     });
 
     await expect(ensureHostedDeviceSyncReconcilerSchedule({
@@ -146,11 +154,13 @@ describe("hosted device-sync reconciler Temporal Schedule", () => {
       config,
     })).resolves.toEqual({
       created: false,
-      scheduleId: "device-sync-test",
+      scheduleId: HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
       updated: true,
     });
 
-    expect(client.schedule.getHandle).toHaveBeenCalledWith("device-sync-test");
+    expect(client.schedule.getHandle).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_SCHEDULE_ID,
+    );
     expect(client.updatedSchedules).toHaveLength(1);
     expect(client.updatedSchedules[0]).toMatchObject({
       action: {

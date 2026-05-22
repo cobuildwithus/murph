@@ -202,8 +202,8 @@ Device-sync reconciler Schedule:
 
 - `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED`: optional, default `true`.
   Set to `false` only when the Temporal Schedule should be paused.
-- `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ID`: optional Schedule id, default
-  `hosted-device-sync-reconciler`.
+- Schedule id is fixed to `hosted-device-sync-reconciler` so a deploy cannot
+  accidentally create a second cadence owner by renaming the Schedule.
 - `HOSTED_DEVICE_SYNC_RECONCILER_INTERVAL_MS`: optional interval, default
   `60000`, min `10000`, max `3600000`.
 - `HOSTED_DEVICE_SYNC_RECONCILER_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS`: optional
@@ -252,7 +252,7 @@ Worker concurrency:
 
 The repo root `render.yaml` defines `murph-temporal-worker` as a Render
 Background Worker. It builds the Temporal package, including the production
-Workflow bundle, and starts
+Workflow bundle, ensures the device-sync reconciler Schedule, and starts
 `pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod`.
 
 Use Render Blueprint sync from the dashboard or validate it with:

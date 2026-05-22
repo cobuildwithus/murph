@@ -322,19 +322,22 @@ function createAuthorityHarness(input: {
   };
 }
 
-describe("readHostedDeviceSyncPendingDirtyState", () => {
+describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("returns an immediate wake when one fetched batch contains multiple pending dirty rows", async () => {
+  it("returns an immediate wake when another dirty row remains after the acked row", async () => {
+    const markDirtyConnectionProcessed = vi.fn(async () =>
+      buildDirtyConnectionRecord({
+        connectionId: "conn_dirty_first",
+        dirtyRevision: 3n,
+        processedRevision: 3n,
+      })
+    );
     const listPendingDirtyConnectionsForUser = vi.fn(async () => ({
       hasMore: false,
       items: [
-        buildDirtyConnectionRecord({
-          connectionId: "conn_dirty_first",
-          dirtyRevision: 3n,
-        }),
         buildDirtyConnectionRecord({
           connectionId: "conn_dirty_second",
           dirtyRevision: 4n,
@@ -343,16 +346,19 @@ describe("readHostedDeviceSyncPendingDirtyState", () => {
     }));
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
+        markDirtyConnectionProcessed,
         listPendingDirtyConnectionsForUser,
       },
     });
-    const { readHostedDeviceSyncPendingDirtyState } = await import(
+    const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"
     );
 
-    const response = await readHostedDeviceSyncPendingDirtyState({
-      request: new Request("https://example.test/device-sync/runtime/dirty-pending", {
+    const response = await ackHostedDeviceSyncDirtyStateProcessed({
+      request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
         body: JSON.stringify({
+          connectionId: "conn_dirty_first",
+          processedRevision: "3",
           userId: "user_123",
         }),
         method: "POST",
@@ -360,15 +366,19 @@ describe("readHostedDeviceSyncPendingDirtyState", () => {
       trustedUserId: "user_123",
     });
 
-    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
-      limit: 10,
+    expect(markDirtyConnectionProcessed).toHaveBeenCalledWith({
+      connectionId: "conn_dirty_first",
+      processedRevision: 3n,
       userId: "user_123",
     });
-    expect(response.hasMore).toBe(false);
-    expect(response.items.map((item) => item.connectionId)).toEqual([
-      "conn_dirty_first",
-      "conn_dirty_second",
-    ]);
+    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
+      limit: 1,
+      userId: "user_123",
+    });
+    expect(response.recorded).toBe(true);
+    expect(response.stillDirty).toBe(false);
+    expect(response.dirtyRevision).toBe("3");
+    expect(response.processedRevision).toBe("3");
     expect(response.nextWakeAt).toEqual(expect.any(String));
     expect(Number.isFinite(Date.parse(response.nextWakeAt ?? ""))).toBe(true);
   });
