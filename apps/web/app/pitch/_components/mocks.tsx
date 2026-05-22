@@ -36,52 +36,64 @@ const CHAT_CARD_FILL = "#fffcf6";
 
 export function ChatMock({
   title,
+  channel,
   members,
   messages,
 }: {
   title: string;
+  // Optional channel tag (e.g. "iMessage group") shown as a pill above
+  // the card, signalling which messaging surface the thread lives on.
+  channel?: string;
   members: number;
   messages: readonly ChatMessage[];
 }) {
   return (
-    <div
-      className="rounded-[22px] border border-[#c4a882]/30 p-4"
-      style={{ backgroundColor: CHAT_CARD_FILL }}
-    >
-      {/* Header */}
-      <div className="flex items-center gap-2.5 border-b border-[#c4a882]/25 px-2 pb-3">
-        <span className="flex size-8 items-center justify-center rounded-full bg-[#7a8c6e]/20 font-mono text-[10px] font-semibold uppercase text-[#5a6e32]">
-          {title.slice(0, 2)}
+    <div className="flex flex-col">
+      {channel ? (
+        <span className="mb-2 ml-1 inline-flex w-fit items-center gap-1.5 rounded-full border border-[#c4a882]/35 bg-[#fffcf6] px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
+          <span className="size-1.5 rounded-full bg-[#0a84ff]" />
+          {channel}
         </span>
-        <div>
-          <p className="text-[13px] font-semibold leading-tight text-[#2d3436]">
-            {title}
-          </p>
-          <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-            {members} members
-          </p>
+      ) : null}
+      <div
+        className="rounded-[22px] border border-[#c4a882]/30 p-4"
+        style={{ backgroundColor: CHAT_CARD_FILL }}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2.5 border-b border-[#c4a882]/25 px-2 pb-3">
+          <span className="flex size-8 items-center justify-center rounded-full bg-[#7a8c6e]/20 font-mono text-[10px] font-semibold uppercase text-[#5a6e32]">
+            {title.slice(0, 2)}
+          </span>
+          <div>
+            <p className="text-[13px] font-semibold leading-tight text-[#2d3436]">
+              {title}
+            </p>
+            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
+              {members} members
+            </p>
+          </div>
         </div>
-      </div>
-      {/* Messages */}
-      <div className="flex flex-col px-2 pt-3">
-        {messages.map((message, index) => {
-          const previous = messages[index - 1];
-          const next = messages[index + 1];
-          const sameAsPrevious =
-            previous?.kind === message.kind &&
-            previous?.name === message.name;
-          const sameAsNext =
-            next?.kind === message.kind && next?.name === message.name;
-          return (
-            <ChatBubble
-              key={index}
-              message={message}
-              firstOfGroup={!sameAsPrevious}
-              lastOfGroup={!sameAsNext}
-              stacked={index > 0}
-            />
-          );
-        })}
+        {/* Messages */}
+        <div className="flex flex-col px-2 pt-3">
+          {messages.map((message, index) => {
+            const previous = messages[index - 1];
+            const next = messages[index + 1];
+            const sameAsPrevious =
+              previous?.kind === message.kind &&
+              previous?.name === message.name;
+            const sameAsNext =
+              next?.kind === message.kind && next?.name === message.name;
+            return (
+              <ChatBubble
+                key={index}
+                message={message}
+                firstOfGroup={!sameAsPrevious}
+                lastOfGroup={!sameAsNext}
+                stacked={index > 0}
+              />
+            );
+          })}
+        </div>
       </div>
     </div>
   );

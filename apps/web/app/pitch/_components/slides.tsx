@@ -36,8 +36,9 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
             The social layer for health experiments.
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-            Private groups and public cohorts test protocols together,
-            track real outcomes, and learn what actually works.
+            Run health challenges with friends or public cohorts, right
+            from iMessage, WhatsApp, Telegram, or web — across the
+            wearables you already use.
           </p>
           <button
             type="button"
@@ -49,6 +50,7 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
           </button>
         </div>
         <ChatMock
+          channel="iMessage group"
           members={6}
           messages={[
             { kind: "you", text: "lowest step count this month buys dinner" },
