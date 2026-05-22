@@ -8,6 +8,7 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import {
   buildHostedAssistantContextFingerprintDetails,
   emitHostedAssistantContextSessionResolvedTrace,
+  emitHostedAssistantContextTimingTrace,
   fingerprintHostedAssistantContextValue,
   resolveHostedAssistantContextFingerprintSecret,
 } from '../src/assistant/hosted-context-diagnostics.js'
@@ -102,6 +103,81 @@ describe('hosted assistant context diagnostics', () => {
     expect(
       fingerprintHostedAssistantContextValue('log-secret', 'thread', '   '),
     ).toBeNull()
+  })
+
+  it('emits hosted timing diagnostics without raw identifiers', () => {
+    const traceEvents: unknown[] = []
+
+    emitHostedAssistantContextTimingTrace({
+      message: {
+        executionContext: {
+          hosted: {
+            memberId: 'member-context-timing',
+            userEnvKeys: [],
+          },
+        },
+        onTraceEvent(event) {
+          traceEvents.push(event)
+        },
+      },
+      preProviderAdmissionCount: 0,
+      preProviderSetupMs: 123,
+      providerRequestOrdinal: 0,
+      stage: 'assistant-pre-provider-ready',
+      turnLockWaitMs: 45,
+    })
+
+    expect(traceEvents).toHaveLength(1)
+    expect(traceEvents[0]).toEqual({
+      codexThreadId: null,
+      rawEvent: {
+        schema: 'murph.assistant-context-diagnostics.v1',
+        type: 'assistant.context.diagnostics',
+        stage: 'assistant-pre-provider-ready',
+        preProviderAdmissionCount: 0,
+        preProviderSetupMs: 123,
+        providerRequestOrdinal: 0,
+        turnLockWaitMs: 45,
+      },
+      updates: [],
+    })
+    expect(JSON.stringify(traceEvents[0])).not.toContain('member-context-timing')
+  })
+
+  it('emits hosted turn-lock timing diagnostics without raw identifiers', () => {
+    const traceEvents: unknown[] = []
+
+    emitHostedAssistantContextTimingTrace({
+      message: {
+        executionContext: {
+          hosted: {
+            memberId: 'member-lock-timing',
+            userEnvKeys: [],
+          },
+        },
+        onTraceEvent(event) {
+          traceEvents.push(event)
+        },
+      },
+      stage: 'assistant-turn-lock-acquired',
+      turnLockWaitMs: 321,
+    })
+
+    expect(traceEvents).toHaveLength(1)
+    expect(traceEvents[0]).toEqual({
+      codexThreadId: null,
+      rawEvent: {
+        schema: 'murph.assistant-context-diagnostics.v1',
+        type: 'assistant.context.diagnostics',
+        stage: 'assistant-turn-lock-acquired',
+        preProviderAdmissionCount: null,
+        preProviderSetupMs: null,
+        providerRequestOrdinal: null,
+        turnLockWaitMs: 321,
+      },
+      updates: [],
+    })
+    expect(JSON.stringify(traceEvents[0])).not.toContain('member-lock-timing')
   })
 
   it('records absent binding inputs without leaking raw values or claiming scope', () => {

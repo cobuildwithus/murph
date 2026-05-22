@@ -297,7 +297,9 @@ test('sendAssistantMessageLocal emits a hosted context trace after session resol
   })
 
   const contextTrace = traceEvents.find((event) =>
-    isTraceEventWithRawType(event, 'assistant.context.diagnostics'),
+    isTraceEventWithRawType(event, 'assistant.context.diagnostics') &&
+    (event as { rawEvent?: { stage?: unknown } }).rawEvent?.stage ===
+      'assistant-session-resolved',
   )
   expect(contextTrace).toBeDefined()
   const rawEvent = (contextTrace as { rawEvent: Record<string, unknown> }).rawEvent

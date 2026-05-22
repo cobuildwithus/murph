@@ -152,6 +152,19 @@ function createRoute(input?: {
   }
 }
 
+function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagnostics'] {
+  return {
+    activeExperimentContextElapsedMs: null,
+    allowSensitiveHealthContext: false,
+    cliBootstrapElapsedMs: null,
+    routePlanningElapsedMs: 0,
+    shouldPrepareAnyBootstrapContext: false,
+    shouldPrepareBootstrapContext: false,
+    shouldPrepareFreshThreadFallback: false,
+    vaultOverviewElapsedMs: null,
+  }
+}
+
 function createAssistantSession(input?: {
   providerOptions?: AssistantProviderSessionOptions
   sessionId?: string
@@ -511,6 +524,7 @@ describe('Codex model catalog', () => {
         codexContinuation: {
           kind: 'explicit-structured-history',
         } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
         refreshThreadInstructions: false,
         resumeCodexThreadId: null,
@@ -626,6 +640,7 @@ describe('Codex model catalog', () => {
         codexContinuation: {
           kind: 'explicit-structured-history',
         } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
         refreshThreadInstructions: false,
         resumeCodexThreadId: null,

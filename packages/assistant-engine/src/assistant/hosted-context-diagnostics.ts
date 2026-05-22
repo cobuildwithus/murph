@@ -18,6 +18,10 @@ export const HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA =
 export const HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE =
   'assistant.context.diagnostics'
 
+export type HostedAssistantContextTimingStage =
+  | 'assistant-pre-provider-ready'
+  | 'assistant-turn-lock-acquired'
+
 type FingerprintPrimitive = boolean | number | string | null
 
 export type HostedAssistantContextFingerprintDetails = Record<
@@ -193,6 +197,42 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
             binding.threadIsDirect ?? input.message.threadIsDirect ?? null,
           sessionId: input.resolved.session.sessionId,
         }),
+      },
+      updates: [],
+    })
+  } catch {
+    // Diagnostic trace hooks must not block the assistant turn.
+  }
+}
+
+export function emitHostedAssistantContextTimingTrace(input: {
+  message: Pick<
+    AssistantMessageInput,
+    | 'executionContext'
+    | 'onTraceEvent'
+  >
+  preProviderAdmissionCount?: number | null
+  preProviderSetupMs?: number | null
+  providerRequestOrdinal?: number | null
+  stage: HostedAssistantContextTimingStage
+  turnLockWaitMs?: number | null
+}): void {
+  const onTraceEvent = input.message.onTraceEvent
+  if (!onTraceEvent || input.message.executionContext?.hosted == null) {
+    return
+  }
+
+  try {
+    onTraceEvent({
+      codexThreadId: null,
+      rawEvent: {
+        schema: HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA,
+        type: HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE,
+        stage: input.stage,
+        preProviderAdmissionCount: input.preProviderAdmissionCount ?? null,
+        preProviderSetupMs: input.preProviderSetupMs ?? null,
+        providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+        turnLockWaitMs: input.turnLockWaitMs ?? null,
       },
       updates: [],
     })
