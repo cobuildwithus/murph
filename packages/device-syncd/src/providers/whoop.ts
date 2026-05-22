@@ -36,6 +36,7 @@ import {
   buildOAuthTokenRequestDiagnostics,
   buildProviderRequestDiagnostics,
   extractProviderQueryParameterNames,
+  resolveOAuthTokenRequestAccountStatus,
 } from "./provider-diagnostics.ts";
 
 import type {
@@ -363,73 +364,6 @@ function buildWhoopApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-function resolveWhoopTokenRequestAccountStatus(input: {
-  clientCredentialPresent?: boolean;
-  grantType?: string;
-  oauthErrorCode?: string | null;
-  oauthErrorDescription?: string | null;
-  refreshCredentialPresent?: boolean;
-  response: Response;
-}): "reauthorization_required" | null {
-  if (input.grantType !== "refresh_token") {
-    return null;
-  }
-
-  const tokenSpecificRefreshFailure =
-    input.oauthErrorCode === "invalid_grant"
-    || (
-      input.oauthErrorCode === "invalid_request"
-      && input.clientCredentialPresent === true
-      && input.refreshCredentialPresent === true
-      && (
-        isWhoopRefreshTokenInvalidRequest(input.oauthErrorDescription)
-        || isWhoopGenericRefreshTokenInvalidRequest(input.oauthErrorDescription)
-      )
-    );
-
-  if ((input.response.status === 400 || input.response.status === 401) && tokenSpecificRefreshFailure) {
-    return "reauthorization_required";
-  }
-
-  return null;
-}
-
-function isWhoopGenericRefreshTokenInvalidRequest(description: string | null | undefined): boolean {
-  if (!description) {
-    return false;
-  }
-
-  const normalized = description.toLowerCase();
-  return [
-    "invalid parameter value",
-    "missing a required parameter",
-    "otherwise malformed",
-    "parameter more than once",
-    "token request is malformed",
-  ].some((marker) => normalized.includes(marker));
-}
-
-function isWhoopRefreshTokenInvalidRequest(description: string | null | undefined): boolean {
-  if (!description) {
-    return false;
-  }
-
-  const normalized = description.toLowerCase();
-  if (!normalized.includes("refresh")) {
-    return false;
-  }
-
-  return [
-    "expired",
-    "inactive",
-    "invalid",
-    "malformed",
-    "not found",
-    "revoked",
-    "unknown",
-  ].some((marker) => normalized.includes(marker));
-}
-
 function resolveWhoopApiEndpointKind(path: string): string {
   const pathname = safeProviderPathname(path);
 
@@ -521,20 +455,14 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           parameters,
           responseBody: body,
         });
-        const oauthErrorCode = typeof diagnostics.oauthErrorCode === "string" ? diagnostics.oauthErrorCode : null;
-        const oauthErrorDescription = typeof diagnostics.oauthErrorDescription === "string"
-          ? diagnostics.oauthErrorDescription
-          : null;
-
         return buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status === 429 || response.status >= 500,
-          accountStatus: resolveWhoopTokenRequestAccountStatus({
-            clientCredentialPresent: Boolean(parameters.client_id && parameters.client_secret),
-            grantType: parameters.grant_type,
-            oauthErrorCode,
-            oauthErrorDescription,
-            refreshCredentialPresent: Boolean(parameters.refresh_token),
+          accountStatus: resolveOAuthTokenRequestAccountStatus({
+            diagnostics,
+            parameters,
             response,
+            treatCompleteRefreshInvalidRequestAsReauthorization: true,
+            treatUnauthorizedAsReauthorization: false,
           }),
           diagnostics,
         });
