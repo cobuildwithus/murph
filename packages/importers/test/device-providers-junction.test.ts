@@ -253,6 +253,58 @@ test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timesta
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"));
 });
 
+test("Junction raw receipt hashing treats Date snapshot fields like ISO strings", async () => {
+  const dateSnapshot = {
+    importedAt: new Date("2026-04-22T12:00:00.000Z"),
+    windowStart: new Date("2026-04-22T00:00:00.000Z"),
+    windowEnd: new Date("2026-04-22T23:59:59.000Z"),
+    summaries: {
+      activity: [{
+        observedAt: "2026-04-22T12:00:00.000Z",
+        steps: 7200,
+      }],
+    },
+  };
+  const stringSnapshot = {
+    importedAt: "2026-04-22T12:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-22T23:59:59.000Z",
+    summaries: {
+      activity: [{
+        observedAt: "2026-04-22T12:00:00.000Z",
+        steps: 7200,
+      }],
+    },
+  };
+
+  const withDates = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn_junction_date_hash",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: dateSnapshot,
+  });
+  const withStrings = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn_junction_date_hash",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: stringSnapshot,
+  });
+  const dateReceipt = withDates.rawIngestReceipts?.[0];
+  const stringReceipt = withStrings.rawIngestReceipts?.[0];
+
+  assert.ok(dateReceipt);
+  assert.ok(stringReceipt);
+  assert.equal(dateReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
+  assert.equal(dateReceipt.observedAt, "2026-04-22T12:00:00.000Z");
+  assert.equal(dateReceipt.payloadHash, stringReceipt.payloadHash);
+  assert.equal(dateReceipt.id, stringReceipt.id);
+  assert.equal(Object.hasOwn(dateReceipt, "payload"), false);
+});
+
 test("Junction normalizer accepts real nested source provider fields on timeseries entries", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
