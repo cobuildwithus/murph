@@ -23,6 +23,7 @@ import {
   createCloudflareHostedProviderFetch,
   isHostedRuntimeInternalAuthorityRejectedError,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
+  readHostedWorkspaceSnapshotRestoreStep,
 } from "./runtime-platform.js";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
@@ -168,6 +169,38 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_PATTERNS: ReadonlyArray<{
   { operation: "telegram_file_lookup", pattern: /^Hosted Telegram file lookup$/u },
   { operation: "usage_recording", pattern: /^Hosted usage recording$/u },
   { operation: "workspace_checkpoint", pattern: /^Hosted workspace checkpoint$/u },
+  {
+    operation: "workspace_snapshot_complete",
+    pattern: /^Hosted workspace snapshot complete$/u,
+  },
+  {
+    operation: "workspace_snapshot_data_key_unwrap",
+    pattern: /^Hosted workspace snapshot data key unwrap$/u,
+  },
+  {
+    operation: "workspace_snapshot_direct_r2_upload",
+    pattern: /^Hosted workspace snapshot direct R2 upload$/u,
+  },
+  {
+    operation: "workspace_snapshot_fetch",
+    pattern: /^Hosted workspace snapshot fetch(?:\b| )/u,
+  },
+  {
+    operation: "workspace_snapshot_presign_get",
+    pattern: /^Hosted workspace snapshot presign download$/u,
+  },
+  {
+    operation: "workspace_snapshot_presign_put",
+    pattern: /^Hosted workspace snapshot presign PUT$/u,
+  },
+  {
+    operation: "workspace_snapshot_session_abort",
+    pattern: /^Hosted workspace snapshot session abort$/u,
+  },
+  {
+    operation: "workspace_snapshot_session_start",
+    pattern: /^Hosted workspace snapshot session start$/u,
+  },
   { operation: "workspace_read", pattern: /^Hosted workspace read$/u },
 ];
 
@@ -482,8 +515,16 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
         }
       : {}),
     ...readHostedExecutionChildRuntimeFetchFailureMetadata(error),
+    ...readHostedExecutionChildRuntimeWorkspaceSnapshotRestoreStep(error),
     ...readHostedExecutionChildRuntimeStatus(error),
   };
+}
+
+function readHostedExecutionChildRuntimeWorkspaceSnapshotRestoreStep(
+  error: unknown,
+): Record<string, string> {
+  const step = readHostedWorkspaceSnapshotRestoreStep(error);
+  return step ? { childRuntimeWorkspaceSnapshotRestoreStep: step } : {};
 }
 
 function readHostedExecutionChildRuntimeFetchFailureMetadata(

@@ -1956,6 +1956,7 @@ describe("RunnerContainer", () => {
             childRuntimeFetchTimeoutSignalAborted: true,
             childRuntimeHttpOperation: "workspace_read",
             childRuntimeStage: "runtime.in-process",
+            childRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
             childProcess: {
               abortedByParent: false,
               abortReasonMessage: hiddenAbortReason,
@@ -2027,6 +2028,7 @@ describe("RunnerContainer", () => {
         childRuntimeFetchTimeoutSignalAborted: true,
         childRuntimeHttpOperation: "workspace_read",
         childRuntimeStage: "runtime.in-process",
+        childRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
         childProcess: {
           abortedByParent: false,
           abortReasonName: "AbortError",
@@ -2098,6 +2100,7 @@ describe("RunnerContainer", () => {
           runnerChildRuntimeLastPhaseStatus: "fail",
           runnerChildRuntimePhaseTrace: ["workspace.read:start", "runtime:fail"],
           runnerChildRuntimeStage: "runtime.in-process",
+          runnerChildRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
           runnerChildRuntimeWakeReady: true,
           runnerChildSignal: "SIGTERM",
           runnerChildStderrTailLineCount: 2,
@@ -2125,6 +2128,7 @@ describe("RunnerContainer", () => {
             "childRuntimeFetchTimeoutSignalAborted",
             "childRuntimeHttpOperation",
             "childRuntimeStage",
+            "childRuntimeWorkspaceSnapshotRestoreStep",
             "errorDetailPresent",
             "payloadDetailsPresent",
           ],
