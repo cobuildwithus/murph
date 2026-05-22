@@ -99,6 +99,9 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_RECHECK_MS = 5_000;
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
+const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
+  "murph.hosted.workspace-snapshot-path-hash.v1";
+const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -1185,12 +1188,21 @@ export class HostedUserRunner {
       forwardedEnv,
       userId: input.userId,
     });
+    const workspaceSnapshotPathHashSecret =
+      await deriveHostedWorkspaceSnapshotPathHashSecret(configSource);
     const userEnv = runtimeConfig.userEnv ?? {};
     const runnerContainerName = resolveHostedExecutionRunnerContainerName({
       source: this.runnerRuntimeEnvSource,
       userId: input.userId,
     });
     const job: HostedExecutionWorkspaceInvocationJobInput = {
+      ...(workspaceSnapshotPathHashSecret
+        ? {
+            diagnostics: {
+              workspaceSnapshotPathHashSecret,
+            },
+          }
+        : {}),
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
         attemptId: input.token.attemptId,
@@ -1605,6 +1617,44 @@ export class HostedUserRunner {
       run,
     );
   }
+}
+
+async function deriveHostedWorkspaceSnapshotPathHashSecret(
+  source: Readonly<Record<string, string | undefined>>,
+): Promise<string | null> {
+  const rawSecret = normalizeHostedRunnerStringEnvValue(
+    source.HOSTED_LOG_FINGERPRINT_SECRET,
+  );
+  if (!rawSecret) {
+    return null;
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER.encode(rawSecret),
+      { hash: "SHA-256", name: "HMAC" },
+      false,
+      ["sign"],
+    );
+    const signature = new Uint8Array(await crypto.subtle.sign(
+      "HMAC",
+      key,
+      WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER.encode(
+        WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT,
+      ),
+    ));
+    return Array.from(signature)
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHostedRunnerStringEnvValue(value: string | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function deleteR2ObjectIfSupported(

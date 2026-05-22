@@ -70,6 +70,7 @@ import {
 } from "../src/storage-paths.ts";
 
 const cleanupPaths: string[] = [];
+const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 const workspaceSnapshotEncryptionScheme:
   typeof HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME =
     HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME;
@@ -1882,11 +1883,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         userId: "member_1",
         workspaceVersion: "7",
       },
-      runtime: {
-        platformEnv: {
-          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
-        },
-      },
+      runtime: {},
+      snapshotDiagnosticsHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
       vaultRoot,
     });
 
@@ -1966,11 +1964,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         userId: "member_1",
         workspaceVersion: "7",
       },
-      runtime: {
-        platformEnv: {
-          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
-        },
-      },
+      runtime: {},
+      snapshotDiagnosticsHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
       vaultRoot,
     });
 
@@ -2048,7 +2043,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("state.json");
   });
 
-  it("does not enable snapshot path fingerprints from forwarded runtime env", async () => {
+  it("does not enable snapshot path fingerprints from normalized runtime env", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
@@ -2078,7 +2073,63 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         forwardedEnv: {
           HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
         },
+        platformEnv: {
+          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
+        },
       },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const snapshotLog = writeLog.mock.calls
+      .flatMap(([request]) => request.entries)
+      .find((entry) =>
+        typeof entry === "object"
+        && entry !== null
+        && "eventCode" in entry
+        && entry.eventCode === "checkpoint.snapshot_finished");
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      redactedJson: expect.objectContaining({
+        workspaceSnapshotFingerprintStatus: "disabled",
+        workspaceSnapshotLargestFiles: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=raw,root=vault,bytes=4,external=0,ext=\.bin,depth=3,relHash=disabled$/u,
+          ),
+        ]),
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
+  });
+
+  it("does not enable snapshot path fingerprints from malformed explicit diagnostics keys", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "raw", "captures", "large-video.bin"), "raw\n", "utf8");
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact: async () => {},
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      snapshotDiagnosticsHashSecret: "diagnostic-secret",
       vaultRoot,
     });
 

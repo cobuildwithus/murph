@@ -35,6 +35,7 @@ import * as nodeRunner from "../src/node-runner.js";
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 const nativeFetch = globalThis.fetch;
 const hostedContainerRunRequestBodyLimitBytes = 8 * 1024 * 1024;
+const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -1170,7 +1171,16 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("parses workspace-invocation requests through the workspace contract before invoking the node runner", async () => {
-    const requestBody = buildWorkspaceJobBody();
+    const baseRequestBody = buildWorkspaceJobBody();
+    const requestBody = {
+      ...baseRequestBody,
+      job: {
+        ...baseRequestBody.job,
+        diagnostics: {
+          workspaceSnapshotPathHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
+        },
+      },
+    };
     const actualContractsModule =
       await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>(
         "@murphai/assistant-runtime/hosted-runtime-contracts",
@@ -1213,12 +1223,65 @@ describe("startHostedContainerEntrypoint", () => {
     expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
     expect(runHostedWorkspaceInvocation).toHaveBeenCalledWith(
       {
+        diagnostics: {
+          workspaceSnapshotPathHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
+        },
         ...parsedJob,
         kind: "workspace-invocation",
       },
       expect.objectContaining({
       }),
     );
+  });
+
+  it("rejects malformed workspace snapshot diagnostics keys before invoking the node runner", async () => {
+    const runHostedWorkspaceInvocation = vi
+      .spyOn(nodeRunner, "runHostedWorkspaceInvocation")
+      .mockResolvedValue(buildWorkspaceRunnerResult());
+
+    try {
+      const baseRequestBody = buildWorkspaceJobBody();
+      const server = await startHostedContainerEntrypoint({
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+        body: JSON.stringify({
+          ...baseRequestBody,
+          job: {
+            ...baseRequestBody.job,
+            diagnostics: {
+              workspaceSnapshotPathHashSecret: "diagnostic-secret",
+            },
+          },
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "type_error",
+        details: {
+          errorDetail: expect.stringContaining(
+            "workspaceSnapshotPathHashSecret must be a 64-character lowercase hexadecimal derived diagnostics key",
+          ),
+        },
+        error: "Invalid request.",
+        errorName: "TypeError",
+      });
+      expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+    } finally {
+      runHostedWorkspaceInvocation.mockRestore();
+    }
   });
 
   it("keeps startup healthy when the background node-runner preload fails", async () => {

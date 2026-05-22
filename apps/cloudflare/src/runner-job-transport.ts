@@ -10,9 +10,15 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 export const HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND = "workspace-invocation";
+const HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN = /^[a-f0-9]{64}$/u;
+
+export interface HostedExecutionWorkspaceInvocationDiagnostics {
+  workspaceSnapshotPathHashSecret?: string;
+}
 
 export interface HostedExecutionWorkspaceInvocationJobInput
   extends HostedAssistantWorkspaceRuntimeJobInput {
+  diagnostics?: HostedExecutionWorkspaceInvocationDiagnostics;
   kind: typeof HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
 }
 
@@ -70,9 +76,11 @@ export function parseHostedExecutionRunnerJobInput(
 ): HostedExecutionRunnerJobInput {
   const record = requireRecord(value, "Hosted execution runner job input");
   const kind = requireHostedExecutionWorkspaceJobKind(record.kind);
+  const diagnostics = parseHostedExecutionWorkspaceInvocationDiagnostics(record.diagnostics);
 
   return {
     ...parsers.parseWorkspaceJobInput(record),
+    ...(diagnostics ? { diagnostics } : {}),
     kind,
   };
 }
@@ -158,6 +166,31 @@ function requireHostedExecutionWorkspaceJobKind(
   throw new TypeError("Hosted execution runner job input.kind must be workspace-invocation.");
 }
 
+function parseHostedExecutionWorkspaceInvocationDiagnostics(
+  value: unknown,
+): HostedExecutionWorkspaceInvocationDiagnostics | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = requireRecord(
+    value,
+    "Hosted execution runner job input.diagnostics",
+  );
+  const workspaceSnapshotPathHashSecret = requireOptionalDerivedDiagnosticsKey(
+    record.workspaceSnapshotPathHashSecret,
+    "Hosted execution runner job input.diagnostics.workspaceSnapshotPathHashSecret",
+  );
+
+  if (!workspaceSnapshotPathHashSecret) {
+    return undefined;
+  }
+
+  return {
+    workspaceSnapshotPathHashSecret,
+  };
+}
+
 function isHostedExecutionRunnerChildMessageOfType(
   value: unknown,
   type: string,
@@ -236,4 +269,27 @@ function requireOptionalString(value: unknown, field: string): string | null {
   }
 
   return value;
+}
+
+function requireOptionalDerivedDiagnosticsKey(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string.`);
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (!HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN.test(normalized)) {
+    throw new TypeError(
+      `${label} must be a 64-character lowercase hexadecimal derived diagnostics key.`,
+    );
+  }
+
+  return normalized;
 }

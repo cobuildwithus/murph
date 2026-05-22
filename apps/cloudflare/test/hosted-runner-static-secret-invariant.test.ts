@@ -140,6 +140,14 @@ const TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST = new Set<string>([
     ],
     CURRENT_RESOLVED_CONFIG_SECRET_SUFFIXES,
   ),
+  ...buildAllowedSecretPaths(
+    [
+      "serialized job input.diagnostics",
+      "job payload sent to container.job.diagnostics",
+      "child stdin payload.job.diagnostics",
+    ],
+    ["workspaceSnapshotPathHashSecret"],
+  ),
 ]);
 
 afterEach(() => {
@@ -185,10 +193,18 @@ it("guards hosted runner job JSON and child launch surfaces against unreviewed s
     isTypeScriptChild: true,
     launcherDirectories: createLauncherDirectories("/tmp/hosted-runner-launch"),
   });
-  const job = createWorkspaceJob(runtime);
+  const job = createWorkspaceJob(runtime, {
+    workspaceSnapshotPathHashSecret: "a".repeat(64),
+  });
   const serializedJobInput = JSON.stringify(job);
   const containerRequestBody = await serializeContainerRequestBody(job);
   const childLaunch = await serializeChildStdinPayload(job);
+  expect(serializedJobInput).not.toContain(configSource.HOSTED_LOG_FINGERPRINT_SECRET);
+  expect(containerRequestBody).not.toContain(configSource.HOSTED_LOG_FINGERPRINT_SECRET);
+  expect(childLaunch.stdinPayload).not.toContain(configSource.HOSTED_LOG_FINGERPRINT_SECRET);
+  expect(serializedJobInput).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
+  expect(containerRequestBody).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
+  expect(childLaunch.stdinPayload).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
   const scannedSurfaces = {
     "actual isolated child env": childLaunch.childEnv,
     "direct child env": childProcessEnv,
@@ -264,8 +280,10 @@ function createReasonablyAvailableRunnerSecrets(): Record<string, string> {
 
 function createWorkspaceJob(
   runtime: HostedExecutionWorkspaceInvocationJobInput["runtime"],
+  diagnostics?: HostedExecutionWorkspaceInvocationJobInput["diagnostics"],
 ): HostedExecutionWorkspaceInvocationJobInput {
   return {
+    ...(diagnostics ? { diagnostics } : {}),
     kind: "workspace-invocation",
     request: {
       attemptId: "attempt_secret_invariant",

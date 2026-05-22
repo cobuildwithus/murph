@@ -152,6 +152,42 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
   });
 
+  it("passes a derived snapshot path diagnostics key without forwarding the raw log secret", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const logFingerprintSecret = "fixture-log-fingerprint-secret";
+    const { invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        HOSTED_LOG_FINGERPRINT_SECRET: logFingerprintSecret,
+      },
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_completed",
+      runtimeStatus: "idle",
+    });
+
+    const job = invoke.mock.calls[0]?.[0].job;
+    expect(job?.diagnostics?.workspaceSnapshotPathHashSecret).toMatch(/^[a-f0-9]{64}$/u);
+    expect(job?.diagnostics?.workspaceSnapshotPathHashSecret).not.toBe(logFingerprintSecret);
+    expect(job?.runtime?.forwardedEnv?.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
+    expect(job?.runtime?.platformEnv?.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
+    expect(job?.runtime?.userEnv?.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
+    expect(JSON.stringify(job)).not.toContain(logFingerprintSecret);
+  });
+
   it("accepts runtime processing start before the invocation reaches idle", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -965,6 +1001,7 @@ function createRunnerHarness(input: {
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
   onWorkspaceRead?: () => Promise<void> | void;
+  runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
@@ -1028,7 +1065,7 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "60000",
     })),
     input.bucket ?? new MemoryEncryptedR2Bucket(),
-    TEST_RUNNER_RUNTIME_ENV_SOURCE,
+    input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     input.runnerContainerNamespace === undefined
       ? namespace
       : input.runnerContainerNamespace,
