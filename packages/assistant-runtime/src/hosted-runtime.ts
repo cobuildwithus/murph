@@ -57,6 +57,12 @@ import {
   type HostedWorkspaceRunnerResult,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_GRACE_MS,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON,
+  runHostedWorkspaceHousekeepingPhase,
+  scheduleLegacyWearableReceiptCompactionWakeIfNeeded,
+} from "./hosted-runtime/workspace-housekeeping.ts";
+import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
@@ -208,6 +214,8 @@ export type {
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhaseResult,
   HostedWorkspaceRunnerCheckpointRequestInput,
+  HostedWorkspaceRunnerHousekeepingPhaseInput,
+  HostedWorkspaceRunnerHousekeepingPhaseResult,
   HostedWorkspaceRunnerInput,
   HostedWorkspaceRunnerPlatform,
   HostedWorkspaceRunnerResult,
@@ -218,6 +226,22 @@ export {
   HostedWorkspaceRunnerUserMismatchError,
   runHostedWorkspaceUntilIdleOrBudget,
 };
+export {
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_GRACE_MS,
+  HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON,
+  hasFreshHostedHousekeepingConversationInput,
+  isLegacyWearableReceiptCompactionWakeDue,
+  runHostedWorkspaceHousekeepingPhase,
+  scheduleLegacyWearableReceiptCompactionWakeForDetection,
+  scheduleLegacyWearableReceiptCompactionWakeIfNeeded,
+} from "./hosted-runtime/workspace-housekeeping.ts";
+export type {
+  HostedWorkspaceHousekeepingPhaseInput,
+  HostedWorkspaceHousekeepingPhaseResult,
+  HostedWorkspaceWakeProjection,
+  ScheduleLegacyWearableReceiptCompactionWakeInput,
+  ScheduleLegacyWearableReceiptCompactionWakeResult,
+} from "./hosted-runtime/workspace-housekeeping.ts";
 export {
   createHostedConversationMailboxImportItem,
 };
@@ -658,6 +682,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtimeEnv,
                     signal: runtimeAbortController.signal,
                   }),
+                runHousekeepingPhase: (phaseInput) =>
+                  runHostedWorkspaceHousekeepingPhase({
+                    ...phaseInput,
+                    rescheduleDelayMs:
+                      idleCheckpointDelayMs
+                      + HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_GRACE_MS,
+                  }),
                 workspace: passInput.workspace,
               }),
           ),
@@ -769,10 +800,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (result.runtimeStateDirty) {
         markIdleCheckpointDeadlineAfterDirtyWork();
       }
-      let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
-        mailboxBudgetExhausted: mailboxBudgetExhausted(),
+      let accumulatedProjection = await scheduleLegacyWearableReceiptCompactionAfterFreshForeground({
+        idleCheckpointDelayMs,
+        projection: buildHostedWorkspaceInvocationProjection({
+          mailboxBudgetExhausted: mailboxBudgetExhausted(),
+          result,
+          workspace: workspaceRead.workspace,
+        }),
         result,
-        workspace: workspaceRead.workspace,
+        vaultRoot: restored.vaultRoot,
       });
       let servicedProjectedRuntimeWakeKey: string | null = null;
       const runIdleWakeForegroundPass = async (wakeInput: {
@@ -795,10 +831,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (result.runtimeStateDirty) {
           markIdleCheckpointDeadlineAfterDirtyWork();
         }
-        const nextProjection = buildHostedWorkspaceInvocationProjection({
-          mailboxBudgetExhausted: mailboxBudgetExhausted(),
+        const nextProjection = await scheduleLegacyWearableReceiptCompactionAfterFreshForeground({
+          idleCheckpointDelayMs,
+          projection: buildHostedWorkspaceInvocationProjection({
+            mailboxBudgetExhausted: mailboxBudgetExhausted(),
+            result,
+            workspace: passWorkspace,
+          }),
           result,
-          workspace: passWorkspace,
+          vaultRoot: restored.vaultRoot,
         });
         accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
           accumulatedProjection,
@@ -923,10 +964,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           idleCheckpointStartByMs = result.runtimeStateDirty
             ? Date.now() + idleCheckpointDelayMs
             : null;
-          const nextProjection = buildHostedWorkspaceInvocationProjection({
-            mailboxBudgetExhausted: mailboxBudgetExhausted(),
+          const nextProjection = await scheduleLegacyWearableReceiptCompactionAfterFreshForeground({
+            idleCheckpointDelayMs,
+            projection: buildHostedWorkspaceInvocationProjection({
+              mailboxBudgetExhausted: mailboxBudgetExhausted(),
+              result,
+              workspace: checkpoint.workspace,
+            }),
             result,
-            workspace: checkpoint.workspace,
+            vaultRoot: restored.vaultRoot,
           });
           accumulatedProjection = {
             ...nextProjection,
@@ -1246,12 +1292,23 @@ function buildHostedWorkspaceInvocationProjection(input: {
     ?? input.workspace;
   const effectiveMailboxImport = input.result.latestMailboxImport;
   const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
-  const nextWake = resolveHostedWorkspaceRunNextWake({
-    assistantPhaseResult: input.result.assistantPhaseResult,
-    committedWorkspace,
-    mailboxImportRetryAt,
-    nowMs: projectionNowMs,
-  });
+  const nextWake = input.result.housekeepingPhaseResult?.handled === true
+    ? selectEarliestHostedRuntimeWake([
+        {
+          at: input.result.housekeepingPhaseResult.nextWakeAt,
+          reason: input.result.housekeepingPhaseResult.nextWakeReason,
+        },
+        {
+          at: mailboxImportRetryAt,
+          reason: mailboxImportRetryAt ? "mailbox" : null,
+        },
+      ])
+    : resolveHostedWorkspaceRunNextWake({
+        assistantPhaseResult: input.result.assistantPhaseResult,
+        committedWorkspace,
+        mailboxImportRetryAt,
+        nowMs: projectionNowMs,
+      });
   const mailboxRedactedStatus = buildHostedMailboxImportRedactedStatus(
     effectiveMailboxImport.importResult,
   );
@@ -1259,6 +1316,9 @@ function buildHostedWorkspaceInvocationProjection(input: {
     ...mailboxRedactedStatus,
     ...(input.result.assistantPhaseResult?.progressed === true
       ? input.result.assistantPhaseResult.redactedStatus ?? {}
+      : {}),
+    ...(input.result.housekeepingPhaseResult?.handled === true
+      ? input.result.housekeepingPhaseResult.redactedStatus ?? {}
       : {}),
     hostedMailboxConversationImportedSeq:
       mailboxRedactedStatus["hostedMailboxConversationImportedSeq"],
@@ -1312,6 +1372,42 @@ function mergeHostedWorkspaceInvocationProjection(
     status: options.replaceWake
       ? next.status
       : mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
+  };
+}
+
+async function scheduleLegacyWearableReceiptCompactionAfterFreshForeground(input: {
+  idleCheckpointDelayMs: number;
+  projection: HostedWorkspaceInvocationProjection;
+  result: HostedWorkspaceRunnerResult;
+  vaultRoot: string;
+}): Promise<HostedWorkspaceInvocationProjection> {
+  if (
+    !input.result.runtimeStateDirty
+    || input.result.housekeepingPhaseResult?.handled === true
+  ) {
+    return input.projection;
+  }
+
+  const scheduled = await scheduleLegacyWearableReceiptCompactionWakeIfNeeded({
+    idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+    projection: input.projection,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!scheduled.changed) {
+    return input.projection;
+  }
+
+  return {
+    ...input.projection,
+    nextWakeAt: scheduled.projection.nextWakeAt,
+    nextWakeReason: scheduled.projection.nextWakeReason,
+    redactedStatus: {
+      ...input.projection.redactedStatus,
+      legacyWearableReceiptCompactionWakeScheduled: true,
+    },
+    status: input.projection.status === "budget_exhausted"
+      ? "budget_exhausted"
+      : "scheduled",
   };
 }
 

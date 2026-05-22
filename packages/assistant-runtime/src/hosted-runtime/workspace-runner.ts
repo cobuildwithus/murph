@@ -145,6 +145,13 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   workspace: HostedWorkspaceState | null;
 }
 
+export interface HostedWorkspaceRunnerHousekeepingPhaseInput {
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  now?: () => string;
+  vaultRoot: string;
+  workspace: HostedWorkspaceState | null;
+}
+
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   nextWakeAt?: string | null;
@@ -161,6 +168,18 @@ export type HostedWorkspaceRunnerAssistantPhaseResult =
       checkpointReason?: never;
       progressed?: false;
     });
+
+export type HostedWorkspaceRunnerHousekeepingPhaseResult =
+  | {
+      handled: false;
+    }
+  | {
+      handled: true;
+      nextWakeAt: string | null;
+      nextWakeReason: string | null;
+      redactedStatus?: HostedRuntimeRedactedJson | null;
+      runtimeStateDirty: boolean;
+    };
 
 export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   checkpointReason: HostedWorkspaceCheckpointReason;
@@ -190,6 +209,9 @@ export interface HostedWorkspaceRunnerInput {
   runAssistantPhase?: (
     input: HostedWorkspaceRunnerAssistantPhaseInput,
   ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
+  runHousekeepingPhase?: (
+    input: HostedWorkspaceRunnerHousekeepingPhaseInput,
+  ) => Promise<HostedWorkspaceRunnerHousekeepingPhaseResult>;
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
   now?: () => string;
@@ -215,6 +237,7 @@ const HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS = 15_000;
 
 export interface HostedWorkspaceRunnerResult {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+  housekeepingPhaseResult: HostedWorkspaceRunnerHousekeepingPhaseResult | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
@@ -333,6 +356,36 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
   markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
+
+  const housekeepingPhaseResult = input.runHousekeepingPhase
+    ? await input.runHousekeepingPhase({
+        initialMailboxImport,
+        now: input.now,
+        vaultRoot: input.vaultRoot,
+        workspace: input.workspace,
+      })
+    : null;
+  if (housekeepingPhaseResult?.handled === true) {
+    if (housekeepingPhaseResult.runtimeStateDirty) {
+      checkpointRequestSession.markRuntimeStateDirty();
+    }
+    await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      input,
+    });
+    return {
+      assistantPhaseResult: null,
+      housekeepingPhaseResult,
+      initialMailboxImport,
+      latestMailboxImport: checkpointRequestSession.latestMailboxImport()
+        ?? initialMailboxImport,
+      latestWorkspace: checkpointRequestSession.latestWorkspace()
+        ?? initialMailboxImport.checkpoint?.workspace
+        ?? input.workspace,
+      runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
+    };
+  }
+
   if (input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -348,6 +401,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
     return {
       assistantPhaseResult: null,
+      housekeepingPhaseResult,
       initialMailboxImport,
       latestMailboxImport: checkpointRequestSession.latestMailboxImport()
         ?? initialMailboxImport,
@@ -454,6 +508,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
   return {
     assistantPhaseResult,
+    housekeepingPhaseResult,
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
       ?? initialMailboxImport,
