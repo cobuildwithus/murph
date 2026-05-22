@@ -16,3 +16,7 @@ export const HOSTED_RUNTIME_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
 export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =
   "/api/internal/hosted-execution/issues/record";
+export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
+  "/api/internal/device-sync/recovery-sweep";
+export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =
+  "hosted-device-sync-reconciler";

@@ -88,7 +88,7 @@ describe("hosted runtime Temporal worker", () => {
     }));
     const workerOptions = readCreatedWorkerOptions();
     expect(String(workerOptions.workflowsPath)).toMatch(
-      /workflows\/hosted-user-runtime\.(?:js|ts)$/u,
+      /workflows\/index\.(?:js|ts)$/u,
     );
     expect(workerOptions.workflowBundle).toBeUndefined();
     expect(workerOptions.shutdownGraceTime).toBeUndefined();

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { bundleWorkflowCode } from "@temporalio/worker";
 
 const workflowsPath = fileURLToPath(
-  new URL("../workflows/hosted-user-runtime.js", import.meta.url),
+  new URL("../workflows/index.js", import.meta.url),
 );
 const workflowBundlePath = fileURLToPath(
   new URL("../workflow-bundle.js", import.meta.url),

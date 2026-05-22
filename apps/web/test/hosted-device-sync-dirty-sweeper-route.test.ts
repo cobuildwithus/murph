@@ -98,7 +98,7 @@ describe("hosted device-sync dirty sweeper cron route", () => {
       expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedDeviceSyncDueReconcileSweeper).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync sweeper cron failed.",
+        "Hosted device-sync recovery sweep failed.",
         expect.objectContaining({
           dirtySweeperErrorName: "Error",
           dirtySweeperFailed: true,
@@ -128,7 +128,7 @@ describe("hosted device-sync dirty sweeper cron route", () => {
       expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedDeviceSyncDueReconcileSweeper).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync sweeper cron failed.",
+        "Hosted device-sync recovery sweep failed.",
         expect.objectContaining({
           dirtySweeperErrorName: null,
           dirtySweeperFailed: false,
@@ -166,7 +166,7 @@ describe("hosted device-sync dirty sweeper cron route", () => {
       expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedDeviceSyncDueReconcileSweeper).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync sweeper cron failed.",
+        "Hosted device-sync recovery sweep failed.",
         expect.objectContaining({
           dirtySweeperFailed: false,
           dirtyWakeAppendFailed: true,
@@ -203,7 +203,7 @@ describe("hosted device-sync dirty sweeper cron route", () => {
       expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedDeviceSyncDueReconcileSweeper).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync sweeper cron failed.",
+        "Hosted device-sync recovery sweep failed.",
         expect.objectContaining({
           dirtySweeperFailed: false,
           dirtyWakeAppendFailed: false,
@@ -232,7 +232,7 @@ describe("hosted device-sync dirty sweeper cron route", () => {
       expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
       expect(mocks.runHostedDeviceSyncDueReconcileSweeper).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        "Hosted device-sync sweeper cron failed.",
+        "Hosted device-sync recovery sweep failed.",
         expect.objectContaining({
           dirtySweeperErrorName: "Error",
           dirtySweeperFailed: true,

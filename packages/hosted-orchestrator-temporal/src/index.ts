@@ -34,9 +34,17 @@ export type {
 } from "@murphai/hosted-execution/orchestration-control";
 
 export type {
+  HostedDeviceSyncReconcilerWorkflowInput,
+  HostedDeviceSyncReconcilerWorkflowOptions,
   HostedUserRuntimeWorkflowCarryForwardState,
   HostedUserRuntimeWorkflowInput,
   HostedUserRuntimeWorkflowOptions,
+} from "./workflow-types.js";
+export {
+  HOSTED_DEVICE_SYNC_RECONCILER_DEFAULT_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+  HOSTED_DEVICE_SYNC_RECONCILER_MAX_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+  HOSTED_DEVICE_SYNC_RECONCILER_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+  HOSTED_DEVICE_SYNC_RECONCILER_WORKFLOW_TYPE,
 } from "./workflow-types.js";
 
 export {

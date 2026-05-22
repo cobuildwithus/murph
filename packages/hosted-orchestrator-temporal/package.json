@@ -27,6 +27,10 @@
       "types": "./dist/client/temporal-client.d.ts",
       "default": "./dist/client/temporal-client.js"
     },
+    "./client/device-sync-reconciler-schedule": {
+      "types": "./dist/client/device-sync-reconciler-schedule.d.ts",
+      "default": "./dist/client/device-sync-reconciler-schedule.js"
+    },
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"
@@ -34,6 +38,10 @@
     "./workflows/hosted-user-runtime": {
       "types": "./dist/workflows/hosted-user-runtime.d.ts",
       "default": "./dist/workflows/hosted-user-runtime.js"
+    },
+    "./workflows/hosted-device-sync-reconciler": {
+      "types": "./dist/workflows/hosted-device-sync-reconciler.d.ts",
+      "default": "./dist/workflows/hosted-device-sync-reconciler.js"
     }
   },
   "files": [
@@ -42,6 +50,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json && node dist/scripts/build-workflow-bundle.js",
+    "temporal:ensure-device-sync-reconciler-schedule": "pnpm exec tsx --tsconfig ../../tsconfig.base.json src/scripts/ensure-device-sync-reconciler-schedule.ts",
     "temporal:worker": "pnpm exec tsx --tsconfig ../../tsconfig.base.json src/worker.ts",
     "temporal:worker:prod": "NODE_ENV=production node dist/worker.js",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",

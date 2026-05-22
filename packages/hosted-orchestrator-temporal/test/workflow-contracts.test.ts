@@ -3,11 +3,15 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_DEVICE_SYNC_RECONCILER_WORKFLOW_TYPE,
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
 } from "../src/index.js";
+import {
+  hostedDeviceSyncReconcilerWorkflow,
+} from "../src/workflows/hosted-device-sync-reconciler.js";
 import {
   hostedUserRuntimeWorkflow,
   runtimeSignal,
@@ -24,12 +28,19 @@ describe("hosted runtime workflow contracts", () => {
     expect(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME).toBe(
       "runtimeWorkflowStatus",
     );
+    expect(HOSTED_DEVICE_SYNC_RECONCILER_WORKFLOW_TYPE).toBe(
+      "hostedDeviceSyncReconcilerWorkflow",
+    );
   });
 
   it("exposes the workflow, signal, and query definitions", () => {
     expect(hostedUserRuntimeWorkflow).toEqual(expect.any(Function));
     expect(HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe(
       hostedUserRuntimeWorkflow.name,
+    );
+    expect(hostedDeviceSyncReconcilerWorkflow).toEqual(expect.any(Function));
+    expect(HOSTED_DEVICE_SYNC_RECONCILER_WORKFLOW_TYPE).toBe(
+      hostedDeviceSyncReconcilerWorkflow.name,
     );
     expect(runtimeSignal).toBeDefined();
     expect(runtimeWorkflowStatus).toBeDefined();
