@@ -1210,7 +1210,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['experiment', 'start'],
         description:
-          'Start a typed experiment run from a Health Commons protocol or as an explicit custom experiment.',
+          'Start a typed experiment run from a Health Commons protocol; custom runs require explicit no-public-protocol fallback.',
       },
       {
         path: ['experiment', 'show'],

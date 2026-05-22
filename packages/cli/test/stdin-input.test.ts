@@ -174,6 +174,7 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
       'start',
       'sleep-reset',
       '--custom',
+      '--no-public-protocol',
       '--title',
       'Sleep Reset Sprint',
       '--hypothesis',

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   EVENT_SOURCES,
   EXPERIMENT_STATUSES,
@@ -77,6 +78,24 @@ const experimentFollowupReasonSchema = z.enum([
   'weekly_digest_not_due',
   'weekly_digest_due',
 ])
+const experimentCommandArgvStorage = new AsyncLocalStorage<readonly string[]>()
+const experimentCommandArgvInstalled = new WeakSet<Cli.Cli>()
+
+function installExperimentCommandArgvContext(cli: Cli.Cli): void {
+  if (experimentCommandArgvInstalled.has(cli)) {
+    return
+  }
+
+  const serve = cli.serve.bind(cli)
+  cli.serve = async (argv = process.argv.slice(2), options = {}) =>
+    experimentCommandArgvStorage.run([...argv], () => serve(argv, options))
+  experimentCommandArgvInstalled.add(cli)
+}
+
+function currentCommandIncludesFlag(flag: string): boolean {
+  return experimentCommandArgvStorage.getStore()?.includes(flag) === true
+}
+
 type ProtocolVariantEntity = HealthCommonsCatalogEntity & {
   entityType: 'protocol_variant'
   testPlans: HealthCommonsTestPlan[]
@@ -474,6 +493,7 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
     body?: string
     fromProtocol?: string
     custom?: boolean
+    publicProtocol?: boolean
     testPlanId?: string
     pageRevisionId?: string
     runSpecRevisionId?: string
@@ -517,10 +537,32 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
     )
   }
 
+  const noPublicProtocolFallback = input.options.publicProtocol === false
+  const explicitNoPublicProtocolFallback = currentCommandIncludesFlag('--no-public-protocol')
+  const explicitCustomFallback =
+    custom &&
+    noPublicProtocolFallback &&
+    currentCommandIncludesFlag('--custom') &&
+    explicitNoPublicProtocolFallback
+
+  if (explicitNoPublicProtocolFallback && !custom) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--no-public-protocol is only valid with --custom.',
+    )
+  }
+
   if (fromProtocol === undefined && !custom) {
     throw new VaultCliError(
       'invalid_option',
-      'experiment start must choose a source: use --from-protocol <key-or-route> for a Health Commons protocol-backed run, or --custom for an intentionally unlinked custom experiment.',
+      'experiment start must choose a source: use --from-protocol <key-or-route> for a Health Commons protocol-backed run. Only use --custom --no-public-protocol after Health Commons has no matching public protocol.',
+    )
+  }
+
+  if (custom && !explicitCustomFallback) {
+    throw new VaultCliError(
+      'invalid_option',
+      'custom experiment starts are disabled by default. Use --from-protocol <key-or-route> for protocol-backed runs, or include --custom --no-public-protocol in this command only after `vault-cli commons protocol explore <query> --format json` has no relevant public protocol. Config defaults do not count for this fallback.',
     )
   }
 
@@ -1111,13 +1153,15 @@ export function registerExperimentCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
+  installExperimentCommandArgvContext(cli)
+
   const experiment = Cli.create('experiment', {
     description: 'Experiment bank commands routed through the core write and query APIs.',
   })
 
   experiment.command('start', {
     description:
-      'Start a typed experiment run from a Health Commons protocol or as an explicit custom experiment.',
+      'Start a typed experiment run from a Health Commons protocol; custom runs require explicit no-public-protocol fallback.',
     args: z.object({
       slug: slugSchema,
     }),
@@ -1132,13 +1176,19 @@ export function registerExperimentCommands(
         .min(1)
         .optional()
         .describe(
-          'Health Commons protocol_variant key or experiment route id. Choose this instead of --custom; experiment start requires exactly one source.',
+          'Health Commons protocol_variant key or experiment route id. This is the default experiment-start path whenever a public protocol exists.',
         ),
       custom: z
         .boolean()
         .optional()
         .describe(
-          'Start an intentionally unlinked custom experiment. Choose this instead of --from-protocol; experiment start requires exactly one source.',
+          'Fallback for an intentionally unlinked custom experiment. Requires --no-public-protocol and should only follow a Health Commons protocol search/explore with no relevant match.',
+        ),
+      publicProtocol: z
+        .boolean()
+        .optional()
+        .describe(
+          'Protocol-first guard for experiment starts. Pass --no-public-protocol with --custom in the current command only after confirming no relevant public Health Commons protocol is available; config defaults do not count.',
         ),
       testPlanId: z
         .string()

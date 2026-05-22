@@ -8884,12 +8884,16 @@
                           "minLength": 1
                         },
                         "fromProtocol": {
-                          "description": "Health Commons protocol_variant key or experiment route id. Choose this instead of --custom; experiment start requires exactly one source.",
+                          "description": "Health Commons protocol_variant key or experiment route id. This is the default experiment-start path whenever a public protocol exists.",
                           "type": "string",
                           "minLength": 1
                         },
                         "custom": {
-                          "description": "Start an intentionally unlinked custom experiment. Choose this instead of --from-protocol; experiment start requires exactly one source.",
+                          "description": "Fallback for an intentionally unlinked custom experiment. Requires --no-public-protocol and should only follow a Health Commons protocol search/explore with no relevant match.",
+                          "type": "boolean"
+                        },
+                        "publicProtocol": {
+                          "description": "Protocol-first guard for experiment starts. Pass --no-public-protocol with --custom in the current command only after confirming no relevant public Health Commons protocol is available; config defaults do not count.",
                           "type": "boolean"
                         },
                         "testPlanId": {

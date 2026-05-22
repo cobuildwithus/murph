@@ -638,12 +638,17 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '--planned-measurement role=followup,kind=lab_panel,window=<YYYY-MM-DD>..<YYYY-MM-DD>,biomarkerKeys=<biomarker:key>',
     )
-    expect(prompt).toContain('vault-cli experiment start <slug> --custom')
+    expect(prompt).toContain(
+      'vault-cli experiment start <slug> --custom --no-public-protocol',
+    )
     expect(prompt).not.toContain('vault-cli experiment start <slug> --protocol-key')
     expect(prompt).toContain('vault-cli experiment edit <id>')
     expect(prompt).toContain('--dry-run --format json')
     expect(prompt).toContain('using typed flags only')
-    expect(prompt).toContain('Prefer protocol-linked runs.')
+    expect(prompt).toContain('Always prefer protocol-linked runs.')
+    expect(prompt).toContain(
+      'Do not create an unlinked/private/custom experiment when a same-family public protocol exists',
+    )
     expect(prompt).toContain(
       'If the user\'s plan is a variant of an existing public protocol or protocol family',
     )
