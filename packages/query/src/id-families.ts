@@ -126,7 +126,7 @@ export const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
     prefix: "xfm_",
     queryable: false,
     lookupConstraint:
-      "Transform ids identify an import batch, not a query-layer record. Use the returned lookupIds or `list --kind sample` instead.",
+      "Transform ids identify an import batch, not a query-layer record. Use returned sample ids with `samples show` or inspect them with `samples list` instead.",
   },
   {
     family: "pack",

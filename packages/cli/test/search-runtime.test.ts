@@ -29,6 +29,10 @@ interface RetrievalFixture {
   vaultRoot: string
 }
 
+interface MetricRetrievalFixture extends RetrievalFixture {
+  metricSampleId: string
+}
+
 async function makeCanonicalHealthFixture(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-canonical-'))
 
@@ -86,9 +90,10 @@ Reduce sleep latency and improve recovery.
   return vaultRoot
 }
 
-async function makeRetrievalFixture(): Promise<RetrievalFixture> {
+async function makeRetrievalFixture(): Promise<MetricRetrievalFixture> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-retrieval-'))
   const csvPath = path.join(vaultRoot, 'heart-rate.csv')
+  const metricSampleId = 'smp_cli_metric_heart_rate_summary'
 
   await writeFile(
     csvPath,
@@ -165,9 +170,30 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
   assert.equal(samplesResult.ok, true)
   assert.equal(requireData(samplesResult).lookupIds.length, 2)
 
+  await writeVaultFile(
+    vaultRoot,
+    'ledger/metric-samples/heart_rate/2026/2026-03.jsonl',
+    [
+      JSON.stringify({
+        schemaVersion: 'murph.metric-sample.v1',
+        id: metricSampleId,
+        metric: 'heart_rate',
+        recordedAt: '2026-03-12T21:00:00.000Z',
+        dayKey: '2026-03-12',
+        source: 'manual',
+        quality: 'normalized',
+        qualifiers: { summary: true },
+        value: 69,
+        unit: 'bpm',
+      }),
+      '',
+    ].join('\n'),
+  )
+
   return {
     journalPath: requireData(journalResult).journalPath,
     mealId: requireData(mealResult).mealId,
+    metricSampleId,
     vaultRoot,
   }
 }
@@ -443,7 +469,7 @@ Afternoon crash after pasta lunch returned.
   }
 })
 
-test('search includes sample rows when the caller scopes by stream', async () => {
+test('search includes query-visible metric sample rows when the caller scopes by stream', async () => {
   const fixture = await makeRetrievalFixture()
 
   try {
@@ -467,7 +493,10 @@ test('search includes sample rows when the caller scopes by stream', async () =>
     assert.equal(result.ok, true)
     assert.equal(
       requireData(result).hits.some(
-        (hit) => hit.recordType === 'sample' && hit.stream === 'heart_rate',
+        (hit) =>
+          hit.recordId === fixture.metricSampleId &&
+          hit.recordType === 'sample' &&
+          hit.stream === 'heart_rate',
       ),
       true,
     )
@@ -476,7 +505,7 @@ test('search includes sample rows when the caller scopes by stream', async () =>
   }
 })
 
-test('timeline merges journals, events, and sample summaries into one descending feed', async () => {
+test('timeline merges journals, events, and metric sample summaries into one descending feed', async () => {
   const fixture = await makeRetrievalFixture()
 
   try {
@@ -578,7 +607,10 @@ test('query projection status and rebuild expose the shared local projection wit
     assert.equal(indexedSearch.ok, true)
     assert.equal(
       requireData(indexedSearch).hits.some(
-        (hit) => hit.recordType === 'sample' && hit.stream === 'heart_rate',
+        (hit) =>
+          hit.recordId === fixture.metricSampleId &&
+          hit.recordType === 'sample' &&
+          hit.stream === 'heart_rate',
       ),
       true,
     )

@@ -304,6 +304,7 @@ test('goal list keeps status-only filters canonical', async () => {
 test('generic list exposes record-type, status, stream, and tag filter parity', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const csvPath = path.join(vaultRoot, 'samples.csv')
+  const metricSampleId = 'smp_cli_list_metric_heart_rate_summary'
   const experimentPath = path.join(
     vaultRoot,
     'bank/experiments/sleep-window.md',
@@ -371,6 +372,29 @@ test('generic list exposes record-type, status, stream, and tag filter parity', 
     ], options)
     assert.equal(importResult.ok, true)
     assert.equal(requireData(importResult).importedCount, 2)
+
+    await mkdir(path.join(vaultRoot, 'ledger/metric-samples/heart_rate/2026'), {
+      recursive: true,
+    })
+    await writeFile(
+      path.join(vaultRoot, 'ledger/metric-samples/heart_rate/2026/2026-03.jsonl'),
+      [
+        JSON.stringify({
+          schemaVersion: 'murph.metric-sample.v1',
+          id: metricSampleId,
+          metric: 'heart_rate',
+          recordedAt: '2026-03-12T21:00:00.000Z',
+          dayKey: '2026-03-12',
+          source: 'manual',
+          quality: 'normalized',
+          qualifiers: { summary: true },
+          value: 69,
+          unit: 'bpm',
+        }),
+        '',
+      ].join('\n'),
+      'utf8',
+    )
 
     const experimentList = await runSourceCli<{
       filters: {
@@ -446,9 +470,29 @@ test('generic list exposes record-type, status, stream, and tag filter parity', 
       'heart_rate',
       'glucose',
     ])
-    assert.equal(requireData(sampleList).items.length, 2)
+    assert.deepEqual(
+      requireData(sampleList).items.map((item) => [item.id, item.kind]),
+      [[metricSampleId, 'metric_sample']],
+    )
+
+    const rawSampleList = await runSourceCli<{
+      count: number
+      items: Array<{
+        id: string
+        kind: string
+      }>
+    }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ], options)
+    assert.equal(rawSampleList.ok, true)
+    assert.equal(requireData(rawSampleList).count, 2)
     assert.equal(
-      requireData(sampleList).items.every((item) => item.kind === 'sample'),
+      requireData(rawSampleList).items.every((item) => item.kind === 'sample'),
       true,
     )
   } finally {
