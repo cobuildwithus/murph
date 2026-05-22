@@ -64,7 +64,7 @@ type ConnectSourceConnectionState = {
   connectProvider: string | null;
   connectTarget: string | null;
   sourceId: string;
-  state: "active" | "reauthorization_required";
+  state: "active" | "disconnected" | "reauthorization_required";
 };
 
 const CONNECT_SOURCE_UI = {
@@ -255,13 +255,13 @@ export default async function ConnectPage({
         const sourceId = connection.sourceId;
         if (connection.state === "active") {
           connectedSourceIds.add(sourceId);
-        } else if (connection.state === "reauthorization_required") {
+        } else if (isReconnectableConnectSourceState(connection.state)) {
           reconnectSourceIds.add(sourceId);
         }
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
         }
-        if (connection.state === "reauthorization_required") {
+        if (isReconnectableConnectSourceState(connection.state)) {
           if (connection.connectProvider) {
             reconnectProviderBySourceId.set(sourceId, connection.connectProvider);
           }
@@ -427,7 +427,7 @@ function resolveConnectSourceConnectionMatches(
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
     const sourceState = source.state === "active" || (
       options.includeReauthorizationRequired === true
-      && source.state === "reauthorization_required"
+      && isReconnectableConnectSourceState(source.state)
     )
       ? source.state
       : null;
@@ -508,7 +508,17 @@ function compareConnectSourceStatePriority(
 }
 
 function connectSourceStatePriority(state: ConnectSourceConnectionState["state"]): number {
-  return state === "active" ? 2 : 1;
+  if (state === "active") {
+    return 3;
+  }
+
+  return state === "reauthorization_required" ? 2 : 1;
+}
+
+function isReconnectableConnectSourceState(
+  state: HostedDeviceSyncSettingsSource["state"] | ConnectSourceConnectionState["state"],
+): state is "disconnected" | "reauthorization_required" {
+  return state === "disconnected" || state === "reauthorization_required";
 }
 
 function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): ConnectCallbackInput {

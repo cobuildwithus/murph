@@ -677,6 +677,33 @@ test("ConnectPage surfaces reauthorization-required sources as reconnectable", a
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
+test("ConnectPage surfaces disconnected sources as reconnectable", async () => {
+  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_whoop_123",
+        provider: "whoop",
+        state: "disconnected",
+        upstreamSources: [],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Whoop needs reconnect/);
+  assert.match(markup, /data-connection-state="needs-access"/u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
+});
+
 test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
@@ -686,6 +713,12 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
         connectionId: "dsc_whoop_reauth",
         provider: "whoop",
         state: "reauthorization_required",
+        upstreamSources: [],
+      },
+      {
+        connectionId: "dsc_whoop_disconnected",
+        provider: "whoop",
+        state: "disconnected",
         upstreamSources: [],
       },
       {
@@ -782,7 +815,7 @@ test("resolveConnectedConnectSourceConnections carries connection ids for direct
   );
 });
 
-test("ConnectPage ignores stale Junction upstream sources when the parent connection is not active", async () => {
+test("ConnectPage treats disconnected Junction sources as reconnectable", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
   vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -811,8 +844,8 @@ test("ConnectPage ignores stale Junction upstream sources when the parent connec
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.match(markup, /Oura not connected/);
-  assert.match(markup, /aria-label="Connect Oura"/u);
+  assert.match(markup, /Oura needs reconnect/);
+  assert.match(markup, /aria-label="Reconnect Oura"/u);
 });
 
 test("ConnectPage keeps configured sources visible but renders sign-in actions when signed out", async () => {

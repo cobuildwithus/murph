@@ -267,6 +267,32 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("offers reconnect for disconnected configured sources", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectTargets: [{
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "oura",
+        sourceProviderSlug: null,
+      }],
+      connections: [buildConnection({
+        lastSyncCompletedAt: "2026-03-28T07:00:00.000Z",
+        status: "disconnected",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      guidance: "Reconnect this source to resume syncing. Past history stays in place.",
+      headline: "Disconnected",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      secondaryAction: null,
+      state: "disconnected",
+      statusLabel: "Disconnected",
+    });
+  });
+
   it("uses the Junction reconnect target when direct and Junction targets share a visible source", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connectionSources: [{
