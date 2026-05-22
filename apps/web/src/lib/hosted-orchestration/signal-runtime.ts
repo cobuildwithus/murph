@@ -62,6 +62,7 @@ export interface SignalHostedMailboxAppendInput {
 export interface SignalHostedDeviceSyncRecoveryInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   eventId?: string | null;
+  occurredAt?: string | null;
   userId: string;
 }
 
@@ -130,6 +131,8 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
     client: input.client,
     eventId: input.eventId ?? null,
     kind: "runtime.device-sync-recovery-requested",
+    occurredAt: input.occurredAt ?? null,
+    runtimeSignalKind: "device_sync_recovery_requested",
     source: "device-sync-recovery",
     userId: input.userId,
   });
@@ -178,6 +181,7 @@ export async function signalHostedDeviceSyncMailboxRuntime(
         mailboxItemId: mailboxItem.id,
         recoveryIntent: input.recoveryIntent ?? null,
       }),
+      occurredAt: mailboxItem.occurredAt,
       userId: mailboxItem.userId,
     });
   }
@@ -200,16 +204,20 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
   eventId?: string | null;
   kind: HostedExecutionRuntimeControlWakeKind;
+  occurredAt?: string | null;
+  runtimeSignalKind?: "device_sync_recovery_requested" | null;
   source: string;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = getPrisma();
   await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
-  const occurredAt = new Date().toISOString();
+  const deterministicEventId = normalizeHostedRuntimeControlEventId(input.eventId);
+  const occurredAt = normalizeHostedRuntimeControlOccurredAt(input.occurredAt)
+    ?? (deterministicEventId ? HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT : new Date().toISOString());
   const mailboxItem = (await prisma.$transaction((tx) =>
     appendHostedMailboxEnvelopeTx({
       envelope: buildHostedExecutionRuntimeControlWake({
-        eventId: normalizeHostedRuntimeControlEventId(input.eventId)
+        eventId: deterministicEventId
           ?? `runtime-control:${input.kind}:${randomUUID()}`,
         kind: input.kind,
         occurredAt,
@@ -222,16 +230,22 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     ensureWorkspace: false,
-    signal: parseHostedRuntimeSignal({
-      kind: "mailbox_appended",
-      lane: mailboxItem.lane,
-      laneSeq: mailboxItem.laneSeq,
-      mailboxItemId: mailboxItem.id,
-      source: sanitizeHostedRuntimeSignalSource(input.source),
-    }),
+    signal: input.runtimeSignalKind === "device_sync_recovery_requested"
+      ? parseHostedRuntimeSignal({
+        kind: "device_sync_recovery_requested",
+      })
+      : parseHostedRuntimeSignal({
+        kind: "mailbox_appended",
+        lane: mailboxItem.lane,
+        laneSeq: mailboxItem.laneSeq,
+        mailboxItemId: mailboxItem.id,
+        source: sanitizeHostedRuntimeSignalSource(input.source),
+      }),
     userId: input.userId,
   });
 }
+
+const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
 
 function buildHostedDeviceSyncRecoveryRuntimeControlEventId(input: {
   mailboxItemId: string;
@@ -258,6 +272,18 @@ function normalizeHostedRuntimeControlEventId(
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeHostedRuntimeControlOccurredAt(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeHostedRuntimeControlEventId(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 export async function signalHostedUserRuntimeWorkflow(

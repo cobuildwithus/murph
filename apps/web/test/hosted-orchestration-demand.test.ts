@@ -303,6 +303,33 @@ describe("hosted orchestration demand", () => {
     );
   });
 
+  it("logs legacy wearable compaction wakes as maintenance metadata", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:58:00.000Z",
+      nextWakeReason: "legacy-wearable-receipt-compaction-v1",
+    }));
+
+    const response = await demandRoute.GET(
+      requestForDemand(),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(demand).toMatchObject({
+      kind: "run",
+      source: "workspace_wake",
+      workspace: {
+        nextWakeReason: "legacy-wearable-receipt-compaction-v1",
+      },
+    });
+    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy.mock.calls[0]?.[1]).toMatchObject({
+      workspaceNextWakeReason: "legacy-wearable-receipt-compaction-v1",
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
   it("can evaluate demand with a read-only usage gate for status diagnostics", async () => {
     const { readHostedRuntimeDemand } = await import(
       "@/src/lib/hosted-orchestration/runtime-demand"
