@@ -204,6 +204,9 @@ class HostedRuntimeControlPlaneFetchError extends Error {
   }
 }
 
+const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEP_MARKER =
+  "hostedWorkspaceSnapshotRestoreStep";
+
 export class HostedRuntimeInternalAuthorityRejectedError extends Error {
   readonly code = HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE;
   readonly reason = HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON;
@@ -1567,7 +1570,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         },
         step: "size_guard",
       });
-      const dataKey = await runHostedWorkspaceSnapshotRestoreStep({
+      const dataKey = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         run: async () => await unwrapWorkspaceSnapshotDataKey({
           aad: request.ref.encryption.aad,
@@ -1590,7 +1593,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
       });
       const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
       try {
-        const presignedGet = await runHostedWorkspaceSnapshotRestoreStep({
+        const presignedGet = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
           run: async () => {
             const result = await presignWorkspaceSnapshotGet({
@@ -1612,7 +1615,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
           },
           step: "presign_get",
         });
-        await runHostedWorkspaceSnapshotRestoreStep({
+        await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
           details: restoreLogDetails,
           run: async () => {
             const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
@@ -1669,13 +1672,23 @@ function createCloudflareWorkspaceSnapshotPort(input: {
   return port;
 }
 
-type HostedWorkspaceSnapshotRestoreStep =
+export type HostedWorkspaceSnapshotRestoreStep =
   | "archive_restore"
   | "data_key_unwrap"
   | "object_fetch"
   | "presign_get"
   | "scratch_prepare"
   | "size_guard";
+
+const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS =
+  new Set<HostedWorkspaceSnapshotRestoreStep>([
+    "archive_restore",
+    "data_key_unwrap",
+    "object_fetch",
+    "presign_get",
+    "scratch_prepare",
+    "size_guard",
+  ]);
 
 function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
   ref: HostedWorkspaceSnapshotV2Ref;
@@ -1691,6 +1704,59 @@ function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
     scratchRootPresent: input.scratchRootPresent,
     timeoutMs: input.timeoutMs,
   };
+}
+
+async function runHostedWorkspaceSnapshotRestoreReplaySafeReadStep<T>(input: {
+  details: HostedExecutionStructuredLogDetails;
+  run(): Promise<T>;
+  step: HostedWorkspaceSnapshotRestoreStep;
+}): Promise<T> {
+  let lastError: unknown;
+
+  for (
+    let attempt = 1;
+    attempt <= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS;
+    attempt += 1
+  ) {
+    const attemptDetails = {
+      ...input.details,
+      workspaceSnapshotRestoreAttempt: attempt,
+      workspaceSnapshotRestoreMaxAttempts: HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
+    };
+
+    try {
+      return await runHostedWorkspaceSnapshotRestoreStep({
+        ...input,
+        details: attemptDetails,
+      });
+    } catch (error) {
+      lastError = error;
+      const retrying = shouldRetryHostedRuntimeReplaySafeRead({
+        attempt,
+        error,
+      });
+      if (!retrying) {
+        throw error;
+      }
+
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.workspace-snapshot",
+        details: {
+          ...attemptDetails,
+          retrying,
+          workspaceSnapshotRestoreStep: input.step,
+          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        },
+        level: "warn",
+        message: "Hosted workspace snapshot restore read step failed; retrying.",
+        phase: "runtime.starting",
+        userId: null,
+      });
+      await sleepHostedReplaySafeReadRetryDelay();
+    }
+  }
+
+  throw lastError;
 }
 
 async function runHostedWorkspaceSnapshotRestoreStep<T>(input: {
@@ -1725,6 +1791,7 @@ async function runHostedWorkspaceSnapshotRestoreStep<T>(input: {
     });
     return result;
   } catch (error) {
+    annotateHostedWorkspaceSnapshotRestoreStep(error, input.step);
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.workspace-snapshot",
       details: {
@@ -1740,6 +1807,66 @@ async function runHostedWorkspaceSnapshotRestoreStep<T>(input: {
     });
     throw error;
   }
+}
+
+function annotateHostedWorkspaceSnapshotRestoreStep(
+  error: unknown,
+  step: HostedWorkspaceSnapshotRestoreStep,
+): void {
+  if (!error || typeof error !== "object") {
+    return;
+  }
+  const record = error as Record<string, unknown>;
+  if (
+    readHostedWorkspaceSnapshotRestoreStepValue(
+      record[HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEP_MARKER],
+    )
+  ) {
+    return;
+  }
+  try {
+    Object.defineProperty(error, HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEP_MARKER, {
+      configurable: true,
+      enumerable: false,
+      value: step,
+    });
+  } catch {
+    // Best-effort diagnostics only; never mask the original restore failure.
+  }
+}
+
+export function readHostedWorkspaceSnapshotRestoreStep(
+  error: unknown,
+): HostedWorkspaceSnapshotRestoreStep | null {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    const step = readHostedWorkspaceSnapshotRestoreStepValue(
+      record[HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEP_MARKER],
+    );
+    if (step) {
+      return step;
+    }
+    current = "cause" in record ? record.cause : null;
+  }
+
+  return null;
+}
+
+function readHostedWorkspaceSnapshotRestoreStepValue(
+  value: unknown,
+): HostedWorkspaceSnapshotRestoreStep | null {
+  return (
+    typeof value === "string"
+    && HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS.has(
+      value as HostedWorkspaceSnapshotRestoreStep,
+    )
+  )
+    ? (value as HostedWorkspaceSnapshotRestoreStep)
+    : null;
 }
 
 function parseHostedWorkspaceSnapshotStartPayload(
@@ -1973,14 +2100,33 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
   if (contentLength !== null && contentLength !== String(input.expectedEncryptedByteSize)) {
     throw new Error("Hosted workspace snapshot fetch content-length does not match its ref.");
   }
-  await pipeline(
-    Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>),
-    createExpectedByteCountTransform({
-      expectedBytes: input.expectedEncryptedByteSize,
-      label: "Hosted workspace snapshot fetch",
-    }),
-    createWriteStream(input.encryptedFilePath, { mode: 0o600 }),
-  );
+  try {
+    await pipeline(
+      Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>),
+      createExpectedByteCountTransform({
+        expectedBytes: input.expectedEncryptedByteSize,
+        label: "Hosted workspace snapshot fetch",
+      }),
+      createWriteStream(input.encryptedFilePath, { mode: 0o600 }),
+    );
+  } catch (error) {
+    const wrappedError = new HostedRuntimeControlPlaneFetchError({
+      cause: error,
+      description: "Hosted workspace snapshot fetch response body read",
+      signalState: {
+        callerSignalAborted: false,
+        requestSignalAborted: false,
+        timeoutMs: input.timeoutMs,
+        timeoutSignalAborted: false,
+      },
+    });
+
+    if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
+      throw wrappedError;
+    }
+
+    throw error;
+  }
   return true;
 }
 
@@ -2323,6 +2469,8 @@ function buildHostedRuntimeControlPlaneSafeErrorMetadata(
 ): HostedExecutionStructuredLogDetails {
   const fetchFailureDiagnostics =
     readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
+  const workspaceSnapshotRestoreStep =
+    readHostedWorkspaceSnapshotRestoreStep(error);
   return {
     errorCode: fetchFailureDiagnostics?.fetchCauseCode
       ?? deriveHostedExecutionErrorCode(error),
@@ -2345,6 +2493,9 @@ function buildHostedRuntimeControlPlaneSafeErrorMetadata(
           fetchTimeoutSignalAborted:
             fetchFailureDiagnostics.fetchTimeoutSignalAborted,
         }
+      : {}),
+    ...(workspaceSnapshotRestoreStep
+      ? { workspaceSnapshotRestoreStep }
       : {}),
   };
 }
@@ -2891,11 +3042,17 @@ function shouldRetryHostedRuntimeReplaySafeRead(input: {
     return false;
   }
 
-  if (isHostedRuntimeInternalAuthorityRejectedError(input.error)) {
+  return isRetryableHostedRuntimeReplaySafeReadTransportError(input.error);
+}
+
+function isRetryableHostedRuntimeReplaySafeReadTransportError(
+  error: unknown,
+): boolean {
+  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
     return false;
   }
 
-  const diagnostics = readHostedRuntimeControlPlaneFetchFailureDiagnostics(input.error);
+  const diagnostics = readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
   if (diagnostics) {
     if (
       diagnostics.fetchCallerSignalAborted
@@ -2905,24 +3062,26 @@ function shouldRetryHostedRuntimeReplaySafeRead(input: {
       return false;
     }
 
-    return diagnostics.fetchCauseKind === "fetch_failed"
+    return diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
+      || diagnostics.fetchCauseKind === "fetch_failed"
       || diagnostics.fetchCauseKind === "network";
   }
 
-  if (isHostedWebControlAbortError(input.error) || isHostedWebControlTimeoutError(input.error)) {
+  if (isHostedWebControlAbortError(error) || isHostedWebControlTimeoutError(error)) {
     return false;
   }
 
-  if (readHostedWebControlErrorStatus(input.error) !== null) {
+  if (readHostedWebControlErrorStatus(error) !== null) {
     return false;
   }
 
-  if (!(input.error instanceof Error)) {
+  if (!(error instanceof Error)) {
     return false;
   }
 
-  const message = input.error.message.trim().toLowerCase();
+  const message = error.message.trim().toLowerCase();
   return message === "fetch failed"
+    || message === "the rpc call destroy() was called"
     || message.includes(" fetch failed")
     || message.includes("network")
     || message.includes("socket")

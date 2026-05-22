@@ -85,11 +85,28 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS = [
   "telegram_file_lookup",
   "usage_recording",
   "workspace_checkpoint",
+  "workspace_snapshot_complete",
+  "workspace_snapshot_data_key_unwrap",
+  "workspace_snapshot_direct_r2_upload",
+  "workspace_snapshot_fetch",
+  "workspace_snapshot_presign_get",
+  "workspace_snapshot_presign_put",
+  "workspace_snapshot_session_abort",
+  "workspace_snapshot_session_start",
   "workspace_read",
 ] as const;
 
 export type HostedExecutionChildRuntimeHttpOperation =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS[number];
+
+const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS = new Set<string>([
+  "archive_restore",
+  "data_key_unwrap",
+  "object_fetch",
+  "presign_get",
+  "scratch_prepare",
+  "size_guard",
+]);
 
 export const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES = [
   "cli.bridge",
@@ -446,6 +463,16 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
   );
   if (childRuntimeHttpOperation) {
     metadata.childRuntimeHttpOperation = childRuntimeHttpOperation;
+  }
+
+  const childRuntimeWorkspaceSnapshotRestoreStep =
+    readAllowedHostedExecutionChildDiagnostic(
+      record.childRuntimeWorkspaceSnapshotRestoreStep,
+      HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS,
+    );
+  if (childRuntimeWorkspaceSnapshotRestoreStep) {
+    metadata.childRuntimeWorkspaceSnapshotRestoreStep =
+      childRuntimeWorkspaceSnapshotRestoreStep;
   }
 
   const childRuntimeFetchCauseKind = readAllowedHostedExecutionChildDiagnostic(

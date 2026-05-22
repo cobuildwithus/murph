@@ -2181,6 +2181,8 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
     childRuntimeFetchTimeoutSignalAborted: "runnerChildRuntimeFetchTimeoutSignalAborted",
     childRuntimeHttpOperation: "runnerChildRuntimeHttpOperation",
     childRuntimeStage: "runnerChildRuntimeStage",
+    childRuntimeWorkspaceSnapshotRestoreStep:
+      "runnerChildRuntimeWorkspaceSnapshotRestoreStep",
   } as const;
 
   for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {

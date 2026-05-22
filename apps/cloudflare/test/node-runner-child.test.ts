@@ -808,6 +808,68 @@ describe("runHostedExecutionChild", () => {
     expect(JSON.stringify(payload.error?.details)).not.toContain("destroy() was called");
   });
 
+  it("propagates workspace snapshot restore step metadata for fetch failures", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = Object.assign(
+      new Error("Hosted workspace snapshot fetch request failed."),
+      {
+        hostedRuntimeControlPlaneFetchFailure: true,
+        hostedRuntimeFetchCallerSignalAborted: false,
+        hostedRuntimeFetchCauseCode: "type_error",
+        hostedRuntimeFetchCauseKind: "fetch_failed",
+        hostedRuntimeFetchCauseName: "TypeError",
+        hostedRuntimeFetchRequestSignalAborted: false,
+        hostedRuntimeFetchTimeoutMs: 30_000,
+        hostedRuntimeFetchTimeoutSignalAborted: false,
+        hostedWorkspaceSnapshotRestoreStep: "object_fetch",
+      },
+    );
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_snapshot_fetch_failed",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorName: "Error",
+      childRuntimeFailureKind: "control_plane_fetch",
+      childRuntimeFetchCallerSignalAborted: false,
+      childRuntimeFetchCauseKind: "fetch_failed",
+      childRuntimeFetchCauseName: "TypeError",
+      childRuntimeFetchRequestSignalAborted: false,
+      childRuntimeFetchTimeoutMs: 30_000,
+      childRuntimeFetchTimeoutSignalAborted: false,
+      childRuntimeHttpOperation: "workspace_snapshot_fetch",
+      childRuntimeStage: "runtime.in-process",
+      childRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
+    });
+  });
+
   it("classifies runtime control-plane transport failures by fixed operation", async () => {
     const sendResult = vi.fn();
     const setExitCode = vi.fn();
