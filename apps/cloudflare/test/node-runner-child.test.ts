@@ -856,6 +856,7 @@ describe("runHostedExecutionChild", () => {
     expect(payload.ok).toBe(false);
     expect(payload.error?.details).toMatchObject({
       childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorMessageKind: "workspace_snapshot_fetch_request_failure",
       childRuntimeErrorName: "Error",
       childRuntimeFailureKind: "control_plane_fetch",
       childRuntimeFetchCallerSignalAborted: false,
@@ -868,6 +869,55 @@ describe("runHostedExecutionChild", () => {
       childRuntimeStage: "runtime.in-process",
       childRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
     });
+  });
+
+  it("classifies fixed workspace snapshot restore error messages without free-form details", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = Object.assign(
+      new Error("Hosted workspace snapshot plaintext archive digest does not match its ref."),
+      {
+        hostedWorkspaceSnapshotRestoreStep: "archive_restore",
+      },
+    );
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_snapshot_plaintext_digest",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorMessageKind: "workspace_snapshot_plaintext_digest_mismatch",
+      childRuntimeErrorName: "Error",
+      childRuntimeFailureKind: "unclassified_runtime_error",
+      childRuntimeStage: "runtime.in-process",
+      childRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
+    });
+    expect(payload.error?.details?.childRuntimeErrorMessageKind).not.toContain("archive digest");
   });
 
   it("classifies runtime control-plane transport failures by fixed operation", async () => {

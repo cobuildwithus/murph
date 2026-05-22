@@ -53,6 +53,7 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.js";
 import {
+  classifyHostedExecutionChildRuntimeErrorMessageKind,
   readHostedExecutionChildRuntimeErrorName,
   type HostedExecutionChildRuntimeFailureKind,
   type HostedExecutionChildRuntimeHttpOperation,
@@ -486,10 +487,14 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
   const childRuntimeHttpOperation =
     readHostedExecutionChildRuntimeHttpOperation(error);
   const childRuntimeErrorCode = deriveHostedExecutionErrorCode(error);
+  const childRuntimeErrorMessageKind = error instanceof Error
+    ? classifyHostedExecutionChildRuntimeErrorMessageKind(error.message)
+    : null;
   const bundleValidation = readHostedBundleArchiveValidationErrorDetails(error);
   return {
     childRuntimeErrorCode,
     ...(childRuntimeErrorName ? { childRuntimeErrorName } : {}),
+    ...(childRuntimeErrorMessageKind ? { childRuntimeErrorMessageKind } : {}),
     childRuntimeFailureKind: classifyHostedExecutionChildRuntimeFailure(error, {
       bundleValidationPresent: bundleValidation !== null,
       childRuntimeErrorCode,

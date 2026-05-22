@@ -1945,6 +1945,7 @@ describe("RunnerContainer", () => {
             childRuntimeBundleRefPresent: true,
             childRuntimeBundleRefSize: 1234,
             childRuntimeErrorCode: "invalid_request",
+            childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
             childRuntimeErrorName: "Error",
             childRuntimeErrorStatus: 404,
             childRuntimeFailureKind: "control_plane_http",
@@ -2017,6 +2018,7 @@ describe("RunnerContainer", () => {
         childRuntimeBundleRefPresent: true,
         childRuntimeBundleRefSize: 1234,
         childRuntimeErrorCode: "invalid_request",
+        childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
         childRuntimeErrorName: "Error",
         childRuntimeErrorStatus: 404,
         childRuntimeFailureKind: "control_plane_http",
@@ -2086,6 +2088,7 @@ describe("RunnerContainer", () => {
           runnerChildRuntimeBundleRefPresent: true,
           runnerChildRuntimeBundleRefSize: 1234,
           runnerChildRuntimeErrorCode: "invalid_request",
+          runnerChildRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
           runnerChildRuntimeErrorName: "Error",
           runnerChildRuntimeErrorStatus: 404,
           runnerChildRuntimeFailureKind: "control_plane_http",
@@ -2117,6 +2120,7 @@ describe("RunnerContainer", () => {
             "childRuntimeBundleRefPresent",
             "childRuntimeBundleRefSize",
             "childRuntimeErrorCode",
+            "childRuntimeErrorMessageKind",
             "childRuntimeErrorName",
             "childRuntimeErrorStatus",
             "childRuntimeFailureKind",
@@ -2152,6 +2156,7 @@ describe("RunnerContainer", () => {
   it("drops non-allowlisted child runtime error diagnostics from runner response logs", async () => {
     const hiddenErrorName = "UntrustedCustomErrorName";
     const hiddenErrorCode = "untrusted_custom_error_code";
+    const hiddenErrorMessageKind = "untrusted_custom_error_message_kind";
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -2167,6 +2172,7 @@ describe("RunnerContainer", () => {
           code: "runtime_error",
           details: {
             childRuntimeErrorCode: hiddenErrorCode,
+            childRuntimeErrorMessageKind: hiddenErrorMessageKind,
             childRuntimeErrorName: hiddenErrorName,
             childRuntimeErrorStatus: 499,
             childRuntimeFailureKind: "unclassified_runtime_error",
@@ -2203,6 +2209,7 @@ describe("RunnerContainer", () => {
     const serializedThrown = JSON.stringify(thrown);
     expect(serializedThrown).not.toContain(hiddenErrorName);
     expect(serializedThrown).not.toContain(hiddenErrorCode);
+    expect(serializedThrown).not.toContain(hiddenErrorMessageKind);
     expect(serializedThrown).not.toContain("hidden_http_operation");
 
     const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
@@ -2220,6 +2227,7 @@ describe("RunnerContainer", () => {
     const serializedFailureLog = JSON.stringify(failureLogInput);
     expect(serializedFailureLog).not.toContain(hiddenErrorName);
     expect(serializedFailureLog).not.toContain(hiddenErrorCode);
+    expect(serializedFailureLog).not.toContain(hiddenErrorMessageKind);
     expect(serializedFailureLog).not.toContain("hidden_http_operation");
   });
 
