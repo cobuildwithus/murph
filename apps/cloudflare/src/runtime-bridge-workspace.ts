@@ -298,23 +298,11 @@ function requireHostedWorkspaceBridgeIdleCheckpointRequest(
 }
 
 const HOSTED_WORKSPACE_V2_SNAPSHOT_MODE = "workspace_snapshot_v2";
-const HOSTED_WORKSPACE_SNAPSHOT_TIMING_KEYS = [
-  "snapshotSessionStartElapsedMs",
-  "snapshotRuntimeSymlinkPruneElapsedMs",
-  "snapshotLegacyMaterializeElapsedMs",
-  "snapshotLegacyCleanupElapsedMs",
-  "snapshotArchivePlanElapsedMs",
-  "snapshotArchiveEncryptElapsedMs",
-  "snapshotDirectR2UploadElapsedMs",
-  "snapshotCompleteElapsedMs",
-  "snapshotPostCompleteCleanupElapsedMs",
-  "snapshotAbortElapsedMs",
-] as const;
 
-type HostedWorkspaceSnapshotTimingKey =
-  (typeof HOSTED_WORKSPACE_SNAPSHOT_TIMING_KEYS)[number];
-type HostedWorkspaceSnapshotStepTimings =
-  Partial<Record<HostedWorkspaceSnapshotTimingKey, number>>;
+interface HostedWorkspaceSnapshotTimingDetails {
+  snapshotArchiveBuildElapsedMs?: number;
+  snapshotDirectR2UploadElapsedMs?: number;
+}
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
   legacyMaterialization: Awaited<
@@ -366,7 +354,7 @@ async function createHostedWorkspaceV2Snapshot(
   let snapshotSession: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startSnapshotSession"]>> | null = null;
   let checkpointAttempted = false;
   let prunedRuntimeSymlinkCount = 0;
-  const stepTimings: HostedWorkspaceSnapshotStepTimings = {};
+  const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
@@ -377,26 +365,16 @@ async function createHostedWorkspaceV2Snapshot(
     });
     const durableRoot = resolveWorkspaceDurableRoot(input.vaultRoot);
     const operatorHomeRoot = resolveWorkspaceOperatorHomeRoot(input.vaultRoot);
-    snapshotSession = await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotSessionStartElapsedMs",
-      run: async () =>
-        await workspaceSnapshotPort.startSnapshotSession({
-          expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
-          nextWakeAt: input.request.nextWakeAt,
-          nextWakeReason: input.request.nextWakeReason,
-          reason: "idle_shutdown",
-        }),
-      timings: stepTimings,
+    snapshotSession = await workspaceSnapshotPort.startSnapshotSession({
+      expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+      nextWakeAt: input.request.nextWakeAt,
+      nextWakeReason: input.request.nextWakeReason,
+      reason: "idle_shutdown",
     });
     const activeSnapshotSession = snapshotSession;
-    ({ prunedRuntimeSymlinkCount } = await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotRuntimeSymlinkPruneElapsedMs",
-      run: async () =>
-        await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
-          durableRoot,
-          operatorHomeRoot,
-        }),
-      timings: stepTimings,
+    ({ prunedRuntimeSymlinkCount } = await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
+      durableRoot,
+      operatorHomeRoot,
     }));
     if (prunedRuntimeSymlinkCount > 0) {
       emitHostedExecutionStructuredLog({
@@ -411,25 +389,15 @@ async function createHostedWorkspaceV2Snapshot(
         userId: input.userId,
       });
     }
-    await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotLegacyMaterializeElapsedMs",
-      run: async () =>
-        await materializeLegacyWorkspaceRefsForV2Snapshot({
-          artifactStore: input.platform.artifactStore,
-          operatorHomeRoot,
-          plan: input.legacyMaterialization,
-          vaultRoot: input.vaultRoot,
-        }),
-      timings: stepTimings,
+    await materializeLegacyWorkspaceRefsForV2Snapshot({
+      artifactStore: input.platform.artifactStore,
+      operatorHomeRoot,
+      plan: input.legacyMaterialization,
+      vaultRoot: input.vaultRoot,
     });
-    await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotLegacyCleanupElapsedMs",
-      run: async () =>
-        await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
-          plan: input.legacyMaterialization,
-          vaultRoot: input.vaultRoot,
-        }),
-      timings: stepTimings,
+    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      plan: input.legacyMaterialization,
+      vaultRoot: input.vaultRoot,
     });
     const legacySnapshotExtraFiles: HostedWorkspaceSnapshotArchiveExtraPath[] = [];
     for (const file of input.legacyMaterialization.skippedInlineFiles) {
@@ -440,21 +408,16 @@ async function createHostedWorkspaceV2Snapshot(
         });
       }
     }
-    const archivePlan = await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotArchivePlanElapsedMs",
-      run: async () =>
-        await collectHostedWorkspaceSnapshotArchivePlan({
+    const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotArchiveBuildElapsedMs",
+      run: async () => {
+        const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
           durableRoot,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           vaultRoot: input.vaultRoot,
-        }),
-      timings: stepTimings,
-    });
-    const encrypted = await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotArchiveEncryptElapsedMs",
-      run: async () =>
-        await createEncryptedWorkspaceSnapshotFile({
+        });
+        return await createEncryptedWorkspaceSnapshotFile({
           aad: activeSnapshotSession.encryption.aad,
           archiveEntries: archivePlan.entries,
           dataKey: activeSnapshotSession.encryption.dataKeyBase64,
@@ -465,8 +428,9 @@ async function createHostedWorkspaceV2Snapshot(
             HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
           ),
           outputDir: resolveWorkspaceScratchRoot(input.vaultRoot),
-        }),
-      timings: stepTimings,
+        });
+      },
+      timings: snapshotTimings,
     });
     encryptedTemporaryDirectoryPath = encrypted.temporaryDirectoryPath;
     encryptedByteSize = encrypted.encryptedByteSize;
@@ -502,7 +466,7 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_direct_r2_put",
       userId: input.userId,
     });
-    await runHostedWorkspaceSnapshotTimedStep({
+    await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotDirectR2UploadElapsedMs",
       run: async () =>
         await workspaceSnapshotPort.putSnapshotObjectDirect({
@@ -512,7 +476,7 @@ async function createHostedWorkspaceV2Snapshot(
           sourceFilePath: encrypted.encryptedFilePath,
           snapshotId: activeSnapshotSession.snapshotId,
         }),
-      timings: stepTimings,
+      timings: snapshotTimings,
     });
 
     snapshotRef = {
@@ -540,55 +504,39 @@ async function createHostedWorkspaceV2Snapshot(
       userId: input.userId,
     };
     checkpointAttempted = true;
-    const completed = await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotCompleteElapsedMs",
-      run: async () =>
-        await workspaceSnapshotPort.completeSnapshotSession({
-          checkpointRequest: {
-            ...input.request,
-            snapshotRef,
-          },
-          ref: snapshotRef,
-        }),
-      timings: stepTimings,
+    const completed = await workspaceSnapshotPort.completeSnapshotSession({
+      checkpointRequest: {
+        ...input.request,
+        snapshotRef,
+      },
+      ref: snapshotRef,
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
-    await runHostedWorkspaceSnapshotTimedStep({
-      key: "snapshotPostCompleteCleanupElapsedMs",
-      run: async () => {
-        await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
-          plan: input.legacyMaterialization,
-          vaultRoot: input.vaultRoot,
-        }).catch((clearError) => {
-          emitHostedExecutionStructuredLog({
-            component: "runner",
-            details: {
-              snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
-            },
-            error: clearError,
-            level: "warn",
-            message: "Hosted workspace legacy snapshot manifest cleanup failed.",
-            phase: "checkpoint",
-            userId: input.userId,
-          });
-        });
-      },
-      timings: stepTimings,
+    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      plan: input.legacyMaterialization,
+      vaultRoot: input.vaultRoot,
+    }).catch((clearError) => {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        },
+        error: clearError,
+        level: "warn",
+        message: "Hosted workspace legacy snapshot manifest cleanup failed.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
     });
   } catch (error) {
     const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
     const abortedSnapshotSession = snapshotSession;
     if (abortedSnapshotSession && !checkpointAttempted) {
       try {
-        await runHostedWorkspaceSnapshotTimedStep({
-          key: "snapshotAbortElapsedMs",
-          run: async () =>
-            await workspaceSnapshotPort.abortSnapshotSession({
-              objectKey: abortedSnapshotSession.objectKey,
-              snapshotId: abortedSnapshotSession.snapshotId,
-            }),
-          timings: stepTimings,
+        await workspaceSnapshotPort.abortSnapshotSession({
+          objectKey: abortedSnapshotSession.objectKey,
+          snapshotId: abortedSnapshotSession.snapshotId,
         });
       } catch (abortError) {
         emitHostedExecutionStructuredLog({
@@ -614,7 +562,7 @@ async function createHostedWorkspaceV2Snapshot(
               runtimeSymlinkPruneScope: "operator-home",
             }
           : {}),
-        ...toHostedWorkspaceSnapshotTimingRedactedJson(stepTimings),
+        ...snapshotTimings,
         ...(workspaceSnapshotFileCount > 0
           ? { workspaceSnapshotFileCount }
           : {}),
@@ -664,7 +612,7 @@ async function createHostedWorkspaceV2Snapshot(
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
     snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
-    stepTimings,
+    timingDetails: snapshotTimings,
   });
 
   return {
@@ -673,10 +621,10 @@ async function createHostedWorkspaceV2Snapshot(
   };
 }
 
-async function runHostedWorkspaceSnapshotTimedStep<T>(input: {
-  key: HostedWorkspaceSnapshotTimingKey;
+async function runHostedWorkspaceSnapshotMeasuredStep<T>(input: {
+  key: keyof HostedWorkspaceSnapshotTimingDetails;
   run: () => Promise<T>;
-  timings: HostedWorkspaceSnapshotStepTimings;
+  timings: HostedWorkspaceSnapshotTimingDetails;
 }): Promise<T> {
   const stepStartedAt = Date.now();
   try {
@@ -687,27 +635,14 @@ async function runHostedWorkspaceSnapshotTimedStep<T>(input: {
 }
 
 function recordHostedWorkspaceSnapshotStepTiming(
-  timings: HostedWorkspaceSnapshotStepTimings,
-  key: HostedWorkspaceSnapshotTimingKey,
+  timings: HostedWorkspaceSnapshotTimingDetails,
+  key: keyof HostedWorkspaceSnapshotTimingDetails,
   stepStartedAt: number,
 ): void {
   const elapsedMs = Date.now() - stepStartedAt;
   timings[key] = Number.isSafeInteger(elapsedMs) && elapsedMs >= 0
     ? elapsedMs
     : 0;
-}
-
-function toHostedWorkspaceSnapshotTimingRedactedJson(
-  timings: HostedWorkspaceSnapshotStepTimings,
-): HostedRuntimeRedactedJson {
-  const redactedJson: HostedRuntimeRedactedJson = {};
-  for (const key of HOSTED_WORKSPACE_SNAPSHOT_TIMING_KEYS) {
-    const value = timings[key];
-    if (value !== undefined) {
-      redactedJson[key] = value;
-    }
-  }
-  return redactedJson;
 }
 
 function classifyHostedWorkspaceSnapshotFailure(error: unknown): unknown {
@@ -841,7 +776,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
-  stepTimings: HostedWorkspaceSnapshotStepTimings;
+  timingDetails: HostedWorkspaceSnapshotTimingDetails;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -857,7 +792,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
           runtimeSymlinkPruneScope: "operator-home",
         }
       : {}),
-    ...toHostedWorkspaceSnapshotTimingRedactedJson(input.stepTimings),
+    ...input.timingDetails,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,
     workspaceSnapshotFileCount: input.fileCount,

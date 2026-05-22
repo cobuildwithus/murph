@@ -351,8 +351,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         redactedJson: expect.objectContaining({
           prunedRuntimeSymlinkCount: 1,
           runtimeSymlinkPruneScope: "operator-home",
-          snapshotArchiveEncryptElapsedMs: expect.any(Number),
-          snapshotArchivePlanElapsedMs: expect.any(Number),
+          snapshotArchiveBuildElapsedMs: expect.any(Number),
           snapshotDirectR2UploadElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
           workspaceSnapshotFileCount: snapshotRef.archive.fileCount,
@@ -887,8 +886,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         eventCode: "checkpoint.snapshot_failed",
         redactedJson: expect.objectContaining({
           safeErrorDetail: "Hosted workspace snapshot exceeds the configured size limit.",
-          snapshotArchiveEncryptElapsedMs: expect.any(Number),
-          snapshotArchivePlanElapsedMs: expect.any(Number),
+          snapshotArchiveBuildElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
         }),
       }),
@@ -957,9 +955,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       redactedJson: expect.objectContaining({
         encryptedByteSize: expect.any(Number),
         safeErrorDetail: "Hosted workspace snapshot direct R2 upload failed.",
-        snapshotAbortElapsedMs: expect.any(Number),
-        snapshotArchiveEncryptElapsedMs: expect.any(Number),
-        snapshotArchivePlanElapsedMs: expect.any(Number),
+        snapshotArchiveBuildElapsedMs: expect.any(Number),
         snapshotDirectR2UploadElapsedMs: expect.any(Number),
         snapshotElapsedMs: expect.any(Number),
         snapshotMode: "workspace_snapshot_v2",
@@ -1800,8 +1796,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       eventCode: "checkpoint.snapshot_finished",
       redactedJson: expect.objectContaining({
         checkpointReason: "idle_shutdown",
-        snapshotArchiveEncryptElapsedMs: expect.any(Number),
-        snapshotArchivePlanElapsedMs: expect.any(Number),
+        snapshotArchiveBuildElapsedMs: expect.any(Number),
         snapshotDirectR2UploadElapsedMs: expect.any(Number),
         snapshotMode: "workspace_snapshot_v2",
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
