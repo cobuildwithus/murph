@@ -504,6 +504,8 @@ describe("hosted execution coverage gaps", () => {
     expect("HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH" in routeModule).toBe(false);
     expect("HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH" in routeModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
+      "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
+      "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
@@ -524,6 +526,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/issues/record",
+    );
+    expect(routeModule.HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH).toBe(
+      "/api/internal/device-sync/recovery-sweep",
     );
     expect(routeModule.HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH).toBe(
       "/api/internal/hosted-runtime/crypto-context",

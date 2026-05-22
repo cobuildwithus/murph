@@ -35,10 +35,13 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
 
   const dirtyWakeAppendFailed =
     dirtySweep.status === "fulfilled"
-    && hasDirtyWakeAppendFailures(dirtySweep.value);
+    && dirtySweep.value.wakeNotAppended > 0;
   const dueReconcileWakeAppendFailed =
     dueReconcileSweep.status === "fulfilled"
-    && hasDueReconcileWakeAppendFailures(dueReconcileSweep.value);
+    && (
+      dueReconcileSweep.value.wakeFailed > 0
+      || dueReconcileSweep.value.wakeNotAppended > 0
+    );
 
   if (
     dirtySweep.status === "rejected"
@@ -73,7 +76,6 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
     if (dueReconcileWakeAppendFailed) {
       throw new Error("Hosted device-sync due reconcile sweeper failed to append one or more wakes.");
     }
-    throw new Error("Hosted device-sync recovery sweep failed without an error reason.");
   }
 
   return {
@@ -90,16 +92,4 @@ function describeErrorName<T>(
   }
 
   return result.reason instanceof Error ? result.reason.name : "unknown";
-}
-
-function hasDirtyWakeAppendFailures(
-  result: HostedDeviceSyncDirtySweeperResult,
-): boolean {
-  return result.wakeNotAppended > 0;
-}
-
-function hasDueReconcileWakeAppendFailures(
-  result: HostedDeviceSyncDueReconcileSweeperResult,
-): boolean {
-  return result.wakeFailed > 0 || result.wakeNotAppended > 0;
 }

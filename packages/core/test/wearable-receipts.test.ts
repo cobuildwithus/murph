@@ -19,6 +19,9 @@ import {
   readJsonlRecords,
   validateVault,
 } from "../src/index.ts";
+import {
+  parseRawImportManifest,
+} from "../src/operations/raw-manifests.ts";
 
 const IMPORTED_AT = "2026-04-22T12:00:00.000Z";
 const IMPORT_ID = "xfm_FKXWJ9CRVED58RA9QVF2QHA1WE";
@@ -219,15 +222,11 @@ test("compactLegacyWearableReceiptEnvelopes updates agreeing duplicate manifests
   assert.equal(agreeResult.compactedCount, 1);
   await assertArtifactMatchesFile(
     agreeingVault,
-    (await readManifest(agreeingVault, "manifest.json")).artifacts.find((artifact) =>
-      artifact.role.startsWith("wearable-raw-envelope:")
-    ) as RawImportManifestArtifact,
+    readEnvelopeArtifact(await readManifest(agreeingVault, "manifest.json")),
   );
   await assertArtifactMatchesFile(
     agreeingVault,
-    (await readManifest(agreeingVault, "manifest.copy.json")).artifacts.find((artifact) =>
-      artifact.role.startsWith("wearable-raw-envelope:")
-    ) as RawImportManifestArtifact,
+    readEnvelopeArtifact(await readManifest(agreeingVault, "manifest.copy.json")),
   );
 
   const disagreeingVault = await createLegacyWearableFixture({
@@ -384,7 +383,11 @@ async function writeRawJsonArtifact(input: {
 }
 
 async function readRawJson(vaultRoot: string, fileName: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await readRawText(vaultRoot, fileName)) as Record<string, unknown>;
+  const parsed: unknown = JSON.parse(await readRawText(vaultRoot, fileName));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Expected raw JSON object in ${fileName}.`);
+  }
+  return parsed;
 }
 
 async function readRawText(vaultRoot: string, fileName: string): Promise<string> {
@@ -392,7 +395,7 @@ async function readRawText(vaultRoot: string, fileName: string): Promise<string>
 }
 
 async function readManifest(vaultRoot: string, fileName: string): Promise<RawImportManifest> {
-  return JSON.parse(await readRawText(vaultRoot, fileName)) as RawImportManifest;
+  return parseRawImportManifest(JSON.parse(await readRawText(vaultRoot, fileName)));
 }
 
 async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, string>> {
@@ -429,6 +432,16 @@ async function assertArtifactMatchesFile(
   const content = await fs.readFile(path.join(vaultRoot, artifact.relativePath));
   assert.equal(content.byteLength, artifact.byteSize);
   assert.equal(sha256Hex(content), artifact.sha256);
+}
+
+function readEnvelopeArtifact(manifest: RawImportManifest): RawImportManifestArtifact {
+  const artifact = manifest.artifacts.find((entry) =>
+    entry.role.startsWith("wearable-raw-envelope:")
+  );
+  if (!artifact) {
+    throw new Error("Expected wearable raw envelope artifact in manifest.");
+  }
+  return artifact;
 }
 
 function sha256Hex(content: string | Buffer): string {
