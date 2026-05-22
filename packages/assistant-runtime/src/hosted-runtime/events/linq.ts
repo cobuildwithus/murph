@@ -24,8 +24,8 @@ type HostedLinqAttachmentDownloadDriver =
     ): Promise<Uint8Array | null>;
   };
 
-type HostedLinqAttachmentDownloadLogPlatform =
-  Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+type HostedLinqAttachmentDownloadPlatform =
+  Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort" | "providerFetch">;
 
 type HostedLinqAttachmentDownloadResult = "failed" | "not_downloaded" | "succeeded";
 
@@ -71,15 +71,16 @@ const HOSTED_LINQ_LOCAL_ATTACHMENT_CDN_HOSTNAMES = new Set([
 
 export function createHostedLinqAttachmentDownloadDriver(
   options: {
-    platform?: HostedLinqAttachmentDownloadLogPlatform | null;
+    platform?: HostedLinqAttachmentDownloadPlatform | null;
   } = {},
 ): HostedLinqAttachmentDownloadDriver | null {
-  if (typeof globalThis.fetch !== "function") {
+  const platform = options.platform ?? null;
+  const fetchImplementation = resolveHostedLinqAttachmentFetchImplementation(platform);
+  if (!fetchImplementation) {
     return null;
   }
 
   const apiConfig = resolveHostedLinqAttachmentApiConfig();
-  const platform = options.platform ?? null;
 
   return {
     downloadUrl: async (url: string, signal?: AbortSignal) => {
@@ -101,7 +102,10 @@ export function createHostedLinqAttachmentDownloadDriver(
       }
 
       try {
-        const bytes = await downloadHostedLinqAttachmentBytes(normalizedUrl, { signal });
+        const bytes = await downloadHostedLinqAttachmentBytes(normalizedUrl, {
+          fetchImplementation,
+          signal,
+        });
         await writeHostedLinqAttachmentDownloadAttemptLog({
           attempt: {
             byteCountBucket: bucketHostedLinqAttachmentByteCount(bytes.byteLength),
@@ -138,6 +142,7 @@ export function createHostedLinqAttachmentDownloadDriver(
     downloadPart: async (part: HostedLinqAttachmentDownloadPart, signal?: AbortSignal) =>
       downloadHostedLinqAttachmentPart({
         apiConfig,
+        fetchImplementation,
         part,
         platform,
         signal,
@@ -170,8 +175,9 @@ export function normalizeHostedLinqAttachmentUrl(value: string | null | undefine
 
 async function downloadHostedLinqAttachmentPart(input: {
   apiConfig: HostedLinqAttachmentApiConfig | null;
+  fetchImplementation: typeof fetch;
   part: HostedLinqAttachmentDownloadPart;
-  platform: HostedLinqAttachmentDownloadLogPlatform | null;
+  platform: HostedLinqAttachmentDownloadPlatform | null;
   signal?: AbortSignal;
 }): Promise<Uint8Array | null> {
   const declaredSize = normalizeHostedLinqAttachmentDeclaredSize(input.part.size);
@@ -212,6 +218,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     try {
       const bytes = await downloadHostedLinqAttachmentBytes(directUrl, {
         declaredSize,
+        fetchImplementation: input.fetchImplementation,
         signal: input.signal,
       });
       await writeHostedLinqAttachmentDownloadAttemptLog({
@@ -258,6 +265,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     apiBaseUrl: input.apiConfig.apiBaseUrl,
     apiToken: input.apiConfig.apiToken,
     attachmentId,
+    fetchImplementation: input.fetchImplementation,
     signal: input.signal,
   });
   const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(metadataResult.downloadLocator)
@@ -292,6 +300,7 @@ async function downloadHostedLinqAttachmentPart(input: {
   try {
     const bytes = await downloadHostedLinqAttachmentBytes(normalizedRefreshedUrl, {
       declaredSize,
+      fetchImplementation: input.fetchImplementation,
       signal: input.signal,
     });
     await writeHostedLinqAttachmentDownloadAttemptLog({
@@ -341,12 +350,13 @@ async function downloadHostedLinqAttachmentBytes(
   url: string,
   input: {
     declaredSize?: number | null;
+    fetchImplementation: typeof fetch;
     signal?: AbortSignal;
-  } = {},
+  },
 ): Promise<Uint8Array> {
   assertHostedLinqAttachmentWithinByteLimit(input.declaredSize ?? null);
 
-  const response = await globalThis.fetch(url, {
+  const response = await input.fetchImplementation(url, {
     method: "GET",
     signal: input.signal,
   });
@@ -518,6 +528,7 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
   apiBaseUrl: string;
   apiToken: string;
   attachmentId: string;
+  fetchImplementation: typeof fetch;
   signal?: AbortSignal;
 }): Promise<HostedLinqAttachmentMetadataLookupResult> {
   const controller = new AbortController();
@@ -527,7 +538,7 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
   const releaseRelay = input.signal ? relayAbortSignal(input.signal, controller) : () => {};
 
   try {
-    const response = await globalThis.fetch(
+    const response = await input.fetchImplementation(
       new URL(`attachments/${encodeURIComponent(input.attachmentId)}`, `${input.apiBaseUrl}/`),
       {
         headers: {
@@ -564,6 +575,18 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
     clearTimeout(timeout);
     releaseRelay();
   }
+}
+
+function resolveHostedLinqAttachmentFetchImplementation(
+  platform: HostedLinqAttachmentDownloadPlatform | null,
+): typeof fetch | null {
+  if (typeof platform?.providerFetch === "function") {
+    return platform.providerFetch;
+  }
+
+  return typeof globalThis.fetch === "function"
+    ? globalThis.fetch.bind(globalThis) as typeof fetch
+    : null;
 }
 
 function normalizeHostedAttachmentDownloadUrlField(value: unknown): string | null {
@@ -764,7 +787,7 @@ function classifyHostedLinqApiBaseUrl(value: string): string {
 
 async function writeHostedLinqAttachmentDownloadAttemptLog(input: {
   attempt: HostedLinqAttachmentDownloadAttemptLog;
-  platform: HostedLinqAttachmentDownloadLogPlatform | null;
+  platform: HostedLinqAttachmentDownloadPlatform | null;
 }): Promise<void> {
   if (!input.platform?.logPort) {
     return;
