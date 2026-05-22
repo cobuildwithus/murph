@@ -1,6 +1,6 @@
 # Wearable Raw Receipt Cleanup
 
-Status: active
+Status: completed
 Created: 2026-05-22
 Updated: 2026-05-22
 
@@ -86,15 +86,30 @@ Updated: 2026-05-22
 
 ## Verification
 
-- Commands to run:
-- Focused importer/core Vitest targets while iterating.
-- `pnpm --dir packages/importers test:coverage`
-- `pnpm --dir packages/core test:coverage`
-- `pnpm typecheck`
-- `pnpm test:smoke`
-- `git diff --check`
-- Scoped privacy/identifier scan over touched files.
-- Required completion audits: `security-privacy-review`, `coverage-write`, and
-  `task-finish-review`.
-- Expected outcomes: all required checks pass, or unrelated blockers are
-  documented with exact failing targets.
+Completed:
+
+- Focused importer Vitest for Garmin/canonical/Junction/device-provider/Strava
+  receipt behavior passed.
+- Focused core `device-import.test.ts` passed after adding compact JSON and
+  synthetic-receipt fallback coverage.
+- `pnpm --dir packages/importers test:coverage` passed.
+- `pnpm --dir packages/core test:coverage` passed after the final-review fix.
+- `pnpm typecheck` passed after the final-review fix.
+- `pnpm test:smoke` passed after the final-review fix.
+- `git diff --check -- <task paths>` passed after the final-review fix.
+- Scoped privacy/identifier scan over touched files found no direct local
+  identifiers or secrets; only generic plan guardrail text matched.
+
+Audits:
+
+- `security-privacy-review`: no findings. Residual note: historical vault data
+  may still contain old receipt/envelope artifacts by design, and new receipts
+  remain sensitive metadata if exported outside the private raw-artifact
+  boundary.
+- `coverage-write` on `gpt-5.5` with medium reasoning: no edits; coverage was
+  sufficient.
+- `task-finish-review`: one low finding that synthetic receipt artifacts could
+  become implicit sole raw evidence. Fixed in core by excluding synthetic
+  wearable receipt/envelope/canonical-record roles from the implicit sole raw
+  fallback unless explicitly referenced, with a focused regression test.
+Completed: 2026-05-22

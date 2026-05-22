@@ -1388,7 +1388,10 @@ function prepareDeviceEventEntries(
   const rawArtifactPathByRole = new Map(
     preparedRawArtifacts.map((artifact) => [artifact.role, artifact.raw.relativePath] as const),
   );
-  const soleRawArtifactPath = preparedRawArtifacts.length === 1 ? preparedRawArtifacts[0]?.raw.relativePath : undefined;
+  const soleRawArtifact = preparedRawArtifacts.length === 1 ? preparedRawArtifacts[0] : undefined;
+  const soleRawArtifactPath = soleRawArtifact && isImplicitDeviceRawRefFallbackRole(soleRawArtifact.role)
+    ? soleRawArtifact.raw.relativePath
+    : undefined;
 
   return events.map((event) => {
     const rawRefs = event.rawArtifactRoles.length > 0
@@ -1415,6 +1418,12 @@ function prepareDeviceEventEntries(
       event.recordId,
     );
   });
+}
+
+function isImplicitDeviceRawRefFallbackRole(role: string): boolean {
+  return !role.startsWith("wearable-raw-receipt:")
+    && !role.startsWith("wearable-raw-envelope:")
+    && !role.startsWith("wearable-canonical-records:");
 }
 
 function prepareDeviceSampleEntries(
