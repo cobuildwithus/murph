@@ -206,6 +206,9 @@ function buildConnectedSource(input: {
   );
   const lastSuccessfulSyncAgeMs = ageInMilliseconds(lastSuccessfulSyncAt, now);
   const hasRecentError = isIsoTimestampNewer(connection.lastSyncErrorAt, connection.lastSyncCompletedAt);
+  const recentErrorReconnectAction = hasRecentError
+    ? buildReconnectAction(input.connectTarget)
+    : null;
   const connectedAgeMs = ageInMilliseconds(connection.connectedAt, now);
   const setupPhase = connection.setupPhase ?? null;
 
@@ -319,7 +322,9 @@ function buildConnectedSource(input: {
       ? "Waiting for the first full sync."
       : "Murph has not seen a successful sync from this source yet.";
     const guidance = hasRecentError
-      ? "Disconnect this source if you no longer need it."
+      ? recentErrorReconnectAction
+        ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
+        : "Disconnect this source if you no longer need it."
       : stillWithinFirstSyncWindow
         ? "This usually settles on its own after the initial connection."
         : "Give it a little time unless you expect data here already.";
@@ -337,7 +342,7 @@ function buildConnectedSource(input: {
       lastSuccessfulSyncAt: null,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: connection.nextReconcileAt,
-      primaryAction: null,
+      primaryAction: recentErrorReconnectAction,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -421,14 +426,16 @@ function buildConnectedSource(input: {
     detail: "Murph has not seen a fresh sync from this source recently.",
     displayName,
     guidance: hasRecentError
-      ? "Disconnect this source if you no longer need it."
+      ? recentErrorReconnectAction
+        ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
+        : "Disconnect this source if you no longer need it."
       : "This may resolve on its own if the provider sends new data.",
     headline: "Connected, but updates have been quiet lately",
     lastActivityAt,
     lastSuccessfulSyncAt,
     lastWebhookAt: connection.lastWebhookAt,
     nextReconcileAt: connection.nextReconcileAt,
-    primaryAction: null,
+    primaryAction: recentErrorReconnectAction,
     provider: connection.provider,
     providerConfigured: true,
     providerLabel,
@@ -442,6 +449,19 @@ function buildConnectedSource(input: {
     updatedAt: connection.updatedAt,
     upstreamSources: input.upstreamSources,
   } satisfies HostedDeviceSyncSettingsSource;
+}
+
+function buildReconnectAction(
+  connectTarget: HostedDeviceSyncSettingsConnectTarget | null,
+): HostedDeviceSyncSettingsAction | null {
+  if (!connectTarget) {
+    return null;
+  }
+
+  return {
+    kind: "reconnect",
+    label: "Reconnect",
+  };
 }
 
 function buildUnavailableSource(
