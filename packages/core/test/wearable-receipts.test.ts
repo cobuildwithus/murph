@@ -116,6 +116,13 @@ test("compactLegacyWearableReceiptEnvelopes is idempotent after a successful com
   assert.equal(second.compactedCount, 0);
   assert.equal(second.mutated, false);
   assert.deepEqual(afterSecond, afterFirst);
+
+  const detection = await detectLegacyWearableReceiptCompaction({ vaultRoot });
+  assert.deepEqual(detection, {
+    hasWork: false,
+    largestSuspectByteSize: undefined,
+    suspectedCount: 0,
+  });
 });
 
 test("compactLegacyWearableReceiptEnvelopes resumes bounded batches without a durable cursor", async () => {
@@ -189,8 +196,33 @@ test("compactLegacyWearableReceiptEnvelopes honors deadline and candidate byte b
   assert.equal(byteBoundResult.mutated, false);
   assert.equal(byteBoundResult.compactedCount, 0);
   assert.equal(byteBoundResult.skippedCount, 1);
+  assert.equal(byteBoundResult.oversizedEnvelopeSkippedCount, 1);
   assert.equal(byteBoundResult.hasMore, false);
   assert.deepEqual(await snapshotVaultFiles(byteBoundVault), byteBoundBefore);
+});
+
+test("compactLegacyWearableReceiptEnvelopes bounds scanned skipped candidates", async () => {
+  const vaultRoot = await createLegacyWearableFixture({
+    envelopeCount: 3,
+    envelopePayloadPresent: false,
+  });
+  const before = await snapshotVaultFiles(vaultRoot);
+  const detection = await detectLegacyWearableReceiptCompaction({ vaultRoot });
+
+  assert.equal(detection.hasWork, false);
+
+  const result = await compactLegacyWearableReceiptEnvelopes({
+    maxCandidatesScanned: 2,
+    now: COMPACTION_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(result.mutated, false);
+  assert.equal(result.compactedCount, 0);
+  assert.equal(result.skippedCount, 2);
+  assert.equal(result.scannedCount, 2);
+  assert.equal(result.hasMore, true);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
 });
 
 test("compactLegacyWearableReceiptEnvelopes bounds evidence proof reads", async () => {
@@ -211,6 +243,7 @@ test("compactLegacyWearableReceiptEnvelopes bounds evidence proof reads", async 
   assert.equal(artifactBoundResult.mutated, false);
   assert.equal(artifactBoundResult.compactedCount, 0);
   assert.equal(artifactBoundResult.skippedCount, 1);
+  assert.equal(artifactBoundResult.oversizedEvidenceSkippedCount, 1);
   assert.deepEqual(await snapshotVaultFiles(artifactBoundVault), artifactBoundBefore);
 
   const roleBoundVault = await createLegacyWearableFixture({
@@ -230,6 +263,22 @@ test("compactLegacyWearableReceiptEnvelopes bounds evidence proof reads", async 
   assert.equal(roleBoundResult.compactedCount, 0);
   assert.equal(roleBoundResult.skippedCount, 1);
   assert.deepEqual(await snapshotVaultFiles(roleBoundVault), roleBoundBefore);
+});
+
+test("compactLegacyWearableReceiptEnvelopes validates the vault after mutation", async () => {
+  const vaultRoot = await createLegacyWearableFixture();
+  await fs.rm(path.join(vaultRoot, "ledger"), { force: true, recursive: true });
+
+  await assert.rejects(
+    compactLegacyWearableReceiptEnvelopes({
+      now: COMPACTION_NOW,
+      vaultRoot,
+    }),
+    (error) =>
+      error instanceof Error
+      && "code" in error
+      && error.code === "LEGACY_WEARABLE_RECEIPT_COMPACTION_INVALID_VAULT",
+  );
 });
 
 test("compactLegacyWearableReceiptEnvelopes skips unsafe legacy envelope candidates", async () => {
@@ -315,6 +364,7 @@ test("compactLegacyWearableReceiptEnvelopes updates agreeing duplicate manifests
 async function createLegacyWearableFixture(options: {
   duplicateManifest?: "agree" | "disagree";
   envelopeCount?: number;
+  envelopePayloadPresent?: boolean;
   envelopePayload?: Record<string, unknown>;
   providerSnapshotContent?: unknown;
   rawArtifactRoles?: string[];
@@ -342,15 +392,18 @@ async function createLegacyWearableFixture(options: {
   const envelopeCount = options.envelopeCount ?? 1;
   for (let index = 0; index < envelopeCount; index += 1) {
     const suffix = envelopeCount === 1 ? "" : `-${index + 1}`;
+    const envelopeContent = {
+      id: `wearable_raw_legacy${suffix}`,
+      payloadHash: hashWearableRawPayload(providerPayload),
+      rawArtifactCount: rawArtifactRoles.length,
+      rawArtifactRoles,
+      schemaVersion: "wearable.raw_ingest.v1",
+      ...(options.envelopePayloadPresent === false
+        ? {}
+        : { payload: envelopePayload }),
+    };
     artifacts.push(await writeRawJsonArtifact({
-      content: {
-        id: `wearable_raw_legacy${suffix}`,
-        payload: envelopePayload,
-        payloadHash: hashWearableRawPayload(providerPayload),
-        rawArtifactCount: rawArtifactRoles.length,
-        rawArtifactRoles,
-        schemaVersion: "wearable.raw_ingest.v1",
-      },
+      content: envelopeContent,
       fileName: `02-garmin-raw-ingest-envelope-legacy${suffix}.json`,
       role: `wearable-raw-envelope:wearable_raw_legacy${suffix}`,
       vaultRoot,

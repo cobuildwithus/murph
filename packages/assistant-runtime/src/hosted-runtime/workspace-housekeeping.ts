@@ -14,7 +14,15 @@ import type {
 export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_REASON =
   "legacy-wearable-receipt-compaction-v1";
 export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_WAKE_GRACE_MS = 5_000;
-export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS = 10_000;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS = 15_000;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_BYTES_READ =
+  64 * 1024 * 1024;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_CANDIDATES_SCANNED = 25;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_ENVELOPES = 5;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_ARTIFACT_BYTES =
+  16 * 1024 * 1024;
+export const HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_TOTAL_BYTES =
+  32 * 1024 * 1024;
 
 export interface HostedWorkspaceHousekeepingPhaseInput {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
@@ -37,8 +45,11 @@ export type HostedWorkspaceHousekeepingPhaseResult =
       mutated: boolean;
       nextWakeAt: string | null;
       nextWakeReason: string | null;
+      oversizedEnvelopeSkippedCount: number;
+      oversizedEvidenceSkippedCount: number;
       redactedStatus: HostedRuntimeRedactedJson;
       runtimeStateDirty: boolean;
+      scannedCount: number;
       skippedCount: number;
     };
 
@@ -78,6 +89,14 @@ export async function runHostedWorkspaceHousekeepingPhase(
 
   const compaction = await compactLegacyWearableReceiptEnvelopes({
     deadlineMs: HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_DEADLINE_MS,
+    maxBytesRead: HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_BYTES_READ,
+    maxCandidatesScanned:
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_CANDIDATES_SCANNED,
+    maxEnvelopes: HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_ENVELOPES,
+    maxEvidenceArtifactBytes:
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_ARTIFACT_BYTES,
+    maxEvidenceTotalBytes:
+      HOSTED_LEGACY_WEARABLE_RECEIPT_COMPACTION_MAX_EVIDENCE_TOTAL_BYTES,
     now: new Date(nowMs),
     vaultRoot: input.vaultRoot,
   });
@@ -100,15 +119,23 @@ export async function runHostedWorkspaceHousekeepingPhase(
     mutated: compaction.mutated,
     nextWakeAt,
     nextWakeReason,
+    oversizedEnvelopeSkippedCount: compaction.oversizedEnvelopeSkippedCount,
+    oversizedEvidenceSkippedCount: compaction.oversizedEvidenceSkippedCount,
     redactedStatus: {
       legacyWearableReceiptCompactionBytesAfter: compaction.bytesAfter,
       legacyWearableReceiptCompactionBytesBefore: compaction.bytesBefore,
       legacyWearableReceiptCompactionCompactedCount: compaction.compactedCount,
       legacyWearableReceiptCompactionHasMore: compaction.hasMore,
       legacyWearableReceiptCompactionMutated: compaction.mutated,
+      legacyWearableReceiptCompactionOversizedEnvelopeSkippedCount:
+        compaction.oversizedEnvelopeSkippedCount,
+      legacyWearableReceiptCompactionOversizedEvidenceSkippedCount:
+        compaction.oversizedEvidenceSkippedCount,
+      legacyWearableReceiptCompactionScannedCount: compaction.scannedCount,
       legacyWearableReceiptCompactionSkippedCount: compaction.skippedCount,
     },
     runtimeStateDirty,
+    scannedCount: compaction.scannedCount,
     skippedCount: compaction.skippedCount,
   };
 }
