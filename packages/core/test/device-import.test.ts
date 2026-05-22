@@ -686,6 +686,54 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   assert.equal(manifest.artifacts[0]?.originalFileName, "whoop-01.json");
 });
 
+test("importDeviceBatch does not implicitly attach synthetic wearable receipts as raw evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-receipt-fallback");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    source: "device",
+    events: [
+      {
+        kind: "note",
+        occurredAt: "2026-03-16T09:30:00.000Z",
+        title: "implicit receipt fallback",
+        note: "receipt should not become provider evidence",
+      },
+      {
+        kind: "note",
+        occurredAt: "2026-03-16T09:31:00.000Z",
+        title: "explicit receipt reference",
+        note: "explicit references are still honored",
+        rawArtifactRoles: ["wearable-raw-receipt:wearable_raw_test"],
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "wearable-raw-receipt:wearable_raw_test",
+        fileName: "receipt.json",
+        mediaType: "application/json",
+        content: {
+          schemaVersion: "wearable.raw_ingest_receipt.v1",
+          id: "wearable_raw_test",
+          payloadHash: "sha256:test",
+        },
+      },
+    ],
+  });
+
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.eventShardPaths[0] as string,
+  })) as EventRecord[];
+
+  assert.equal(eventRecords[0]?.title, "implicit receipt fallback");
+  assert.equal(Object.hasOwn(eventRecords[0] ?? {}, "rawRefs"), false);
+  assert.deepEqual(eventRecords[1]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
+});
+
 test("importDeviceBatch supports sample-only batches without raw artifacts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-sample-only");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
