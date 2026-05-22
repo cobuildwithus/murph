@@ -351,8 +351,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         redactedJson: expect.objectContaining({
           prunedRuntimeSymlinkCount: 1,
           runtimeSymlinkPruneScope: "operator-home",
+          snapshotArchiveEncryptElapsedMs: expect.any(Number),
+          snapshotArchivePlanElapsedMs: expect.any(Number),
+          snapshotDirectR2UploadElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
+          workspaceSnapshotFileCount: snapshotRef.archive.fileCount,
           workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
+          workspaceSnapshotPlainBytes: snapshotRef.archive.totalPlainBytes,
         }),
       }),
     );
@@ -882,10 +887,89 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         eventCode: "checkpoint.snapshot_failed",
         redactedJson: expect.objectContaining({
           safeErrorDetail: "Hosted workspace snapshot exceeds the configured size limit.",
+          snapshotArchiveEncryptElapsedMs: expect.any(Number),
+          snapshotArchivePlanElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
         }),
       }),
     );
+  });
+
+  it("logs partial snapshot timing diagnostics when the direct R2 upload fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: () => {
+          throw new Error("Hosted workspace snapshot direct R2 upload failed.");
+        },
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted workspace snapshot direct R2 upload failed.");
+
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(putArtifact).not.toHaveBeenCalled();
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    const failureLog = entries.find((entry) =>
+      typeof entry === "object"
+      && entry !== null
+      && "eventCode" in entry
+      && entry.eventCode === "checkpoint.snapshot_failed");
+    expect(failureLog).toEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_failed",
+      redactedJson: expect.objectContaining({
+        encryptedByteSize: expect.any(Number),
+        safeErrorDetail: "Hosted workspace snapshot direct R2 upload failed.",
+        snapshotAbortElapsedMs: expect.any(Number),
+        snapshotArchiveEncryptElapsedMs: expect.any(Number),
+        snapshotArchivePlanElapsedMs: expect.any(Number),
+        snapshotDirectR2UploadElapsedMs: expect.any(Number),
+        snapshotElapsedMs: expect.any(Number),
+        snapshotMode: "workspace_snapshot_v2",
+        workspaceSnapshotFileCount: expect.any(Number),
+        workspaceSnapshotPlainBytes: expect.any(Number),
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("snapshot_test_");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("workspace-snapshots");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("encryptedObjectSha256");
   });
 
   it("keeps live raw files inside the encrypted v2 snapshot when legacy artifact refs are stale", async () => {
@@ -1716,8 +1800,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       eventCode: "checkpoint.snapshot_finished",
       redactedJson: expect.objectContaining({
         checkpointReason: "idle_shutdown",
+        snapshotArchiveEncryptElapsedMs: expect.any(Number),
+        snapshotArchivePlanElapsedMs: expect.any(Number),
+        snapshotDirectR2UploadElapsedMs: expect.any(Number),
         snapshotMode: "workspace_snapshot_v2",
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
+        workspaceSnapshotFileCount: snapshotRef.archive.fileCount,
+        workspaceSnapshotPlainBytes: snapshotRef.archive.totalPlainBytes,
       }),
     }));
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
