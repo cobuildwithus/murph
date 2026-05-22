@@ -60,6 +60,10 @@ const BOUND_USER_WRITE_FENCE_HEADERS = {
   ...WRITE_FENCE_HEADERS,
   [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
 } as const;
+const BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS = {
+  ...BOUND_USER_WRITE_FENCE_HEADERS,
+  authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+} as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
 
 function testByteLength(value: string): number {
@@ -1325,6 +1329,57 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
+  it.each([
+    {
+      name: "directions",
+      path: "/directions/v5/mapbox/walking/1,2;3,4",
+    },
+    {
+      name: "geocoding",
+      path: "/search/geocode/v6/forward",
+    },
+    {
+      name: "searchbox",
+      path: "/search/searchbox/v1/forward",
+    },
+    {
+      name: "terrain tilequery",
+      path: "/v4/mapbox.mapbox-terrain-v2/tilequery/1,2.json",
+    },
+  ] as const)("allows required Mapbox runtime route family: $name", async ({ path }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const requestUrl = new URL(`https://api.mapbox.com${path}`);
+    requestUrl.searchParams.set("access_token", HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+
+    const response = await hostedRunnerIntercept(
+      new Request(requestUrl, {
+        headers: {
+          authorization: "Bearer user-supplied-mapbox-token",
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        MAPBOX_ACCESS_TOKEN: "mapbox-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    const forwarded = readForwardedRequest(fetchMock);
+    const forwardedUrl = new URL(forwarded.url);
+    expect(forwardedUrl.origin).toBe("https://api.mapbox.com");
+    expect(forwardedUrl.pathname).toBe(path);
+    expect(forwardedUrl.searchParams.get("access_token")).toBe("mapbox-worker-secret");
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("still requires the Mapbox sentinel before injecting the Worker token", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -1472,6 +1527,88 @@ describe("hostedRunnerIntercept", () => {
     );
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
       "member_123",
+    );
+  });
+
+  it.each([
+    {
+      host: "api.us.junction.com",
+      path: "/v1/sync",
+    },
+    {
+      host: "api.eu.junction.com",
+      path: "/v1/sync",
+    },
+    {
+      host: "api.ouraring.com",
+      path: "/v2/usercollection/personal_info",
+    },
+    {
+      host: "cloud.ouraring.com",
+      path: "/oauth/token",
+    },
+    {
+      host: "api.prod.whoop.com",
+      path: "/developer/v1/user/profile/basic",
+    },
+    {
+      host: "www.strava.com",
+      path: "/api/v3/athlete",
+    },
+  ] as const)("does not reject hosted device-sync provider egress for $host", async ({ host, path }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request(`https://${host}${path}`, {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: "Bearer device-provider-token",
+          "x-api-key": "device-provider-api-key",
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        MAPBOX_ACCESS_TOKEN: "mapbox-worker-secret",
+        OPENAI_API_KEY: "openai-worker-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe(`https://${host}${path}`);
+    expect(forwarded.headers.get("authorization")).toBe("Bearer device-provider-token");
+    expect(forwarded.headers.get("x-api-key")).toBe("device-provider-api-key");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    const forwardedHeaderParts: string[] = [];
+    forwarded.headers.forEach((value, name) => {
+      forwardedHeaderParts.push(name, value);
+    });
+    const forwardedSerialized = [forwarded.url, ...forwardedHeaderParts].join("\n");
+    expect(forwardedSerialized).not.toContain("linq-worker-secret");
+    expect(forwardedSerialized).not.toContain("mapbox-worker-secret");
+    expect(forwardedSerialized).not.toContain("openai-worker-secret");
+    expect(forwardedSerialized).not.toContain("telegram-worker-secret");
+    expect(forwardedSerialized).not.toContain("whatsapp-worker-secret");
+    expect(forwardedSerialized).not.toContain("phone_123");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          host,
+          method: "GET",
+          policy: "open_internet_passthrough",
+          userIdPresent: true,
+        },
+        message: "Hosted runner open-internet passthrough forwarded outbound request.",
+      }),
     );
   });
 
@@ -2130,6 +2267,67 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
+  it.each([
+    {
+      method: "POST",
+      operation: "sendMessage",
+      query: "",
+    },
+    {
+      method: "POST",
+      operation: "sendChatAction",
+      query: "",
+    },
+    {
+      method: "POST",
+      operation: "deleteMessages",
+      query: "",
+    },
+    {
+      method: "POST",
+      operation: "deleteBusinessMessages",
+      query: "",
+    },
+    {
+      method: "GET",
+      operation: "getFile",
+      query: "?file_id=file_1",
+    },
+  ] as const)(
+    "allows required Telegram Bot API operation: $operation",
+    async ({ method, operation, query }) => {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+      vi.stubGlobal("fetch", fetchMock);
+      const validateRuntimeWriteFence = vi.fn(async () => true);
+
+      const response = await hostedRunnerIntercept(
+        new Request(`https://api.telegram.org/bot__cloudflare_injected__/${operation}${query}`, {
+          headers: BOUND_USER_WRITE_FENCE_HEADERS,
+          method,
+        }),
+        createInterceptEnv({
+          TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+        attemptId: "attempt_1",
+        generation: "7",
+        userId: "member_123",
+      });
+      const forwarded = readForwardedRequest(fetchMock);
+      expect(forwarded.method).toBe(method);
+      expect(forwarded.url).toBe(
+        `https://api.telegram.org/bottelegram-worker-secret/${operation}${query}`,
+      );
+      expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+      expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    },
+  );
+
   it("maps default Telegram provider host egress to the configured upstream base", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -2265,7 +2463,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2279,9 +2477,44 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://graph.facebook.com/v25.0/phone_123/messages");
-    expect(forwarded.headers.get("authorization")?.startsWith("Bearer ")).toBe(true);
+    expect(forwarded.headers.get("authorization")).toBe("Bearer whatsapp-worker-secret");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
+  it.each([
+    {
+      name: "missing",
+      headers: BOUND_USER_WRITE_FENCE_HEADERS,
+    },
+    {
+      name: "wrong",
+      headers: {
+        ...BOUND_USER_WRITE_FENCE_HEADERS,
+        authorization: "Bearer user-supplied-whatsapp-token",
+      },
+    },
+  ] as const)("rejects WhatsApp provider egress with a $name access-token sentinel", async ({ headers }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
+        headers,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects WhatsApp provider egress without the sentinel phone id", async () => {
@@ -2291,7 +2524,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://graph.facebook.com/v25.0/phone_123/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2313,7 +2546,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({}),
@@ -2335,7 +2568,7 @@ describe("hostedRunnerIntercept", () => {
     ]) {
       const response = await hostedRunnerIntercept(
         new Request(url, {
-          headers: BOUND_USER_WRITE_FENCE_HEADERS,
+          headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
           method: "POST",
         }),
         createInterceptEnv({
@@ -2358,7 +2591,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("http://127.0.0.1:4012/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2382,7 +2615,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("http://whatsapp.example.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2406,7 +2639,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2435,7 +2668,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://whatsapp.example.test/meta/proxy/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2464,7 +2697,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://whatsapp.example.test/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
@@ -2487,7 +2720,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://graph.facebook.com/vbeta/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
