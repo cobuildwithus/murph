@@ -365,6 +365,7 @@ describe("appendHostedMailboxItemTx", () => {
       id: "mailbox_checkpoint_1",
       lane: "system",
       laneSeq: "42",
+      occurredAt: FIXED_NOW.toISOString(),
       userId: "member_mailbox_1",
     });
     expect(findUnique).toHaveBeenCalledWith({
@@ -372,6 +373,7 @@ describe("appendHostedMailboxItemTx", () => {
         id: true,
         lane: true,
         laneSeq: true,
+        occurredAt: true,
         userId: true,
       },
       where: {

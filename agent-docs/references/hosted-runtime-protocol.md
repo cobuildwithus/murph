@@ -182,12 +182,14 @@ connections whose canonical `nextReconcileAt` is due. Temporal owns the cadence
 through a global scheduled reconciler workflow, but web owns the signed recovery
 command that selects stale dirty and due-reconcile facts, appends wake pointers,
 records due-reconcile signals, and keeps retries idempotent. Each dirty sweep
-attempt for a still-dirty revision appends a fresh opaque wake pointer so an
-already-imported pointer cannot make recovery one-shot. During migration, the
-Vercel dirty-sweeper cron was removed so Temporal remains the only scheduler.
-The runtime must support dirty-pending and dirty-ack callbacks; dirty ack means
-the dirty revision was handed off into the checkpointed local device-sync job
-store, not that upstream provider sync succeeded. Connection-established and
+attempt for the same still-dirty revision reuses the same opaque wake pointer
+and deterministic runtime-control recovery item, then sends an explicit
+`device_sync_recovery_requested` Temporal signal so an already-imported mailbox
+pointer does not make recovery one-shot. During migration, the Vercel
+dirty-sweeper cron was removed so Temporal remains the only scheduler. The
+runtime must support dirty-pending and dirty-ack callbacks; dirty ack means the
+dirty revision was handed off into the checkpointed local device-sync job store,
+not that upstream provider sync succeeded. Connection-established and
 disconnect lifecycle commands may still use coarse device-sync mailbox wakes
 because they are explicit lifecycle events, not high-cardinality freshness
 hints.

@@ -75,6 +75,7 @@ export interface HostedMailboxItemCheckpointRecord {
   id: string;
   lane: HostedMailboxLane;
   laneSeq: string;
+  occurredAt: string;
   userId: string;
 }
 
@@ -593,6 +594,7 @@ export async function readHostedMailboxItemCheckpointById(input: {
       id: true,
       lane: true,
       laneSeq: true,
+      occurredAt: true,
       userId: true,
     },
     where: {
@@ -605,6 +607,7 @@ export async function readHostedMailboxItemCheckpointById(input: {
       id: record.id,
       lane: requireHostedMailboxLane(record.lane),
       laneSeq: record.laneSeq.toString(),
+      occurredAt: record.occurredAt.toISOString(),
       userId: record.userId,
     }
     : null;

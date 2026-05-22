@@ -81,6 +81,7 @@ describe("hosted runtime Temporal signaling", () => {
       id: "mailbox_123",
       lane: "conversation",
       laneSeq: "42",
+      occurredAt: "2026-03-26T12:00:00.000Z",
       userId: "member_123",
     });
   });
@@ -185,6 +186,7 @@ describe("hosted runtime Temporal signaling", () => {
       envelope: expect.objectContaining({
         eventId: expect.stringMatching(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u),
         kind: "runtime.device-sync-recovery-requested",
+        occurredAt: "2026-03-26T12:00:00.000Z",
         userId: "member_123",
       }),
       tx: { kind: "tx" },
@@ -193,11 +195,7 @@ describe("hosted runtime Temporal signaling", () => {
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.device-sync-recovery-requested",
-          source: "device-sync-recovery",
+          kind: "device_sync_recovery_requested",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -234,10 +232,25 @@ describe("hosted runtime Temporal signaling", () => {
     const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
       ([input]) => input.envelope.eventId,
     );
+    const occurredAts = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      ([input]) => input.envelope.occurredAt,
+    );
     expect(eventIds[0]).toBe(eventIds[1]);
     expect(eventIds[0]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
     expect(eventIds[2]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
     expect(eventIds[2]).not.toBe(eventIds[0]);
+    expect(occurredAts).toEqual([
+      "2026-03-26T12:00:00.000Z",
+      "2026-03-26T12:00:00.000Z",
+      "2026-03-26T12:00:00.000Z",
+    ]);
+    expect(mocks.signalWithStart.mock.calls.map(
+      ([, options]) => options.signalArgs[0],
+    )).toEqual([
+      { kind: "device_sync_recovery_requested" },
+      { kind: "device_sync_recovery_requested" },
+      { kind: "device_sync_recovery_requested" },
+    ]);
   });
 
   it("persists browser-vault refresh as durable control demand before signaling", async () => {
