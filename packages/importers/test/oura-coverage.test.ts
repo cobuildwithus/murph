@@ -40,20 +40,15 @@ test("normalizeOuraSnapshot covers dailySpo2 aliasing, heartRate aliasing, and p
 
   const spo2Event = payload.events?.find((event) => event.externalRef?.facet === "spo2-average");
   const readinessEvent = payload.events?.find((event) => event.externalRef?.facet === "readiness-score");
-  const slugifiedHeartRateSample = payload.samples?.find(
-    (sample) => sample.externalRef?.facet === "resting-hr",
-  );
-  const fallbackHeartRateSample = payload.samples?.find(
-    (sample) => sample.externalRef?.facet === "sample",
-  );
+  const heartRateArtifacts = payload.rawArtifacts?.filter((artifact) => artifact.role === "heartrate") ?? [];
 
   assert.equal(payload.accountId, "oura-user-user-id");
   assert.equal(payload.provenance?.ouraUserId, "oura-user-user-id");
   assert.equal(spo2Event?.fields?.metric, "spo2");
   assert.equal(spo2Event?.fields?.value, 97.6);
   assert.equal(readinessEvent?.fields?.value, 78);
-  assert.equal(slugifiedHeartRateSample?.sample.value, 61);
-  assert.equal(fallbackHeartRateSample?.sample.value, 63);
+  assert.equal(heartRateArtifacts.length, 1);
+  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing branches", () => {
@@ -153,6 +148,24 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
     (event) =>
       event.externalRef?.resourceId === "workout-unknown-distance" && event.kind === "activity_session",
   );
+  const restSleepAverageHeartRate = payload.events?.find(
+    (event) =>
+      event.externalRef?.resourceId === "sleep-rest" &&
+      event.kind === "observation" &&
+      event.fields?.metric === "average-heart-rate",
+  );
+  const partialSleepRespiratoryRate = payload.events?.find(
+    (event) =>
+      event.externalRef?.resourceId === "sleep-partial" &&
+      event.kind === "observation" &&
+      event.fields?.metric === "respiratory-rate",
+  );
+  const partialSessionHeartRate = payload.events?.find(
+    (event) =>
+      event.externalRef?.resourceId === "session-partial" &&
+      event.kind === "observation" &&
+      event.fields?.metric === "average-heart-rate",
+  );
 
   assert.equal(payload.accountId, "oura-user-user-id-2");
   assert.equal(payload.provenance?.ouraUserId, "oura-user-user-id-2");
@@ -166,19 +179,10 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
   assert.ok(unknownDistanceWorkoutEvent);
   assert.equal(unknownDistanceWorkoutEvent?.fields?.activityType, "rowing");
   assert.equal(unknownDistanceWorkoutEvent?.fields?.distanceKm, undefined);
-  assert.ok(
-    payload.samples?.some((sample) => sample.externalRef?.resourceId === "sleep-rest" && sample.stream === "heart_rate"),
-  );
-  assert.ok(
-    payload.samples?.some(
-      (sample) => sample.externalRef?.resourceId === "sleep-partial" && sample.stream === "respiratory_rate",
-    ),
-  );
-  assert.ok(
-    payload.samples?.some(
-      (sample) => sample.externalRef?.resourceId === "session-partial" && sample.stream === "heart_rate",
-    ),
-  );
+  assert.equal(restSleepAverageHeartRate?.fields?.value, 55);
+  assert.equal(partialSleepRespiratoryRate?.fields?.value, 11.7);
+  assert.equal(partialSessionHeartRate?.fields?.value, 62);
+  assert.equal(payload.samples?.length ?? 0, 0);
   assert.ok(
     payload.events?.some(
       (event) =>

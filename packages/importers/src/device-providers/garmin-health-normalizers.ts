@@ -25,14 +25,12 @@ import {
 import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
-  DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 
 export interface GarminHealthNormalizationContext {
   importedAt: string;
   events: DeviceEventPayload[];
-  samples: DeviceSamplePayload[];
   rawArtifacts: DeviceRawArtifactPayload[];
 }
 

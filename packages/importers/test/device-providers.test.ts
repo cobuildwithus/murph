@@ -373,7 +373,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "session:session-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"));
+  assert.equal(payload.rawArtifacts?.filter((artifact) => artifact.role === "heartrate").length, 1);
   assert.ok(
     payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
@@ -1497,6 +1497,45 @@ test("importDeviceProviderSnapshot uses the default Oura adapter registry", asyn
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.provider, "oura");
   assert.ok(calls[0]?.events?.some((event) => event.fields?.metric === "readiness-score"));
+});
+
+test("importDeviceProviderSnapshot imports Oura heart-rate raw artifacts once", async () => {
+  const vaultRoot = await makeTempDirectory("murph-oura-heartrate-import");
+  await coreRuntime.initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-12T12:00:00.000Z",
+    timezone: "America/Los_Angeles",
+  });
+
+  const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "oura",
+      vaultRoot,
+      snapshot: {
+        importedAt: "2026-03-16T12:00:00.000Z",
+        dailyReadiness: [
+          {
+            day: "2026-03-16",
+            score: 81,
+          },
+        ],
+        heartRate: [
+          {
+            timestamp: "2026-03-16T08:00:00.000Z",
+            bpm: 62,
+          },
+        ],
+      },
+    },
+    {
+      corePort: coreRuntime,
+    },
+  );
+
+  assert.equal(
+    result.rawArtifacts.filter((artifact) => artifact.relativePath.endsWith("/01-heartrate.json")).length,
+    1,
+  );
 });
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {

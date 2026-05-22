@@ -5,8 +5,6 @@ import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
-  DeviceSamplePayload,
-  DeviceSampleValuePayload,
 } from "../core-port.ts";
 import type { NormalizedDeviceBatch } from "./types.ts";
 
@@ -21,16 +19,6 @@ export interface ObservationEventOptions {
   title: string;
   note?: string;
   rawArtifactRoles?: string[];
-  externalRef: DeviceExternalRefPayload;
-}
-
-export interface SampleOptions {
-  stream: string;
-  value: unknown;
-  unit: string;
-  recordedAt?: string;
-  dayKey?: string;
-  timeZone?: string;
   externalRef: DeviceExternalRefPayload;
 }
 
@@ -51,14 +39,6 @@ export interface ObservationMetricDescriptor<T> {
   unit: string;
   title: string | ((source: T) => string);
   note?: string | ((source: T) => string | undefined);
-  facet?: string | ((source: T) => string | undefined);
-}
-
-export interface SampleMetricDescriptor<T> {
-  stream: string;
-  value: (source: T) => unknown;
-  transform?: (value: unknown, source: T) => unknown;
-  unit: string;
   facet?: string | ((source: T) => string | undefined);
 }
 
@@ -83,7 +63,6 @@ export interface DeletionObservationOptions {
 
 export type NormalizedDeviceBatchOptions = Omit<NormalizedDeviceBatch, "source">;
 
-const INTEGER_SAMPLE_STREAMS = new Set(["heart_rate", "steps"]);
 const DELETION_ARTIFACT_IDENTITY_PREFIX = "device-deletion-observation";
 const DELETION_ARTIFACT_PART_MAX_LENGTH = 32;
 
@@ -391,38 +370,6 @@ export function pushObservationEvent(
   );
 }
 
-export function pushSample(
-  samples: DeviceSamplePayload[],
-  options: SampleOptions,
-): void {
-  const numeric = finiteNumber(options.value);
-
-  if (numeric === undefined || !options.recordedAt) {
-    return;
-  }
-
-  const resolvedValue = INTEGER_SAMPLE_STREAMS.has(options.stream) ? Math.round(numeric) : numeric;
-
-  const sample: DeviceSampleValuePayload = {
-    recordedAt: options.recordedAt,
-    value: resolvedValue,
-  };
-
-  samples.push(
-    stripUndefined({
-      stream: options.stream,
-      recordedAt: options.recordedAt,
-      dayKey: options.dayKey,
-      timeZone: options.timeZone,
-      source: "device",
-      quality: "normalized",
-      unit: options.unit,
-      externalRef: options.externalRef,
-      sample,
-    }),
-  );
-}
-
 function resolveMetricDescriptorValue<T, TValue>(
   value: TValue | ((source: T) => TValue),
   source: T,
@@ -452,31 +399,6 @@ export function emitObservationMetrics<T>(
         ? resolveMetricDescriptorValue(descriptor.note, context.source)
         : undefined,
       rawArtifactRoles: context.rawArtifactRoles,
-      externalRef: context.externalRef(
-        descriptor.facet
-          ? resolveMetricDescriptorValue(descriptor.facet, context.source)
-          : undefined,
-      ),
-    });
-  }
-}
-
-export function emitSampleMetrics<T>(
-  samples: DeviceSamplePayload[],
-  context: MetricEmissionContext<T>,
-  descriptors: readonly SampleMetricDescriptor<T>[],
-): void {
-  for (const descriptor of descriptors) {
-    const rawValue = descriptor.value(context.source);
-    const value = descriptor.transform ? descriptor.transform(rawValue, context.source) : rawValue;
-
-    pushSample(samples, {
-      stream: descriptor.stream,
-      value,
-      unit: descriptor.unit,
-      recordedAt: context.recordedAt,
-      dayKey: context.dayKey,
-      timeZone: context.timeZone,
       externalRef: context.externalRef(
         descriptor.facet
           ? resolveMetricDescriptorValue(descriptor.facet, context.source)

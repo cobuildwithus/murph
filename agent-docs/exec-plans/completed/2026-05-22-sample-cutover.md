@@ -32,3 +32,6 @@ Out of scope:
 - Focused tests for query projection/readVault/browser-vault behavior.
 - Package typecheck/test commands covering touched packages.
 - Repo-required completion audits before final commit.
+Status: completed
+Updated: 2026-05-22
+Completed: 2026-05-22
