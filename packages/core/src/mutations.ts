@@ -528,7 +528,7 @@ function normalizeInlineRawContent(content: unknown): string {
     throw new VaultError("VAULT_INVALID_RAW_CONTENT", "raw artifact content is required.");
   }
 
-  return `${JSON.stringify(stableSortValue(content), null, 2)}\n`;
+  return `${stableStringify(content)}\n`;
 }
 
 function earliestTimestamp(timestamps: readonly string[], fallback: DateInput = new Date()): string {

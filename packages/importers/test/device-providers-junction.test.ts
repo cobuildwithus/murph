@@ -684,7 +684,7 @@ test("Junction normalizer maps blood oxygen unit aliases to the canonical sample
   }
 });
 
-test("Junction snapshot import minimizes grouped source identifiers in raw envelopes", async () => {
+test("Junction snapshot import minimizes grouped source identifiers in raw receipts", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     sourceKind: "poll",
@@ -758,37 +758,40 @@ test("Junction snapshot import minimizes grouped source identifiers in raw envel
     },
   });
 
-  const rawEnvelope = payload.rawIngestEnvelopes?.[0];
-  assert.ok(rawEnvelope);
-  const rawEnvelopeArtifact = payload.rawArtifacts?.find((artifact) =>
-    artifact.role === `wearable-raw-envelope:${rawEnvelope.id}`
+  const rawReceipt = payload.rawIngestReceipts?.[0];
+  assert.ok(rawReceipt);
+  const rawReceiptArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role === `wearable-raw-receipt:${rawReceipt.id}`
   );
-  const rawEnvelopeText = JSON.stringify(rawEnvelope);
-  const rawEnvelopeArtifactText = JSON.stringify(rawEnvelopeArtifact?.content);
+  const rawReceiptText = JSON.stringify(rawReceipt);
+  const rawReceiptArtifactText = JSON.stringify(rawReceiptArtifact?.content);
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);
 
-  assert.equal(Object.hasOwn(rawEnvelope, "payload"), false);
-  assert.ok(rawEnvelopeArtifact);
-  assert.deepEqual(rawEnvelope.rawArtifactRoles, [
+  assert.equal(Object.hasOwn(rawReceipt, "payload"), false);
+  assert.equal(rawReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
+  assert.ok(rawReceiptArtifact);
+  assert.deepEqual(rawReceipt.rawArtifactRoles, [
     "junction-summary-profile",
     "junction-summary-activity",
     "junction-timeseries-steps",
   ]);
-  assert.equal(rawEnvelope.rawArtifactCount, 3);
+  assert.equal(rawReceipt.rawArtifactCount, 3);
+  assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
+  assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-canonical-records:")), false);
   assert.doesNotMatch(
-    rawEnvelopeText,
+    rawReceiptText,
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
   );
-  assert.equal(rawEnvelopeArtifact?.content, rawEnvelope);
+  assert.equal(rawReceiptArtifact?.content, rawReceipt);
   assert.doesNotMatch(
-    rawEnvelopeArtifactText,
+    rawReceiptArtifactText,
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
   );
   assert.doesNotMatch(
     rawArtifactText,
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u,
   );
-  assert.match(rawEnvelopeText, /"provider":"junction"/u);
+  assert.match(rawReceiptText, /"provider":"junction"/u);
   assert.match(rawArtifactText, /"sourceProviderSlug":"oura"/u);
   assert.match(rawArtifactText, /"sourceType":"ring"/u);
   assert.match(rawArtifactText, /"value":123/u);
@@ -826,11 +829,6 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
   const glucoseArtifact = payload.rawArtifacts?.find((artifact) =>
     artifact.role === "junction-timeseries-glucose"
   );
-  const canonicalArtifact = payload.rawArtifacts?.find((artifact) =>
-    artifact.role.startsWith("wearable-canonical-records:")
-  );
-  const canonicalArtifactContent = canonicalArtifact?.content as { records?: unknown[] } | undefined;
-
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
   assert.equal(glucoseSamples.length, 0);
   assert.deepEqual(payload.canonicalWearableRecords, []);
@@ -847,8 +845,10 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
       value: 102,
     },
   ]);
-  assert.ok(canonicalArtifact);
-  assert.deepEqual(canonicalArtifactContent?.records, []);
+  assert.equal(
+    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
+    false,
+  );
 });
 
 test("Junction importer skips source-specific floating summary records instead of using window fallback", async () => {
@@ -879,17 +879,14 @@ test("Junction importer skips source-specific floating summary records instead o
   });
 
   const bodyArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-body");
-  const canonicalArtifact = payload.rawArtifacts?.find((artifact) =>
-    artifact.role.startsWith("wearable-canonical-records:")
-  );
-  const canonicalArtifactContent = canonicalArtifact?.content as { records?: unknown[] } | undefined;
-
   assert.deepEqual(payload.provenance?.summaryResources, ["body"]);
   assert.deepEqual(payload.events, []);
   assert.deepEqual(payload.canonicalWearableRecords, []);
   assert.ok(bodyArtifact);
-  assert.ok(canonicalArtifact);
-  assert.deepEqual(canonicalArtifactContent?.records, []);
+  assert.equal(
+    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
+    false,
+  );
 });
 
 test("Junction normalizer does not use source-specific floating timestamps as window times", () => {

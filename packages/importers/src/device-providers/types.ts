@@ -4,7 +4,7 @@ import type {
   WearableRawIngestDeliveryMode,
   WearableRawIngestEventType,
   WearableRawIngestSourceKind,
-} from "./raw-ingest-envelope.ts";
+} from "./raw-ingest-receipt.ts";
 
 export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot"> {}
 

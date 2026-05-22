@@ -40,10 +40,10 @@
       "import": "./dist/device-providers/metric-catalog.js",
       "default": "./dist/device-providers/metric-catalog.js"
     },
-    "./device-providers/raw-ingest-envelope": {
-      "types": "./dist/device-providers/raw-ingest-envelope.d.ts",
-      "import": "./dist/device-providers/raw-ingest-envelope.js",
-      "default": "./dist/device-providers/raw-ingest-envelope.js"
+    "./device-providers/raw-ingest-receipt": {
+      "types": "./dist/device-providers/raw-ingest-receipt.d.ts",
+      "import": "./dist/device-providers/raw-ingest-receipt.js",
+      "default": "./dist/device-providers/raw-ingest-receipt.js"
     },
     "./sample-series-summary": {
       "types": "./dist/sample-series-summary.d.ts",

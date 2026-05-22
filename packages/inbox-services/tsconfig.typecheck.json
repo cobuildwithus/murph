@@ -15,8 +15,8 @@
       "@murphai/importers/device-providers/provider-descriptors": [
         "packages/importers/src/device-providers/provider-descriptors.ts"
       ],
-      "@murphai/importers/device-providers/raw-ingest-envelope": [
-        "packages/importers/src/device-providers/raw-ingest-envelope.ts"
+      "@murphai/importers/device-providers/raw-ingest-receipt": [
+        "packages/importers/src/device-providers/raw-ingest-receipt.ts"
       ],
       "@murphai/importers/*": [
         "packages/importers/src/*"

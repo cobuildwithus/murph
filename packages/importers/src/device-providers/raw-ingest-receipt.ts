@@ -15,10 +15,10 @@ export type WearableRawIngestDeliveryMode =
   | "scheduled_reconcile";
 export type WearableRawIngestEventType = "create" | "update" | "delete" | "deauthorize";
 
-export interface WearableRawIngestEnvelope {
+export interface WearableRawIngestReceipt {
   id: string;
   provider: string;
-  schemaVersion: "wearable.raw_ingest.v1";
+  schemaVersion: "wearable.raw_ingest_receipt.v1";
   userId?: string;
   accountId?: string;
   connectionId?: string;
@@ -39,9 +39,9 @@ export interface WearableRawIngestEnvelope {
   rawArtifactCount: number;
 }
 
-export interface BuildWearableRawIngestEnvelopeInput {
+export interface BuildWearableRawIngestReceiptInput {
   provider: string;
-  payload: unknown;
+  payloadForHash: unknown;
   rawArtifactRoles?: readonly string[];
   userId?: string;
   accountId?: string;
@@ -60,14 +60,14 @@ export interface BuildWearableRawIngestEnvelopeInput {
   signatureVerified?: boolean;
 }
 
-export function buildWearableRawIngestEnvelope(
-  input: BuildWearableRawIngestEnvelopeInput,
-): WearableRawIngestEnvelope {
+export function buildWearableRawIngestReceipt(
+  input: BuildWearableRawIngestReceiptInput,
+): WearableRawIngestReceipt {
   const observedAt = input.observedAt ?? new Date().toISOString();
-  const payload = normalizeWearableRawIngestJsonPayload(input.payload);
+  const payload = normalizeWearableRawIngestJsonPayload(input.payloadForHash);
   const payloadHash = sha256Hex(stableStringify(payload));
   const rawArtifactRoles = normalizeRawArtifactRoles(input.rawArtifactRoles);
-  const id = buildWearableRawIngestEnvelopeId({
+  const id = buildWearableRawIngestReceiptId({
     provider: input.provider,
     accountId: input.accountId,
     connectionId: input.connectionId,
@@ -80,7 +80,7 @@ export function buildWearableRawIngestEnvelope(
   return stripUndefined({
     id,
     provider: input.provider,
-    schemaVersion: "wearable.raw_ingest.v1" as const,
+    schemaVersion: "wearable.raw_ingest_receipt.v1" as const,
     userId: input.userId,
     accountId: input.accountId,
     connectionId: input.connectionId,
@@ -106,7 +106,7 @@ function normalizeRawArtifactRoles(rawArtifactRoles: readonly string[] | undefin
   return [...(rawArtifactRoles ?? [])];
 }
 
-function buildWearableRawIngestEnvelopeId(input: {
+function buildWearableRawIngestReceiptId(input: {
   provider: string;
   accountId?: string;
   connectionId?: string;

@@ -113,13 +113,13 @@ export type {
   WearableMetricRecordKind,
 } from "./metric-catalog.ts";
 export {
-  buildWearableRawIngestEnvelope,
+  buildWearableRawIngestReceipt,
   stableStringify,
-} from "./raw-ingest-envelope.ts";
+} from "./raw-ingest-receipt.ts";
 export type {
-  BuildWearableRawIngestEnvelopeInput,
+  BuildWearableRawIngestReceiptInput,
   WearableRawIngestDeliveryMode,
-  WearableRawIngestEnvelope,
+  WearableRawIngestReceipt,
   WearableRawIngestEventType,
   WearableRawIngestSourceKind,
-} from "./raw-ingest-envelope.ts";
+} from "./raw-ingest-receipt.ts";
