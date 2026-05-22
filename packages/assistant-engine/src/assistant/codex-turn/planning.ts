@@ -70,6 +70,7 @@ export interface AssistantRouteTurnPlan {
   freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
   onboardingGuidanceInjected: boolean
   codexContinuation: AssistantCodexContinuation
+  planningDiagnostics: AssistantRoutePlanningDiagnostics
   refreshThreadInstructions: boolean
   resumeCodexThreadId: string | null
   sessionContext?: {
@@ -79,6 +80,17 @@ export interface AssistantRouteTurnPlan {
   systemPrompt: string | null
   turnContextPrompt: string | null
   workingDirectory: string
+}
+
+export interface AssistantRoutePlanningDiagnostics {
+  activeExperimentContextElapsedMs: number | null
+  allowSensitiveHealthContext: boolean
+  cliBootstrapElapsedMs: number | null
+  routePlanningElapsedMs: number
+  shouldPrepareAnyBootstrapContext: boolean
+  shouldPrepareBootstrapContext: boolean
+  shouldPrepareFreshThreadFallback: boolean
+  vaultOverviewElapsedMs: number | null
 }
 
 export interface AssistantRouteFreshThreadFallbackPlan {
@@ -289,6 +301,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
 }): Promise<AssistantRouteTurnPlan> {
+  const routePlanningStartedAt = Date.now()
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const resumeBinding = resolveAssistantRouteResumeBinding({
     route: input.route,
@@ -334,24 +347,42 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const shouldPrepareConversationThreadInstructions =
     shouldPrepareAnyBootstrapContext && input.profile.promptProfile === 'conversation'
+  let cliBootstrapElapsedMs: number | null = null
   const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
-    ? await resolveAssistantCliSurfaceBootstrapContext({
-        cliEnv: input.sharedPlan.cliAccess.env,
-        executionContext: input.input.executionContext,
-        sessionId: input.session.sessionId,
-        vault: input.input.vault,
-        workingDirectory,
-      })
+    ? await measureElapsed(
+        () => resolveAssistantCliSurfaceBootstrapContext({
+          cliEnv: input.sharedPlan.cliAccess.env,
+          executionContext: input.input.executionContext,
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+          workingDirectory,
+        }),
+        (elapsedMs) => {
+          cliBootstrapElapsedMs = elapsedMs
+        },
+      )
     : null
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
       ? resolveAssistantSupportedExperimentProtocols()
       : []
+  let vaultOverviewElapsedMs: number | null = null
   const bootstrapVaultOverview = shouldPrepareAnyBootstrapContext
-    ? await resolveAssistantVaultOverviewBlock(input.input.vault)
+    ? await measureElapsed(
+        () => resolveAssistantVaultOverviewBlock(input.input.vault),
+        (elapsedMs) => {
+          vaultOverviewElapsedMs = elapsedMs
+        },
+      )
     : null
+  let activeExperimentContextElapsedMs: number | null = null
   const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
-    ? await resolveAssistantActiveExperimentContextBlock(input.input.vault)
+    ? await measureElapsed(
+        () => resolveAssistantActiveExperimentContextBlock(input.input.vault),
+        (elapsedMs) => {
+          activeExperimentContextElapsedMs = elapsedMs
+        },
+      )
     : null
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
@@ -470,6 +501,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
     codexContinuation: resolveAssistantCodexContinuation({
       resumeCodexThreadId,
     }),
+    planningDiagnostics: {
+      activeExperimentContextElapsedMs,
+      allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+      cliBootstrapElapsedMs,
+      routePlanningElapsedMs: elapsedSince(routePlanningStartedAt),
+      shouldPrepareAnyBootstrapContext,
+      shouldPrepareBootstrapContext,
+      shouldPrepareFreshThreadFallback,
+      vaultOverviewElapsedMs,
+    },
     refreshThreadInstructions,
     resumeCodexThreadId,
     sessionContext: shouldPrepareBootstrapContext
@@ -482,6 +523,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     systemPrompt,
     turnContextPrompt,
   }
+}
+
+async function measureElapsed<TResult>(
+  work: () => Promise<TResult>,
+  record: (elapsedMs: number) => void,
+): Promise<TResult> {
+  const startedAt = Date.now()
+  try {
+    return await work()
+  } finally {
+    record(elapsedSince(startedAt))
+  }
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt)
 }
 
 function resolveAssistantSupportedExperimentProtocols() {

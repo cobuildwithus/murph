@@ -159,6 +159,114 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-session-id");
   });
 
+  it("captures hosted context timing diagnostics as metadata only", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_context_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantContextTraceLog({
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-context-diagnostics.v1",
+          type: "assistant.context.diagnostics",
+          stage: "assistant-pre-provider-ready",
+          preProviderAdmissionCount: 0,
+          preProviderSetupMs: 123,
+          providerRequestOrdinal: 0,
+          turnLockWaitMs: 45,
+          rawUserId: "raw-user-id",
+          rawPrompt: "raw prompt text",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.context",
+      eventId: "evt_context_timing",
+      level: "info",
+      message: "Hosted assistant context timing captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        preProviderAdmissionCount: 0,
+        preProviderSetupMs: 123,
+        providerRequestOrdinal: 0,
+        schema: "murph.assistant-context-diagnostics.v1",
+        stage: "assistant-pre-provider-ready",
+        turnLockWaitMs: 45,
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-user-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt text");
+  });
+
+  it("captures hosted turn-lock timing diagnostics as metadata only", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_context_lock_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantContextTraceLog({
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-context-diagnostics.v1",
+          type: "assistant.context.diagnostics",
+          stage: "assistant-turn-lock-acquired",
+          turnLockWaitMs: 321,
+          rawUserId: "raw-user-id",
+          rawPrompt: "raw prompt text",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.context",
+      eventId: "evt_context_lock_timing",
+      level: "info",
+      message: "Hosted assistant context timing captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        schema: "murph.assistant-context-diagnostics.v1",
+        stage: "assistant-turn-lock-acquired",
+        turnLockWaitMs: 321,
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-user-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt text");
+  });
+
   it("captures hosted Codex invalid-output diagnostics without raw identifiers", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_invalid_output",
@@ -538,6 +646,15 @@ describe("executeHostedMailboxEvent", () => {
           providerRequestOrdinal: 2,
           refreshThreadInstructions: false,
           resumeProviderSessionIdPresent: true,
+          routePlanningActiveExperimentContextElapsedMs: 6000,
+          routePlanningAnyBootstrapContextPrepared: true,
+          routePlanningBootstrapContextPrepared: false,
+          routePlanningCliBootstrapElapsedMs: null,
+          routePlanningElapsedMs: 7000,
+          routePlanningFreshThreadFallbackPrepared: true,
+          routePlanningSensitiveHealthContextAllowed: true,
+          routePlanningVaultOverviewElapsedMs: 900,
+          routePlanningRawPath: "/tmp/raw-path",
           workingDirectoryKind: "hosted-stable-proc-cwd",
         },
         updates: [],
@@ -560,13 +677,22 @@ describe("executeHostedMailboxEvent", () => {
         refreshThreadInstructions: false,
         requestId: "req_legacy_keys",
         resumeCodexThreadIdPresent: true,
+        routePlanningActiveExperimentContextElapsedMs: 6000,
+        routePlanningAnyBootstrapContextPrepared: true,
+        routePlanningBootstrapContextPrepared: false,
+        routePlanningElapsedMs: 7000,
+        routePlanningFreshThreadFallbackPrepared: true,
+        routePlanningSensitiveHealthContextAllowed: true,
+        routePlanningVaultOverviewElapsedMs: 900,
         workingDirectoryKind: "hosted-stable-proc-cwd",
       }),
     });
     expect(entry?.redacted).not.toHaveProperty("codexThreadId");
     expect(entry?.redacted).not.toHaveProperty("providerContinuation");
     expect(entry?.redacted).not.toHaveProperty("resumeProviderSessionIdPresent");
+    expect(entry?.redacted).not.toHaveProperty("routePlanningRawPath");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
   it("captures provider prompt-size diagnostics without prompt text", () => {

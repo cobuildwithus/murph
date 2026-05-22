@@ -37,7 +37,9 @@ const HOSTED_CONTEXT_DIAGNOSTIC_SESSION_LOOKUP_SOURCES = new Set([
 ]);
 
 const HOSTED_CONTEXT_DIAGNOSTIC_STAGES = new Set([
+  "assistant-pre-provider-ready",
   "assistant-session-resolved",
+  "assistant-turn-lock-acquired",
 ]);
 
 const HOSTED_CONTEXT_DIAGNOSTIC_FINGERPRINT_PATTERN =
@@ -67,6 +69,9 @@ const hostedContextDiagnosticDetailReaders = {
   primaryConversationFingerprint: readHostedContextFingerprint,
   primaryConversationIndexed: readHostedContextBoolean,
   primaryConversationScope: readHostedContextScope,
+  preProviderAdmissionCount: readHostedContextNonnegativeNumber,
+  preProviderSetupMs: readHostedContextNonnegativeNumber,
+  providerRequestOrdinal: readHostedContextNonnegativeNumber,
   sessionFingerprint: readHostedContextFingerprint,
   sessionPresent: readHostedContextBoolean,
   sessionResolutionCreated: readHostedContextBoolean,
@@ -77,6 +82,7 @@ const hostedContextDiagnosticDetailReaders = {
   threadFingerprint: readHostedContextFingerprint,
   threadIsDirect: readHostedContextBoolean,
   threadPresent: readHostedContextBoolean,
+  turnLockWaitMs: readHostedContextNonnegativeNumber,
 } as const satisfies Record<string, HostedContextDiagnosticDetailReader>;
 
 export function emitHostedAssistantContextTraceLog(input: {
@@ -90,10 +96,14 @@ export function emitHostedAssistantContextTraceLog(input: {
 
   const redactedDetails = sanitizeHostedExecutionStructuredLogDetails(diagnostic);
 
+  const message = diagnostic.stage === "assistant-session-resolved"
+    ? "Hosted assistant context fingerprints captured."
+    : "Hosted assistant context timing captured.";
+
   emitHostedExecutionStructuredLog({
     component: "runtime.context",
     details: redactedDetails,
-    message: "Hosted assistant context fingerprints captured.",
+    message,
     phase: "wake.running",
     wake: input.wake,
   });
@@ -102,7 +112,7 @@ export function emitHostedAssistantContextTraceLog(input: {
     component: "runtime.context",
     eventId: input.wake.eventId,
     level: "info",
-    message: "Hosted assistant context fingerprints captured.",
+    message,
     phase: "wake.running",
     redacted: redactedDetails,
   };

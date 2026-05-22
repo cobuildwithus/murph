@@ -60,6 +60,7 @@ import {
 } from './codex-turn/planning.js'
 import type {
   AssistantCodexAttemptPlan,
+  AssistantRoutePlanningDiagnostics,
   AssistantCodexTurnExecutionPlan,
   AssistantCodexTurnExecutionProfile,
   AssistantCodexTurnThreadScopeProfile,
@@ -224,6 +225,7 @@ function emitCodexPlanTraceEvent(input: {
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   codexContinuation: string
   providerRequestOrdinal: number | null
+  routePlanningDiagnostics: AssistantRoutePlanningDiagnostics
   refreshThreadInstructions: boolean
   resumeCodexThreadIdPresent: boolean
   workingDirectory: string
@@ -242,6 +244,21 @@ function emitCodexPlanTraceEvent(input: {
         activeTurnHistoryPresent: input.activeTurnHistoryPresent,
         codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
+        routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
+        routePlanningCliBootstrapElapsedMs:
+          input.routePlanningDiagnostics.cliBootstrapElapsedMs,
+        routePlanningVaultOverviewElapsedMs:
+          input.routePlanningDiagnostics.vaultOverviewElapsedMs,
+        routePlanningActiveExperimentContextElapsedMs:
+          input.routePlanningDiagnostics.activeExperimentContextElapsedMs,
+        routePlanningAnyBootstrapContextPrepared:
+          input.routePlanningDiagnostics.shouldPrepareAnyBootstrapContext,
+        routePlanningBootstrapContextPrepared:
+          input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
+        routePlanningFreshThreadFallbackPrepared:
+          input.routePlanningDiagnostics.shouldPrepareFreshThreadFallback,
+        routePlanningSensitiveHealthContextAllowed:
+          input.routePlanningDiagnostics.allowSensitiveHealthContext,
         refreshThreadInstructions: input.refreshThreadInstructions,
         resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
         workingDirectoryKind:
@@ -296,6 +313,7 @@ async function executeAssistantCodexAttempt(input: {
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
     refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     resumeCodexThreadIdPresent:
       attemptPlan.routePlan.resumeCodexThreadId !== null,

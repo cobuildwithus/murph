@@ -31,6 +31,7 @@ import {
   resolveAssistantSessionForMessage as resolveAssistantMessageSession,
 } from './session-resolution.js'
 import {
+  emitHostedAssistantContextTimingTrace,
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
@@ -240,10 +241,18 @@ export async function sendAssistantMessageLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  const turnLockWaitStartedAt = Date.now()
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const lockAcquiredAt = Date.now()
+      const turnLockWaitMs = elapsedSince(turnLockWaitStartedAt)
+      emitHostedAssistantContextTimingTrace({
+        message: input,
+        stage: 'assistant-turn-lock-acquired',
+        turnLockWaitMs,
+      })
       const resolved = await resolveAssistantMessageSession({
         boundaryDefaultTarget,
         defaults,
@@ -471,6 +480,14 @@ export async function sendAssistantMessageLocal(
               sessionId: currentSession.sessionId,
             })
           }
+          emitHostedAssistantContextTimingTrace({
+            message: input,
+            preProviderAdmissionCount,
+            preProviderSetupMs: elapsedSince(lockAcquiredAt),
+            providerRequestOrdinal,
+            stage: 'assistant-pre-provider-ready',
+            turnLockWaitMs,
+          })
           let providerRequestJournal: Awaited<
             ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
           > = null
@@ -1054,6 +1071,10 @@ function isManualAssistantTurnTrigger(
     turnTrigger === 'manual-ask' ||
     turnTrigger === 'manual-deliver'
   )
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt)
 }
 
 function buildActiveTurnContinuationInput(input: {

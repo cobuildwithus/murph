@@ -716,7 +716,7 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     return null;
   }
 
-  return {
+  const details: HostedExecutionStructuredLogDetails = {
     activeTurnHistoryCount:
       readHostedAssistantProviderPlanNullableNumber(record, "activeTurnHistoryCount"),
     activeTurnHistoryPresent:
@@ -732,6 +732,33 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
         ?? readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
     workingDirectoryKind,
   };
+
+  for (const key of [
+    "routePlanningActiveExperimentContextElapsedMs",
+    "routePlanningCliBootstrapElapsedMs",
+    "routePlanningElapsedMs",
+    "routePlanningVaultOverviewElapsedMs",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+  for (const key of [
+    "routePlanningAnyBootstrapContextPrepared",
+    "routePlanningBootstrapContextPrepared",
+    "routePlanningFreshThreadFallbackPrepared",
+    "routePlanningSensitiveHealthContextAllowed",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+
+  return details;
 }
 
 function readHostedAssistantProviderPromptSizeDiagnosticTrace(
