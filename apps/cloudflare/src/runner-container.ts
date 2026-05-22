@@ -2170,6 +2170,7 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
     childRuntimeBundleRefPresent: "runnerChildRuntimeBundleRefPresent",
     childRuntimeBundleRefSize: "runnerChildRuntimeBundleRefSize",
     childRuntimeErrorCode: "runnerChildRuntimeErrorCode",
+    childRuntimeErrorMessageKind: "runnerChildRuntimeErrorMessageKind",
     childRuntimeErrorName: "runnerChildRuntimeErrorName",
     childRuntimeErrorStatus: "runnerChildRuntimeErrorStatus",
     childRuntimeFailureKind: "runnerChildRuntimeFailureKind",

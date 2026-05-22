@@ -61,6 +61,57 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KINDS = [
 export type HostedExecutionChildRuntimeFetchCauseKind =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KINDS[number];
 
+export const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KINDS = [
+  "artifact_fetch_exhausted_retries",
+  "artifact_fetch_http_failure",
+  "canonical_write_receipt_action_invalid",
+  "canonical_write_receipt_artifact_size_mismatch",
+  "canonical_write_receipt_artifact_unavailable",
+  "canonical_write_receipt_content_ref_invalid",
+  "canonical_write_receipt_fields_invalid",
+  "canonical_write_receipt_schema_invalid",
+  "codex_continuity_manifest_invalid_json",
+  "codex_continuity_manifest_invalid_rollout_path",
+  "codex_continuity_manifest_missing",
+  "codex_continuity_manifest_missing_rollout",
+  "codex_continuity_manifest_missing_rollout_state",
+  "codex_continuity_manifest_schema_mismatch",
+  "codex_continuity_manifest_thread_invalid",
+  "codex_continuity_rollout_missing",
+  "codex_continuity_rollout_sha_mismatch",
+  "codex_continuity_rollout_size_mismatch",
+  "codex_continuity_unmanifested_home_file",
+  "workspace_snapshot_archive_manifest_mismatch",
+  "workspace_snapshot_data_key_unwrap_http_failure",
+  "workspace_snapshot_data_key_unwrap_invalid_json",
+  "workspace_snapshot_data_key_unwrap_invalid_response",
+  "workspace_snapshot_data_key_unwrap_missing_data_key",
+  "workspace_snapshot_encrypted_digest_mismatch",
+  "workspace_snapshot_encrypted_object_too_small",
+  "workspace_snapshot_encrypted_size_mismatch",
+  "workspace_snapshot_fetch_body_unavailable",
+  "workspace_snapshot_fetch_byte_count_mismatch",
+  "workspace_snapshot_fetch_content_length_mismatch",
+  "workspace_snapshot_fetch_http_failure",
+  "workspace_snapshot_fetch_request_failure",
+  "workspace_snapshot_object_unavailable",
+  "workspace_snapshot_plaintext_digest_mismatch",
+  "workspace_snapshot_presign_get_http_failure",
+  "workspace_snapshot_presign_get_invalid_json",
+  "workspace_snapshot_presign_get_invalid_response",
+  "workspace_snapshot_restore_archive_streams_unavailable",
+  "workspace_snapshot_restored_state_mismatch",
+  "workspace_snapshot_tar_command_failed",
+  "workspace_snapshot_tar_entry_count_unsafe",
+  "workspace_snapshot_tar_entry_format_unsupported",
+  "workspace_snapshot_tar_entry_size_unsafe",
+  "workspace_snapshot_tar_entry_type_unsafe",
+  "workspace_snapshot_zstd_command_failed",
+] as const;
+
+export type HostedExecutionChildRuntimeErrorMessageKind =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KINDS[number];
+
 export const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS = [
   "artifact_fetch",
   "artifact_upload",
@@ -161,6 +212,9 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_SET = new Set<string>(
 const HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KIND_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KINDS,
 );
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KINDS,
+);
 const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES,
 );
@@ -210,6 +264,225 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAMES = [
 const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAME_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAMES,
 );
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_EXACT:
+  ReadonlyArray<readonly [string, HostedExecutionChildRuntimeErrorMessageKind]> = [
+    [
+      "Hosted artifact fetch exhausted retry attempts.",
+      "artifact_fetch_exhausted_retries",
+    ],
+    [
+      "Hosted canonical write receipt artifact is unavailable.",
+      "canonical_write_receipt_artifact_unavailable",
+    ],
+    [
+      "Hosted canonical write receipt artifact size does not match its log ref.",
+      "canonical_write_receipt_artifact_size_mismatch",
+    ],
+    [
+      "Hosted canonical write receipt schema is invalid.",
+      "canonical_write_receipt_schema_invalid",
+    ],
+    [
+      "Hosted canonical write receipt fields are invalid.",
+      "canonical_write_receipt_fields_invalid",
+    ],
+    [
+      "Hosted canonical write receipt action is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical write receipt action target is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical text write receipt action is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical JSONL append receipt action is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical raw write receipt action is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical raw write receipt action is missing content.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical delete receipt action is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical write receipt action kind is invalid.",
+      "canonical_write_receipt_action_invalid",
+    ],
+    [
+      "Hosted canonical write receipt content ref is invalid.",
+      "canonical_write_receipt_content_ref_invalid",
+    ],
+    [
+      "Hosted Codex continuity manifest is missing after restore.",
+      "codex_continuity_manifest_missing",
+    ],
+    [
+      "Hosted Codex continuity manifest contains an invalid rollout path.",
+      "codex_continuity_manifest_invalid_rollout_path",
+    ],
+    [
+      "Hosted Codex continuity rollout was not restored as a regular file.",
+      "codex_continuity_rollout_missing",
+    ],
+    [
+      "Hosted Codex continuity rollout byte size mismatch after restore.",
+      "codex_continuity_rollout_size_mismatch",
+    ],
+    [
+      "Hosted Codex continuity rollout SHA-256 mismatch after restore.",
+      "codex_continuity_rollout_sha_mismatch",
+    ],
+    [
+      "Hosted Codex continuity manifest is missing restored session rollout state.",
+      "codex_continuity_manifest_missing_rollout_state",
+    ],
+    [
+      "Hosted Codex continuity manifest is missing a restored session rollout.",
+      "codex_continuity_manifest_missing_rollout",
+    ],
+    [
+      "Hosted Codex continuity restore included an unmanifested Codex home file.",
+      "codex_continuity_unmanifested_home_file",
+    ],
+    [
+      "Hosted Codex continuity manifest is not valid JSON.",
+      "codex_continuity_manifest_invalid_json",
+    ],
+    [
+      "Hosted Codex continuity manifest schema mismatch.",
+      "codex_continuity_manifest_schema_mismatch",
+    ],
+    [
+      "Hosted Codex continuity manifest thread entry is invalid.",
+      "codex_continuity_manifest_thread_invalid",
+    ],
+    [
+      "Hosted workspace snapshot data key unwrap returned invalid JSON.",
+      "workspace_snapshot_data_key_unwrap_invalid_json",
+    ],
+    [
+      "Hosted workspace snapshot data key unwrap response must be an object.",
+      "workspace_snapshot_data_key_unwrap_invalid_response",
+    ],
+    [
+      "Hosted workspace snapshot data key unwrap response dataKey is required.",
+      "workspace_snapshot_data_key_unwrap_missing_data_key",
+    ],
+    [
+      "Hosted workspace snapshot presign download returned invalid JSON.",
+      "workspace_snapshot_presign_get_invalid_json",
+    ],
+    [
+      "Hosted workspace snapshot presign response must be an object.",
+      "workspace_snapshot_presign_get_invalid_response",
+    ],
+    [
+      "Hosted workspace snapshot encrypted object is unavailable.",
+      "workspace_snapshot_object_unavailable",
+    ],
+    [
+      "Hosted workspace snapshot fetch response body is unavailable.",
+      "workspace_snapshot_fetch_body_unavailable",
+    ],
+    [
+      "Hosted workspace snapshot fetch content-length does not match its ref.",
+      "workspace_snapshot_fetch_content_length_mismatch",
+    ],
+    [
+      "Hosted workspace snapshot fetch byte count does not match its ref.",
+      "workspace_snapshot_fetch_byte_count_mismatch",
+    ],
+    [
+      "Hosted workspace snapshot encrypted size does not match its ref.",
+      "workspace_snapshot_encrypted_size_mismatch",
+    ],
+    [
+      "Hosted workspace snapshot encrypted digest does not match its ref.",
+      "workspace_snapshot_encrypted_digest_mismatch",
+    ],
+    [
+      "Hosted workspace snapshot encrypted object is too small.",
+      "workspace_snapshot_encrypted_object_too_small",
+    ],
+    [
+      "Hosted workspace snapshot plaintext archive digest does not match its ref.",
+      "workspace_snapshot_plaintext_digest_mismatch",
+    ],
+    [
+      "Hosted workspace snapshot archive manifest does not match its ref.",
+      "workspace_snapshot_archive_manifest_mismatch",
+    ],
+    [
+      "Hosted workspace snapshot tar entry count is unsafe.",
+      "workspace_snapshot_tar_entry_count_unsafe",
+    ],
+    [
+      "Hosted workspace snapshot tar entry type is unsafe.",
+      "workspace_snapshot_tar_entry_type_unsafe",
+    ],
+    [
+      "Hosted workspace snapshot tar entry format is unsupported.",
+      "workspace_snapshot_tar_entry_format_unsupported",
+    ],
+    [
+      "Hosted workspace snapshot tar entry size is unsafe.",
+      "workspace_snapshot_tar_entry_size_unsafe",
+    ],
+    [
+      "Hosted workspace snapshot restore archive streams are unavailable.",
+      "workspace_snapshot_restore_archive_streams_unavailable",
+    ],
+    [
+      "Hosted workspace snapshot restored state does not match its ref.",
+      "workspace_snapshot_restored_state_mismatch",
+    ],
+  ];
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_PATTERNS:
+  ReadonlyArray<{
+    kind: HostedExecutionChildRuntimeErrorMessageKind;
+    pattern: RegExp;
+  }> = [
+    {
+      kind: "artifact_fetch_http_failure",
+      pattern: /^Hosted artifact fetch failed with HTTP \d{3}\./u,
+    },
+    {
+      kind: "workspace_snapshot_data_key_unwrap_http_failure",
+      pattern: /^Hosted workspace snapshot data key unwrap failed with HTTP \d{3}\./u,
+    },
+    {
+      kind: "workspace_snapshot_presign_get_http_failure",
+      pattern: /^Hosted workspace snapshot presign download failed with HTTP \d{3}\./u,
+    },
+    {
+      kind: "workspace_snapshot_fetch_http_failure",
+      pattern: /^Hosted workspace snapshot fetch failed with HTTP \d{3}\./u,
+    },
+    {
+      kind: "workspace_snapshot_fetch_request_failure",
+      pattern: /^Hosted workspace snapshot fetch(?: response body read)? request failed(?:\.|:)/u,
+    },
+    {
+      kind: "workspace_snapshot_zstd_command_failed",
+      pattern: /^Hosted workspace snapshot zstd command failed with /u,
+    },
+    {
+      kind: "workspace_snapshot_tar_command_failed",
+      pattern: /^Hosted workspace snapshot tar command failed with /u,
+    },
+  ];
 
 const HOSTED_RUNNER_CHILD_OUTPUT_MARKER_VALUES = [
   "hosted_assistant_config_required",
@@ -483,6 +756,14 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
     metadata.childRuntimeFetchCauseKind = childRuntimeFetchCauseKind;
   }
 
+  const childRuntimeErrorMessageKind =
+    readHostedExecutionChildRuntimeErrorMessageKind(
+      record.childRuntimeErrorMessageKind,
+    );
+  if (childRuntimeErrorMessageKind) {
+    metadata.childRuntimeErrorMessageKind = childRuntimeErrorMessageKind;
+  }
+
   const childRuntimeFetchCauseName = readHostedExecutionChildRuntimeErrorName(
     record.childRuntimeFetchCauseName,
   );
@@ -582,6 +863,33 @@ export function readHostedExecutionChildRuntimeErrorCode(
     HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODE_SET,
   );
   return code as HostedExecutionErrorCode | null;
+}
+
+export function readHostedExecutionChildRuntimeErrorMessageKind(
+  value: unknown,
+): HostedExecutionChildRuntimeErrorMessageKind | null {
+  const kind = readAllowedHostedExecutionChildDiagnostic(
+    value,
+    HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_SET,
+  );
+  return kind as HostedExecutionChildRuntimeErrorMessageKind | null;
+}
+
+export function classifyHostedExecutionChildRuntimeErrorMessageKind(
+  message: string,
+): HostedExecutionChildRuntimeErrorMessageKind | null {
+  const normalized = message.trim();
+  for (const [candidate, kind] of HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_EXACT) {
+    if (normalized === candidate) {
+      return kind;
+    }
+  }
+  for (const { kind, pattern } of HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return kind;
+    }
+  }
+  return null;
 }
 
 function isHostedRunnerChildFirstCompletionKind(

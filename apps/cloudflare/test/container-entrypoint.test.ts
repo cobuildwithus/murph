@@ -1413,6 +1413,7 @@ describe("startHostedContainerEntrypoint", () => {
       Object.assign(new Error("hidden child failure message"), {
         details: {
           childRuntimeErrorCode: "invalid_request",
+          childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
           childRuntimeErrorName: "Error",
           childRuntimeErrorStatus: 404,
           childRuntimeFailureKind: "control_plane_http",
@@ -1499,6 +1500,7 @@ describe("startHostedContainerEntrypoint", () => {
             stdoutTailPresent: true,
           },
           childRuntimeErrorCode: "invalid_request",
+          childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
           childRuntimeErrorName: "Error",
           childRuntimeErrorStatus: 404,
           childRuntimeFailureKind: "control_plane_http",
@@ -1507,6 +1509,7 @@ describe("startHostedContainerEntrypoint", () => {
           detailsKeys: [
             "childProcess",
             "childRuntimeErrorCode",
+            "childRuntimeErrorMessageKind",
             "childRuntimeErrorName",
             "childRuntimeErrorStatus",
             "childRuntimeFailureKind",
@@ -1549,6 +1552,7 @@ describe("startHostedContainerEntrypoint", () => {
             stdoutTailPresent: true,
           }),
           childRuntimeErrorCode: "invalid_request",
+          childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
           childRuntimeErrorName: "Error",
           childRuntimeErrorStatus: 404,
           childRuntimeFailureKind: "control_plane_http",
@@ -1576,10 +1580,12 @@ describe("startHostedContainerEntrypoint", () => {
   it("drops non-allowlisted child runtime error diagnostics at the entrypoint boundary", async () => {
     const hiddenErrorName = "UntrustedCustomErrorName";
     const hiddenErrorCode = "untrusted_custom_error_code";
+    const hiddenErrorMessageKind = "untrusted_custom_error_message_kind";
     const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       Object.assign(new Error("hidden child failure message"), {
         details: {
           childRuntimeErrorCode: hiddenErrorCode,
+          childRuntimeErrorMessageKind: hiddenErrorMessageKind,
           childRuntimeErrorName: hiddenErrorName,
           childRuntimeErrorStatus: 499,
           childRuntimeFailureKind: "unclassified_runtime_error",
@@ -1626,6 +1632,7 @@ describe("startHostedContainerEntrypoint", () => {
       const serializedPayload = JSON.stringify(payload);
       expect(serializedPayload).not.toContain(hiddenErrorName);
       expect(serializedPayload).not.toContain(hiddenErrorCode);
+      expect(serializedPayload).not.toContain(hiddenErrorMessageKind);
       expect(serializedPayload).not.toContain("hidden_http_operation");
 
       const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
@@ -1641,6 +1648,7 @@ describe("startHostedContainerEntrypoint", () => {
       const serializedFailureLog = JSON.stringify(failureLogInput);
       expect(serializedFailureLog).not.toContain(hiddenErrorName);
       expect(serializedFailureLog).not.toContain(hiddenErrorCode);
+      expect(serializedFailureLog).not.toContain(hiddenErrorMessageKind);
       expect(serializedFailureLog).not.toContain("hidden_http_operation");
     } finally {
       spy.mockRestore();
