@@ -129,9 +129,14 @@ export async function compactLegacyWearableReceiptEnvelopes({
       break;
     }
 
+    const references = candidates[index];
+    if (!references) {
+      continue;
+    }
+
     const compaction = await prepareLegacyEnvelopeCompaction({
       maxCandidateBytes,
-      references: candidates[index] as LegacyEnvelopeReference[],
+      references,
       vaultRoot,
     });
     if (!compaction) {
@@ -335,15 +340,17 @@ async function prepareLegacyEnvelopeCompaction(input: {
     return null;
   }
 
-  const evidenceByManifest = input.references.map((reference) =>
-    indexManifestArtifactsByRole(reference.manifest),
-  );
-  if (evidenceByManifest.some((index) => index === null)) {
-    return null;
+  const evidenceByManifest: Array<Map<string, RawImportManifestArtifact>> = [];
+  for (const reference of input.references) {
+    const evidenceIndex = indexManifestArtifactsByRole(reference.manifest);
+    if (!evidenceIndex) {
+      return null;
+    }
+    evidenceByManifest.push(evidenceIndex);
   }
 
   const hasProof = await verifyLegacyEnvelopeEvidenceProof({
-    evidenceByManifest: evidenceByManifest as Array<Map<string, RawImportManifestArtifact>>,
+    evidenceByManifest,
     manifestReferences: input.references,
     payloadHash,
     rawArtifactRoles,
