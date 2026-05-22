@@ -36,9 +36,8 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
             The social layer for health experiments.
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-            Run health challenges with friends or public cohorts, right
-            from iMessage, WhatsApp, Telegram, or web — across the
-            wearables you already use.
+            Text Murph to try health protocols with friends or public
+            groups and learn what actually makes you healthier.
           </p>
           <button
             type="button"
