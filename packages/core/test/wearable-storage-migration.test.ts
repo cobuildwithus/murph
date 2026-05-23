@@ -104,6 +104,19 @@ test("dense raw timeseries tombstoning requires explicit prune flag", async () =
   assert.equal(afterDetection.denseProviderRawTimeseriesCount, 0);
 });
 
+test("dense raw timeseries detection covers non-Junction dense provider roles", async () => {
+  const vaultRoot = await createRawArtifactFixture({ denseRole: "heartrate" });
+
+  const detection = await detectWearableStorageMigrationCandidates({
+    includeRecentDenseRaw: true,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(detection.denseProviderRawTimeseriesCount, 1);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 1);
+});
+
 test("dense raw timeseries tombstoning preserves recent artifacts unless explicitly included", async () => {
   const vaultRoot = await createRawArtifactFixture({
     importedAt: "2026-05-22T00:00:00.000Z",
@@ -138,6 +151,87 @@ test("dense raw timeseries tombstoning preserves recent artifacts unless explici
   assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
 });
 
+test("raw tombstoning skips when required evidence files are missing", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await fs.rm(path.join(vaultRoot, RAW_DIRECTORY, "02-raw-ingest-receipt.json"));
+
+  const result = await runWearableStorageMigrationPass({
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    validateAfter: false,
+    vaultRoot,
+  });
+
+  assert.equal(result.mutated, false);
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "03-canonical-wearable-records.json"), "utf8"),
+    /sampleValues/u,
+  );
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    /sampleValues/u,
+  );
+});
+
+test("raw tombstoning rejects cross-manifest role disagreement", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await writeAdditionalRawManifest(vaultRoot, (manifest) => ({
+    ...manifest,
+    artifacts: manifest.artifacts.map((artifact) =>
+      artifact.relativePath.endsWith("/03-canonical-wearable-records.json")
+        ? { ...artifact, role: "provider-summary-copy" }
+        : artifact
+    ),
+  }));
+
+  const result = await runWearableStorageMigrationPass({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(result.tombstonedCanonicalArtifactCount, 0);
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "03-canonical-wearable-records.json"), "utf8"),
+    /sampleValues/u,
+  );
+});
+
+test("raw tombstoning updates every agreeing manifest for a shared path", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await writeAdditionalRawManifest(vaultRoot, (manifest) => manifest);
+
+  const result = await runWearableStorageMigrationPass({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(result.tombstonedCanonicalArtifactCount, 1);
+  await assertManifestArtifactMatchesFile(vaultRoot, "03-canonical-wearable-records.json", "manifest.json");
+  await assertManifestArtifactMatchesFile(
+    vaultRoot,
+    "03-canonical-wearable-records.json",
+    "manifest.shared.json",
+  );
+});
+
+test("raw tombstoning makes progress on one oversized candidate", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+
+  const result = await runWearableStorageMigrationPass({
+    maxBytes: 1,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  assert.equal(result.tombstonedCanonicalArtifactCount, 1);
+  assert.ok(result.bytesBefore > 1);
+});
+
 test("dense raw timeseries tombstoning treats escaped ledger raw references as blockers", async () => {
   const vaultRoot = await createRawArtifactFixture();
   await runWearableStorageMigrationPass({
@@ -152,6 +246,35 @@ test("dense raw timeseries tombstoning treats escaped ledger raw references as b
   await fs.writeFile(
     path.join(vaultRoot, eventShardPath),
     `{"rawRef":"${escapedRawPath}"}\n`,
+    "utf8",
+  );
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  const rawText = await fs.readFile(path.join(vaultRoot, rawPath), "utf8");
+  assert.match(rawText, /sampleValues/u);
+});
+
+test("dense raw timeseries tombstoning treats plain ledger raw references as blockers", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+  });
+  const rawPath = `${RAW_DIRECTORY}/01-provider-timeseries-heart-rate.json`;
+  const eventShardPath = "ledger/events/2026/2026-05.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `{"rawRef":"${rawPath}"}\n`,
     "utf8",
   );
 
@@ -228,7 +351,7 @@ test("runWearableStorageMigrationPass leaves manual sample shards untouched", as
 });
 
 async function createRawArtifactFixture(
-  options: { importedAt?: string } = {},
+  options: { denseRole?: string; importedAt?: string } = {},
 ): Promise<string> {
   const vaultRoot = await makeTempDirectory("murph-wearable-storage-migration");
   await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
@@ -241,7 +364,7 @@ async function createRawArtifactFixture(
         sampleValues: [70, 71, 72],
       },
       fileName: "01-provider-timeseries-heart-rate.json",
-      role: "provider-timeseries-heart-rate",
+      role: options.denseRole ?? "provider-timeseries-heart-rate",
       vaultRoot,
     }),
     await writeRawJsonArtifact({
@@ -278,6 +401,20 @@ async function createRawArtifactFixture(
   );
 
   return vaultRoot;
+}
+
+async function writeAdditionalRawManifest(
+  vaultRoot: string,
+  mutate: (manifest: RawImportManifest) => RawImportManifest,
+): Promise<void> {
+  const manifest = parseRawImportManifest(
+    JSON.parse(await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "manifest.json"), "utf8")),
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, RAW_DIRECTORY, "manifest.shared.json"),
+    `${JSON.stringify(mutate(manifest), null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function writeRawJsonArtifact(input: {
@@ -373,9 +510,10 @@ function buildHeartRateSample(recordedAt: string, value: number): {
 async function assertManifestArtifactMatchesFile(
   vaultRoot: string,
   fileName: string,
+  manifestFileName = "manifest.json",
 ): Promise<void> {
   const manifest = parseRawImportManifest(
-    JSON.parse(await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "manifest.json"), "utf8")),
+    JSON.parse(await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, manifestFileName), "utf8")),
   );
   const artifact = manifest.artifacts.find((entry) => entry.relativePath.endsWith(`/${fileName}`));
   assert.ok(artifact);

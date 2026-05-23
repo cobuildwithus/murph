@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -2837,6 +2837,7 @@ test.sequential(
         mode: 'dry-run' | 'apply'
         hasWork: boolean
         denseProviderRawTimeseriesCount: number
+        retentionEligibleDenseProviderRawTimeseriesCount: number
         mutated: boolean
         touchedPathCount: number
       }>([
@@ -2851,6 +2852,7 @@ test.sequential(
       assert.equal(requireData(dryRun).mode, 'dry-run')
       assert.equal(requireData(dryRun).hasWork, false)
       assert.equal(requireData(dryRun).denseProviderRawTimeseriesCount, 0)
+      assert.equal(requireData(dryRun).retentionEligibleDenseProviderRawTimeseriesCount, 0)
       assert.equal(requireData(dryRun).mutated, false)
 
       const applied = await runSliceCli<{
@@ -2875,6 +2877,64 @@ test.sequential(
       assert.equal(requireData(applied).mode, 'apply')
       assert.equal(requireData(applied).mutated, false)
       assert.equal(requireData(applied).touchedPathCount, 0)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-wearable-storage reports sample shards without selected hasMore work',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-samples-'))
+    const shardPath = path.join(vaultRoot, 'ledger/samples/heart_rate/2026/2026-05.jsonl')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await mkdir(path.dirname(shardPath), { recursive: true })
+      await writeFile(shardPath, '{}\n', 'utf8')
+
+      const dryRun = await runSliceCli<{
+        denseProviderSampleShardCount: number
+        hasMore: boolean
+        hasWork: boolean
+      }>([
+        'vault',
+        'repair-wearable-storage',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(requireData(dryRun).denseProviderSampleShardCount, 1)
+      assert.equal(requireData(dryRun).hasWork, false)
+      assert.equal(requireData(dryRun).hasMore, false)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-wearable-storage rejects recent dense raw flag without dense raw pruning',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-recent-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      const result = await runSliceCli([
+        'vault',
+        'repair-wearable-storage',
+        '--vault',
+        vaultRoot,
+        '--include-recent-dense-raw',
+      ])
+
+      assert.equal(result.ok, false)
+      if (!result.ok) {
+        assert.equal(result.error.code, 'invalid_options')
+        assert.match(result.error.message ?? '', /--prune-dense-raw/u)
+      }
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -2925,6 +2985,60 @@ test.sequential(
       }
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-wearable-storage rejects each destructive option loaded only from config',
+  async () => {
+    const cases = [
+      { option: 'apply', expectedFlag: '--apply' },
+      { option: 'pruneDenseRaw', expectedFlag: '--prune-dense-raw' },
+      { option: 'includeRecentDenseRaw', expectedFlag: '--include-recent-dense-raw' },
+    ] as const
+
+    for (const [index, testCase] of cases.entries()) {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-cli-wearable-storage-repair-config-one-${index}-`))
+      const configPath = path.join(vaultRoot, 'config.json')
+
+      try {
+        await runSliceCli(['init', '--vault', vaultRoot])
+        await writeFile(
+          configPath,
+          `${JSON.stringify({
+            commands: {
+              vault: {
+                commands: {
+                  'repair-wearable-storage': {
+                    options: {
+                      [testCase.option]: true,
+                    },
+                  },
+                },
+              },
+            },
+          }, null, 2)}\n`,
+          'utf8',
+        )
+
+        const result = await runSliceCli([
+          'vault',
+          'repair-wearable-storage',
+          '--vault',
+          vaultRoot,
+          '--config',
+          configPath,
+        ], { config: true })
+
+        assert.equal(result.ok, false)
+        if (!result.ok) {
+          assert.equal(result.error.code, 'invalid_options')
+          assert.match(result.error.message ?? '', new RegExp(testCase.expectedFlag, 'u'))
+        }
+      } finally {
+        await rm(vaultRoot, { recursive: true, force: true })
+      }
     }
   },
 )
