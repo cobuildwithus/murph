@@ -103,6 +103,7 @@ Do not add:
 - Query/browser-vault schema rewrites.
 - Provider-specific one-off reconstruction logic.
 - AI/model participation in repair.
+- Dense raw timeseries tombstoning in v1.
 
 ## Phase 1: Prevention First
 
@@ -144,13 +145,15 @@ Rules:
 - Importers must not emit generic sample rows for provider firehoses unless an
   explicit debug mode is set.
 
-Add a core guard so one bad adapter cannot recreate the blowup:
+Add a core guard inside `importDeviceBatch` after normalized input parsing, so
+one bad adapter cannot recreate the blowup. Do not rely on a caller-provided
+`source` string as the only gate:
 
 ```ts
 if (
-  payload.source === "device" &&
+  isDeviceProviderImport(payload) &&
   (payload.samples?.length ?? 0) > MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT &&
-  payload.provenance?.allowDenseDebugSamples !== true
+  options.denseSamplePolicy?.allowDenseDebugSamples !== true
 ) {
   throw new VaultError(
     "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
@@ -159,14 +162,18 @@ if (
 }
 ```
 
-The escape hatch should be explicit and retention-bound:
+The escape hatch should be explicit operation metadata, not persisted sample-row
+contract shape:
 
 ```ts
-provenance: {
+options: {
   allowDenseDebugSamples: true,
   retention: "debug_temporary",
 }
 ```
+
+Require both `allowDenseDebugSamples: true` and
+`retention: "debug_temporary"`.
 
 ### 4. Make Provider Dense Timeseries Idempotent
 
@@ -180,22 +187,52 @@ Keep the design small:
 - Leave summary reconcile windows reasonably broad, because summaries are small.
 - Reduce dense timeseries scheduled reconcile to the smallest useful lookback,
   such as 1-2 days, independent of summary reconcile.
-- Split dense timeseries fetch/import by provider resource and UTC day.
+- Split dense timeseries fetch/import by provider resource and stable day key.
 - Classify dense resources through provider-owned resource/capability metadata,
   not core hardcoded provider names.
+- Bucket dense chunks by provider-native day/date when the resource supplies one.
+  Otherwise use UTC half-open windows `[dayStart, nextDayStart)`.
+- Persist `dayKey`, `dayKeyBasis`, `coverageStart`, and `coverageEnd` as
+  metadata. Product/query day assignment remains separate from sync bucketing
+  and must not depend on the sync machine's local timezone.
+- Compute dense idempotency fingerprints from canonicalized provider resource
+  content only: provider, connection id, source provider/source instance,
+  resource, day bucket, and stable payload body.
+- Strip fetch/import metadata such as `importedAt`, scheduler `now`, request
+  window wrappers, pagination cursors, and volatile provider request metadata
+  before hashing.
 - Before writing a dense timeseries raw artifact, check whether the same
-  connection/resource/day/payload hash was already imported.
+  connection/resource/day fingerprint was already imported.
 - If already imported, skip the raw artifact/write batch and record only a
   metadata-only sync observation if needed.
-- Use existing device-sync operational state under
-  `.runtime/operations/device-sync/**` for machine-local cursors/high-water
-  marks. Do not put OAuth/webhook/reconcile cursors in the canonical vault.
+- Prefer closed resource/day windows after a provider-specific freshness lag.
+  For mutable recent days, keep at most one retained vault artifact per
+  connection/resource/day, or treat current-day fetches as runtime observations
+  until the day is closed. A changed content hash for the same dense day must
+  not create unbounded retained artifacts.
+- Local device-sync may use `.runtime/operations/device-sync/**` for
+  scheduling cursors, high-water marks, and rebuildable indexes. The durable
+  "already imported" check must be derivable from existing raw
+  receipts/manifests.
+- Hosted device-sync must not rely on local-only runtime state for this fence.
+  If hosted imports dense provider data, persist only sparse metadata
+  fingerprints in the web-owned device-sync control plane, or prove idempotency
+  from existing vault raw receipts/manifests before writing. Never store raw
+  payloads, samples, or health facts in hosted control-plane state.
 
 Avoid a global content-addressed raw store. The required primitive is only:
 
 ```text
-provider connection + resource + day + payload hash -> already imported?
+provider connection + source + resource + stable day key + canonicalized content hash -> already imported?
 ```
+
+Webhook resource jobs enqueue bounded resource/day rechecks. Duplicate webhook
+deliveries, recovery sweeps, and scheduled reconcile overlap may all request the
+same day; only the dense import fingerprint decides whether a new raw transform
+is written. If a webhook includes a provider object id or revision, include it
+in the recheck hint, but still hash fetched resource content before import.
+Delete and deauthorize events remain separate job kinds and must not be
+suppressed by dense sample idempotency.
 
 ### 5. Bound Backfills
 
@@ -203,7 +240,13 @@ Backfills may need historical data, but they should be chunked and predictable:
 
 - Summary backfill can stay day/week chunked.
 - Dense timeseries backfill should be day chunked.
-- Backfill jobs should not repeatedly refetch already completed dense days.
+- Backfill jobs should not repeatedly write already imported dense days.
+- Do not mark dense days permanently sealed on first success. Recent mutable
+  days stay eligible for scheduled or webhook-triggered recheck; if the stable
+  resource/day content hash changes, import the correction as a bounded new
+  version rather than appending unbounded artifacts.
+- Older days may stop routine polling only after an explicit provider/resource
+  retention or immutability window.
 - Failed days should retry by day/resource, not by reimporting a large rolling
   window.
 
@@ -232,8 +275,47 @@ The implementation should be a fixed ordered pass, not a generic registry:
 1. Compact legacy wearable receipt envelopes.
 2. Replace legacy derived canonical-record raw artifacts with tiny tombstones.
 3. Delete proven provider-generated dense sample-debug ledgers.
-4. Optionally, after measurement, tombstone old dense raw timeseries artifacts
-   that are not needed as sole product evidence.
+
+V1 has exactly those three mutating steps. Dense raw timeseries retention is a
+separate future decision after measurement, with its own plan and durable docs
+update.
+
+Layering rule:
+
+- Core repair eligibility is limited to file, manifest, hash, provenance,
+  preimage, and raw-reference proofs.
+- Core must not import query or browser-vault code.
+- Read-model equivalence is verified outside core by `vault-usecases`, the CLI,
+  or tests that compose core plus query/browser-vault.
+- Query equivalence means product-visible families are unchanged. Metadata-only
+  `vault_repair` audit rows are the only allowed query-visible delta.
+- Browser-vault equivalence compares normalized user-visible replica rows after
+  ignoring generated timestamps, bundle hashes, and data-version metadata.
+
+Repair exception rule:
+
+- Raw tombstone rewrites run through the same repair mode as legacy wearable
+  receipt compaction: under the canonical write lock, without emitting hosted
+  canonical write receipts for the raw rewrite.
+- Hosted propagation, if ever enabled, must use a full workspace checkpoint or
+  a separately designed guarded raw compare-and-replace mode.
+- Append-only JSONL shard deletion is a repair-only exception, not a general
+  delete primitive.
+- Any new tombstone/delete repair exception must update `ARCHITECTURE.md` and
+  `docs/contracts/00-invariants.md`. The default contract remains immutable raw
+  artifacts and append-only ledgers.
+
+Privacy/output rule:
+
+- Audits, tombstones, logs, dry-run/apply output, sync observations, broad
+  result DTOs, and test failures must stay metadata-only: artifact class,
+  action, counts, byte totals, bounded status, and reason.
+- Do not include account/user/connection ids, provider ids, raw payloads, sample
+  values, provider bodies, raw snippets, local paths, or per-row data.
+- Content hashes and exact vault-relative paths are allowed only inside the
+  local repair implementation or internal proof report when needed for proof;
+  they must not be emitted to hosted logs, tombstones, audits, or broad
+  user-facing output.
 
 ### Step 1: Compact Legacy Receipt Payloads
 
@@ -246,8 +328,8 @@ Eligibility remains strict:
 - Manifest state and file bytes match.
 - The same manifest set proves duplicate provider evidence by exact payload
   hash.
-- Raw provider evidence, canonical records, ledgers, metric samples, and
-  query/browser-vault behavior are preserved.
+- Raw provider evidence, canonical product records, ledgers, metric samples, and
+  product-visible read-model behavior are preserved.
 
 Expected win: useful for old payload-bearing envelopes, but not enough by
 itself for the 90% goal.
@@ -257,13 +339,17 @@ itself for the 90% goal.
 Target legacy derived artifacts:
 
 - Roles beginning with `wearable-canonical-records:`.
-- Legacy transform files like `03-*-canonical-wearable-records-*.json`.
+- Legacy transform files like `03-*-canonical-wearable-records-*.json` as
+  scanner hints only.
 
 Mutation:
 
 - Do not hard-delete raw artifacts.
 - Replace the file at the same path with a tiny JSON tombstone.
-- Update the raw manifest `byteSize` and `sha256`.
+- Generate tombstone content as deterministic UTF-8 JSON with stable key order
+  and one trailing newline.
+- Update every raw manifest artifact entry that references the rewritten path,
+  recomputing `byteSize` and `sha256` from the exact tombstone bytes.
 - Emit metadata-only `vault_repair` audit.
 
 Reason:
@@ -278,9 +364,9 @@ Tombstone shape:
 ```json
 {
   "schemaVersion": "wearable.legacy_canonical_records_pruned.v1",
+  "artifactClass": "derived_canonical_records",
   "reason": "derived_duplicate_not_canonical_evidence",
   "originalByteSize": 17400000,
-  "originalSha256": "old-sha",
   "prunedAt": "2026-05-23T00:00:00.000Z"
 }
 ```
@@ -289,22 +375,38 @@ Eligibility:
 
 - File exists.
 - Actual byte size and SHA match the raw manifest before rewrite.
+- A strict raw-manifest checksum verifier passes over every touched
+  manifest/artifact entry before and after rewrite. Treat `validateVault` as
+  structural validation only; it does not prove raw digest integrity.
+- Filename patterns are discovery hints only. Eligibility requires a manifest
+  role beginning `wearable-canonical-records:` or a parsed legacy schema marker
+  proving the artifact is derived.
 - Provider raw evidence for the same import still exists.
 - Wearable raw receipt/envelope for the same import still exists.
 - No event/sample raw reference depends on this file as sole provider evidence.
-- Query/browser-vault output is unchanged before and after.
+- Every manifest reference to the path agrees on preimage role, byte size, and
+  SHA. If references disagree, skip.
+- Product-visible read-model output is unchanged before and after, verified
+  outside core.
 
 If any proof is missing, skip.
 
 ### Step 3: Delete Proven Dense Provider Sample-Debug Ledgers
 
-Target:
+Candidate paths:
 
 - `ledger/samples/heart_rate/**`
 - `ledger/samples/respiratory_rate/**`
 - `ledger/samples/hrv/**`
 - `ledger/samples/steps/**`
 - `ledger/samples/spo2/**`
+
+These paths are candidates only. Eligibility comes from row and provenance
+proof, not the path alone. Use a small shared dense-telemetry classification,
+not provider names or an ad hoc path list. Initial `debug_dense` streams may
+include HR, HRV, respiratory rate, SpO2, steps, sleep stage, and temperature.
+Exclude glucose/CGM from deletion unless a separate product decision classifies
+a specific provider/resource as debug-only.
 
 These are not default product state. Query should read product facts from
 canonical events and display-grade `ledger/metric-samples/**`, not generic
@@ -318,26 +420,38 @@ Important simplification:
 Mutation:
 
 - Delete only provider-generated debug JSONL shards.
-- Use normal core delete with the existing append-only JSONL repair allowance.
+- Use `stageDelete(path, { allowAppendOnlyJsonl: true })` only for whole-shard
+  repair deletion under `ledger/samples/<dense-stream>/`.
 - Emit metadata-only `vault_repair` audit.
 - Do not add a new retention ledger in v1.
+- Capture preimage `{ sha256, byteSize, rowCount, firstRecordedAt,
+  lastRecordedAt }` in the local pass result or metadata-only repair report.
+  Do not store detailed proof in ad hoc audit fields.
 
 Eligibility:
 
-- Path is under a known dense provider stream.
-- Rows are provider/device generated, not explicit user CSV imports.
-- Shard is not used by default query/read/browser-vault output.
-- Query/browser-vault output is identical before and after.
-- Audit contains only metadata: path, bytes, row count, hash, reason.
+- Path is under a known dense provider debug stream.
+- Every row parses as the sample record schema and matches the path stream.
+- Every valid row is proven provider-generated device debug telemetry by row
+  source, provider/device provenance through `externalRef` or `dataOrigin`,
+  import manifest/audit provenance, and raw integration ownership.
+- No row is `manual`, `import`, `derived`, missing provenance, mixed provenance,
+  or tied to `raw/samples/**` CSV source artifacts.
+- No supported export, operator, or debug surface depends on the shard.
+- Product-visible read-model output is unchanged before and after, verified
+  outside core.
+- Do not rewrite or filter rows in v1.
 
 Skip mixed-provenance shards.
 
-### Step 4: Measure Dense Raw Timeseries Retention Need
+### Future Decision: Dense Raw Timeseries Retention
 
 After Steps 1-3, measure actual reduction. If the vault is still far above the
 target, the remaining bulk is likely raw provider timeseries artifacts.
 
-Only then add a fourth repair step for old dense raw timeseries artifacts.
+Do not include raw provider timeseries tombstoning in v1. Reopen it only with a
+separate plan, a documented retention policy, and an exact legacy role/schema
+allowlist.
 
 Target role classes, with provider-specific names treated as examples:
 
@@ -347,7 +461,7 @@ Target role classes, with provider-specific names treated as examples:
 - blood-oxygen timeseries, such as `junction-timeseries-blood-oxygen`.
 - step timeseries, such as `junction-timeseries-steps`.
 
-Mutation should mirror Step 2:
+Any future mutation should mirror Step 2:
 
 - Replace eligible raw files with tiny tombstones.
 - Update raw manifests.
@@ -359,20 +473,26 @@ Eligibility should be even stricter:
 - The artifact is older than the chosen retention window.
 - It is not a sole raw reference for any durable product fact.
 - The corresponding receipt/import metadata remains.
-- Compact product facts for the covered days already exist.
-- Query/browser-vault output is unchanged.
+- Compact facts cover the same provider/resource/day and preserve the product
+  semantics that the raw artifact uniquely supplied: coverage window, sample
+  count, min/max/avg where applicable, threshold/run summaries where applicable,
+  and session/workout/sleep links.
+- Days overlapping active experiments or user-requested raw/sample inspection
+  periods are skipped.
+- Product-visible read-model output is unchanged.
 
-This step is deliberately optional because raw provider evidence has higher
-trust/debug value than derived canonical files or debug ledgers. It is the right
-lever only if the 90% target requires it.
+Raw provider evidence has higher trust/debug value than derived canonical files
+or debug ledgers. This future lever is appropriate only if the 90% target still
+requires it after v1 cleanup and prevention.
 
 ## Phase 3: Operator Path
 
-Start with an explicit local/operator command, not automatic hosted cleanup.
+Start with an explicit local/operator repair command, not automatic hosted
+cleanup or a generic maintenance surface.
 
 ```text
-murph vault maintenance wearable-storage --dry-run
-murph vault maintenance wearable-storage --apply
+murph vault repair wearable-storage --dry-run
+murph vault repair wearable-storage --apply
 ```
 
 The command should be a thin wrapper over core only.
@@ -384,8 +504,7 @@ Wearable storage cleanup candidates:
 - legacy receipt payloads: 143 files, 180 MB candidate
 - legacy canonical record artifacts: 36 files, 620 MB candidate
 - dense provider sample-debug ledgers: 5 files, 252 MB candidate
-- dense raw timeseries older than retention: 42 files, 300 MB candidate
-Estimated hot-vault reduction: 850 MB
+Estimated v1 hot-vault reduction: 552 MB
 ```
 
 Apply should run bounded passes:
@@ -395,20 +514,21 @@ Pass complete:
 - compacted receipts: 5
 - tombstoned canonical artifacts: 5
 - deleted sample-debug shards: 1
-- tombstoned dense raw timeseries: 0
 - bytesBefore: ...
 - bytesAfter: ...
 - hasMore: true
 ```
 
-## Phase 4: Hosted Path, Only If Needed
+## Phase 4: Hosted Path, Out Of V1
 
-Do not immediately reintroduce hosted automatic maintenance. A prior hosted
-compaction path was intentionally retired after the one-shot did not find
-compactable legacy envelopes.
+Hosted cleanup is out of v1. Do not immediately reintroduce hosted automatic
+maintenance. A prior hosted compaction path was intentionally retired after the
+one-shot did not find compactable legacy envelopes.
 
-If hosted cleanup becomes necessary after operator dry-runs prove the candidate
-classes and byte savings, add one narrow wake:
+Reopen hosted cleanup only with a separate plan after operator dry-run/apply
+proves candidate classes, byte savings, bounded runtime, idempotent resume,
+metadata-only observability, fresh-input preemption, and checkpoint behavior.
+If that future plan proves hosted cleanup is necessary, add one narrow wake:
 
 ```ts
 export const HOSTED_WEARABLE_STORAGE_HOUSEKEEPING_WAKE_REASON =
@@ -424,10 +544,15 @@ Rules:
 - It relies on the existing idle checkpoint path.
 - It does not call the assistant/model.
 - It does not add hosted DB fields, cron tables, or a generic job queue.
+- Fresh input is checked at dispatch and before each bounded mutation/checkpoint.
+- Cleanup demand is acknowledged only after the idle checkpoint succeeds.
+  Checkpoint failure leaves cleanup retryable.
 
 The retired `legacy-wearable-receipt-compaction-v1` wake should remain retired.
 If a legacy wake is still persisted, runtime demand should ignore it rather
-than treating it as a valid run reason.
+than treating it as a valid run reason. Retired legacy wakes are acknowledged or
+cleared without assistant hydration, vault mutation, or clobbering unrelated
+demand.
 
 ## Tests
 
@@ -439,10 +564,21 @@ than treating it as a valid run reason.
   produce raw artifacts and zero generic sample rows by default.
 - Core rejects large device-provider sample arrays without explicit
   `allowDenseDebugSamples`.
+- Dense debug escape hatch requires explicit temporary retention and is not
+  persisted onto sample rows.
 - The provider-agnostic dense timeseries reconciler does not write a second
-  artifact for an already imported connection/resource/day/payload hash.
+  artifact for an already imported connection/resource/day/content hash.
+- Overlapping scheduled reconcile, recovery, and webhook dense sync import each
+  connection/resource/day at most once unless the stable resource-day content
+  hash changes within the bounded mutable window.
 - Junction has a focused regression test because it is the first observed
   rolling-window offender.
+- Dense import fingerprints strip volatile wrapper metadata and are stable
+  across equivalent provider resource content.
+- Day bucketing covers provider-native day keys, UTC fallback windows, and
+  cross-midnight resources without using machine-local time.
+- Webhook rechecks pass through the same dense import fingerprint fence, while
+  delete/deauthorize jobs remain separate.
 - Backfill retries one failed dense day/resource without reimporting completed
   days.
 
@@ -451,17 +587,26 @@ than treating it as a valid run reason.
 - Legacy receipt compaction remains idempotent.
 - Legacy canonical-record artifact becomes a tiny tombstone and manifest
   SHA/size update exactly.
+- Raw tombstones are deterministic bytes with stable key order and a trailing
+  newline.
+- Filename patterns are scanner hints only; role/schema proof decides
+  eligibility.
 - Provider raw evidence is untouched.
-- Dense provider sample shard is deleted only when query/browser-vault output
-  is unchanged.
+- Dense provider sample shard is deleted only when product-visible read-model
+  output is unchanged.
 - Explicit user CSV sample shard is skipped.
 - Mixed-provenance sample shard is skipped.
-- Optional dense raw timeseries tombstoning skips artifacts still used as sole
-  evidence.
+- Missing provider/device provenance, malformed sample rows, `raw/samples/**`
+  CSV ownership, or export/operator/debug dependencies skip the shard.
+- Append-only JSONL delete allowance is never used for `audit/**`,
+  `ledger/events/**`, `ledger/metric-samples/**`, or mixed shards.
 - No audit entry contains raw health payloads, sample arrays, provider bodies,
   local paths, secrets, or direct identifiers.
 - `validateVault` passes.
 - A strict raw manifest helper recomputes size/SHA for every touched raw file.
+- Dry-run performs no writes, and apply uses the same eligibility set.
+- Every mutating cleanup step validates before/after product-visible read-model
+  equivalence outside core.
 
 ### Budget And Runtime Tests
 
@@ -482,10 +627,12 @@ than treating it as a valid run reason.
 4. Run scanner against the affected workspace and record only metadata counts
    and byte totals.
 5. Apply Step 1 and Step 2 in small bounded passes.
-6. Apply Step 3 only where query/browser-vault equivalence is proven.
-7. Re-measure. If the vault is still too large, decide and document the dense
-   raw timeseries retention window before enabling Step 4.
-8. Consider hosted cleanup only after operator dry-run/apply behavior is proven.
+6. Apply Step 3 only where product-visible read-model equivalence is proven
+   outside core.
+7. Re-measure. If the vault is still too large, decide whether a separate dense
+   raw timeseries retention plan is warranted.
+8. Consider hosted cleanup only after a separate operator-proven plan justifies
+   it.
 
 ## Architecture End State
 
