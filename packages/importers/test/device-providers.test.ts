@@ -84,10 +84,6 @@ test("makeNormalizedDeviceBatch preserves the canonical device payload shape and
         dailySummaries: 1,
       },
     },
-    denseSamplePolicy: {
-      allowDenseDebugSamples: true,
-      retention: "debug_temporary",
-    },
   };
 
   const payload: DeviceBatchImportPayload = {
@@ -1542,6 +1538,42 @@ test("importDeviceProviderSnapshot imports Oura heart-rate raw artifacts once", 
   );
 });
 
+test("prepareDeviceProviderSnapshotImport routes Junction floating timeseries entries through the closed day window", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    snapshot: {
+      accountId: "junction-user-1",
+      importedAt: "2026-03-16T12:00:00.000Z",
+      windowStart: "2026-03-15T00:00:00.000Z",
+      windowEnd: "2026-03-16T00:00:00.000Z",
+      timeseries: {
+        weight: [
+          {
+            day: "2026-03-15",
+            value: 72.4,
+            source: {
+              provider: "apple-health",
+              type: "watch",
+              id: "device-1",
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
+
+  assert.equal(weightEvent?.occurredAt, "2026-03-16T00:00:00.000Z");
+  assert.equal(weightEvent?.recordedAt, "2026-03-16T00:00:00.000Z");
+  assert.equal(weightEvent?.dayKey, "2026-03-15");
+  assert.equal(weightEvent?.externalRef?.resourceType, "junction-apple-health-weight");
+  assert.match(weightEvent?.externalRef?.resourceId ?? "", /^weight-[0-9a-f]{16}$/u);
+  assert.deepEqual(weightEvent?.rawArtifactRoles, ["junction-timeseries-weight"]);
+  assert.equal(weightEvent?.dataOrigin?.timestampSemantics, "floating");
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-weight"), true);
+});
+
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
   const calls: DeviceBatchImportPayload[] = [];
 
@@ -1659,6 +1691,71 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
   assert.equal(rawReceipt?.rawArtifactCount, 1);
   assert.equal(rawReceipt?.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
   assert.equal(calls[0]?.vaultRoot, undefined);
+});
+
+test("importDeviceProviderSnapshot does not let adapters bypass the dense sample guard", async () => {
+  const registry = createDeviceProviderRegistry();
+  const vaultRoot = await makeTempDirectory("murph-importers-dense-policy-");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-03-16T12:00:00.000Z",
+    vaultRoot,
+  });
+
+  registry.register(makeTestDeviceProviderAdapter({
+    provider: "polar",
+    normalizeSnapshot() {
+      const samples: NonNullable<NormalizedDeviceBatch["samples"]> = Array.from(
+        { length: 1001 },
+        (_, index) => {
+          const recordedAt = new Date(Date.UTC(2026, 2, 16, 12, 0, index)).toISOString();
+          return {
+            stream: "heart_rate",
+            recordedAt,
+            unit: "bpm",
+            quality: "normalized",
+            sample: {
+              recordedAt,
+              value: 70,
+            },
+          };
+        },
+      );
+      const normalized: NormalizedDeviceBatch & {
+        denseSamplePolicy: {
+          allowDenseDebugSamples: true;
+          retention: "debug_temporary";
+        };
+      } = {
+        provider: "polar",
+        source: "device",
+        samples,
+        denseSamplePolicy: {
+          allowDenseDebugSamples: true,
+          retention: "debug_temporary",
+        },
+      };
+      return normalized;
+    },
+  }));
+
+  await assert.rejects(
+    importDeviceProviderSnapshot(
+      {
+        provider: "polar",
+        vaultRoot,
+        snapshot: {},
+      },
+      {
+        corePort: coreRuntime,
+        providerRegistry: registry,
+      },
+    ),
+    (error) =>
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
+  );
 });
 
 test("createImporters composes custom device providers behind the same core seam", async () => {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 
 import {
@@ -12,6 +13,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  acquireCanonicalWriteLock,
   compactLegacyWearableReceiptEnvelopes,
   detectLegacyWearableReceiptCompaction,
   hashWearableRawPayload,
@@ -168,6 +170,48 @@ test("compactLegacyWearableReceiptEnvelopes resumes bounded batches without a du
     [fourth.compactedCount, fourth.hasMore],
     [0, false],
   );
+});
+
+test("compactLegacyWearableReceiptEnvelopes scans manifests under the canonical write lock", async () => {
+  const vaultRoot = await createLegacyWearableFixture();
+  const lock = await acquireCanonicalWriteLock(vaultRoot);
+  const compactionPromise = compactLegacyWearableReceiptEnvelopes({
+    vaultRoot,
+    now: COMPACTION_NOW,
+  });
+
+  let concurrentArtifact: RawImportManifestArtifact | null = null;
+  try {
+    await sleep(25);
+    concurrentArtifact = await writeRawJsonArtifact({
+      content: {
+        retained: true,
+      },
+      fileName: "99-concurrent-provider-note.json",
+      role: "provider-concurrent-note",
+      vaultRoot,
+    });
+    const manifest = await readManifest(vaultRoot, "manifest.json");
+    await fs.writeFile(
+      path.join(vaultRoot, RAW_DIRECTORY, "manifest.json"),
+      `${JSON.stringify({
+        ...manifest,
+        artifacts: [...manifest.artifacts, concurrentArtifact],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+  } finally {
+    await lock.release();
+  }
+
+  const result = await compactionPromise;
+  assert.ok(concurrentArtifact);
+  assert.equal(result.compactedCount, 1);
+  const afterManifest = await readManifest(vaultRoot, "manifest.json");
+  assert.ok(
+    afterManifest.artifacts.some((artifact) => artifact.role === "provider-concurrent-note"),
+  );
+  await assertArtifactMatchesFile(vaultRoot, concurrentArtifact);
 });
 
 test("compactLegacyWearableReceiptEnvelopes drains later candidates after prior batches compact", async () => {

@@ -14,6 +14,10 @@ import {
   isRawManifestFileName,
   parseRawImportManifest,
 } from "./operations/raw-manifests.ts";
+import {
+  acquireCanonicalWriteLock,
+  withCanonicalWriteLockScope,
+} from "./operations/canonical-write-lock.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import {
   normalizeRelativeVaultPath,
@@ -71,6 +75,11 @@ interface RawManifestSnapshot {
   relativePath: string;
 }
 
+interface RawManifestReadResult {
+  invalidDirectories: Set<string>;
+  snapshots: RawManifestSnapshot[];
+}
+
 interface RawArtifactReference {
   artifact: RawImportManifestArtifact;
   manifest: RawImportManifest;
@@ -107,6 +116,16 @@ const RAW_RECEIPT_ROLE_PREFIXES = Object.freeze([
   "wearable-raw-envelope:",
   "wearable-raw-receipt:",
 ]);
+const WEARABLE_STORAGE_TOMBSTONE_ROLE_PREFIX = "wearable-storage-pruned:";
+const WEARABLE_STORAGE_TOMBSTONE_SCHEMA_VERSIONS = new Set([
+  "wearable.dense_provider_timeseries_pruned.v1",
+  "wearable.legacy_canonical_records_pruned.v1",
+]);
+const WEARABLE_RECEIPT_SCHEMA_VERSIONS = new Set([
+  "wearable.raw_ingest.v1",
+  "wearable.raw_ingest_receipt.v1",
+]);
+const MAX_TOMBSTONE_CONTENT_PROBE_BYTES = 16 * 1024;
 const DENSE_SAMPLE_STREAMS = new Set([
   "heart_rate",
   "hrv",
@@ -211,8 +230,12 @@ export async function runWearableStorageMigrationPass({
   let compactedReceiptCount = 0;
   let tombstonedCanonicalArtifactCount = 0;
   let tombstonedDenseRawArtifactCount = 0;
+  let attemptedReceiptCompaction = false;
+  let attemptedCanonicalTombstones = false;
+  let attemptedDenseRawTombstones = false;
 
   if (remainingFiles > 0 && remainingBytes > 0 && !deadlineExceeded(startedAtMs, deadlineMs)) {
+    attemptedReceiptCompaction = true;
     const receiptResult = await compactLegacyWearableReceiptEnvelopes({
       deadlineMs: remainingDeadlineMs(startedAtMs, deadlineMs),
       maxBytesRead: remainingBytes,
@@ -237,6 +260,7 @@ export async function runWearableStorageMigrationPass({
   }
 
   if (remainingFiles > 0 && remainingBytes > 0 && !deadlineExceeded(startedAtMs, deadlineMs)) {
+    attemptedCanonicalTombstones = true;
     const canonicalResult = await tombstoneRawArtifactClass({
       artifactClass: "derived_canonical_records",
       deadlineMs,
@@ -267,6 +291,7 @@ export async function runWearableStorageMigrationPass({
     && remainingBytes > 0
     && !deadlineExceeded(startedAtMs, deadlineMs)
   ) {
+    attemptedDenseRawTombstones = true;
     const denseRawResult = await tombstoneRawArtifactClass({
       artifactClass: "dense_provider_timeseries",
       denseRetentionPolicy: {
@@ -290,6 +315,34 @@ export async function runWearableStorageMigrationPass({
       touchedPaths.add(touchedPath);
     }
     hasMore ||= denseRawResult.hasMore;
+  }
+
+  if (
+    !hasMore
+    && (
+      !attemptedReceiptCompaction
+      || !attemptedCanonicalTombstones
+      || (pruneDenseRaw && !attemptedDenseRawTombstones)
+    )
+  ) {
+    const detection = await detectWearableStorageMigrationCandidates({
+      includeRecentDenseRaw,
+      now,
+      vaultRoot,
+    });
+    if (!attemptedReceiptCompaction && detection.legacyReceiptPayloadCount > 0) {
+      hasMore = true;
+    }
+    if (!attemptedCanonicalTombstones && detection.legacyCanonicalArtifactCount > 0) {
+      hasMore = true;
+    }
+    if (
+      pruneDenseRaw
+      && !attemptedDenseRawTombstones
+      && detection.retentionEligibleDenseProviderRawTimeseriesCount > 0
+    ) {
+      hasMore = true;
+    }
   }
 
   const mutated =
@@ -334,7 +387,34 @@ async function tombstoneRawArtifactClass(input: {
   startedAtMs: number;
   vaultRoot: string;
 }): Promise<RawTombstoneRunResult> {
-  const manifestSnapshots = await readRawManifestSnapshots(input.vaultRoot);
+  return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(input.vaultRoot);
+
+    try {
+      return await tombstoneRawArtifactClassLocked(input);
+    } finally {
+      await lock.release();
+    }
+  });
+}
+
+async function tombstoneRawArtifactClassLocked(input: {
+  artifactClass: PreparedRawTombstone["artifactClass"];
+  denseRetentionPolicy?: {
+    includeRecent: boolean;
+  };
+  deadlineMs?: number;
+  maxBytes: number;
+  maxFiles: number;
+  now: Date;
+  predicate: (artifact: RawImportManifestArtifact) => boolean;
+  reason: string;
+  schemaVersion: string;
+  startedAtMs: number;
+  vaultRoot: string;
+}): Promise<RawTombstoneRunResult> {
+  const manifestReadResult = await readRawManifestReadResult(input.vaultRoot);
+  const manifestSnapshots = manifestReadResult.snapshots;
   const groups = collectRawArtifactReferenceGroups(manifestSnapshots, input.predicate)
     .sort((left, right) => largestReferenceByteSize(right) - largestReferenceByteSize(left));
   const prepared: PreparedRawTombstone[] = [];
@@ -362,6 +442,7 @@ async function tombstoneRawArtifactClass(input: {
     const tombstone = await prepareRawArtifactTombstone({
       artifactClass: input.artifactClass,
       denseRetentionPolicy: input.denseRetentionPolicy,
+      invalidManifestDirectories: manifestReadResult.invalidDirectories,
       manifestSnapshots,
       now: input.now,
       reason: input.reason,
@@ -431,7 +512,7 @@ async function tombstoneRawArtifactClass(input: {
       await emitAuditRecord({
         action: "vault_repair",
         batch,
-        changes: [],
+        changes: touchedPaths.map((touchedPath) => ({ op: "update", path: touchedPath })),
         commandName: "core.runWearableStorageMigrationPass",
         occurredAt: input.now,
         summary:
@@ -463,6 +544,7 @@ async function prepareRawArtifactTombstone(input: {
   denseRetentionPolicy?: {
     includeRecent: boolean;
   };
+  invalidManifestDirectories: ReadonlySet<string>;
   manifestSnapshots: readonly RawManifestSnapshot[];
   now: Date;
   reason: string;
@@ -475,6 +557,9 @@ async function prepareRawArtifactTombstone(input: {
     return null;
   }
   const targetArtifact = firstReference.artifact;
+  if (input.invalidManifestDirectories.has(path.posix.dirname(targetArtifact.relativePath))) {
+    return null;
+  }
   if (!artifactPathBelongsToRawDirectory(targetArtifact, firstReference.manifest.rawDirectory)) {
     return null;
   }
@@ -555,9 +640,17 @@ async function readRawManifestSnapshots(
   vaultRoot: string,
   options: { maxManifestBytes?: number } = {},
 ): Promise<RawManifestSnapshot[]> {
+  return (await readRawManifestReadResult(vaultRoot, options)).snapshots;
+}
+
+async function readRawManifestReadResult(
+  vaultRoot: string,
+  options: { maxManifestBytes?: number } = {},
+): Promise<RawManifestReadResult> {
   const manifestPaths = (await walkVaultFiles(vaultRoot, "raw", { extension: ".json" }))
     .filter((relativePath) => isRawManifestFileName(path.posix.basename(relativePath)));
   const snapshots: RawManifestSnapshot[] = [];
+  const invalidDirectories = new Set<string>();
 
   for (const relativePath of manifestPaths) {
     const resolved = resolveVaultPath(vaultRoot, relativePath);
@@ -574,11 +667,15 @@ async function readRawManifestSnapshots(
         relativePath,
       });
     } catch {
+      invalidDirectories.add(path.posix.dirname(relativePath));
       continue;
     }
   }
 
-  return snapshots;
+  return {
+    invalidDirectories,
+    snapshots,
+  };
 }
 
 function collectRawArtifactReferenceGroups(
@@ -742,39 +839,115 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
   vaultRoot: string;
 }): Promise<boolean> {
   for (const reference of input.references) {
-    let hasProviderEvidence = false;
-    let hasReceipt = false;
-    const artifactsToVerify: RawImportManifestArtifact[] = [];
+    const providerEvidenceArtifacts: RawImportManifestArtifact[] = [];
+    const receiptArtifacts: RawImportManifestArtifact[] = [];
 
     for (const artifact of reference.manifest.artifacts) {
       if (!artifactPathBelongsToRawDirectory(artifact, reference.manifest.rawDirectory)) {
         return false;
       }
       if (RAW_RECEIPT_ROLE_PREFIXES.some((prefix) => artifact.role.startsWith(prefix))) {
-        hasReceipt = true;
-        artifactsToVerify.push(artifact);
+        receiptArtifacts.push(artifact);
         continue;
       }
       const isProviderEvidence =
         artifact.relativePath !== reference.artifact.relativePath
-        && !isCanonicalRecordArtifact(artifact);
+        && !isCanonicalRecordArtifact(artifact)
+        && !isWearableStorageTombstoneArtifact(artifact);
       if (input.artifactClass === "derived_canonical_records" && isProviderEvidence) {
-        hasProviderEvidence = true;
-        artifactsToVerify.push(artifact);
+        providerEvidenceArtifacts.push(artifact);
       }
     }
 
-    if (!hasReceipt || (input.artifactClass === "derived_canonical_records" && !hasProviderEvidence)) {
+    if (
+      receiptArtifacts.length === 0
+      || (input.artifactClass === "derived_canonical_records" && providerEvidenceArtifacts.length === 0)
+    ) {
       return false;
     }
-    for (const artifact of artifactsToVerify) {
-      if (!await rawArtifactFileMatchesManifest(input.vaultRoot, artifact)) {
+    for (const artifact of providerEvidenceArtifacts) {
+      if (!await rawArtifactIsUsableEvidenceFile(input.vaultRoot, artifact)) {
         return false;
+      }
+    }
+    const coveredRoles = new Set<string>();
+    for (const artifact of receiptArtifacts) {
+      const receiptRoles = await readReceiptCoveredRoles(input.vaultRoot, artifact);
+      if (!receiptRoles) {
+        return false;
+      }
+      for (const role of receiptRoles) {
+        coveredRoles.add(role);
+      }
+    }
+    if (input.artifactClass === "dense_provider_timeseries") {
+      if (!coveredRoles.has(reference.artifact.role)) {
+        return false;
+      }
+    } else {
+      for (const providerEvidence of providerEvidenceArtifacts) {
+        if (!coveredRoles.has(providerEvidence.role)) {
+          return false;
+        }
       }
     }
   }
 
   return true;
+}
+
+async function readReceiptCoveredRoles(
+  vaultRoot: string,
+  artifact: RawImportManifestArtifact,
+): Promise<Set<string> | null> {
+  if (!await rawArtifactIsUsableEvidenceFile(vaultRoot, artifact)) {
+    return null;
+  }
+  try {
+    const raw = JSON.parse(
+      await fs.readFile(resolveVaultPath(vaultRoot, artifact.relativePath).absolutePath, "utf8"),
+    );
+    if (!isPlainRecord(raw)) {
+      return null;
+    }
+    if (!isRecognizedWearableReceipt(raw)) {
+      return null;
+    }
+    const rawArtifactRoles = readStringArray(raw.rawArtifactRoles);
+    if (!rawArtifactRoles || rawArtifactRoles.length === 0) {
+      return null;
+    }
+    return new Set(rawArtifactRoles);
+  } catch {
+    return null;
+  }
+}
+
+function isRecognizedWearableReceipt(raw: Record<string, unknown>): boolean {
+  return typeof raw.schemaVersion === "string"
+    && WEARABLE_RECEIPT_SCHEMA_VERSIONS.has(raw.schemaVersion)
+    && typeof raw.payloadHash === "string"
+    && Number.isInteger(raw.rawArtifactCount)
+    && Array.isArray(raw.rawArtifactRoles)
+    && raw.rawArtifactCount === raw.rawArtifactRoles.length;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const strings: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      return null;
+    }
+    strings.push(entry.trim());
+  }
+  return strings;
 }
 
 async function rawArtifactFileMatchesManifest(
@@ -785,6 +958,38 @@ async function rawArtifactFileMatchesManifest(
   return actual !== null
     && actual.byteSize === artifact.byteSize
     && actual.sha256 === artifact.sha256;
+}
+
+async function rawArtifactIsUsableEvidenceFile(
+  vaultRoot: string,
+  artifact: RawImportManifestArtifact,
+): Promise<boolean> {
+  if (!await rawArtifactFileMatchesManifest(vaultRoot, artifact)) {
+    return false;
+  }
+  return !await rawArtifactContentIsWearableStorageTombstone(vaultRoot, artifact);
+}
+
+async function rawArtifactContentIsWearableStorageTombstone(
+  vaultRoot: string,
+  artifact: RawImportManifestArtifact,
+): Promise<boolean> {
+  if (isWearableStorageTombstoneArtifact(artifact)) {
+    return true;
+  }
+  if (artifact.byteSize > MAX_TOMBSTONE_CONTENT_PROBE_BYTES) {
+    return false;
+  }
+  try {
+    const raw = JSON.parse(
+      await fs.readFile(resolveVaultPath(vaultRoot, artifact.relativePath).absolutePath, "utf8"),
+    );
+    return isPlainRecord(raw)
+      && typeof raw.schemaVersion === "string"
+      && WEARABLE_STORAGE_TOMBSTONE_SCHEMA_VERSIONS.has(raw.schemaVersion);
+  } catch {
+    return false;
+  }
 }
 
 function isCanonicalRecordArtifact(artifact: RawImportManifestArtifact): boolean {
@@ -803,8 +1008,12 @@ function replacementRoleForTombstone(
   artifactClass: PreparedRawTombstone["artifactClass"],
 ): string {
   return artifactClass === "dense_provider_timeseries"
-    ? "wearable-storage-pruned:dense-debug"
-    : "wearable-storage-pruned:derived-canonical-records";
+    ? `${WEARABLE_STORAGE_TOMBSTONE_ROLE_PREFIX}dense-debug`
+    : `${WEARABLE_STORAGE_TOMBSTONE_ROLE_PREFIX}derived-canonical-records`;
+}
+
+function isWearableStorageTombstoneArtifact(artifact: RawImportManifestArtifact): boolean {
+  return artifact.role.startsWith(WEARABLE_STORAGE_TOMBSTONE_ROLE_PREFIX);
 }
 
 function artifactPathBelongsToRawDirectory(

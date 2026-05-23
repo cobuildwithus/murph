@@ -62,6 +62,7 @@ function createQueryRuntimeStub() {
 
 afterEach(() => {
   vi.doUnmock("../src/runtime-import.ts");
+  vi.doUnmock("../src/usecases/runtime.js");
   vi.restoreAllMocks();
 });
 
@@ -115,6 +116,55 @@ test("createUnwiredMethod rejects with a shared not_implemented error", async ()
     code: "not_implemented",
     message: "CLI integration for query.showGoal is not wired yet.",
   });
+});
+
+test("repairWearableStorage dry-run scopes dense raw hasMore to selected work", async () => {
+  const coreRuntime = createCoreRuntimeStub();
+  coreRuntime.detectWearableStorageMigrationCandidates = vi.fn(async () => ({
+    denseProviderRawTimeseriesCount: 1,
+    denseProviderSampleShardCount: 0,
+    hasWork: true,
+    legacyCanonicalArtifactCount: 0,
+    legacyReceiptPayloadCount: 0,
+    retentionEligibleDenseProviderRawTimeseriesCount: 1,
+    suspectedBytes: 4096,
+  }));
+  const runtimeModule = {
+    createUnwiredMethod,
+    loadCoreRuntime: vi.fn(async () => coreRuntime),
+    loadImporterRuntime: vi.fn(async () => {
+      throw new Error("loadImporterRuntime should not be called");
+    }),
+    loadQueryRuntime: vi.fn(async () => {
+      throw new Error("loadQueryRuntime should not be called");
+    }),
+  };
+  const integratedServicesModule = await importWithMocks<typeof import("../src/usecases/integrated-services.ts")>(
+    "../src/usecases/integrated-services.ts",
+    {
+      "../src/usecases/runtime.js": () => runtimeModule,
+    },
+  );
+  const services = integratedServicesModule.createIntegratedVaultServices();
+
+  const defaultDryRun = await services.core.repairWearableStorage({
+    requestId: "repair-default",
+    vault: "fixture-vault",
+  });
+
+  assert.equal(defaultDryRun.hasWork, false);
+  assert.equal(defaultDryRun.hasMore, false);
+  assert.equal(defaultDryRun.denseProviderRawTimeseriesCount, 1);
+  assert.equal(defaultDryRun.retentionEligibleDenseProviderRawTimeseriesCount, 1);
+
+  const denseDryRun = await services.core.repairWearableStorage({
+    pruneDenseRaw: true,
+    requestId: "repair-dense-raw",
+    vault: "fixture-vault",
+  });
+
+  assert.equal(denseDryRun.hasWork, true);
+  assert.equal(denseDryRun.hasMore, true);
 });
 
 test("loadCoreRuntime validates module shape and caches the successful runtime", async () => {
