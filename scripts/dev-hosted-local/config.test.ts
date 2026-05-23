@@ -27,7 +27,7 @@ describe("resolveHostedLocalDevConfig", () => {
       skipVercelPull: false,
       temporal: {
         host: "127.0.0.1",
-        mode: "managed",
+        mode: "auto",
         namespace: "default",
         port: 7233,
         taskQueue: "murph-hosted-runtime",
@@ -173,7 +173,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
     expect(output).toContain("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...");
     expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
-    expect(output).toContain("MURPH_DEV_TEMPORAL=managed");
+    expect(output).toContain("MURPH_DEV_TEMPORAL=auto");
     expect(output).toContain("MURPH_DEV_TEMPORAL_PORT=7233");
     expect(output).toContain("TEMPORAL_TASK_QUEUE=murph-hosted-runtime");
     expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
@@ -203,7 +203,8 @@ describe("parseTemporalMode", () => {
     expect(parseTemporalMode(undefined, "managed")).toBe("managed");
   });
 
-  it("normalizes managed, external, and disabled values", () => {
+  it("normalizes auto, managed, external, and disabled values", () => {
+    expect(parseTemporalMode("auto")).toBe("auto");
     expect(parseTemporalMode("on")).toBe("managed");
     expect(parseTemporalMode("external")).toBe("external");
     expect(parseTemporalMode("off")).toBe("disabled");
@@ -211,7 +212,7 @@ describe("parseTemporalMode", () => {
 
   it("rejects invalid values", () => {
     expect(() => parseTemporalMode("maybe")).toThrow(
-      "MURPH_DEV_TEMPORAL must be managed, external, disabled, 1, or 0.",
+      "MURPH_DEV_TEMPORAL must be auto, managed, external, disabled, 1, or 0.",
     );
   });
 });

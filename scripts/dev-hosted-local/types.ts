@@ -22,7 +22,7 @@ export interface HostedLocalDevConfig {
   workerProtocol: "http" | "https";
 }
 
-export type HostedLocalTemporalMode = "disabled" | "external" | "managed";
+export type HostedLocalTemporalMode = "auto" | "disabled" | "external" | "managed";
 
 export interface HostedLocalTemporalConfig {
   host: string;

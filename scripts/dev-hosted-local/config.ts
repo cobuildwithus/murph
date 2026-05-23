@@ -99,7 +99,7 @@ function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
     return "managed";
   }
 
-  return "managed";
+  return "auto";
 }
 
 export function parseTemporalMode(
@@ -119,12 +119,16 @@ export function parseTemporalMode(
     return "managed";
   }
 
+  if (normalized === "auto") {
+    return "auto";
+  }
+
   if (normalized === "external") {
     return "external";
   }
 
   throw new Error(
-    "MURPH_DEV_TEMPORAL must be managed, external, disabled, 1, or 0.",
+    "MURPH_DEV_TEMPORAL must be auto, managed, external, disabled, 1, or 0.",
   );
 }
 
@@ -225,8 +229,8 @@ export function printHelp(): void {
       "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
       "  HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...  Comma-separated sender phone allowlist for local Linq webhooks",
       "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
-      "  MURPH_DEV_TEMPORAL=managed         Temporal mode: managed starts local Temporal + worker, external uses caller-supplied Temporal, disabled skips orchestration",
-      "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for managed mode",
+      "  MURPH_DEV_TEMPORAL=auto            Temporal mode: auto reuses a local Temporal listener or starts one; managed always starts one; external uses caller-supplied Temporal; disabled skips orchestration",
+      "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for auto/managed mode",
       "  MURPH_DEV_TEMPORAL_PORT=7233       Local Temporal frontend gRPC port",
       "  TEMPORAL_NAMESPACE=default         Temporal namespace for web signals and worker polling",
       "  TEMPORAL_TASK_QUEUE=murph-hosted-runtime Temporal task queue for hosted runtime workflows",
