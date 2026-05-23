@@ -137,7 +137,7 @@ test("importDeviceBatch dense sample guard does not trust caller-provided source
       provider: "wearable-provider",
       accountId: "acct-test",
       importedAt: "2026-03-16T09:30:00.000Z",
-      source: "import",
+      source: "manual",
       samples: buildDenseHeartRateSamples(1001),
     }),
     (error) =>

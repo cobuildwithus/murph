@@ -9,6 +9,10 @@ import type {
 
 import { emitAuditRecord } from "./audit.ts";
 import { walkVaultFiles } from "./fs.ts";
+import {
+  acquireCanonicalWriteLock,
+  withCanonicalWriteLockScope,
+} from "./operations/canonical-write-lock.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import {
   isRawManifestFileName,
@@ -172,6 +176,24 @@ export async function detectLegacyWearableReceiptCompaction({
 }
 
 export async function compactLegacyWearableReceiptEnvelopes({
+  vaultRoot,
+  ...input
+}: CompactLegacyWearableReceiptEnvelopesInput): Promise<CompactLegacyWearableReceiptEnvelopesResult> {
+  return await withCanonicalWriteLockScope(vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(vaultRoot);
+
+    try {
+      return await compactLegacyWearableReceiptEnvelopesLocked({
+        ...input,
+        vaultRoot,
+      });
+    } finally {
+      await lock.release();
+    }
+  });
+}
+
+async function compactLegacyWearableReceiptEnvelopesLocked({
   vaultRoot,
   maxBytesRead = DEFAULT_MAX_BYTES_READ,
   maxCandidatesScanned = DEFAULT_MAX_CANDIDATES_SCANNED,

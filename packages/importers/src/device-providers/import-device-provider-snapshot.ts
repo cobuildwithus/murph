@@ -101,9 +101,17 @@ export async function prepareDeviceProviderSnapshotImport(
   const rawObservedAt = resolveStableRawReceiptObservedAt(request, normalized);
   const basePayload = stripUndefined({
     vaultRoot: request.vaultRoot,
-    ...normalized,
+    provider: normalized.provider,
     accountId: normalized.accountId ?? request.accountId,
     importedAt: rawObservedAt,
+    source: normalized.source,
+    dataOrigin: normalized.dataOrigin,
+    events: normalized.events,
+    samples: normalized.samples,
+    rawArtifacts: normalized.rawArtifacts,
+    rawIngestReceipts: normalized.rawIngestReceipts,
+    canonicalWearableRecords: normalized.canonicalWearableRecords,
+    provenance: normalized.provenance,
   });
   const payloadWithRawEvidence = ensureProviderRawArtifact(basePayload, rawSnapshot);
   const payloadWithLegacyRawRole = attachSingleLegacyRawArtifactRole(payloadWithRawEvidence);
