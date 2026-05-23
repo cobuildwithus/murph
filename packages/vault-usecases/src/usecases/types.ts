@@ -744,6 +744,7 @@ export interface WearableStorageRepairResult {
   legacyCanonicalArtifactCount: number
   denseProviderSampleShardCount: number
   denseProviderRawTimeseriesCount: number
+  retentionEligibleDenseProviderRawTimeseriesCount: number
   mutated: boolean
   hasMore: boolean
   bytesBefore: number
@@ -1438,6 +1439,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }>
   detectWearableStorageMigrationCandidates(input: {
     vaultRoot: string
+    includeRecentDenseRaw?: boolean
     maxManifestBytes?: number
   }): Promise<{
     hasWork: boolean
@@ -1446,6 +1448,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     legacyCanonicalArtifactCount: number
     denseProviderSampleShardCount: number
     denseProviderRawTimeseriesCount: number
+    retentionEligibleDenseProviderRawTimeseriesCount: number
   }>
   runWearableStorageMigrationPass(input: {
     vaultRoot: string

@@ -85,6 +85,7 @@ const wearableStorageRepairResultSchema = z.object({
   legacyCanonicalArtifactCount: z.number().int().nonnegative(),
   denseProviderSampleShardCount: z.number().int().nonnegative(),
   denseProviderRawTimeseriesCount: z.number().int().nonnegative(),
+  retentionEligibleDenseProviderRawTimeseriesCount: z.number().int().nonnegative(),
   mutated: z.boolean(),
   hasMore: z.boolean(),
   bytesBefore: z.number().int().nonnegative(),
@@ -250,6 +251,12 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
         throw new VaultCliError(
           'invalid_options',
           'Recent dense raw timeseries pruning must be requested with --include-recent-dense-raw on the command line.',
+        )
+      }
+      if (options.includeRecentDenseRaw && !options.pruneDenseRaw) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Recent dense raw timeseries pruning requires --prune-dense-raw.',
         )
       }
       if (options.apply && options.dryRun) {

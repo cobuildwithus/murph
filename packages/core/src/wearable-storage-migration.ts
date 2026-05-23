@@ -32,6 +32,7 @@ export interface WearableStorageMigrationDetection {
   legacyCanonicalArtifactCount: number;
   denseProviderSampleShardCount: number;
   denseProviderRawTimeseriesCount: number;
+  retentionEligibleDenseProviderRawTimeseriesCount: number;
 }
 
 export interface WearableStorageMigrationResult {
@@ -49,7 +50,9 @@ export interface WearableStorageMigrationResult {
 
 export interface DetectWearableStorageMigrationCandidatesInput {
   vaultRoot: string;
+  includeRecentDenseRaw?: boolean;
   maxManifestBytes?: number;
+  now?: Date;
 }
 
 export interface RunWearableStorageMigrationPassInput {
@@ -128,8 +131,25 @@ const DENSE_RAW_ROLE_TERMS = Object.freeze([
   "steps",
   "temperature",
 ]);
+const DENSE_RAW_EXACT_ROLES = new Set([
+  "blood-oxygen",
+  "blood_oxygen",
+  "heartrate",
+  "heart-rate",
+  "heart_rate",
+  "hrv",
+  "respiratory-rate",
+  "respiratory_rate",
+  "sleep-stage",
+  "sleep_stage",
+  "spo2",
+  "steps",
+  "temperature",
+]);
 
 export async function detectWearableStorageMigrationCandidates({
+  includeRecentDenseRaw = false,
+  now = new Date(),
   vaultRoot,
   maxManifestBytes,
 }: DetectWearableStorageMigrationCandidatesInput): Promise<WearableStorageMigrationDetection> {
@@ -156,6 +176,10 @@ export async function detectWearableStorageMigrationCandidates({
   return {
     denseProviderRawTimeseriesCount: denseRawReferences.length,
     denseProviderSampleShardCount: sampleShardCandidates.length,
+    retentionEligibleDenseProviderRawTimeseriesCount: denseRawReferences.filter((references) =>
+      includeRecentDenseRaw
+      || isArtifactOlderThanDenseRetentionWindow(references[0]?.manifest.importedAt ?? "", now)
+    ).length,
     hasWork:
       receiptDetection.hasWork
       || canonicalReferences.length > 0
@@ -215,12 +239,14 @@ export async function runWearableStorageMigrationPass({
   if (remainingFiles > 0 && remainingBytes > 0 && !deadlineExceeded(startedAtMs, deadlineMs)) {
     const canonicalResult = await tombstoneRawArtifactClass({
       artifactClass: "derived_canonical_records",
+      deadlineMs,
       maxBytes: remainingBytes,
       maxFiles: remainingFiles,
       now,
       predicate: isCanonicalRecordArtifact,
       reason: "derived_duplicate_not_canonical_evidence",
       schemaVersion: "wearable.legacy_canonical_records_pruned.v1",
+      startedAtMs,
       vaultRoot,
     });
     tombstonedCanonicalArtifactCount = canonicalResult.tombstonedCount;
@@ -246,12 +272,14 @@ export async function runWearableStorageMigrationPass({
       denseRetentionPolicy: {
         includeRecent: includeRecentDenseRaw,
       },
+      deadlineMs,
       maxBytes: remainingBytes,
       maxFiles: remainingFiles,
       now,
       predicate: isDenseRawTimeseriesArtifact,
       reason: "dense_provider_debug_timeseries_pruned_after_product_facts",
       schemaVersion: "wearable.dense_provider_timeseries_pruned.v1",
+      startedAtMs,
       vaultRoot,
     });
     tombstonedDenseRawArtifactCount = denseRawResult.tombstonedCount;
@@ -296,12 +324,14 @@ async function tombstoneRawArtifactClass(input: {
   denseRetentionPolicy?: {
     includeRecent: boolean;
   };
+  deadlineMs?: number;
   maxBytes: number;
   maxFiles: number;
   now: Date;
   predicate: (artifact: RawImportManifestArtifact) => boolean;
   reason: string;
   schemaVersion: string;
+  startedAtMs: number;
   vaultRoot: string;
 }): Promise<RawTombstoneRunResult> {
   const manifestSnapshots = await readRawManifestSnapshots(input.vaultRoot);
@@ -315,12 +345,16 @@ async function tombstoneRawArtifactClass(input: {
   let hasMore = false;
 
   for (const references of groups) {
+    if (deadlineExceeded(input.startedAtMs, input.deadlineMs)) {
+      hasMore = true;
+      break;
+    }
     if (prepared.length >= input.maxFiles) {
       hasMore = true;
       break;
     }
     const largestBytes = largestReferenceByteSize(references);
-    if (bytesBefore + largestBytes > input.maxBytes) {
+    if (prepared.length > 0 && bytesBefore + largestBytes > input.maxBytes) {
       hasMore = true;
       continue;
     }
@@ -338,6 +372,10 @@ async function tombstoneRawArtifactClass(input: {
     if (!tombstone) {
       skippedCount += 1;
       continue;
+    }
+    if (deadlineExceeded(input.startedAtMs, input.deadlineMs)) {
+      hasMore = true;
+      break;
     }
 
     prepared.push(tombstone);
@@ -447,11 +485,11 @@ async function prepareRawArtifactTombstone(input: {
   ) {
     return null;
   }
-  if (
-    input.artifactClass === "derived_canonical_records"
-      ? !manifestsHaveProviderEvidenceAndReceipt(input.references)
-      : !manifestsHaveRawReceipt(input.references)
-  ) {
+  if (!await manifestsHaveRequiredEvidenceFiles({
+    artifactClass: input.artifactClass,
+    references: input.references,
+    vaultRoot: input.vaultRoot,
+  })) {
     return null;
   }
   const actual = await statAndHashVaultFile(input.vaultRoot, targetArtifact.relativePath);
@@ -471,6 +509,7 @@ async function prepareRawArtifactTombstone(input: {
   const manifestPathsWithTargetPath = collectManifestPathsForRawArtifactPreimage({
     manifestSnapshots: input.manifestSnapshots,
     originalByteSize,
+    originalRole: targetArtifact.role,
     originalSha256,
     targetPath: targetArtifact.relativePath,
   });
@@ -692,44 +731,60 @@ function rawArtifactReferencesAgree(references: readonly RawArtifactReference[])
   return references.every((reference) =>
     reference.artifact.relativePath === firstReference.artifact.relativePath
     && reference.artifact.byteSize === firstReference.artifact.byteSize
+    && reference.artifact.role === firstReference.artifact.role
     && reference.artifact.sha256 === firstReference.artifact.sha256
   );
 }
 
-function manifestsHaveProviderEvidenceAndReceipt(references: readonly RawArtifactReference[]): boolean {
-  return references.every((reference) => {
+async function manifestsHaveRequiredEvidenceFiles(input: {
+  artifactClass: PreparedRawTombstone["artifactClass"];
+  references: readonly RawArtifactReference[];
+  vaultRoot: string;
+}): Promise<boolean> {
+  for (const reference of input.references) {
     let hasProviderEvidence = false;
     let hasReceipt = false;
+    const artifactsToVerify: RawImportManifestArtifact[] = [];
+
     for (const artifact of reference.manifest.artifacts) {
       if (!artifactPathBelongsToRawDirectory(artifact, reference.manifest.rawDirectory)) {
         return false;
       }
       if (RAW_RECEIPT_ROLE_PREFIXES.some((prefix) => artifact.role.startsWith(prefix))) {
         hasReceipt = true;
+        artifactsToVerify.push(artifact);
         continue;
       }
-      if (
+      const isProviderEvidence =
         artifact.relativePath !== reference.artifact.relativePath
-        && !isCanonicalRecordArtifact(artifact)
-      ) {
+        && !isCanonicalRecordArtifact(artifact);
+      if (input.artifactClass === "derived_canonical_records" && isProviderEvidence) {
         hasProviderEvidence = true;
+        artifactsToVerify.push(artifact);
       }
     }
-    return hasProviderEvidence && hasReceipt;
-  });
-}
 
-function manifestsHaveRawReceipt(references: readonly RawArtifactReference[]): boolean {
-  return references.every((reference) => {
-    let hasReceipt = false;
-    for (const artifact of reference.manifest.artifacts) {
-      if (!artifactPathBelongsToRawDirectory(artifact, reference.manifest.rawDirectory)) {
+    if (!hasReceipt || (input.artifactClass === "derived_canonical_records" && !hasProviderEvidence)) {
+      return false;
+    }
+    for (const artifact of artifactsToVerify) {
+      if (!await rawArtifactFileMatchesManifest(input.vaultRoot, artifact)) {
         return false;
       }
-      hasReceipt ||= RAW_RECEIPT_ROLE_PREFIXES.some((prefix) => artifact.role.startsWith(prefix));
     }
-    return hasReceipt;
-  });
+  }
+
+  return true;
+}
+
+async function rawArtifactFileMatchesManifest(
+  vaultRoot: string,
+  artifact: RawImportManifestArtifact,
+): Promise<boolean> {
+  const actual = await statAndHashVaultFile(vaultRoot, artifact.relativePath);
+  return actual !== null
+    && actual.byteSize === artifact.byteSize
+    && actual.sha256 === artifact.sha256;
 }
 
 function isCanonicalRecordArtifact(artifact: RawImportManifestArtifact): boolean {
@@ -738,7 +793,8 @@ function isCanonicalRecordArtifact(artifact: RawImportManifestArtifact): boolean
 
 function isDenseRawTimeseriesArtifact(artifact: RawImportManifestArtifact): boolean {
   const role = artifact.role.toLowerCase();
-  return role.includes("timeseries")
+  return DENSE_RAW_EXACT_ROLES.has(role)
+    || role.includes("timeseries")
     && !role.includes("summary")
     && DENSE_RAW_ROLE_TERMS.some((term) => role.includes(term));
 }
@@ -773,6 +829,7 @@ function sumLargestReferenceBytes(groups: readonly RawArtifactReference[][]): nu
 function collectManifestPathsForRawArtifactPreimage(input: {
   manifestSnapshots: readonly RawManifestSnapshot[];
   originalByteSize: number;
+  originalRole: string;
   originalSha256: string;
   targetPath: string;
 }): string[] | null {
@@ -785,6 +842,7 @@ function collectManifestPathsForRawArtifactPreimage(input: {
       }
       if (
         artifact.byteSize !== input.originalByteSize
+        || artifact.role !== input.originalRole
         || artifact.sha256 !== input.originalSha256
       ) {
         return null;

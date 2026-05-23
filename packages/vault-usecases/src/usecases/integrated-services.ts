@@ -198,6 +198,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
       const { vault } = input
       const core = await loadCoreRuntime()
       const detection = await core.detectWearableStorageMigrationCandidates({
+        includeRecentDenseRaw: input.includeRecentDenseRaw,
         vaultRoot: vault,
       })
 
@@ -205,7 +206,10 @@ function createIntegratedCoreServices(): CoreWriteServices {
         const hasSelectedWork =
           detection.legacyReceiptPayloadCount > 0
           || detection.legacyCanonicalArtifactCount > 0
-          || (input.pruneDenseRaw === true && detection.denseProviderRawTimeseriesCount > 0)
+          || (
+            input.pruneDenseRaw === true
+            && detection.retentionEligibleDenseProviderRawTimeseriesCount > 0
+          )
         return {
           mode: "dry-run",
           hasWork: hasSelectedWork,
@@ -214,8 +218,10 @@ function createIntegratedCoreServices(): CoreWriteServices {
           legacyCanonicalArtifactCount: detection.legacyCanonicalArtifactCount,
           denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
           denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
+          retentionEligibleDenseProviderRawTimeseriesCount:
+            detection.retentionEligibleDenseProviderRawTimeseriesCount,
           mutated: false,
-          hasMore: detection.hasWork,
+          hasMore: hasSelectedWork,
           bytesBefore: 0,
           bytesAfter: 0,
           bytesFreed: 0,
@@ -243,6 +249,8 @@ function createIntegratedCoreServices(): CoreWriteServices {
         legacyCanonicalArtifactCount: detection.legacyCanonicalArtifactCount,
         denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
         denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
+        retentionEligibleDenseProviderRawTimeseriesCount:
+          detection.retentionEligibleDenseProviderRawTimeseriesCount,
         mutated: result.mutated,
         hasMore: result.hasMore,
         bytesBefore: result.bytesBefore,

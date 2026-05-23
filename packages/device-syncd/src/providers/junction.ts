@@ -244,7 +244,7 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
     await projectJunctionSources(context, sourceProviders);
 
-    const summaryWindow = job.kind === "reconcile"
+    const summaryWindow = job.kind === "reconcile" && isCurrentScheduledClosedWindow(window, context.now, reconcileDays)
       ? resolveCurrentSummaryWindow(context.now, reconcileDays)
       : window;
     const summaries = await fetchSummarySnapshots(context, summaryWindow.windowStart, summaryWindow.windowEnd);
@@ -262,12 +262,17 @@ export function createJunctionDeviceSyncProvider(
       summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
       timeseries: {},
     });
-    await importTimeseriesDailySnapshots(
-      context,
-      sourceProviders,
-      timeseriesWindowStart,
-      window.windowEnd,
-    );
+    if (
+      job.kind === "backfill"
+      || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
+    ) {
+      await importTimeseriesDailySnapshots(
+        context,
+        sourceProviders,
+        timeseriesWindowStart,
+        window.windowEnd,
+      );
+    }
 
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
@@ -285,7 +290,6 @@ export function createJunctionDeviceSyncProvider(
     await projectJunctionSources(context, sourceProviders);
 
     const summaries: Record<string, unknown[]> = {};
-    const timeseries: Record<string, unknown[]> = {};
 
     if (resource) {
       const inferredCategory = inferJunctionResourceCategory(resourceCategory, resource);
@@ -296,12 +300,16 @@ export function createJunctionDeviceSyncProvider(
           resourceCategory: inferredCategory,
         });
       } else if (inferredCategory === "timeseries") {
-        timeseries[resource] = await fetchTimeseriesResourceInChunks(
+        await importTimeseriesDailySnapshots(
           context,
-          resource,
+          sourceProviders,
           window.windowStart,
           window.windowEnd,
+          [resource],
         );
+        return {
+          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+        };
       } else {
         summaries[resource] = await fetchOptionalJunctionResourceRecords(
           context,
@@ -326,7 +334,7 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: window.windowEnd,
       connections: sanitizeJunctionImportConnections(sourceProviders),
       summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
-      timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
+      timeseries: {},
     });
 
     return {
@@ -420,10 +428,11 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     windowStart: string,
     windowEnd: string,
+    resources: readonly string[] = timeseriesResources,
   ): Promise<Record<string, unknown[]>> {
     const snapshots: Record<string, unknown[]> = {};
 
-    for (const resource of timeseriesResources) {
+    for (const resource of resources) {
       snapshots[resource] = await fetchTimeseriesResourceInChunks(
         context,
         resource,
@@ -485,12 +494,14 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[],
     windowStart: string,
     windowEnd: string,
+    resources?: readonly string[],
   ): Promise<void> {
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
       const timeseries = await fetchTimeseriesSnapshots(
         context,
         window.windowStart,
         window.windowEnd,
+        resources,
       );
       if (!hasJunctionSnapshotRecords(timeseries)) {
         continue;
@@ -1001,6 +1012,30 @@ function resolveCurrentSummaryWindow(
     windowStart: subtractDays(windowEnd, fallbackDays),
     windowEnd,
   };
+}
+
+function isCurrentScheduledClosedWindow(
+  window: { windowStart: string; windowEnd: string },
+  now: string,
+  fallbackDays: number,
+): boolean {
+  const expectedWindowEnd = floorUtcDayTimestamp(now);
+  const expectedWindowStart = floorUtcDayTimestamp(subtractDays(expectedWindowEnd, fallbackDays));
+  return window.windowStart === expectedWindowStart && window.windowEnd === expectedWindowEnd;
+}
+
+function shouldImportClosedTimeseriesForReconcile(
+  lastSyncCompletedAt: string | null | undefined,
+  windowEnd: string,
+): boolean {
+  if (!lastSyncCompletedAt) {
+    return true;
+  }
+  const lastCompletedClosedDayMs = Date.parse(floorUtcDayTimestamp(lastSyncCompletedAt));
+  const windowEndMs = Date.parse(windowEnd);
+  return !Number.isFinite(lastCompletedClosedDayMs)
+    || !Number.isFinite(windowEndMs)
+    || lastCompletedClosedDayMs < windowEndMs;
 }
 
 function buildClosedDailyWindows(
