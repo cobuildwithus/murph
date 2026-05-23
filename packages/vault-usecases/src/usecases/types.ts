@@ -728,6 +728,34 @@ export interface SupplementCompoundListResult {
   nextCursor: string | null
 }
 
+export interface WearableStorageRepairInput extends CommandContext {
+  apply?: boolean
+  pruneDenseRaw?: boolean
+  includeRecentDenseRaw?: boolean
+  maxFiles?: number
+  maxBytes?: number
+}
+
+export interface WearableStorageRepairResult {
+  mode: "dry-run" | "apply"
+  hasWork: boolean
+  suspectedBytes: number
+  legacyReceiptPayloadCount: number
+  legacyCanonicalArtifactCount: number
+  denseProviderSampleShardCount: number
+  denseProviderRawTimeseriesCount: number
+  mutated: boolean
+  hasMore: boolean
+  bytesBefore: number
+  bytesAfter: number
+  bytesFreed: number
+  compactedReceiptCount: number
+  tombstonedCanonicalArtifactCount: number
+  tombstonedDenseRawArtifactCount: number
+  skippedCount: number
+  touchedPathCount: number
+}
+
 export interface CoreWriteServices extends HealthCoreServiceMethods {
   init(
     input: CommandContext & {
@@ -1043,6 +1071,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     },
   ): Promise<VaultUpdateResult>
   repairVault(input: CommandContext): Promise<VaultRepairResult>
+  repairWearableStorage(input: WearableStorageRepairInput): Promise<WearableStorageRepairResult>
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
@@ -1406,6 +1435,38 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     createdDirectories: string[]
     updated: boolean
     auditPath: string | null
+  }>
+  detectWearableStorageMigrationCandidates(input: {
+    vaultRoot: string
+    maxManifestBytes?: number
+  }): Promise<{
+    hasWork: boolean
+    suspectedBytes: number
+    legacyReceiptPayloadCount: number
+    legacyCanonicalArtifactCount: number
+    denseProviderSampleShardCount: number
+    denseProviderRawTimeseriesCount: number
+  }>
+  runWearableStorageMigrationPass(input: {
+    vaultRoot: string
+    maxFiles?: number
+    maxBytes?: number
+    deadlineMs?: number
+    now?: Date
+    pruneDenseRaw?: boolean
+    includeRecentDenseRaw?: boolean
+    validateAfter?: boolean
+  }): Promise<{
+    mutated: boolean
+    hasMore: boolean
+    bytesBefore: number
+    bytesAfter: number
+    bytesFreed: number
+    compactedReceiptCount: number
+    tombstonedCanonicalArtifactCount: number
+    tombstonedDenseRawArtifactCount: number
+    skippedCount: number
+    touchedPaths: string[]
   }>
   addMeal(input: {
     vaultRoot: string

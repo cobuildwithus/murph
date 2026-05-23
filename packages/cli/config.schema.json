@@ -136,6 +136,56 @@
                       }
                     }
                   }
+                },
+                "repair-wearable-storage": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show candidates without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Apply one bounded repair pass.",
+                          "type": "boolean"
+                        },
+                        "pruneDenseRaw": {
+                          "default": false,
+                          "description": "Also tombstone proven dense raw provider timeseries artifacts.",
+                          "type": "boolean"
+                        },
+                        "includeRecentDenseRaw": {
+                          "default": false,
+                          "description": "Allow dense raw provider timeseries newer than the default retention window to be tombstoned.",
+                          "type": "boolean"
+                        },
+                        "maxFiles": {
+                          "description": "Maximum candidate files to mutate in one apply pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 250
+                        },
+                        "maxBytes": {
+                          "description": "Maximum candidate bytes to mutate in one apply pass.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

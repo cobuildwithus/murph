@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { Cli, z } from 'incur'
 import {
   emptyArgsSchema,
@@ -12,6 +13,7 @@ import {
   vaultInitResultSchema,
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
@@ -72,7 +74,49 @@ const vaultRepairResultSchema = z.object({
   auditPath: pathSchema.nullable(),
 })
 
+const vaultCommandArgvStorage = new AsyncLocalStorage<readonly string[]>()
+const vaultCommandArgvInstalled = new WeakSet<Cli.Cli>()
+
+const wearableStorageRepairResultSchema = z.object({
+  mode: z.enum(['dry-run', 'apply']),
+  hasWork: z.boolean(),
+  suspectedBytes: z.number().int().nonnegative(),
+  legacyReceiptPayloadCount: z.number().int().nonnegative(),
+  legacyCanonicalArtifactCount: z.number().int().nonnegative(),
+  denseProviderSampleShardCount: z.number().int().nonnegative(),
+  denseProviderRawTimeseriesCount: z.number().int().nonnegative(),
+  mutated: z.boolean(),
+  hasMore: z.boolean(),
+  bytesBefore: z.number().int().nonnegative(),
+  bytesAfter: z.number().int().nonnegative(),
+  bytesFreed: z.number().int().nonnegative(),
+  compactedReceiptCount: z.number().int().nonnegative(),
+  tombstonedCanonicalArtifactCount: z.number().int().nonnegative(),
+  tombstonedDenseRawArtifactCount: z.number().int().nonnegative(),
+  skippedCount: z.number().int().nonnegative(),
+  touchedPathCount: z.number().int().nonnegative(),
+})
+
+function installVaultCommandArgvContext(cli: Cli.Cli): void {
+  if (vaultCommandArgvInstalled.has(cli)) {
+    return
+  }
+
+  const serve = cli.serve.bind(cli)
+  cli.serve = async (argv = process.argv.slice(2), options = {}) =>
+    vaultCommandArgvStorage.run([...argv], () => serve(argv, options))
+  vaultCommandArgvInstalled.add(cli)
+}
+
+function currentCommandIncludesFlag(flag: string): boolean {
+  return vaultCommandArgvStorage.getStore()?.some((token) =>
+    token === flag || token.startsWith(`${flag}=`)
+  ) === true
+}
+
 export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
+  installVaultCommandArgvContext(cli)
+
   cli.command(
     'init',
     {
@@ -168,6 +212,62 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       return services.core.repairVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
+      })
+    },
+  })
+
+  vaultGroup.command('repair-wearable-storage', {
+    description:
+      'Dry-run or apply the provider-agnostic wearable storage repair for dense device telemetry and derived raw artifacts.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show candidates without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Apply one bounded repair pass.'),
+      pruneDenseRaw: z.boolean().default(false).describe('Also tombstone proven dense raw provider timeseries artifacts.'),
+      includeRecentDenseRaw: z.boolean().default(false).describe('Allow dense raw provider timeseries newer than the default retention window to be tombstoned.'),
+      maxFiles: z.number().int().positive().max(250).optional().describe('Maximum candidate files to mutate in one apply pass.'),
+      maxBytes: z.number().int().positive().optional().describe('Maximum candidate bytes to mutate in one apply pass.'),
+    }),
+    output: wearableStorageRepairResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+      const pruneDenseRawWasExplicit = currentCommandIncludesFlag('--prune-dense-raw')
+      const includeRecentDenseRawWasExplicit = currentCommandIncludesFlag('--include-recent-dense-raw')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Wearable storage repair apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.pruneDenseRaw && !pruneDenseRawWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Dense raw timeseries pruning must be requested with --prune-dense-raw on the command line.',
+        )
+      }
+      if (options.includeRecentDenseRaw && !includeRecentDenseRawWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Recent dense raw timeseries pruning must be requested with --include-recent-dense-raw on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for wearable storage repair, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      return services.core.repairWearableStorage({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        apply: options.apply,
+        pruneDenseRaw: options.pruneDenseRaw,
+        includeRecentDenseRaw: options.includeRecentDenseRaw,
+        maxFiles: options.maxFiles,
+        maxBytes: options.maxBytes,
       })
     },
   })

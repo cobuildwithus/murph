@@ -236,6 +236,11 @@ interface DeviceSampleInput extends LooseRecord {
   sample?: unknown;
 }
 
+interface DenseDeviceSamplePolicyInput extends LooseRecord {
+  allowDenseDebugSamples?: boolean;
+  retention?: string;
+}
+
 interface ImportDeviceBatchInput {
   vaultRoot: string;
   provider: string;
@@ -245,6 +250,7 @@ interface ImportDeviceBatchInput {
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
   rawArtifacts?: readonly DeviceRawArtifactInput[];
+  denseSamplePolicy?: DenseDeviceSamplePolicyInput;
   provenance?: Record<string, unknown>;
 }
 
@@ -326,6 +332,8 @@ interface DeviceBatchPlan {
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
   preparedRawArtifacts: PreparedDeviceRawArtifact[];
 }
+
+const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
 
 interface BuildEventRecordInput<K extends EventKind> {
   kind: K;
@@ -2008,8 +2016,13 @@ export async function importDeviceBatch({
   events = [],
   samples = [],
   rawArtifacts = [],
+  denseSamplePolicy,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
+  assertDenseDeviceSamplePolicy({
+    policy: denseSamplePolicy,
+    sampleCount: Array.isArray(samples) ? samples.length : 0,
+  });
   const vault = await loadVault({ vaultRoot });
   const deviceBatchPlan = prepareDeviceBatchPlan({
     provider,
@@ -2116,4 +2129,28 @@ export async function importDeviceBatch({
       };
     },
   });
+}
+
+function assertDenseDeviceSamplePolicy(input: {
+  policy?: DenseDeviceSamplePolicyInput;
+  sampleCount: number;
+}): void {
+  if (input.sampleCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT) {
+    return;
+  }
+  if (
+    input.policy?.allowDenseDebugSamples === true
+    && input.policy.retention === "debug_temporary"
+  ) {
+    return;
+  }
+
+  throw new VaultError(
+    "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
+    "Device provider imports must keep dense timeseries as raw evidence and emit compact product facts.",
+    {
+      maxAllowed: MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT,
+      sampleCount: input.sampleCount,
+    },
+  );
 }

@@ -2826,6 +2826,110 @@ test.sequential(
 )
 
 test.sequential(
+  'vault repair-wearable-storage exposes dry-run and explicit dense raw apply controls',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        denseProviderRawTimeseriesCount: number
+        mutated: boolean
+        touchedPathCount: number
+      }>([
+        'vault',
+        'repair-wearable-storage',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(dryRun.meta?.command, 'vault repair-wearable-storage')
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).hasWork, false)
+      assert.equal(requireData(dryRun).denseProviderRawTimeseriesCount, 0)
+      assert.equal(requireData(dryRun).mutated, false)
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        mutated: boolean
+        touchedPathCount: number
+      }>([
+        'vault',
+        'repair-wearable-storage',
+        '--vault',
+        vaultRoot,
+        '--apply',
+        '--prune-dense-raw',
+        '--include-recent-dense-raw',
+        '--max-files',
+        '2',
+        '--max-bytes',
+        '1024',
+      ])
+
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).mutated, false)
+      assert.equal(requireData(applied).touchedPathCount, 0)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-wearable-storage rejects destructive options loaded only from config',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-config-'))
+    const configPath = path.join(vaultRoot, 'config.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await writeFile(
+        configPath,
+        `${JSON.stringify({
+          commands: {
+            vault: {
+              commands: {
+                'repair-wearable-storage': {
+                  options: {
+                    apply: true,
+                    includeRecentDenseRaw: true,
+                    pruneDenseRaw: true,
+                  },
+                },
+              },
+            },
+          },
+        }, null, 2)}\n`,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        'vault',
+        'repair-wearable-storage',
+        '--vault',
+        vaultRoot,
+        '--config',
+        configPath,
+      ], { config: true })
+
+      assert.equal(result.ok, false)
+      if (!result.ok) {
+        assert.equal(result.error.code, 'invalid_options')
+        assert.match(result.error.message ?? '', /--apply/u)
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'journal unlink returns a stable not_found error when the journal day does not exist',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-missing-'))

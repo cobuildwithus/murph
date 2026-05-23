@@ -54,6 +54,135 @@ function invalidTestValue<T>(value: unknown): T {
   return value as T;
 }
 
+function buildDenseHeartRateSamples(count: number): Array<{
+  stream: "heart_rate";
+  recordedAt: string;
+  unit: "bpm";
+  quality: "normalized";
+  externalRef: {
+    system: string;
+    resourceType: string;
+    resourceId: string;
+    version: string;
+  };
+  dataOrigin: {
+    version: 1;
+    aggregatorProvider: string;
+    sourceProviderSlug: string;
+    sourceType: string;
+    sourceInstanceId: string;
+    timestampSemantics: "utc";
+  };
+  sample: {
+    recordedAt: string;
+    value: number;
+  };
+}> {
+  const startMs = Date.parse("2026-03-16T09:00:00.000Z");
+  return Array.from({ length: count }, (_, index) => {
+    const recordedAt = new Date(startMs + index * 1000).toISOString();
+    return {
+      stream: "heart_rate",
+      recordedAt,
+      unit: "bpm",
+      quality: "normalized",
+      externalRef: {
+        system: "wearable-provider",
+        resourceType: "timeseries-heart-rate",
+        resourceId: "day-2026-03-16",
+        version: "2026-03-16",
+      },
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "wearable-aggregator",
+        sourceProviderSlug: "wearable-provider",
+        sourceType: "watch",
+        sourceInstanceId: "device-test",
+        timestampSemantics: "utc",
+      },
+      sample: {
+        recordedAt,
+        value: 70 + (index % 5),
+      },
+    };
+  });
+}
+
+test("importDeviceBatch rejects dense provider sample firehoses by default", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dense-samples");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      samples: buildDenseHeartRateSamples(1001),
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED"
+      && !JSON.stringify(error).includes("bpm"),
+  );
+});
+
+test("importDeviceBatch dense sample guard does not trust caller-provided source", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dense-samples");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      source: "import",
+      samples: buildDenseHeartRateSamples(1001),
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
+  );
+});
+
+test("importDeviceBatch dense sample escape hatch requires temporary debug retention", async () => {
+  const missingRetentionVault = await makeTempDirectory("murph-device-import-dense-samples");
+  await initializeVault({ vaultRoot: missingRetentionVault, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot: missingRetentionVault,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      samples: buildDenseHeartRateSamples(1001),
+      denseSamplePolicy: {
+        allowDenseDebugSamples: true,
+      },
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
+  );
+
+  const allowedVault = await makeTempDirectory("murph-device-import-dense-samples");
+  await initializeVault({ vaultRoot: allowedVault, createdAt: "2026-03-12T12:00:00.000Z" });
+  const result = await importDeviceBatch({
+    vaultRoot: allowedVault,
+    provider: "wearable-provider",
+    accountId: "acct-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    samples: buildDenseHeartRateSamples(1001),
+    denseSamplePolicy: {
+      allowDenseDebugSamples: true,
+      retention: "debug_temporary",
+    },
+  });
+
+  assert.equal(result.samples.length, 1001);
+});
+
 test("importDeviceBatch writes inline raw integration payloads and canonical records", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

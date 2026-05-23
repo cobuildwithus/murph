@@ -194,6 +194,67 @@ function createIntegratedCoreServices(): CoreWriteServices {
         auditPath: result.auditPath,
       }
     },
+    async repairWearableStorage(input) {
+      const { vault } = input
+      const core = await loadCoreRuntime()
+      const detection = await core.detectWearableStorageMigrationCandidates({
+        vaultRoot: vault,
+      })
+
+      if (!input.apply) {
+        const hasSelectedWork =
+          detection.legacyReceiptPayloadCount > 0
+          || detection.legacyCanonicalArtifactCount > 0
+          || (input.pruneDenseRaw === true && detection.denseProviderRawTimeseriesCount > 0)
+        return {
+          mode: "dry-run",
+          hasWork: hasSelectedWork,
+          suspectedBytes: detection.suspectedBytes,
+          legacyReceiptPayloadCount: detection.legacyReceiptPayloadCount,
+          legacyCanonicalArtifactCount: detection.legacyCanonicalArtifactCount,
+          denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
+          denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
+          mutated: false,
+          hasMore: detection.hasWork,
+          bytesBefore: 0,
+          bytesAfter: 0,
+          bytesFreed: 0,
+          compactedReceiptCount: 0,
+          tombstonedCanonicalArtifactCount: 0,
+          tombstonedDenseRawArtifactCount: 0,
+          skippedCount: 0,
+          touchedPathCount: 0,
+        }
+      }
+
+      const result = await core.runWearableStorageMigrationPass({
+        vaultRoot: vault,
+        maxFiles: input.maxFiles,
+        maxBytes: input.maxBytes,
+        pruneDenseRaw: input.pruneDenseRaw,
+        includeRecentDenseRaw: input.includeRecentDenseRaw,
+      })
+
+      return {
+        mode: "apply",
+        hasWork: result.mutated || result.hasMore,
+        suspectedBytes: detection.suspectedBytes,
+        legacyReceiptPayloadCount: detection.legacyReceiptPayloadCount,
+        legacyCanonicalArtifactCount: detection.legacyCanonicalArtifactCount,
+        denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
+        denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
+        mutated: result.mutated,
+        hasMore: result.hasMore,
+        bytesBefore: result.bytesBefore,
+        bytesAfter: result.bytesAfter,
+        bytesFreed: result.bytesFreed,
+        compactedReceiptCount: result.compactedReceiptCount,
+        tombstonedCanonicalArtifactCount: result.tombstonedCanonicalArtifactCount,
+        tombstonedDenseRawArtifactCount: result.tombstonedDenseRawArtifactCount,
+        skippedCount: result.skippedCount,
+        touchedPathCount: result.touchedPaths.length,
+      }
+    },
     async addMeal(input: CommandContext & {
       photo?: string
       audio?: string

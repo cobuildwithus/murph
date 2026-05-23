@@ -22,6 +22,8 @@ function createCoreRuntimeStub() {
     initializeVault: vi.fn(async () => undefined),
     validateVault: vi.fn(async () => ({ valid: true, issues: [] })),
     repairVault: vi.fn(async () => ({ updated: false, createdDirectories: [] })),
+    detectWearableStorageMigrationCandidates: vi.fn(async () => ({ hasWork: false })),
+    runWearableStorageMigrationPass: vi.fn(async () => ({ mutated: false })),
     addMeal: vi.fn(async () => undefined),
     createExperiment: vi.fn(async () => undefined),
     ensureJournalDay: vi.fn(async () => undefined),

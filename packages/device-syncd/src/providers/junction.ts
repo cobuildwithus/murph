@@ -244,27 +244,30 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
     await projectJunctionSources(context, sourceProviders);
 
-    const summaries = await fetchSummarySnapshots(context, window.windowStart, window.windowEnd);
+    const summaryWindow = job.kind === "reconcile"
+      ? resolveCurrentSummaryWindow(context.now, reconcileDays)
+      : window;
+    const summaries = await fetchSummarySnapshots(context, summaryWindow.windowStart, summaryWindow.windowEnd);
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    const timeseries = await fetchTimeseriesSnapshots(
-      context,
-      timeseriesWindowStart,
-      window.windowEnd,
-    );
-
     await context.importSnapshot({
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.id),
       connectionId: context.account.id,
-      importedAt: context.now,
-      windowStart: window.windowStart,
-      windowEnd: window.windowEnd,
+      importedAt: summaryWindow.windowEnd,
+      windowStart: summaryWindow.windowStart,
+      windowEnd: summaryWindow.windowEnd,
       connections: sanitizeJunctionImportConnections(sourceProviders),
       summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
-      timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
+      timeseries: {},
     });
+    await importTimeseriesDailySnapshots(
+      context,
+      sourceProviders,
+      timeseriesWindowStart,
+      window.windowEnd,
+    );
 
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
@@ -446,12 +449,19 @@ export function createJunctionDeviceSyncProvider(
     while (chunkStart < end) {
       const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
       try {
-        records.push(...await client.listTimeseries({
+        const chunkRecords = await client.listTimeseries({
           resource,
           userId: context.account.externalAccountId,
           windowStart: new Date(chunkStart).toISOString(),
           windowEnd: new Date(chunkEnd).toISOString(),
-        }));
+        });
+        records.push(
+          ...filterJunctionTimeseriesRecordsToWindow(
+            chunkRecords,
+            new Date(chunkStart).toISOString(),
+            new Date(chunkEnd).toISOString(),
+          ),
+        );
       } catch (error) {
         const status = readOptionalJunctionResourceFailureStatus(error);
         if (status === null) {
@@ -468,6 +478,36 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return dedupeJunctionTimeseriesRecords(resource, records);
+  }
+
+  async function importTimeseriesDailySnapshots(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    windowStart: string,
+    windowEnd: string,
+  ): Promise<void> {
+    for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
+      const timeseries = await fetchTimeseriesSnapshots(
+        context,
+        window.windowStart,
+        window.windowEnd,
+      );
+      if (!hasJunctionSnapshotRecords(timeseries)) {
+        continue;
+      }
+
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.id),
+        connectionId: context.account.id,
+        importedAt: window.windowEnd,
+        windowStart: window.windowStart,
+        windowEnd: window.windowEnd,
+        connections: sanitizeJunctionImportConnections(sourceProviders),
+        summaries: {},
+        timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
+      });
+    }
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -792,6 +832,34 @@ function dedupeJunctionTimeseriesRecords(resource: string, records: unknown[]): 
   return deduped;
 }
 
+function filterJunctionTimeseriesRecordsToWindow(
+  records: readonly unknown[],
+  windowStart: string,
+  windowEnd: string,
+): unknown[] {
+  const startMs = Date.parse(windowStart);
+  const endMs = Date.parse(windowEnd);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return [...records];
+  }
+
+  return records.filter((record) => {
+    const entry = readPlainObject(record);
+    if (!entry) {
+      return true;
+    }
+    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+    if (!timestamp) {
+      return true;
+    }
+    const recordedMs = Date.parse(timestamp);
+    if (!Number.isFinite(recordedMs)) {
+      return true;
+    }
+    return recordedMs >= startMs && recordedMs < endMs;
+  });
+}
+
 function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): string | null {
   const entry = readPlainObject(record);
   if (!entry) {
@@ -924,20 +992,90 @@ function resolveJobWindow(
   };
 }
 
+function resolveCurrentSummaryWindow(
+  now: string,
+  fallbackDays: number,
+): { windowStart: string; windowEnd: string } {
+  const windowEnd = new Date(now).toISOString();
+  return {
+    windowStart: subtractDays(windowEnd, fallbackDays),
+    windowEnd,
+  };
+}
+
+function buildClosedDailyWindows(
+  windowStart: string,
+  windowEnd: string,
+): Array<{ windowStart: string; windowEnd: string }> {
+  const startMs = Date.parse(windowStart);
+  const endMs = Date.parse(windowEnd);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return [];
+  }
+
+  const closedEndMs = Date.parse(floorUtcDayTimestamp(windowEnd));
+  const flooredStartMs = Date.parse(floorUtcDayTimestamp(windowStart));
+  if (flooredStartMs >= closedEndMs) {
+    return [];
+  }
+
+  const windows: Array<{ windowStart: string; windowEnd: string }> = [];
+  let chunkStartMs = flooredStartMs;
+  while (chunkStartMs < closedEndMs) {
+    const nextDayMs = Date.parse(
+      addMilliseconds(
+        floorUtcDayTimestamp(new Date(chunkStartMs).toISOString()),
+        TIMESERIES_CHUNK_MS,
+      ),
+    );
+    const chunkEndMs = Math.min(nextDayMs, closedEndMs);
+    if (chunkEndMs <= chunkStartMs) {
+      break;
+    }
+    windows.push({
+      windowStart: new Date(chunkStartMs).toISOString(),
+      windowEnd: new Date(chunkEndMs).toISOString(),
+    });
+    chunkStartMs = chunkEndMs;
+  }
+
+  return windows;
+}
+
+function floorUtcDayTimestamp(timestamp: string): string {
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    return timestamp;
+  }
+  const date = new Date(parsed);
+  return new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+  )).toISOString();
+}
+
+function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolean {
+  return Object.values(snapshot).some((records) => records.length > 0);
+}
+
 function buildWindowJob(input: {
   kind: "backfill" | "reconcile";
   now: string;
   windowStart: string;
   priority: number;
 }): DeviceSyncJobInput {
+  const windowEnd = floorUtcDayTimestamp(input.now);
+  const windowStart = floorUtcDayTimestamp(input.windowStart);
+
   return {
     kind: input.kind,
     payload: {
-      windowStart: input.windowStart,
-      windowEnd: input.now,
+      windowStart,
+      windowEnd,
     },
     priority: input.priority,
-    dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, input.windowStart, input.now])),
+    dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, windowStart, windowEnd])),
   };
 }
 

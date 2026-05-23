@@ -45,6 +45,16 @@ export type {
   DetectLegacyWearableReceiptCompactionInput,
   LegacyWearableReceiptCompactionDetection,
 } from "./wearable-receipts.ts";
+export {
+  detectWearableStorageMigrationCandidates,
+  runWearableStorageMigrationPass,
+} from "./wearable-storage-migration.ts";
+export type {
+  DetectWearableStorageMigrationCandidatesInput,
+  RunWearableStorageMigrationPassInput,
+  WearableStorageMigrationDetection,
+  WearableStorageMigrationResult,
+} from "./wearable-storage-migration.ts";
 
 export {
   buildAttachmentCompatibilityProjections,

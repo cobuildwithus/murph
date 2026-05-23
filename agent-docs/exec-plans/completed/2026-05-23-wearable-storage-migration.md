@@ -1,6 +1,6 @@
 # Wearable Storage Migration
 
-Status: active planning
+Status: completed
 Created: 2026-05-23
 Updated: 2026-05-23
 
@@ -69,10 +69,10 @@ The current codebase still has two important gaps:
 
 - Existing vaults can still contain old bulky artifacts and debug ledgers.
 - Provider sync must be cursor/idempotency based for dense timeseries. The
-  current concrete gap is Junction: scheduled sync is bounded, but it uses a
-  rolling reconcile window and a dedupe key that includes the current `now`, so
-  repeated runs can fetch overlapping recent days and write new raw transform
-  artifacts.
+  first concrete gap was Junction: scheduled sync was bounded, but it used a
+  rolling reconcile window and a dedupe key that included the current `now`.
+  The implementation target is stable closed-day dense timeseries chunks rather
+  than large volatile scheduled snapshots.
 
 ## Storage Policy
 
@@ -103,7 +103,8 @@ Do not add:
 - Query/browser-vault schema rewrites.
 - Provider-specific one-off reconstruction logic.
 - AI/model participation in repair.
-- Dense raw timeseries tombstoning in v1.
+- Automatic hosted raw-timeseries deletion without an explicit operator/apply
+  request.
 
 ## Phase 1: Prevention First
 
@@ -266,6 +267,8 @@ export async function runWearableStorageMigrationPass(input: {
   maxBytes?: number;
   deadlineMs?: number;
   now?: Date;
+  pruneDenseRaw?: boolean;
+  includeRecentDenseRaw?: boolean;
   validateAfter?: boolean;
 }): Promise<WearableStorageMigrationResult>;
 ```
@@ -274,11 +277,15 @@ The implementation should be a fixed ordered pass, not a generic registry:
 
 1. Compact legacy wearable receipt envelopes.
 2. Replace legacy derived canonical-record raw artifacts with tiny tombstones.
-3. Delete proven provider-generated dense sample-debug ledgers.
+3. Report provider-generated dense sample-debug ledger candidates without
+   deleting them in v1.
+4. Tombstone proven dense provider raw timeseries artifacts when explicitly
+   requested by the operator.
 
-V1 has exactly those three mutating steps. Dense raw timeseries retention is a
-separate future decision after measurement, with its own plan and durable docs
-update.
+V1 includes Step 4 because affected workspaces can still be dominated by raw
+provider timeseries after derived artifacts are gone and sample-debug ledger
+deletion remains intentionally deferred. Keep it opt-in and proof-heavy: dry-run reports candidates, apply deletes only
+when the operator passes the explicit dense-raw flag.
 
 Layering rule:
 
@@ -299,8 +306,9 @@ Repair exception rule:
   canonical write receipts for the raw rewrite.
 - Hosted propagation, if ever enabled, must use a full workspace checkpoint or
   a separately designed guarded raw compare-and-replace mode.
-- Append-only JSONL shard deletion is a repair-only exception, not a general
-  delete primitive.
+- Append-only JSONL shard deletion is out of v1. Reporting candidate
+  `ledger/samples/**` shards is allowed, but deleting them needs a separate
+  named repair proof and architecture update.
 - Any new tombstone/delete repair exception must update `ARCHITECTURE.md` and
   `docs/contracts/00-invariants.md`. The default contract remains immutable raw
   artifacts and append-only ledgers.
@@ -313,9 +321,9 @@ Privacy/output rule:
 - Do not include account/user/connection ids, provider ids, raw payloads, sample
   values, provider bodies, raw snippets, local paths, or per-row data.
 - Content hashes and exact vault-relative paths are allowed only inside the
-  local repair implementation or internal proof report when needed for proof;
-  they must not be emitted to hosted logs, tombstones, audits, or broad
-  user-facing output.
+  local repair implementation, raw manifests, same-path tombstones, or internal
+  proof reports when needed for proof; they must not be emitted to hosted logs,
+  audits, or broad user-facing output.
 
 ### Step 1: Compact Legacy Receipt Payloads
 
@@ -350,6 +358,8 @@ Mutation:
   and one trailing newline.
 - Update every raw manifest artifact entry that references the rewritten path,
   recomputing `byteSize` and `sha256` from the exact tombstone bytes.
+- Move the manifest artifact role to a repair tombstone role so future scans do
+  not rediscover the same path as live canonical evidence.
 - Emit metadata-only `vault_repair` audit.
 
 Reason:
@@ -367,6 +377,7 @@ Tombstone shape:
   "artifactClass": "derived_canonical_records",
   "reason": "derived_duplicate_not_canonical_evidence",
   "originalByteSize": 17400000,
+  "originalSha256": "old-sha",
   "prunedAt": "2026-05-23T00:00:00.000Z"
 }
 ```
@@ -391,7 +402,7 @@ Eligibility:
 
 If any proof is missing, skip.
 
-### Step 3: Delete Proven Dense Provider Sample-Debug Ledgers
+### Step 3: Report Dense Provider Sample-Debug Ledgers
 
 Candidate paths:
 
@@ -415,43 +426,33 @@ debug sample ledgers.
 Important simplification:
 
 - Cleanup must not derive new summaries.
-- If product facts are missing, skip the shard and fix the importer separately.
+- V1 does not delete these shards. It reports candidate counts and bytes so
+  operators can see how much storage remains in this class.
+- If we later decide to delete these ledgers, that needs a separate proof that
+  product-visible read-model output, exports, and debug/operator surfaces do
+  not depend on them.
 
 Mutation:
 
-- Delete only provider-generated debug JSONL shards.
-- Use `stageDelete(path, { allowAppendOnlyJsonl: true })` only for whole-shard
-  repair deletion under `ledger/samples/<dense-stream>/`.
-- Emit metadata-only `vault_repair` audit.
+- None in v1.
 - Do not add a new retention ledger in v1.
-- Capture preimage `{ sha256, byteSize, rowCount, firstRecordedAt,
-  lastRecordedAt }` in the local pass result or metadata-only repair report.
-  Do not store detailed proof in ad hoc audit fields.
+- Do not use `stageDelete` for `ledger/samples/**` in this repair.
 
 Eligibility:
 
-- Path is under a known dense provider debug stream.
-- Every row parses as the sample record schema and matches the path stream.
-- Every valid row is proven provider-generated device debug telemetry by row
-  source, provider/device provenance through `externalRef` or `dataOrigin`,
-  import manifest/audit provenance, and raw integration ownership.
-- No row is `manual`, `import`, `derived`, missing provenance, mixed provenance,
-  or tied to `raw/samples/**` CSV source artifacts.
-- No supported export, operator, or debug surface depends on the shard.
-- Product-visible read-model output is unchanged before and after, verified
-  outside core.
-- Do not rewrite or filter rows in v1.
+- Candidate reporting is path/stream based only and must be labeled as a
+  candidate estimate, not safe-to-delete proof.
+- Do not parse, rewrite, filter, or delete rows in v1.
 
-Skip mixed-provenance shards.
+### Step 4: Tombstone Proven Dense Provider Raw Timeseries
 
-### Future Decision: Dense Raw Timeseries Retention
+Affected workspaces can contain very large raw provider timeseries artifacts.
+Those are provider evidence, so the default repair pass should report them but
+not mutate them. When the operator explicitly requests dense raw pruning, they
+are eligible for same-path tombstoning.
 
-After Steps 1-3, measure actual reduction. If the vault is still far above the
-target, the remaining bulk is likely raw provider timeseries artifacts.
-
-Do not include raw provider timeseries tombstoning in v1. Reopen it only with a
-separate plan, a documented retention policy, and an exact legacy role/schema
-allowlist.
+This is not a broad raw delete API. It is one narrow repair exception for known
+dense debug telemetry.
 
 Target role classes, with provider-specific names treated as examples:
 
@@ -461,29 +462,36 @@ Target role classes, with provider-specific names treated as examples:
 - blood-oxygen timeseries, such as `junction-timeseries-blood-oxygen`.
 - step timeseries, such as `junction-timeseries-steps`.
 
-Any future mutation should mirror Step 2:
+Mutation mirrors Step 2:
 
 - Replace eligible raw files with tiny tombstones.
 - Update raw manifests.
+- Move the manifest artifact role to a repair tombstone role so future scans do
+  not rediscover the same path as live dense telemetry.
 - Preserve summaries, sessions, workouts, metric samples, receipts, and audit.
+- Emit metadata-only `vault_repair` audit.
 
-Eligibility should be even stricter:
+Eligibility:
 
 - The artifact is a known dense debug timeseries role.
-- The artifact is older than the chosen retention window.
+- The operator requested dense raw pruning for this pass.
+- The artifact is older than the configured dense raw retention window, unless
+  the operator also passes a one-time `--include-recent-dense-raw` flag.
 - It is not a sole raw reference for any durable product fact.
 - The corresponding receipt/import metadata remains.
-- Compact facts cover the same provider/resource/day and preserve the product
-  semantics that the raw artifact uniquely supplied: coverage window, sample
-  count, min/max/avg where applicable, threshold/run summaries where applicable,
-  and session/workout/sleep links.
-- Days overlapping active experiments or user-requested raw/sample inspection
-  periods are skipped.
-- Product-visible read-model output is unchanged.
+- Cleanup does not derive summaries or repair missing product facts. If the
+  product needs facts from this resource, the importer must have already written
+  them through canonical events or display-grade metric rows.
+- Core proves the raw file is not referenced by canonical ledgers. Product or
+  query-level read-model equivalence can be tested outside core, but core must
+  not import query/browser-vault to do it.
+- Provider/source identity is retained through the receipt, manifest, and
+  tombstone metadata, but no raw sample values or provider bodies remain.
 
 Raw provider evidence has higher trust/debug value than derived canonical files
-or debug ledgers. This future lever is appropriate only if the 90% target still
-requires it after v1 cleanup and prevention.
+or debug ledgers, so Step 4 is intentionally explicit. But once the product
+facts exist, the firehose itself is not default product state and should be
+removable.
 
 ## Phase 3: Operator Path
 
@@ -491,8 +499,9 @@ Start with an explicit local/operator repair command, not automatic hosted
 cleanup or a generic maintenance surface.
 
 ```text
-murph vault repair wearable-storage --dry-run
-murph vault repair wearable-storage --apply
+murph vault repair-wearable-storage --dry-run
+murph vault repair-wearable-storage --apply
+murph vault repair-wearable-storage --apply --prune-dense-raw
 ```
 
 The command should be a thin wrapper over core only.
@@ -504,7 +513,9 @@ Wearable storage cleanup candidates:
 - legacy receipt payloads: 143 files, 180 MB candidate
 - legacy canonical record artifacts: 36 files, 620 MB candidate
 - dense provider sample-debug ledgers: 5 files, 252 MB candidate
-Estimated v1 hot-vault reduction: 552 MB
+- dense provider raw timeseries: 12 files, 300 MB candidate
+Estimated hot-vault reduction without dense raw: 552 MB
+Estimated hot-vault reduction with dense raw: 852 MB
 ```
 
 Apply should run bounded passes:
@@ -513,7 +524,8 @@ Apply should run bounded passes:
 Pass complete:
 - compacted receipts: 5
 - tombstoned canonical artifacts: 5
-- deleted sample-debug shards: 1
+- reported sample-debug shard candidates: 1
+- tombstoned dense raw artifacts: 1
 - bytesBefore: ...
 - bytesAfter: ...
 - hasMore: true
@@ -592,21 +604,24 @@ demand.
 - Filename patterns are scanner hints only; role/schema proof decides
   eligibility.
 - Provider raw evidence is untouched.
-- Dense provider sample shard is deleted only when product-visible read-model
-  output is unchanged.
-- Explicit user CSV sample shard is skipped.
-- Mixed-provenance sample shard is skipped.
-- Missing provider/device provenance, malformed sample rows, `raw/samples/**`
-  CSV ownership, or export/operator/debug dependencies skip the shard.
-- Append-only JSONL delete allowance is never used for `audit/**`,
-  `ledger/events/**`, `ledger/metric-samples/**`, or mixed shards.
+- Dense provider sample shard candidates are reported without deleting
+  `ledger/samples/**` in v1.
+- Dense raw provider timeseries is tombstoned only when explicit dense-raw
+  pruning is requested, manifest proof passes, and no canonical ledger row
+  references the raw artifact.
+- Dense raw provider timeseries dry-run reports candidates without making it
+  part of the default apply set.
+- Explicit user CSV sample shards are not mutated.
+- Mixed-provenance sample shards are not mutated.
+- Append-only JSONL delete allowance is never used by the v1 repair.
 - No audit entry contains raw health payloads, sample arrays, provider bodies,
   local paths, secrets, or direct identifiers.
 - `validateVault` passes.
 - A strict raw manifest helper recomputes size/SHA for every touched raw file.
 - Dry-run performs no writes, and apply uses the same eligibility set.
-- Every mutating cleanup step validates before/after product-visible read-model
-  equivalence outside core.
+- Query/browser-vault equivalence is covered by composition tests outside core;
+  core-level cleanup tests prove manifests, vault validation, provenance, and
+  canonical ledger references.
 
 ### Budget And Runtime Tests
 
@@ -627,10 +642,10 @@ demand.
 4. Run scanner against the affected workspace and record only metadata counts
    and byte totals.
 5. Apply Step 1 and Step 2 in small bounded passes.
-6. Apply Step 3 only where product-visible read-model equivalence is proven
-   outside core.
-7. Re-measure. If the vault is still too large, decide whether a separate dense
-   raw timeseries retention plan is warranted.
+6. Treat Step 3 as report-only. Do not delete `ledger/samples/**` in v1.
+7. Re-measure. If raw provider timeseries remains the dominant bulk and the
+   operator accepts losing that debug evidence, apply Step 4 with
+   `--prune-dense-raw`.
 8. Consider hosted cleanup only after a separate operator-proven plan justifies
    it.
 
@@ -651,3 +666,4 @@ rewriting overlapping dense windows every reconcile.
 Core owns repair authority. Importers prevent bad writes. Device-sync prevents
 duplicate windows. Query remains read-only. Hosted runtime stays out unless an
 operator-proven cleanup pass genuinely needs a single narrow wake.
+Completed: 2026-05-23
