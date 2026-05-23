@@ -28,6 +28,7 @@ import type {
   DeviceSyncAccount,
   DeviceSyncJobRecord,
   ProviderJobContext,
+  StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
 function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">> & {
@@ -59,6 +60,25 @@ function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">>
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+function createStoredAccount(): StoredDeviceSyncAccount {
+  const account = createAccount();
+
+  return {
+    ...account,
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+      credentialMetadata: {},
+    },
+    hostedObservedConnectionRevision: 0,
+    hostedObservedTokenRevision: 0,
+    hostedObservedTokenVersion: null,
+    hostedObservedUpdatedAt: null,
+    localConnectionRevision: 0,
+    localTokenRevision: 0,
   };
 }
 
@@ -591,6 +611,77 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
   });
   const payload = connection.initialJobs?.[0]?.payload as Record<string, unknown> | undefined;
   assert.equal(Array.isArray(payload?.resources), false);
+});
+
+test("Junction scheduled polling uses stable closed-day windows", () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+  const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
+
+  const first = executor.createScheduledJobs?.(
+    createStoredAccount(),
+    "2026-04-03T12:34:56.000Z",
+  );
+  const second = executor.createScheduledJobs?.(
+    createStoredAccount(),
+    "2026-04-03T23:45:00.000Z",
+  );
+
+  assert.equal(first?.jobs.length, 1);
+  assert.deepEqual(first?.jobs[0]?.payload, {
+    windowStart: "2026-03-27T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  assert.equal(first?.jobs[0]?.dedupeKey, second?.jobs[0]?.dedupeKey);
+});
+
+test("Junction reconcile keeps summaries current while dense timeseries stays on closed days", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/heartrate/grouped")) {
+      return createJsonResponse({ groups: {} });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const importedSnapshots: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    {
+      account: createAccount(),
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {},
+      refreshAccountTokens: async () => createAccount(),
+    },
+    createJob("reconcile", {
+      windowStart: "2026-03-27T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const summarySnapshot = importedSnapshots[0] as { windowEnd?: string };
+  assert.equal(summarySnapshot.windowEnd, "2026-04-03T12:00:00.000Z");
+  assert.equal(
+    requests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .some((url) => url.includes("end_date=2026-04-04")),
+    false,
+  );
 });
 
 test("Junction completeConnection falls back to the callback user_id when no seed is present", async () => {
@@ -1323,20 +1414,22 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.user_id, undefined);
-  assert.equal(importedSnapshots.length, 1);
-  assert.match(JSON.stringify(importedSnapshots[0]), /"provider":"junction"/u);
-  const snapshotJson = JSON.stringify(importedSnapshots[0]);
+  assert.equal(importedSnapshots.length, 2);
+  assert.match(JSON.stringify(importedSnapshots), /"provider":"junction"/u);
+  const snapshotJson = JSON.stringify(importedSnapshots);
   assert.doesNotMatch(snapshotJson, /provider-connection-oura-ring|device-oura-ring|app-oura-cloud/u);
   assert.doesNotMatch(snapshotJson, /junction-user-1|junction-account-raw|junction-user-raw|client-user-raw|junction-account-timeseries|junction-user-timeseries/u);
   assert.doesNotMatch(snapshotJson, /nested-(source|account|device|app)-summary|Nested Summary|nested-(account|device|app)-timeseries|Nested Timeseries/u);
-  const snapshot = importedSnapshots[0] as {
+  const summarySnapshot = importedSnapshots[0] as {
     accountId?: string;
     connections?: Array<Record<string, unknown>>;
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, Array<Record<string, unknown>>>;
+    windowEnd?: string;
   };
-  assert.match(snapshot.accountId ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
-  const importedConnection = snapshot.connections?.[0] as
+  assert.match(summarySnapshot.accountId ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
+  assert.equal(summarySnapshot.windowEnd, "2026-04-03T00:00:00.000Z");
+  const importedConnection = summarySnapshot.connections?.[0] as
     | {
         provider?: unknown;
         source?: unknown;
@@ -1355,22 +1448,45 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(importedConnection?.sourceProviderSlug, "oura");
   assert.equal((importedConnection as { source?: unknown } | undefined)?.source, undefined);
   assert.equal((importedConnection as { provider?: unknown } | undefined)?.provider, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.account_id, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.Source, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.account, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.app, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.client_user_id, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.device, undefined);
-  assert.equal(snapshot.summaries?.activity?.[0]?.provider_connection_id, undefined);
-  assert.equal(snapshot.summaries?.activity?.[1]?.accountId, undefined);
-  assert.equal(snapshot.summaries?.activity?.[1]?.providerConnectionId, undefined);
-  assert.equal(snapshot.summaries?.activity?.[1]?.userId, undefined);
-  assert.deepEqual(Object.keys(snapshot.timeseries ?? {}).sort(), ["distance", "heartrate", "hrv", "steps"]);
-  assert.equal(snapshot.timeseries?.steps?.length, 1);
-  assert.equal(snapshot.timeseries?.distance?.length, 1);
-  assert.equal(snapshot.timeseries?.heartrate?.length, 1);
-  assert.equal(snapshot.timeseries?.hrv?.length, 1);
-  const stepRecord = snapshot.timeseries?.steps?.[0];
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.account_id, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.Source, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.account, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.app, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.client_user_id, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.device, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.provider_connection_id, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[1]?.accountId, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[1]?.providerConnectionId, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[1]?.userId, undefined);
+  assert.deepEqual(summarySnapshot.timeseries, {});
+
+  const timeseriesSnapshots = importedSnapshots.slice(1) as Array<{
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+    windowEnd?: string;
+    windowStart?: string;
+  }>;
+  assert.deepEqual(
+    timeseriesSnapshots.map((snapshot) => [snapshot.windowStart, snapshot.windowEnd]),
+    [
+      ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
+    ],
+  );
+  const timeseries = timeseriesSnapshots.reduce<Record<string, Array<Record<string, unknown>>>>(
+    (merged, snapshot) => {
+      for (const [resource, records] of Object.entries(snapshot.timeseries ?? {})) {
+        merged[resource] = [...(merged[resource] ?? []), ...records];
+      }
+      return merged;
+    },
+    {},
+  );
+
+  assert.deepEqual(Object.keys(timeseries).sort(), ["distance", "heartrate", "hrv", "steps"]);
+  assert.equal(timeseries.steps?.length, 1);
+  assert.equal(timeseries.distance?.length, 1);
+  assert.equal(timeseries.heartrate?.length, 1);
+  assert.equal(timeseries.hrv?.length, 1);
+  const stepRecord = timeseries.steps?.[0];
   assert.equal(stepRecord?.accountId, undefined);
   assert.equal(stepRecord?.account, undefined);
   assert.equal(stepRecord?.app, undefined);
@@ -1385,11 +1501,11 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal((stepRecord as { provider?: unknown } | undefined)?.provider, undefined);
   assert.equal(typeof stepRecord?.sourceInstanceId, "string");
   assert.match(String(stepRecord?.sourceInstanceId), /^source-[a-f0-9]{24}$/u);
-  assert.equal(snapshot.timeseries?.distance?.[0]?.sourceType, "ring");
-  assert.equal(snapshot.timeseries?.heartrate?.[0]?.junctionResource, "heartrate");
-  assert.equal(snapshot.timeseries?.hrv?.[0]?.unit, "rmssd");
+  assert.equal(timeseries.distance?.[0]?.sourceType, "ring");
+  assert.equal(timeseries.heartrate?.[0]?.junctionResource, "heartrate");
+  assert.equal(timeseries.hrv?.[0]?.unit, "rmssd");
   assert.doesNotMatch(
-    JSON.stringify(snapshot.timeseries),
+    JSON.stringify(timeseries),
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1/u,
   );
   assert.equal(requests.filter((url) => url.includes("/v2/summary/")).length, 2);
@@ -1565,15 +1681,21 @@ test("Junction polling skips optional unavailable resource collections", async (
     }),
   );
 
-  assert.equal(importedSnapshots.length, 1);
-  const snapshot = importedSnapshots[0] as {
+  assert.equal(importedSnapshots.length, 2);
+  const summarySnapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
     timeseries?: Record<string, unknown[]>;
   };
-  assert.equal(snapshot.summaries?.activity?.length, 1);
-  assert.deepEqual(snapshot.summaries?.profile, []);
-  assert.equal(snapshot.timeseries?.steps?.length, 1);
-  assert.deepEqual(snapshot.timeseries?.blood_oxygen, []);
+  const timeseriesSnapshot = importedSnapshots[1] as {
+    summaries?: Record<string, unknown[]>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(summarySnapshot.summaries?.activity?.length, 1);
+  assert.deepEqual(summarySnapshot.summaries?.profile, []);
+  assert.deepEqual(summarySnapshot.timeseries, {});
+  assert.deepEqual(timeseriesSnapshot.summaries, {});
+  assert.equal(timeseriesSnapshot.timeseries?.steps?.length, 1);
+  assert.deepEqual(timeseriesSnapshot.timeseries?.blood_oxygen, []);
   assert.deepEqual(
     warnings.map((warning) => ({
       accountId: warning.accountId,

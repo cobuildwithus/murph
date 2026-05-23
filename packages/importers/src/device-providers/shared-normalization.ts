@@ -238,6 +238,7 @@ export function makeNormalizedDeviceBatch(
     source: "device",
     events: options.events,
     samples: options.samples,
+    denseSamplePolicy: options.denseSamplePolicy,
     rawArtifacts: options.rawArtifacts,
     provenance: options.provenance,
   });

@@ -1,0 +1,389 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { promises as fs } from "node:fs";
+import { test } from "vitest";
+
+import {
+  CONTRACT_SCHEMA_VERSION,
+  type RawImportManifest,
+  type RawImportManifestArtifact,
+} from "@murphai/contracts";
+
+import {
+  detectWearableStorageMigrationCandidates,
+  importDeviceBatch,
+  initializeVault,
+  runWearableStorageMigrationPass,
+  validateVault,
+} from "../src/index.ts";
+import { parseRawImportManifest } from "../src/operations/raw-manifests.ts";
+
+const IMPORT_ID = "xfm_FKXWJ9CRVED58RA9QVF2QHA1WE";
+const IMPORTED_AT = "2026-05-01T00:00:00.000Z";
+const RAW_DIRECTORY = `raw/integrations/wearable-provider/2026/05/${IMPORT_ID}`;
+const REPAIR_NOW = new Date("2026-05-23T12:00:00.000Z");
+
+async function makeTempDirectory(name: string): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
+}
+
+test("runWearableStorageMigrationPass tombstones derived canonical raw artifacts", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  const providerBefore = await fs.readFile(
+    path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"),
+    "utf8",
+  );
+
+  const detection = await detectWearableStorageMigrationCandidates({ vaultRoot });
+  assert.equal(detection.legacyCanonicalArtifactCount, 1);
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    now: REPAIR_NOW,
+  });
+
+  assert.equal(result.mutated, true);
+  assert.equal(result.tombstonedCanonicalArtifactCount, 1);
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  assert.ok(result.bytesBefore > 0);
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    providerBefore,
+  );
+
+  const canonicalText = await fs.readFile(
+    path.join(vaultRoot, RAW_DIRECTORY, "03-canonical-wearable-records.json"),
+    "utf8",
+  );
+  const canonicalTombstone = JSON.parse(canonicalText) as Record<string, unknown>;
+  assert.equal(canonicalTombstone.schemaVersion, "wearable.legacy_canonical_records_pruned.v1");
+  assert.equal(canonicalTombstone.artifactClass, "derived_canonical_records");
+  assert.equal(canonicalTombstone.originalRole, "wearable-canonical-records:wearable_raw_test");
+  assert.equal(typeof canonicalTombstone.originalSha256, "string");
+  assert.equal(JSON.stringify(canonicalTombstone).includes("sampleValues"), false);
+
+  await assertManifestArtifactMatchesFile(vaultRoot, "03-canonical-wearable-records.json");
+  const afterDetection = await detectWearableStorageMigrationCandidates({ vaultRoot });
+  assert.equal(afterDetection.legacyCanonicalArtifactCount, 0);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("dense raw timeseries tombstoning requires explicit prune flag", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+
+  const defaultResult = await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+  });
+  assert.equal(defaultResult.tombstonedDenseRawArtifactCount, 0);
+
+  const denseResult = await runWearableStorageMigrationPass({
+    vaultRoot,
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+  });
+
+  assert.equal(denseResult.tombstonedDenseRawArtifactCount, 1);
+  const rawText = await fs.readFile(
+    path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"),
+    "utf8",
+  );
+  const rawTombstone = JSON.parse(rawText) as Record<string, unknown>;
+  assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
+  assert.equal(rawTombstone.artifactClass, "dense_provider_timeseries");
+  assert.equal(rawTombstone.originalRole, "provider-timeseries-heart-rate");
+  assert.equal(typeof rawTombstone.originalSha256, "string");
+  assert.equal(JSON.stringify(rawTombstone).includes("sampleValues"), false);
+  await assertManifestArtifactMatchesFile(vaultRoot, "01-provider-timeseries-heart-rate.json");
+  const afterDetection = await detectWearableStorageMigrationCandidates({ vaultRoot });
+  assert.equal(afterDetection.denseProviderRawTimeseriesCount, 0);
+});
+
+test("dense raw timeseries tombstoning preserves recent artifacts unless explicitly included", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    importedAt: "2026-05-22T00:00:00.000Z",
+  });
+  await runWearableStorageMigrationPass({
+    maxFiles: 1,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+
+  const recentResult = await runWearableStorageMigrationPass({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    vaultRoot,
+  });
+
+  assert.equal(recentResult.tombstonedDenseRawArtifactCount, 0);
+  const rawPath = path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json");
+  assert.match(await fs.readFile(rawPath, "utf8"), /sampleValues/u);
+
+  const explicitRecentResult = await runWearableStorageMigrationPass({
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    vaultRoot,
+  });
+
+  assert.equal(explicitRecentResult.tombstonedDenseRawArtifactCount, 1);
+  const rawTombstone = JSON.parse(await fs.readFile(rawPath, "utf8")) as Record<string, unknown>;
+  assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
+});
+
+test("dense raw timeseries tombstoning treats escaped ledger raw references as blockers", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+  });
+  const rawPath = `${RAW_DIRECTORY}/01-provider-timeseries-heart-rate.json`;
+  const eventShardPath = "ledger/events/2026/2026-05.jsonl";
+  const escapedRawPath = rawPath.replaceAll("/", "\\/");
+  await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `{"rawRef":"${escapedRawPath}"}\n`,
+    "utf8",
+  );
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  const rawText = await fs.readFile(path.join(vaultRoot, rawPath), "utf8");
+  assert.match(rawText, /sampleValues/u);
+});
+
+test("detectWearableStorageMigrationCandidates reports dense sample-debug shards without deleting them", async () => {
+  const vaultRoot = await makeTempDirectory("murph-wearable-storage-migration");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const importResult = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-provider",
+    importedAt: "2026-05-02T00:00:00.000Z",
+    samples: [
+      buildHeartRateSample("2026-05-02T00:00:00.000Z", 70),
+      buildHeartRateSample("2026-05-02T00:00:01.000Z", 71),
+    ],
+  });
+  const [sampleShardPath] = importResult.sampleShardPaths;
+  assert.ok(sampleShardPath);
+  const before = await fs.readFile(path.join(vaultRoot, sampleShardPath), "utf8");
+
+  const detection = await detectWearableStorageMigrationCandidates({ vaultRoot });
+  assert.equal(detection.denseProviderSampleShardCount, 1);
+  assert.equal(detection.hasWork, false);
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    now: REPAIR_NOW,
+  });
+
+  assert.equal(result.mutated, false);
+  assert.equal(await fs.readFile(path.join(vaultRoot, sampleShardPath), "utf8"), before);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("runWearableStorageMigrationPass leaves manual sample shards untouched", async () => {
+  const vaultRoot = await makeTempDirectory("murph-wearable-storage-migration");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const shardPath = "ledger/samples/heart_rate/2026/2026-05.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, shardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, shardPath),
+    `${JSON.stringify({
+      ...buildHeartRateSample("2026-05-02T00:00:00.000Z", 70),
+      id: "smp_00000000000000000000000000",
+      schemaVersion: "murph.sample.v1",
+      dayKey: "2026-05-02",
+      source: "manual",
+      quality: "normalized",
+      timeZone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+
+  const before = await fs.readFile(path.join(vaultRoot, shardPath), "utf8");
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    now: REPAIR_NOW,
+  });
+
+  assert.equal(result.mutated, false);
+  assert.equal(await fs.readFile(path.join(vaultRoot, shardPath), "utf8"), before);
+});
+
+async function createRawArtifactFixture(
+  options: { importedAt?: string } = {},
+): Promise<string> {
+  const vaultRoot = await makeTempDirectory("murph-wearable-storage-migration");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  await fs.mkdir(path.join(vaultRoot, RAW_DIRECTORY), { recursive: true });
+
+  const artifacts = [
+    await writeRawJsonArtifact({
+      content: {
+        resource: "heart_rate",
+        sampleValues: [70, 71, 72],
+      },
+      fileName: "01-provider-timeseries-heart-rate.json",
+      role: "provider-timeseries-heart-rate",
+      vaultRoot,
+    }),
+    await writeRawJsonArtifact({
+      content: {
+        schemaVersion: "wearable.raw_ingest_receipt.v1",
+        payloadHash: "payload_hash",
+        rawArtifactRoles: ["provider-timeseries-heart-rate"],
+      },
+      fileName: "02-raw-ingest-receipt.json",
+      role: "wearable-raw-receipt:wearable_raw_test",
+      vaultRoot,
+    }),
+    await writeRawJsonArtifact({
+      content: {
+        records: [
+          {
+            kind: "observation",
+            sampleValues: [70, 71, 72],
+          },
+        ],
+      },
+      fileName: "03-canonical-wearable-records.json",
+      role: "wearable-canonical-records:wearable_raw_test",
+      vaultRoot,
+    }),
+  ];
+  const manifest = buildManifest(artifacts, {
+    importedAt: options.importedAt ?? IMPORTED_AT,
+  });
+  await fs.writeFile(
+    path.join(vaultRoot, RAW_DIRECTORY, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
+async function writeRawJsonArtifact(input: {
+  content: unknown;
+  fileName: string;
+  role: string;
+  vaultRoot: string;
+}): Promise<RawImportManifestArtifact> {
+  const content = `${JSON.stringify(input.content, null, 2)}\n`;
+  const relativePath = `${RAW_DIRECTORY}/${input.fileName}`;
+  await fs.writeFile(path.join(input.vaultRoot, relativePath), content, "utf8");
+  return {
+    byteSize: Buffer.byteLength(content, "utf8"),
+    mediaType: "application/json",
+    originalFileName: input.fileName,
+    relativePath,
+    role: input.role,
+    sha256: sha256Hex(content),
+  };
+}
+
+function buildManifest(
+  artifacts: RawImportManifestArtifact[],
+  options: { importedAt: string },
+): RawImportManifest {
+  return {
+    artifacts,
+    importId: IMPORT_ID,
+    importKind: "device_batch",
+    importedAt: options.importedAt,
+    owner: {
+      id: IMPORT_ID,
+      kind: "device_batch",
+      partition: "wearable-provider",
+    },
+    provenance: {
+      provider: "wearable-provider",
+    },
+    rawDirectory: RAW_DIRECTORY,
+    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+    source: "device",
+  };
+}
+
+function buildHeartRateSample(recordedAt: string, value: number): {
+  stream: "heart_rate";
+  recordedAt: string;
+  unit: "bpm";
+  quality: "normalized";
+  externalRef: {
+    system: string;
+    resourceType: string;
+    resourceId: string;
+    version: string;
+  };
+  dataOrigin: {
+    version: 1;
+    aggregatorProvider: string;
+    sourceProviderSlug: string;
+    sourceType: string;
+    sourceInstanceId: string;
+  };
+  sample: {
+    recordedAt: string;
+    value: number;
+  };
+} {
+  return {
+    stream: "heart_rate",
+    recordedAt,
+    unit: "bpm",
+    quality: "normalized",
+    externalRef: {
+      system: "wearable-provider",
+      resourceType: "timeseries-heart-rate",
+      resourceId: "day-2026-05-02",
+      version: "2026-05-02",
+    },
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "wearable-aggregator",
+      sourceProviderSlug: "wearable-provider",
+      sourceType: "watch",
+      sourceInstanceId: "device-test",
+    },
+    sample: {
+      recordedAt,
+      value,
+    },
+  };
+}
+
+async function assertManifestArtifactMatchesFile(
+  vaultRoot: string,
+  fileName: string,
+): Promise<void> {
+  const manifest = parseRawImportManifest(
+    JSON.parse(await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "manifest.json"), "utf8")),
+  );
+  const artifact = manifest.artifacts.find((entry) => entry.relativePath.endsWith(`/${fileName}`));
+  assert.ok(artifact);
+  const content = await fs.readFile(path.join(vaultRoot, artifact.relativePath));
+  assert.equal(content.byteLength, artifact.byteSize);
+  assert.equal(sha256Hex(content), artifact.sha256);
+}
+
+function sha256Hex(content: string | Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
+}

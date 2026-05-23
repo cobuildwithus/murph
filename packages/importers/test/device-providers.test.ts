@@ -84,6 +84,10 @@ test("makeNormalizedDeviceBatch preserves the canonical device payload shape and
         dailySummaries: 1,
       },
     },
+    denseSamplePolicy: {
+      allowDenseDebugSamples: true,
+      retention: "debug_temporary",
+    },
   };
 
   const payload: DeviceBatchImportPayload = {

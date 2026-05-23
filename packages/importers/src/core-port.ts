@@ -123,6 +123,11 @@ export interface DeviceRawArtifactPayload {
   metadata?: Record<string, unknown>;
 }
 
+export interface DenseDeviceSamplePolicyPayload {
+  allowDenseDebugSamples?: boolean;
+  retention?: "debug_temporary";
+}
+
 export interface DeviceBatchImportPayload {
   vaultRoot?: string;
   provider: string;
@@ -135,6 +140,7 @@ export interface DeviceBatchImportPayload {
   rawArtifacts?: DeviceRawArtifactPayload[];
   rawIngestReceipts?: WearableRawIngestReceipt[];
   canonicalWearableRecords?: CanonicalWearableRecord[];
+  denseSamplePolicy?: DenseDeviceSamplePolicyPayload;
   provenance?: Record<string, unknown>;
 }
 

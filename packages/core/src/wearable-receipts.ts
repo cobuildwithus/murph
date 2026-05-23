@@ -327,10 +327,7 @@ export async function compactLegacyWearableReceiptEnvelopes({
         vaultRoot,
         action: "vault_repair",
         batch,
-        changes: touchedPaths.map((relativePath) => ({
-          op: "update",
-          path: relativePath,
-        })),
+        changes: [],
         commandName: "core.compactLegacyWearableReceiptEnvelopes",
         occurredAt: now,
         summary:

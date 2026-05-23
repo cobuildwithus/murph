@@ -4,7 +4,7 @@
 
 - Human-facing truth lives in Markdown: `CORE.md`, `journal/`, and `bank/`.
 - Machine-facing truth lives in JSONL: `ledger/events`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, and `audit`. Generic `ledger/samples` shards are not part of the default query/read/browser model.
-- Imported originals live in `raw/` and are immutable once copied into the vault.
+- Imported originals live in `raw/` and are immutable once copied into the vault, except for explicit core-owned repair tombstones that prove the old manifest byte/SHA and preserve durable product facts.
 
 ## Write Authority
 
@@ -22,8 +22,8 @@
 
 ## Append-Only Bias
 
-- `raw/` is immutable.
-- `ledger/*.jsonl` and `audit/*.jsonl` are append-only.
+- `raw/` is immutable by default; any repair rewrite must be a named core primitive with manifest proof, metadata-only audit, and no raw payload leakage.
+- `ledger/*.jsonl` and `audit/*.jsonl` are append-only by default. The wearable storage repair may report dense provider-generated debug shard candidates, but v1 does not delete `ledger/samples/**`; any future shard deletion needs its own named repair proof and architecture update.
 - Markdown docs may change only in explicitly human-facing areas.
 
 ## Deferred Complexity
