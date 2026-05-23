@@ -252,6 +252,21 @@ describe('assistant consumption lookup guidance', () => {
       'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
     )
     expect(prompt).toContain(
+      'When saving a meal and the user provides enough food identity, ingredients, portion hints, package/menu facts, or attachment evidence to form a useful estimate',
+    )
+    expect(prompt).toContain(
+      'do not leave nutrition blank just because exact serving weights are missing',
+    )
+    expect(prompt).toContain(
+      'estimate calories first',
+    )
+    expect(prompt).toContain(
+      'set nutrition provenance to `estimated`',
+    )
+    expect(prompt).toContain(
+      'Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount',
+    )
+    expect(prompt).toContain(
       'If the item is generic, the user asks you to just note it, or evidence is unavailable',
     )
     expect(prompt).toContain(
@@ -447,7 +462,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'e8705b24b0f75cfc31232ef2ec31845f073185c09210da3726c004d67d9a3e4d',
+      '7837fd083d851d234ba552247991aaf6c918b56e04c3d6f738e1ed8f7e1e6454',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
