@@ -39,19 +39,21 @@ pnpm temporal:cli:check
 The setup command installs a pinned official Temporal CLI release on Linux or
 Darwin when `temporal` is not already on `PATH`.
 
-The default `pnpm dev` profile and hosted-local E2E profiles start a managed
-local Temporal dev server and the hosted runtime worker through the canonical
-hosted-local stack:
+The default `pnpm dev` profile uses hosted-local Temporal `auto` mode: it starts
+a managed local Temporal dev server when the configured port is free, or reuses
+a healthy local Temporal listener when one is already running. Hosted-local E2E
+profiles still start managed Temporal for isolated histories. Both paths run
+the hosted runtime worker through the canonical hosted-local stack:
 
 ```bash
 pnpm hosted-local e2e temporal-orchestration --profile e2e:stub
 ```
 
-Interactive `pnpm dev` exposes the managed Temporal Web UI at
-`http://127.0.0.1:8233` by default. If you override `MURPH_DEV_TEMPORAL_PORT`,
-the UI uses that port plus `1000`, matching Temporal CLI defaults. Set
-`TEMPORAL_DEV_HEADLESS=1` only when you intentionally want the managed local
-server without the dashboard.
+Interactive `pnpm dev` exposes the local Temporal Web UI at
+`http://127.0.0.1:8233` by default when it starts or reuses the default local
+server. If you override `MURPH_DEV_TEMPORAL_PORT`, the UI uses that port plus
+`1000`, matching Temporal CLI defaults. Set `TEMPORAL_DEV_HEADLESS=1` only when
+you intentionally want a managed local server without the dashboard.
 
 That scenario signals through the web Temporal client, queries the workflow, and
 expects the worker Activities to reach the hosted web demand endpoint and the
@@ -141,13 +143,15 @@ the Schedule in a paused state.
 
 Temporal connection:
 
-- `MURPH_DEV_TEMPORAL`: hosted-local mode, one of `managed`, `external`, or
-  `disabled`. Full-stack interactive dev and E2E profiles default to
-  `managed`; `worker-only` and `MURPH_DEV_SKIP_WEB=1` default to `disabled`.
-  Explicit `HOSTED_TEMPORAL_ADDRESS` or `TEMPORAL_ADDRESS` defaults the stack
-  to `external`.
+- `MURPH_DEV_TEMPORAL`: hosted-local mode, one of `auto`, `managed`,
+  `external`, or `disabled`. Full-stack interactive dev defaults to `auto`,
+  which reuses a healthy local Temporal listener on the configured port or
+  starts one when the port is free. E2E profiles default to `managed` for
+  isolated histories; `worker-only` and `MURPH_DEV_SKIP_WEB=1` default to
+  `disabled`. Explicit `HOSTED_TEMPORAL_ADDRESS` or `TEMPORAL_ADDRESS` defaults
+  the stack to `external`.
 - `MURPH_DEV_TEMPORAL_HOST` / `MURPH_DEV_TEMPORAL_PORT`: local dev server bind
-  address for managed hosted-local Temporal.
+  address for auto/managed hosted-local Temporal.
 - `HOSTED_TEMPORAL_ADDRESS` / `TEMPORAL_ADDRESS`: Temporal frontend address, for
   example `localhost:7233`.
 - `HOSTED_TEMPORAL_NAMESPACE` / `TEMPORAL_NAMESPACE`: namespace, defaults to

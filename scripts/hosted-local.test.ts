@@ -14,6 +14,9 @@ import {
   resolveHostedLocalProfile,
 } from "../packages/hosted-local-harness/src/profiles.ts";
 import {
+  resolveHostedLocalDevConfig,
+} from "./dev-hosted-local/config.ts";
+import {
   createHostedLocalHarnessState,
 } from "../packages/hosted-local-harness/src/state.ts";
 
@@ -163,6 +166,17 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
   });
 
+  test("uses auto Temporal for the default interactive hosted-local profile", () => {
+    const result = applyHostedLocalProfile({
+      env: {},
+      profileName: "dev",
+    });
+
+    expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("dev");
+    expect(result.env.MURPH_DEV_TEMPORAL).toBeUndefined();
+    expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("auto");
+  });
+
   test("keeps E2E profile defaults away from live tunnels and listeners", () => {
     const result = applyHostedLocalProfile({
       env: {},
@@ -175,6 +189,7 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_VERCEL_PULL).toBe("1");
     expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
+    expect(resolveHostedLocalDevConfig(result.env).temporal.mode).toBe("managed");
   });
 
   test("redacts identifiers, payload-like env values, and command secrets in state files", async () => {

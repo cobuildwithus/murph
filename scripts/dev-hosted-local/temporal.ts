@@ -29,6 +29,15 @@ const MANAGED_TEMPORAL_AUTH_ENV_CLEARANCES: Record<string, undefined> = {
   TEMPORAL_SERVER_ROOT_CA_CERT_PEM: undefined,
   TEMPORAL_TLS_SERVER_NAME_OVERRIDE: undefined,
 };
+const LOCAL_TEMPORAL_CLI_ENV_CLEARANCE_NAMES = [
+  ...Object.keys(MANAGED_TEMPORAL_AUTH_ENV_CLEARANCES),
+  "HOSTED_TEMPORAL_ADDRESS",
+  "HOSTED_TEMPORAL_NAMESPACE",
+  "HOSTED_TEMPORAL_TASK_QUEUE",
+  "TEMPORAL_ADDRESS",
+  "TEMPORAL_NAMESPACE",
+  "TEMPORAL_TASK_QUEUE",
+] as const;
 
 export interface HostedLocalTemporalRuntime {
   address: string;
@@ -48,7 +57,7 @@ export function buildHostedLocalTemporalRuntimeEnv(input: {
   }
 
   const address = resolveHostedLocalTemporalAddress(input);
-  const localTlsEnv = input.config.temporal.mode === "managed"
+  const localTlsEnv = usesLocalTemporalAddress(input.config.temporal.mode)
     ? {
         ...MANAGED_TEMPORAL_AUTH_ENV_CLEARANCES,
         HOSTED_TEMPORAL_TLS_ENABLED: "false",
@@ -96,13 +105,27 @@ export async function startHostedLocalTemporalRuntime(input: {
   let workerProcess: BufferedNamedChildProcess | null = null;
 
   try {
-    if (temporal.mode === "managed") {
+    const startManagedServer = temporal.mode === "managed"
+      || temporal.mode === "auto" && !(await canConnect(temporal.host, temporal.port));
+
+    if (temporal.mode === "auto" && !startManagedServer) {
+      assertTemporalCliAvailable();
+      assertLocalTemporalServerAvailable({
+        address,
+        namespace: temporal.namespace,
+      });
+      process.stdout.write(
+        `[setup] Reusing existing local Temporal at ${address} (namespace ${temporal.namespace}).\n`,
+      );
+    }
+
+    if (startManagedServer) {
       assertTemporalCliAvailable();
       if (await canConnect(temporal.host, temporal.port)) {
         throw new Error(
           [
             `Local Temporal port ${temporal.port} is already in use on ${temporal.host}.`,
-            "Stop the existing listener, set MURPH_DEV_TEMPORAL_PORT to a free port, or set MURPH_DEV_TEMPORAL=external to use it intentionally.",
+            "Stop the existing listener, set MURPH_DEV_TEMPORAL_PORT to a free port, or set MURPH_DEV_TEMPORAL=auto/external to use it intentionally.",
           ].join(" "),
         );
       }
@@ -211,14 +234,19 @@ function resolveHostedLocalTemporalAddress(input: {
   return `${input.config.temporal.host}:${input.config.temporal.port}`;
 }
 
+function usesLocalTemporalAddress(mode: HostedLocalDevConfig["temporal"]["mode"]): boolean {
+  return mode === "auto" || mode === "managed";
+}
+
 function assertTemporalCliAvailable(): void {
   const result = spawnSync("temporal", ["--version"], {
+    env: buildLocalTemporalCliEnv(),
     stdio: "ignore",
   });
 
   if (result.error) {
     throw new Error(
-      "Temporal CLI is required for managed hosted-local Temporal. Run `pnpm temporal:cli:setup` or set MURPH_DEV_TEMPORAL=external/disabled.",
+      "Temporal CLI is required for auto/managed hosted-local Temporal. Run `pnpm temporal:cli:setup` or set MURPH_DEV_TEMPORAL=external/disabled.",
     );
   }
 
@@ -227,6 +255,59 @@ function assertTemporalCliAvailable(): void {
       "Temporal CLI is present but `temporal --version` failed. Fix the CLI or set MURPH_DEV_TEMPORAL=external/disabled.",
     );
   }
+}
+
+function assertLocalTemporalServerAvailable(input: {
+  address: string;
+  namespace: string;
+}): void {
+  const health = spawnSync("temporal", [
+    "operator",
+    "cluster",
+    "health",
+    "--address",
+    input.address,
+    "--tls=false",
+  ], {
+    env: buildLocalTemporalCliEnv(),
+    stdio: "ignore",
+  });
+
+  if (health.error || health.status !== 0) {
+    throw new Error(
+      `Local Temporal port is in use at ${input.address}, but it did not pass a Temporal health probe.`,
+    );
+  }
+
+  const namespace = spawnSync("temporal", [
+    "operator",
+    "namespace",
+    "describe",
+    "--namespace",
+    input.namespace,
+    "--address",
+    input.address,
+    "--tls=false",
+  ], {
+    env: buildLocalTemporalCliEnv(),
+    stdio: "ignore",
+  });
+
+  if (namespace.error || namespace.status !== 0) {
+    throw new Error(
+      `Local Temporal at ${input.address} is reachable, but namespace ${input.namespace} is not available.`,
+    );
+  }
+}
+
+function buildLocalTemporalCliEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const localEnv = { ...env };
+  for (const name of LOCAL_TEMPORAL_CLI_ENV_CLEARANCE_NAMES) {
+    delete localEnv[name];
+  }
+  localEnv.HOSTED_TEMPORAL_TLS_ENABLED = "false";
+  localEnv.TEMPORAL_TLS_ENABLED = "false";
+  return localEnv;
 }
 
 async function waitForTcpPort(input: {

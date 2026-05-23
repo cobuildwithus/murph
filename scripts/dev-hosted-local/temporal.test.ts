@@ -20,13 +20,18 @@ type SpawnChildProcess = (
     stdoutTarget?: NodeJS.WritableStream;
   },
 ) => BufferedNamedChildProcess;
+type SpawnSync = (
+  command: string,
+  args?: readonly string[],
+  options?: unknown,
+) => {
+  error?: Error;
+  status: number | null;
+};
 
 const spawnSyncMock = vi.hoisted(() =>
-  vi.fn<() => {
-    error: Error | undefined;
-    status: number | null;
-  }>(() => ({
-    error: undefined as Error | undefined,
+  vi.fn<SpawnSync>(() => ({
+    error: undefined,
     status: 0,
   })),
 );
@@ -85,6 +90,20 @@ const baseConfig: HostedLocalDevConfig = {
 describe("hosted-local Temporal lifecycle", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    spawnSyncMock.mockReset();
+    spawnSyncMock.mockImplementation(() => ({
+      error: undefined,
+      status: 0,
+    }));
+    spawnChildProcessMock.mockReset();
+    spawnChildProcessMock.mockImplementation((
+      name: HostedLocalChildProcessName,
+    ) => createBufferedChild({
+      exitCode: null,
+      name,
+      pid: 100,
+    }));
     vi.resetModules();
   });
 
@@ -117,6 +136,38 @@ describe("hosted-local Temporal lifecycle", () => {
     });
     expect(env.TEMPORAL_API_KEY).toBeUndefined();
     expect(env.HOSTED_TEMPORAL_API_KEY).toBeUndefined();
+  });
+
+  it("injects non-TLS local Temporal env for auto mode", async () => {
+    const { buildHostedLocalTemporalRuntimeEnv } = await import("./temporal.ts");
+
+    const env = buildHostedLocalTemporalRuntimeEnv({
+      config: {
+        ...baseConfig,
+        temporal: {
+          host: "127.0.0.1",
+          mode: "auto",
+          namespace: "hosted-auto",
+          port: 7243,
+          taskQueue: "hosted-auto-queue",
+        },
+      },
+      env: {
+        TEMPORAL_API_KEY: "remote-secret",
+      },
+    });
+
+    expect(env).toMatchObject({
+      HOSTED_TEMPORAL_ADDRESS: "127.0.0.1:7243",
+      HOSTED_TEMPORAL_NAMESPACE: "hosted-auto",
+      HOSTED_TEMPORAL_TASK_QUEUE: "hosted-auto-queue",
+      HOSTED_TEMPORAL_TLS_ENABLED: "false",
+      TEMPORAL_ADDRESS: "127.0.0.1:7243",
+      TEMPORAL_NAMESPACE: "hosted-auto",
+      TEMPORAL_TASK_QUEUE: "hosted-auto-queue",
+      TEMPORAL_TLS_ENABLED: "false",
+    });
+    expect(env.TEMPORAL_API_KEY).toBeUndefined();
   });
 
   it("preserves caller-supplied external Temporal addresses without forcing TLS off", async () => {
@@ -213,6 +264,211 @@ describe("hosted-local Temporal lifecycle", () => {
 
       await runtime?.stop();
       expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("reuses a healthy local Temporal listener in auto mode", async () => {
+    const port = await reserveLocalTcpPort();
+    const server = net.createServer();
+    const writes: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as typeof process.stdout.write;
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    try {
+      const runtime = await startHostedLocalTemporalRuntime({
+        cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",
+        config: {
+          ...baseConfig,
+          temporal: {
+            host: "127.0.0.1",
+            mode: "auto",
+            namespace: "hosted-auto",
+            port,
+            taskQueue: "hosted-auto-queue",
+          },
+        },
+        env: {},
+        hostedWebBaseUrl: "http://localhost:3000",
+      });
+
+      expect(runtime?.serverProcess).toBeNull();
+      expect(runtime?.address).toBe(`127.0.0.1:${port}`);
+      expect(spawnChildProcessMock).not.toHaveBeenCalledWith(
+        "temporal-server",
+        expect.any(String),
+        expect.any(Array),
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(spawnChildProcessMock).toHaveBeenCalledWith(
+        "temporal-worker",
+        "pnpm",
+        ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
+        expect.objectContaining({
+          HOSTED_TEMPORAL_TLS_ENABLED: "false",
+          TEMPORAL_ADDRESS: `127.0.0.1:${port}`,
+          TEMPORAL_NAMESPACE: "hosted-auto",
+          TEMPORAL_TASK_QUEUE: "hosted-auto-queue",
+          TEMPORAL_TLS_ENABLED: "false",
+        }),
+        expect.any(Object),
+      );
+      for (const [, , options] of spawnSyncMock.mock.calls) {
+        const env = (options as { env?: NodeJS.ProcessEnv } | undefined)?.env;
+        expect(env).toMatchObject({
+          HOSTED_TEMPORAL_TLS_ENABLED: "false",
+          TEMPORAL_TLS_ENABLED: "false",
+        });
+      }
+      expect(spawnSyncMock).toHaveBeenCalledWith("temporal", ["--version"], {
+        env: expect.any(Object),
+        stdio: "ignore",
+      });
+      expect(spawnSyncMock).toHaveBeenCalledWith("temporal", [
+        "operator",
+        "cluster",
+        "health",
+        "--address",
+        `127.0.0.1:${port}`,
+        "--tls=false",
+      ], {
+        env: expect.any(Object),
+        stdio: "ignore",
+      });
+      expect(spawnSyncMock).toHaveBeenCalledWith("temporal", [
+        "operator",
+        "namespace",
+        "describe",
+        "--namespace",
+        "hosted-auto",
+        "--address",
+        `127.0.0.1:${port}`,
+        "--tls=false",
+      ], {
+        env: expect.any(Object),
+        stdio: "ignore",
+      });
+      expect(writes.join("")).toContain(`Reusing existing local Temporal at 127.0.0.1:${port}`);
+
+      await runtime?.stop();
+      expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(1);
+    } finally {
+      process.stdout.write = originalWrite;
+      await closeServer(server);
+    }
+  });
+
+  it("rejects a non-Temporal listener in auto mode", async () => {
+    const port = await reserveLocalTcpPort();
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+    spawnSyncMock.mockImplementation((_command, args) => {
+      if (args?.includes("health")) {
+        return {
+          error: undefined,
+          status: 1,
+        };
+      }
+
+      return {
+        error: undefined,
+        status: 0,
+      };
+    });
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    try {
+      await expect(startHostedLocalTemporalRuntime({
+        cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",
+        config: {
+          ...baseConfig,
+          temporal: {
+            host: "127.0.0.1",
+            mode: "auto",
+            namespace: "default",
+            port,
+            taskQueue: "murph-hosted-runtime",
+          },
+        },
+        env: {},
+        hostedWebBaseUrl: "http://localhost:3000",
+      })).rejects.toThrow(
+        `Local Temporal port is in use at 127.0.0.1:${port}, but it did not pass a Temporal health probe.`,
+      );
+      expect(spawnChildProcessMock).not.toHaveBeenCalled();
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("scrubs remote Temporal env from local auto mode probes", async () => {
+    vi.stubEnv("HOSTED_TEMPORAL_ADDRESS", "temporal.example.test:7233");
+    vi.stubEnv("HOSTED_TEMPORAL_API_KEY", "hosted-remote-secret");
+    vi.stubEnv("HOSTED_TEMPORAL_CLIENT_CERT_PEM", "hosted-client-cert");
+    vi.stubEnv("HOSTED_TEMPORAL_TLS_ENABLED", "true");
+    vi.stubEnv("TEMPORAL_ADDRESS", "legacy-temporal.example.test:7233");
+    vi.stubEnv("TEMPORAL_API_KEY", "legacy-remote-secret");
+    vi.stubEnv("TEMPORAL_CLIENT_KEY_PEM", "legacy-client-key");
+    vi.stubEnv("TEMPORAL_NAMESPACE", "remote-namespace");
+    vi.stubEnv("TEMPORAL_TLS_ENABLED", "true");
+    const port = await reserveLocalTcpPort();
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    try {
+      const runtime = await startHostedLocalTemporalRuntime({
+        cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",
+        config: {
+          ...baseConfig,
+          temporal: {
+            host: "127.0.0.1",
+            mode: "auto",
+            namespace: "default",
+            port,
+            taskQueue: "murph-hosted-runtime",
+          },
+        },
+        env: {},
+        hostedWebBaseUrl: "http://localhost:3000",
+      });
+
+      const probeCalls = spawnSyncMock.mock.calls.filter(([, args]) =>
+        args?.includes("health") || args?.includes("describe")
+      );
+      expect(probeCalls).toHaveLength(2);
+      for (const [, , options] of probeCalls) {
+        const env = (options as { env?: NodeJS.ProcessEnv } | undefined)?.env;
+        expect(env).toMatchObject({
+          HOSTED_TEMPORAL_TLS_ENABLED: "false",
+          TEMPORAL_TLS_ENABLED: "false",
+        });
+        expect(env).not.toHaveProperty("HOSTED_TEMPORAL_ADDRESS");
+        expect(env).not.toHaveProperty("HOSTED_TEMPORAL_API_KEY");
+        expect(env).not.toHaveProperty("HOSTED_TEMPORAL_CLIENT_CERT_PEM");
+        expect(env).not.toHaveProperty("TEMPORAL_ADDRESS");
+        expect(env).not.toHaveProperty("TEMPORAL_API_KEY");
+        expect(env).not.toHaveProperty("TEMPORAL_CLIENT_KEY_PEM");
+        expect(env).not.toHaveProperty("TEMPORAL_NAMESPACE");
+      }
+
+      await runtime?.stop();
     } finally {
       await closeServer(server);
     }
@@ -348,7 +604,7 @@ describe("hosted-local Temporal lifecycle", () => {
       },
       env: {},
       hostedWebBaseUrl: "http://localhost:3000",
-    })).rejects.toThrow("Temporal CLI is required for managed hosted-local Temporal.");
+    })).rejects.toThrow("Temporal CLI is required for auto/managed hosted-local Temporal.");
   });
 });
 

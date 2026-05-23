@@ -17,9 +17,7 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
   dev: {
     description:
       "Interactive hosted local stack using the production-shaped runner-container Codex app-server path.",
-    envDefaults: {
-      MURPH_DEV_TEMPORAL: "managed",
-    },
+    envDefaults: {},
     mode: "dev",
     name: "dev",
   },
