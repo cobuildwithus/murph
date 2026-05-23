@@ -30,6 +30,7 @@ import {
 
 const require = createRequire(import.meta.url)
 const packageJson = require('../package.json') as { version?: string }
+const INCUR_ROOT_HELP_TIMEOUT_MS = 90_000
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
 
@@ -224,7 +225,7 @@ async function runJsonCli<TData>(
   }
 }
 
-test('root help exposes the Incur built-ins', async () => {
+test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
   const help = await runRawCli(['--help'])
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
@@ -241,7 +242,26 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, /--schema\s+Show JSON Schema for command/u)
   assert.match(help, /--full-output\s+Show full output envelope/u)
   assert.match(help, /--llms, --llms-full\s+Print LLM-readable manifest/u)
-})
+
+  const commands = [
+    'goal',
+    'condition',
+    'allergy',
+    'food',
+    'recipe',
+    'supplement',
+    'regimen',
+    'protocol',
+    'blood-test',
+    'family',
+    'genetics',
+  ]
+
+  for (const command of commands) {
+    const position = help.search(new RegExp(`^\\s+${command}\\s+`, 'mu'))
+    assert.notEqual(position, -1, `expected root help to list ${command}`)
+  }
+}, INCUR_ROOT_HELP_TIMEOUT_MS)
 
 test('root config file can provide command option defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
@@ -491,29 +511,6 @@ test('VaultCliError envelopes default retryable to false', async () => {
   assert.equal(result.envelope.error?.code, 'BRIDGE_DEFAULT_RETRYABLE')
   assert.equal(result.envelope.error?.retryable, false)
   assert.equal(result.exitCode, 1)
-})
-
-test('root help lists the simple health CRUD command groups', async () => {
-  const help = await runRawCli(['--help'])
-
-  const commands = [
-    'goal',
-    'condition',
-    'allergy',
-    'food',
-    'recipe',
-    'supplement',
-    'regimen',
-    'protocol',
-    'blood-test',
-    'family',
-    'genetics',
-  ]
-
-  for (const command of commands) {
-    const position = help.search(new RegExp(`^\\s+${command}\\s+`, 'mu'))
-    assert.notEqual(position, -1, `expected root help to list ${command}`)
-  }
 })
 
 test('descriptor manifest stays aligned with the live root command topology', async () => {
