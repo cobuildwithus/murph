@@ -44,6 +44,19 @@ const HOSTED_RUNTIME_AI_USAGE_SOURCES = new Set<HostedRuntimeDemandRunSource>([
   "manual",
 ]);
 
+const HOSTED_RUNTIME_WORKSPACE_WAKE_REASONS = new Set<string>([
+  "alarm",
+  "assistant",
+  "assistant_due",
+  "device-sync.reconcile",
+  "mailbox",
+]);
+
+const HOSTED_RUNTIME_RESULT_WAKE_REASONS = new Set<string>([
+  ...HOSTED_RUNTIME_WORKSPACE_WAKE_REASONS,
+  "runtime.failed",
+]);
+
 type HostedRuntimeDemandUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
   | "not_required";
@@ -152,6 +165,7 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
     now,
     pendingSystemMailboxKind: input.pendingSystemMailboxKind ?? null,
     runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
+    runtimeResultWakeReason: input.runtimeResultWakeReason ?? null,
     workspace,
   });
 
@@ -163,6 +177,7 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
         nextWakeAt: readEarliestFutureWakeAt({
           now,
           runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
+          runtimeResultWakeReason: input.runtimeResultWakeReason ?? null,
           workspace,
         }),
         workspace,
@@ -332,6 +347,7 @@ function selectHostedRuntimeRunDemand(input: {
   now: Date;
   pendingSystemMailboxKind: HostedMailboxKind | null;
   runtimeResultWakeAt: string | null;
+  runtimeResultWakeReason: string | null;
   workspace: HostedRuntimeDemandWorkspaceProjection | null;
 }): {
   reason: HostedWorkspaceInvocationReason;
@@ -380,7 +396,10 @@ function selectHostedRuntimeRunDemand(input: {
     };
   }
 
-  if (isHostedRuntimeWakeDue(input.runtimeResultWakeAt, input.now)) {
+  if (
+    isHostedRuntimeWakeDue(input.runtimeResultWakeAt, input.now)
+    && isHostedRuntimeResultWakeReasonActive(input.runtimeResultWakeReason ?? null)
+  ) {
     return {
       reason: "retry",
       source: "runtime_result_wake",
@@ -389,6 +408,9 @@ function selectHostedRuntimeRunDemand(input: {
 
   if (
     isHostedRuntimeWakeDue(input.workspace?.nextWakeAt ?? null, input.now)
+    && isHostedRuntimeWorkspaceWakeReasonActive(
+      input.workspace?.nextWakeReason ?? null,
+    )
     && buildHostedRuntimeWorkspaceWakeKey(input.workspace)
       !== input.ignoredWorkspaceWakeKey
   ) {
@@ -433,14 +455,35 @@ function selectHostedRuntimeControlRunDemand(
   }
 }
 
+function isHostedRuntimeWorkspaceWakeReasonActive(
+  reason: string | null,
+): boolean {
+  return reason !== null && HOSTED_RUNTIME_WORKSPACE_WAKE_REASONS.has(reason);
+}
+
+function isHostedRuntimeResultWakeReasonActive(reason: string | null): boolean {
+  return reason === null || HOSTED_RUNTIME_RESULT_WAKE_REASONS.has(reason);
+}
+
 function readEarliestFutureWakeAt(input: {
   now: Date;
   runtimeResultWakeAt: string | null;
+  runtimeResultWakeReason: string | null;
   workspace: HostedRuntimeDemandWorkspaceProjection | null;
 }): string | null {
+  const runtimeResultWakeAt = isHostedRuntimeResultWakeReasonActive(
+    input.runtimeResultWakeReason,
+  )
+    ? input.runtimeResultWakeAt
+    : null;
+  const workspaceWakeAt = isHostedRuntimeWorkspaceWakeReasonActive(
+    input.workspace?.nextWakeReason ?? null,
+  )
+    ? input.workspace?.nextWakeAt ?? null
+    : null;
   const candidates = [
-    input.runtimeResultWakeAt,
-    input.workspace?.nextWakeAt ?? null,
+    runtimeResultWakeAt,
+    workspaceWakeAt,
   ].filter((wakeAt): wakeAt is string =>
     isHostedRuntimeWakeFuture(wakeAt, input.now)
   );
@@ -536,7 +579,6 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
     case "assistant":
     case "assistant_due":
     case "device-sync.reconcile":
-    case "legacy-wearable-receipt-compaction-v1":
     case "mailbox":
     case "runtime.failed":
       return reason;

@@ -247,7 +247,6 @@ describe("hosted web production migration guard", () => {
     assert.deepEqual(cronPaths, [
       "/api/internal/hosted-execution/retention/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
-      "/api/internal/hosted-workspace/legacy-wearable-compaction/cron",
     ]);
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });

@@ -303,33 +303,6 @@ describe("hosted orchestration demand", () => {
     );
   });
 
-  it("logs legacy wearable compaction wakes as maintenance metadata", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:58:00.000Z",
-      nextWakeReason: "legacy-wearable-receipt-compaction-v1",
-    }));
-
-    const response = await demandRoute.GET(
-      requestForDemand(),
-      routeContext(),
-    );
-    const demand = parseHostedRuntimeDemand(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(demand).toMatchObject({
-      kind: "run",
-      source: "workspace_wake",
-      workspace: {
-        nextWakeReason: "legacy-wearable-receipt-compaction-v1",
-      },
-    });
-    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
-    expect(consoleInfoSpy.mock.calls[0]?.[1]).toMatchObject({
-      workspaceNextWakeReason: "legacy-wearable-receipt-compaction-v1",
-    });
-    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
-  });
-
   it("can evaluate demand with a read-only usage gate for status diagnostics", async () => {
     const { readHostedRuntimeDemand } = await import(
       "@/src/lib/hosted-orchestration/runtime-demand"
@@ -590,6 +563,45 @@ describe("hosted orchestration demand", () => {
     });
   });
 
+  it("ignores retired legacy compaction workspace wakes", async () => {
+    const nextWakeAt = "2026-05-20T11:58:00.000Z";
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt,
+      nextWakeReason: "legacy-wearable-receipt-compaction-v1",
+    }));
+
+    const response = await demandRoute.GET(
+      requestForDemand(),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toEqual({
+      kind: "idle",
+      mailboxLag: [
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "system",
+          maxSeq: "0",
+        },
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "conversation",
+          maxSeq: "0",
+        },
+      ],
+      nextWakeAt: null,
+      workspace: {
+        nextWakeAt,
+        nextWakeReason: "legacy-wearable-receipt-compaction-v1",
+        version: "4",
+      },
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
   it("prioritizes device-sync recovery over lag recovery", async () => {
     const response = await demandRoute.GET(
       requestForDemand(
@@ -726,6 +738,41 @@ describe("hosted orchestration demand", () => {
       memberId: MEMBER_ID,
       now: new Date(FIXED_NOW),
     });
+  });
+
+  it("ignores retired legacy compaction runtime-result wakes", async () => {
+    const response = await demandRoute.GET(
+      requestForDemand(
+        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z&runtimeResultWakeReason=legacy-wearable-receipt-compaction-v1",
+      ),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toEqual({
+      kind: "idle",
+      mailboxLag: [
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "system",
+          maxSeq: "0",
+        },
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "conversation",
+          maxSeq: "0",
+        },
+      ],
+      nextWakeAt: null,
+      workspace: {
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "4",
+      },
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("gates model-capable workspace wakes", async () => {
