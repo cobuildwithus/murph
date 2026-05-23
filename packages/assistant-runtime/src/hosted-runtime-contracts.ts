@@ -105,8 +105,6 @@ export type {
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhaseResult,
   HostedWorkspaceRunnerCheckpointRequestInput,
-  HostedWorkspaceRunnerHousekeepingPhaseInput,
-  HostedWorkspaceRunnerHousekeepingPhaseResult,
   HostedWorkspaceRunnerInput,
   HostedWorkspaceRunnerPlatform,
   HostedWorkspaceRunnerResult,
