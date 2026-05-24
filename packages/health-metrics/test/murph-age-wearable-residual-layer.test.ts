@@ -8,9 +8,11 @@ import {
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   applyMurphAgeWearableResidualLayer,
   assessMurphAgeWearableShadowIncrements,
+  calculateMurphAgeFromInputBundle,
   summarizeMurphAgeWearableResidualLayerContracts,
   type MetricPoint,
   type MurphAgeReferenceRiskPoint,
+  type MurphAgeRiskModel,
   type MurphAgeWearableResidualParameterPack,
 } from "../src/index.ts";
 
@@ -214,6 +216,166 @@ test("accepts research-only sleep and autonomic residual packs without authorizi
     assert.equal(application.scoreContributionAuthorized, false);
   }
 });
+
+test("calculator applies multiple wearable residual packs together in research mode only", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const points = [
+    metricPoint("hba1c", "%", 5.4, "test-result"),
+    metricPoint("bmi", "kg/m^2", 24.2, "measurement"),
+    metricPoint("total-sleep-minutes", "minutes", 450, "sleep-summary"),
+    metricPoint("wearable-valid-night-count-28d", "count", 22, "sleep-summary"),
+    metricPoint("wearable-coverage-index", "score", 0.91, "wearable-summary"),
+    metricPoint("resting-heart-rate", "bpm", 54, "wearable-summary"),
+    metricPoint("wearable-valid-day-count-28d", "count", 24, "wearable-summary"),
+    metricPoint("hrv-rmssd", "ms", 70, "wearable-summary"),
+  ];
+  const output = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: {
+      l1b_glycemia_body_10y_acm_research: fixtureL1bResearchModel(),
+    },
+    points,
+    sex: "female",
+    wearableResidualParameterPacks: [
+      wearablePack({
+        center: 420,
+        coefficient: -0.04,
+        family: "sleep",
+        layerId: "sleep-residual-v1",
+        metricKey: "total-sleep-minutes",
+        scale: 30,
+      }),
+      wearablePack({
+        center: 60,
+        coefficient: 0.05,
+        family: "resting-heart-rate",
+        layerId: "resting-heart-rate-residual-v1",
+        metricKey: "resting-heart-rate",
+        scale: 10,
+      }),
+      wearablePack({
+        center: 50,
+        coefficient: -0.02,
+        family: "hrv",
+        layerId: "hrv-residual-v1",
+        metricKey: "hrv-rmssd",
+        scale: 20,
+      }),
+    ],
+  });
+
+  assert.equal(output.status, "ready");
+  assert.equal(output.wearableResidualLayerApplication?.layerId, "multi-wearable-residual-v1");
+  assert.equal(output.wearableResidualLayerApplication?.status, "research-parameterized-shadow-delta");
+  assert.equal(output.wearableResidualLayerApplication?.parameterizationAvailable, true);
+  assert.equal(output.wearableResidualLayerApplication?.residualDeltaLogit, -0.09);
+  assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("total-sleep-minutes"), true);
+  assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("resting-heart-rate"), true);
+  assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("hrv-rmssd"), true);
+  assert.equal(output.wearableResidualLayerApplication?.productAuthorized, false);
+  assert.equal(output.wearableResidualLayerApplication?.scoreBearing, false);
+  assert.equal(output.wearableResidualLayerApplication?.scoreContributionAuthorized, false);
+
+  const productOutput = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "product",
+    models: {
+      l1b_glycemia_body_10y_acm_research: fixtureL1bResearchModel(),
+    },
+    points,
+    sex: "female",
+    wearableResidualParameterPacks: [
+      wearablePack({
+        center: 420,
+        coefficient: -0.04,
+        family: "sleep",
+        layerId: "sleep-residual-v1",
+        metricKey: "total-sleep-minutes",
+        scale: 30,
+      }),
+    ],
+  });
+  assert.equal(productOutput.wearableResidualLayerApplication?.parameterizationAvailable ?? false, false);
+});
+
+function wearablePack(input: {
+  center: number;
+  coefficient: number;
+  family: MurphAgeWearableResidualParameterPack["family"];
+  layerId: MurphAgeWearableResidualParameterPack["layerId"];
+  metricKey: string;
+  scale: number;
+}): MurphAgeWearableResidualParameterPack {
+  return {
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "true-external-validation",
+    family: input.family,
+    featureWeights: [
+      {
+        center: input.center,
+        coefficient: input.coefficient,
+        metricKey: input.metricKey,
+        scale: input.scale,
+        transform: "center-scale",
+      },
+    ],
+    globalWearableCapLogit: 0.25,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: input.layerId,
+    packHash: `research-pack-${input.family.replaceAll("-", "_")}-v1`,
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  };
+}
+
+function fixtureL1bResearchModel(): MurphAgeRiskModel {
+  return {
+    endpoint: "10-year all-cause mortality",
+    features: [
+      { coefficient: 0.04, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.16,
+        expectedUnit: "percent",
+        key: "hba1c",
+        kind: "metric",
+        label: "HbA1c",
+        metricKey: "hba1c",
+        moduleId: "metabolic",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 5.5, standardDeviation: 0.5 },
+      },
+      {
+        coefficient: 0.06,
+        expectedUnit: "kg/m^2",
+        key: "bmi",
+        kind: "metric",
+        label: "BMI",
+        metricKey: "bmi",
+        moduleId: "body",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 25, standardDeviation: 4 },
+      },
+    ],
+    horizonYears: 10,
+    intercept: -4.8,
+    modelId: "fixture-l1b-glycemia-body-research-card-model",
+    modelVersion: "test.0",
+    referencePopulation: "fixture adult reference curve",
+    referenceRiskCurve: [
+      { ageYears: 20, riskProbability: 0.01 },
+      { ageYears: 40, riskProbability: 0.03 },
+      { ageYears: 60, riskProbability: 0.1 },
+      { ageYears: 80, riskProbability: 0.3 },
+    ],
+    uncertainty: { baseYears: 2 },
+  };
+}
 
 function metricPoint(
   metricKey: string,
