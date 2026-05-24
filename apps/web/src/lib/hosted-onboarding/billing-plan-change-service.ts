@@ -131,37 +131,16 @@ export async function upgradeHostedBillingPlan(input: {
     subscription,
     targetPriceId: targetConfig.priceId,
   })) {
-    const cleanedSubscription = await cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems({
+    return await finalizeAppliedHostedBillingPlanUpgrade({
       memberId: input.memberId,
+      now,
+      prisma,
       stripe,
       stripeSubscriptionId,
       subscription,
       targetPlanCode,
       targetPriceId: targetConfig.priceId,
     });
-    const appliedSubscription = await normalizeAppliedHostedBillingPlanUpgradeSubscription({
-      memberId: input.memberId,
-      stripe,
-      stripeSubscriptionId,
-      subscription: cleanedSubscription,
-      targetPlanCode,
-    });
-    await reconcileAppliedHostedBillingPlanUpgrade({
-      memberId: input.memberId,
-      now,
-      prisma,
-      stripeSubscriptionId,
-      subscription: appliedSubscription,
-      targetPlanCode,
-    });
-    await signalHostedRuntimeManualWakeBestEffort({
-      userId: input.memberId,
-    });
-
-    return {
-      billingPlanCode: targetPlanCode,
-      status: "upgraded",
-    };
   }
 
   const updateItems = buildHostedBillingPlanUpgradeSubscriptionItems({
@@ -203,28 +182,62 @@ export async function upgradeHostedBillingPlan(input: {
     };
   }
 
-  const appliedSubscription = await normalizeAppliedHostedBillingPlanUpgradeSubscription({
+  return await finalizeAppliedHostedBillingPlanUpgrade({
     memberId: input.memberId,
+    now,
+    prisma,
     stripe,
     stripeSubscriptionId,
     subscription: updatedSubscription,
     targetPlanCode,
+    targetPriceId: targetConfig.priceId,
+  });
+}
+
+async function finalizeAppliedHostedBillingPlanUpgrade(input: {
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+  stripe: Stripe;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+  targetPlanCode: "launch_edge_monthly";
+  targetPriceId: string;
+}): Promise<{
+  billingPlanCode: "launch_edge_monthly";
+  status: "upgraded";
+}> {
+  const cleanedSubscription = await cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems({
+    memberId: input.memberId,
+    stripe: input.stripe,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription: input.subscription,
+    targetPlanCode: input.targetPlanCode,
+    targetPriceId: input.targetPriceId,
+  });
+  const appliedSubscription = await normalizeAppliedHostedBillingPlanUpgradeSubscription({
+    memberId: input.memberId,
+    stripe: input.stripe,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription: cleanedSubscription,
+    targetPlanCode: input.targetPlanCode,
+    targetPriceId: input.targetPriceId,
   });
 
   await reconcileAppliedHostedBillingPlanUpgrade({
     memberId: input.memberId,
-    now,
-    prisma,
-    stripeSubscriptionId,
+    now: input.now,
+    prisma: input.prisma,
+    stripeSubscriptionId: input.stripeSubscriptionId,
     subscription: appliedSubscription,
-    targetPlanCode,
+    targetPlanCode: input.targetPlanCode,
   });
   await signalHostedRuntimeManualWakeBestEffort({
     userId: input.memberId,
   });
 
   return {
-    billingPlanCode: targetPlanCode,
+    billingPlanCode: input.targetPlanCode,
     status: "upgraded",
   };
 }
@@ -341,21 +354,30 @@ async function cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems(input: {
     return input.subscription;
   }
 
-  return callHostedStripePlanUpgradeOperation(
+  const subscription = await callHostedStripePlanUpgradeOperation(
     "subscription.update.applied-plan-items",
     () =>
-      input.stripe.subscriptions.update(input.stripeSubscriptionId, {
-        expand: ["items.data.price"],
-        items: cleanupItems,
-      }, {
-        idempotencyKey: buildHostedBillingPlanUpgradeAppliedItemsCleanupIdempotencyKey({
-          memberId: input.memberId,
-          stripeSubscriptionId: input.stripeSubscriptionId,
-          targetPlanCode: input.targetPlanCode,
-          targetPriceId: input.targetPriceId,
-        }),
-      }),
+      input.stripe.subscriptions.update(
+        input.stripeSubscriptionId,
+        {
+          expand: ["items.data.price"],
+          items: cleanupItems,
+        },
+        {
+          idempotencyKey: buildHostedBillingPlanUpgradeAppliedItemsCleanupIdempotencyKey({
+            memberId: input.memberId,
+            stripeSubscriptionId: input.stripeSubscriptionId,
+            targetPlanCode: input.targetPlanCode,
+            targetPriceId: input.targetPriceId,
+          }),
+        },
+      ),
   );
+  assertHostedBillingPlanUpgradeAppliedSubscriptionItemsClean({
+    subscription,
+    targetPriceId: input.targetPriceId,
+  });
+  return subscription;
 }
 
 function buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems(input: {
@@ -427,12 +449,17 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
   targetPlanCode: "launch_edge_monthly";
+  targetPriceId: string;
 }): Promise<Stripe.Subscription> {
   if (isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input)) {
+    assertHostedBillingPlanUpgradeAppliedSubscriptionItemsClean({
+      subscription: input.subscription,
+      targetPriceId: input.targetPriceId,
+    });
     return input.subscription;
   }
 
-  return callHostedStripePlanUpgradeOperation(
+  const subscription = await callHostedStripePlanUpgradeOperation(
     "subscription.update.metadata",
     () =>
       input.stripe.subscriptions.update(input.stripeSubscriptionId, {
@@ -449,6 +476,11 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
         }),
       })
   );
+  assertHostedBillingPlanUpgradeAppliedSubscriptionItemsClean({
+    subscription,
+    targetPriceId: input.targetPriceId,
+  });
+  return subscription;
 }
 
 function isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input: {
@@ -535,6 +567,16 @@ function isHostedStripeSubscriptionAppliedPlan(input: {
   );
 
   return itemPriceIds.has(input.targetPriceId);
+}
+
+function assertHostedBillingPlanUpgradeAppliedSubscriptionItemsClean(input: {
+  subscription: Stripe.Subscription;
+  targetPriceId: string;
+}): void {
+  const cleanupItems = buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems(input);
+  if (cleanupItems.length > 0) {
+    throw buildHostedBillingSubscriptionItemsUnsupportedError();
+  }
 }
 
 async function reconcileAppliedHostedBillingPlanUpgrade(input: {

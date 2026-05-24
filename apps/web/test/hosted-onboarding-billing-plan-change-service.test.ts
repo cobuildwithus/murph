@@ -265,6 +265,36 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
+  test("rejects unsupported items returned by the Stripe Edge update before local reconciliation", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_addon", "price_unknown_addon"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
   test("recovers when Stripe is already Edge and drops legacy metered items", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
@@ -317,6 +347,48 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
     });
+  });
+
+  test("rejects unsafe subscription items returned by Stripe cleanup before metadata repair", async () => {
+    const staleMetadata: Record<string, string> = {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialDurationDays: "7",
+      trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialUsageLimitUsdMicros: "2500000",
+    };
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_usage", "price_edge_usage"],
+      ],
+      metadata: staleMetadata,
+      status: "active",
+    }));
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_usage", "price_edge_usage"],
+      ],
+      metadata: staleMetadata,
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
   test("rejects quantity-bearing metered items when Stripe already has Edge applied", async () => {

@@ -741,6 +741,14 @@ describe("resolveHostedAiUsageGate", () => {
       spentUsdMicros: 11_000_000n,
     });
     expect(queryRaw).toHaveBeenCalledTimes(3);
+    const queryRawSql = queryRaw.mock.calls.map(([sql]) =>
+      Array.isArray(sql) ? sql.join("") : String(sql)
+    );
+    expect(queryRawSql[0]).toContain('FROM "hosted_ai_usage_period"');
+    expect(queryRawSql[0]).toContain("FOR UPDATE");
+    expect(queryRawSql[1]).toContain('WITH "candidates"');
+    expect(queryRawSql[2]).toContain('FROM "hosted_ai_usage_period"');
+    expect(queryRawSql[2]).toContain("FOR UPDATE");
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(rawSqlText).toContain(
       '"last_usage_at" = CASE',
