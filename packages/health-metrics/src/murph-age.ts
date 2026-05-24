@@ -39,7 +39,7 @@ export const MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION =
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
-  "murph.age.public-lab-wearable-shadow-evidence-status.v1" as const;
+  "murph.age.public-lab-wearable-shadow-evidence-status.v2" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION =
@@ -327,7 +327,7 @@ export type MurphAgePublicLabWearableShadowEvidencePacketId =
   | "r1067-nhanes-wrist-final-stress-test";
 
 export type MurphAgePublicLabWearableShadowEvidenceConclusion =
-  "public_activity_shadow_signal_mixed_keep_wearable_context_only";
+  "public_multi_family_wearable_shadow_signal_mixed_keep_context_only";
 
 export type MurphAgePublicLabWearableShadowEvidenceNextAction =
   "run_external_or_partner_lab_wearable_aggregate_delta";
@@ -356,7 +356,7 @@ export interface MurphAgePublicLabWearableShadowEvidenceStatus {
   conclusion: MurphAgePublicLabWearableShadowEvidenceConclusion;
   externalConsumerLabWearableAggregateStillMissing: true;
   includedPacketIds: MurphAgePublicLabWearableShadowEvidencePacketId[];
-  inputPriority: "ordinary-16-50-labs-plus-wearable-activity";
+  inputPriority: "ordinary-16-50-labs-plus-multi-family-wearables";
   nextAction: MurphAgePublicLabWearableShadowEvidenceNextAction;
   nextExternalOrPartnerRouteIdsByPriority: MurphAgeSourceRouteId[];
   packets: MurphAgePublicLabWearableShadowEvidencePacket[];
@@ -5076,10 +5076,10 @@ export function summarizeMurphAgePublicLabWearableShadowEvidenceStatus():
   );
 
   return {
-    conclusion: "public_activity_shadow_signal_mixed_keep_wearable_context_only",
+    conclusion: "public_multi_family_wearable_shadow_signal_mixed_keep_context_only",
     externalConsumerLabWearableAggregateStillMissing: true,
     includedPacketIds: MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_PACKETS.map((packet) => packet.packetId),
-    inputPriority: "ordinary-16-50-labs-plus-wearable-activity",
+    inputPriority: "ordinary-16-50-labs-plus-multi-family-wearables",
     nextAction: "run_external_or_partner_lab_wearable_aggregate_delta",
     nextExternalOrPartnerRouteIdsByPriority,
     packets: MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_PACKETS.map(

@@ -910,8 +910,8 @@ test("summarizes public lab and wearable shadow evidence as mixed and non-score-
   const status = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
 
   assert.equal(status.schemaVersion, MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION);
-  assert.equal(status.inputPriority, "ordinary-16-50-labs-plus-wearable-activity");
-  assert.equal(status.conclusion, "public_activity_shadow_signal_mixed_keep_wearable_context_only");
+  assert.equal(status.inputPriority, "ordinary-16-50-labs-plus-multi-family-wearables");
+  assert.equal(status.conclusion, "public_multi_family_wearable_shadow_signal_mixed_keep_context_only");
   assert.equal(status.nextAction, "run_external_or_partner_lab_wearable_aggregate_delta");
   assert.equal(status.externalConsumerLabWearableAggregateStillMissing, true);
   assert.equal(status.publicAggregateOnly, true);
@@ -6729,7 +6729,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.model.wearable.scoreBearing, false);
   assert.equal(submittedLab5ResearchView.model.wearable.scoreContributionAuthorized, false);
   assert.equal(submittedLab5ResearchView.model.wearable.consumerValidationStatus, "missing");
-  assert.equal(submittedLab5ResearchViewJson.includes("\"shadowEvidenceConclusion\":\"public_activity_shadow_signal_mixed_keep_wearable_context_only\""), true);
+  assert.equal(submittedLab5ResearchViewJson.includes("\"shadowEvidenceConclusion\":\"public_multi_family_wearable_shadow_signal_mixed_keep_context_only\""), true);
   assert.equal(submittedLab5ResearchViewJson.includes("\"externalConsumerLabWearableAggregateStillMissing\":true"), true);
   assert.equal(submittedLab5ResearchViewJson.includes("\"usableAsConsumerWearableValidation\":false"), true);
   assert.equal(submittedLab5ResearchView.model.wearable.nextAction, "run_external_or_partner_lab_wearable_aggregate_delta");
