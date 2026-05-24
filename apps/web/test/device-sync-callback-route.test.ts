@@ -152,6 +152,77 @@ describe("hosted device-sync callback route", () => {
     expect(location).toContain("connectTarget=garmin");
   });
 
+  it("redirects stale disconnected connect callbacks through completion return targets", async () => {
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+      details: {
+        accountId: "dsc_seeded_1",
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        provider: "junction",
+        returnTo:
+          "https://app.example.test/device-sync/connect/complete?source=connect&connectSource=garmin&connectTarget=garmin",
+      },
+    }));
+
+    const response = await connectCallbackRoute.GET(
+      new Request(
+        "https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz&state=success&isMobile=false&provider=garmin",
+      ),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toBeTruthy();
+    const destination = new URL(location!);
+    expect(destination.origin).toBe("https://app.example.test");
+    expect(destination.pathname).toBe("/device-sync/connect/complete");
+    expect(destination.searchParams.get("source")).toBe("connect");
+    expect(destination.searchParams.get("connectSource")).toBe("garmin");
+    expect(destination.searchParams.get("connectTarget")).toBe("garmin");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("CONNECTION_ALREADY_DISCONNECTED");
+    expect(destination.searchParams.get("deviceSyncConnectionId")).toBeNull();
+    expect(location).not.toContain("Device sync connection callback");
+    expect(location).not.toContain("dsc_seeded_1");
+    expect(location).not.toContain("dsc_");
+  });
+
+  it("uses generic callback html when device errors cannot redirect safely", async () => {
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+      details: {
+        provider: "junction",
+        returnTo: "javascript:alert(1)",
+      },
+    }));
+
+    const response = await connectCallbackRoute.GET(
+      new Request(
+        "https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz&state=success",
+      ),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const html = await response.text();
+    expect(html).toContain("Device connection failed");
+    expect(html).toContain("Please retry from Murph.");
+    expect(html).not.toContain("seeded account");
+    expect(html).not.toContain("CONNECTION_ALREADY_DISCONNECTED");
+    expect(html).not.toContain("javascript");
+  });
+
   it("does not include the raw connection id in the fallback callback html", async () => {
     const response = await callbackRoute.GET(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),

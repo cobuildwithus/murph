@@ -805,6 +805,61 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(stored.lastSyncErrorAt).toBeNull();
   });
 
+  it("rejects guarded hosted callback upserts when the seeded connection was disconnected", async () => {
+    const existing = createConnection({
+      accessTokenEncrypted: null,
+      id: "dsc_123",
+      keyVersion: null,
+      provider: "whoop",
+      refreshTokenEncrypted: null,
+      setupPhase: "pending_link",
+      status: "disconnected",
+      tokenVersion: null,
+      userId: "user-123",
+    });
+
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: vi.fn(async () => {
+          throw new Error("disconnected seeded callbacks should not update credentials");
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery", "read:sleep"],
+      tokens: {
+        accessToken: "<REDACTED_ACCESS_TOKEN>",
+        refreshToken: "<REDACTED_REFRESH_TOKEN>",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+      },
+      metadata: {},
+      existingAccountGuard: {
+        expectedAccountId: "dsc_123",
+        rejectIfDisconnected: true,
+      },
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: "2026-03-26T09:00:00.000Z",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      httpStatus: 409,
+    });
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
   it("clears hosted OAuth tokens when post-connect setup fails", async () => {
     let stored = createConnection({
       accessTokenEncrypted: "enc:access-token",

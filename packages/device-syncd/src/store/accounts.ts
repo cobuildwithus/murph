@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
+import { deviceSyncError } from "../errors.ts";
 import {
   generatePrefixedId,
   maybeParseJsonObject,
@@ -18,6 +19,7 @@ import type {
   StoredDeviceSyncAccountCredential,
   StoredDeviceSyncAccount,
   ListDeviceSyncAccountsInput,
+  UpsertPublicDeviceSyncExistingAccountGuard,
 } from "../types.ts";
 
 type SqliteRow = Record<string, unknown>;
@@ -42,6 +44,7 @@ export interface AccountUpsertInput {
   tokens?: EncryptedProviderAuthTokens;
   credential?: StorageDeviceAccountCredential;
   metadata?: Record<string, unknown>;
+  existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
   connectedAt: string;
   nextReconcileAt?: string | null;
 }
@@ -740,9 +743,11 @@ export function upsertAccount(
       : existing?.setupExpiresAt ?? null;
     const scopesJson = stringifyJson(input.scopes ?? []);
     const metadataJson = stringifyJson(sanitizeStoredDeviceSyncAccountMetadata(input.metadata ?? {}));
-    const credential = resolveAccountCredentialInput(input);
 
     if (existing) {
+      assertAccountUpsertExistingGuard(existing, input.existingAccountGuard ?? null);
+      const credential = resolveAccountCredentialInput(input);
+
       database.prepare(`
         update device_connection
         set display_name = ?,
@@ -807,6 +812,9 @@ export function upsertAccount(
 
       return getAccountById(database, existing.id)!;
     }
+
+    assertAccountUpsertExistingGuard(null, input.existingAccountGuard ?? null);
+    const credential = resolveAccountCredentialInput(input);
 
     const id = generatePrefixedId("dsa");
     database.prepare(`
@@ -891,6 +899,33 @@ export function upsertAccount(
 
     return getAccountById(database, id)!;
   });
+}
+
+function assertAccountUpsertExistingGuard(
+  existing: StoredDeviceSyncAccount | null,
+  guard: UpsertPublicDeviceSyncExistingAccountGuard | null,
+): void {
+  if (!guard) {
+    return;
+  }
+
+  if (!existing || existing.id !== guard.expectedAccountId) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+      message: "Device sync connection callback referenced an unexpected seeded account.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  if (guard.rejectIfDisconnected && existing.status === "disconnected") {
+    throw deviceSyncError({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
 }
 
 export function patchAccount(
