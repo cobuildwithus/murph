@@ -8,6 +8,7 @@ import {
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   applyMurphAgeWearableResidualLayer,
   assessMurphAgeWearableShadowIncrements,
+  summarizeMurphAgeWearableResidualLayerContracts,
   type MetricPoint,
   type MurphAgeReferenceRiskPoint,
   type MurphAgeWearableResidualParameterPack,
@@ -101,6 +102,117 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
   assert.equal(noReferenceCurveApplication.anchorRiskAgeEquivalentYears, null);
   assert.equal(noReferenceCurveApplication.finalRiskAgeEquivalentYears, null);
   assert.equal(noReferenceCurveApplication.residualDeltaYears, null);
+});
+
+test("accepts research-only sleep and autonomic residual packs without authorizing product scoring", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const points = [
+    metricPoint("total-sleep-minutes", "minutes", 450, "sleep-summary"),
+    metricPoint("wearable-valid-night-count-28d", "count", 22, "sleep-summary"),
+    metricPoint("wearable-coverage-index", "score", 0.91, "wearable-summary"),
+    metricPoint("resting-heart-rate", "bpm", 54, "wearable-summary"),
+    metricPoint("wearable-valid-day-count-28d", "count", 24, "wearable-summary"),
+    metricPoint("hrv-rmssd", "ms", 70, "wearable-summary"),
+  ];
+  const assessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
+    asOf,
+    points,
+  });
+  const contracts = summarizeMurphAgeWearableResidualLayerContracts();
+  assert.deepEqual(
+    contracts.map((contract) => contract.layerId),
+    [
+      "activity-residual-v1",
+      "sleep-residual-v1",
+      "resting-heart-rate-residual-v1",
+      "hrv-residual-v1",
+    ],
+  );
+
+  const cases: Array<{
+    coefficient: number;
+    expectedDelta: number;
+    family: MurphAgeWearableResidualParameterPack["family"];
+    layerId: MurphAgeWearableResidualParameterPack["layerId"];
+    metricKey: string;
+    scale: number;
+    center: number;
+  }> = [
+    {
+      center: 420,
+      coefficient: -0.04,
+      expectedDelta: -0.04,
+      family: "sleep",
+      layerId: "sleep-residual-v1",
+      metricKey: "total-sleep-minutes",
+      scale: 30,
+    },
+    {
+      center: 60,
+      coefficient: 0.05,
+      expectedDelta: -0.03,
+      family: "resting-heart-rate",
+      layerId: "resting-heart-rate-residual-v1",
+      metricKey: "resting-heart-rate",
+      scale: 10,
+    },
+    {
+      center: 50,
+      coefficient: -0.02,
+      expectedDelta: -0.02,
+      family: "hrv",
+      layerId: "hrv-residual-v1",
+      metricKey: "hrv-rmssd",
+      scale: 20,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const parameterPack: MurphAgeWearableResidualParameterPack = {
+      anchorCardId: "l1b_glycemia_body_10y_acm_research",
+      calibrationIntercept: 0,
+      calibrationSlope: 1,
+      deploymentRights: "research-only",
+      endpoint: "10-year all-cause mortality",
+      evidenceTier: "true-external-validation",
+      family: testCase.family,
+      featureWeights: [
+        {
+          center: testCase.center,
+          coefficient: testCase.coefficient,
+          metricKey: testCase.metricKey,
+          scale: testCase.scale,
+          transform: "center-scale",
+        },
+      ],
+      globalWearableCapLogit: 0.25,
+      horizonYears: 10,
+      intercept: 0,
+      layerId: testCase.layerId,
+      packHash: `research-pack-${testCase.family.replaceAll("-", "_")}-v1`,
+      schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+      sourceRouteId: "all-of-us-fitbit-labs-ehr",
+    };
+
+    const application = applyMurphAgeWearableResidualLayer({
+      anchorCardId: "l1b_glycemia_body_10y_acm_research",
+      anchorRiskProbability: 0.1,
+      asOf,
+      assessments,
+      parameterPack,
+      points,
+    });
+
+    assert.equal(application.layerId, testCase.layerId);
+    assert.equal(application.status, "research-parameterized-shadow-delta");
+    assert.equal(application.parameterizationAvailable, true);
+    assert.equal(application.residualDeltaLogit, testCase.expectedDelta);
+    assert.equal(application.selectedMetricKeys.includes(testCase.metricKey), true);
+    assert.equal(application.productAuthorized, false);
+    assert.equal(application.scoreBearing, false);
+    assert.equal(application.scoreContributionAuthorized, false);
+  }
 });
 
 function metricPoint(

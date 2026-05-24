@@ -390,7 +390,11 @@ export type MurphAgeWearableScoreBearingPromotionSignal =
   | "replicates-in-two-source-families"
   | "reverse-causation-washout-passes";
 
-export type MurphAgeWearableResidualLayerId = "activity-residual-v1";
+export type MurphAgeWearableResidualLayerId =
+  | "activity-residual-v1"
+  | "hrv-residual-v1"
+  | "resting-heart-rate-residual-v1"
+  | "sleep-residual-v1";
 
 export type MurphAgeWearableResidualLayerCombinationScale = "logit-residual";
 
@@ -468,7 +472,7 @@ export interface MurphAgeWearableResidualParameterPack {
   deploymentRights: MurphAgeWearableParameterPackDeploymentRights;
   endpoint: string;
   evidenceTier: MurphAgeValidationEvidenceTier;
-  family: "activity";
+  family: MurphAgeWearableShadowIncrementFamily;
   featureWeights: MurphAgeWearableResidualParameterPackFeature[];
   globalWearableCapLogit: number;
   horizonYears: 10;
@@ -507,10 +511,11 @@ export interface MurphAgeWearableResidualLayerContract {
   currentDeploymentStatus: MurphAgeWearableResidualLayerDeploymentStatus;
   deployableParameterizationAvailable: false;
   deferredFamilyOrder: Array<"sleep" | "resting-heart-rate" | "hrv" | "estimated-vo2-max">;
-  family: "activity";
+  family: MurphAgeWearableShadowIncrementFamily;
   featureSetContract: MurphAgeWearableResidualFeatureSetContract;
   layerId: MurphAgeWearableResidualLayerId;
-  minimumValidDays28d: 14;
+  minimumValidDays28d: number | null;
+  minimumValidNights28d: number | null;
   missingnessPolicy: "missing-or-undercovered-family-zero-delta-widen-uncertainty";
   nuisanceControlMetricKeys: string[];
   primaryDecisionComparisons: Array<"m5-vs-m1-lab-body" | "m5-vs-m2-coverage-control">;
@@ -3894,7 +3899,33 @@ export function summarizeMurphAgeWearableParameterPackContract(): MurphAgeWearab
   };
 }
 
-export function summarizeMurphAgeWearableResidualLayerContract(): MurphAgeWearableResidualLayerContract {
+const MURPH_AGE_WEARABLE_RESIDUAL_LAYER_IDS_BY_FAMILY = {
+  activity: "activity-residual-v1",
+  hrv: "hrv-residual-v1",
+  "resting-heart-rate": "resting-heart-rate-residual-v1",
+  sleep: "sleep-residual-v1",
+} satisfies Record<MurphAgeWearableShadowIncrementFamily, MurphAgeWearableResidualLayerId>;
+
+export function summarizeMurphAgeWearableResidualLayerContractForFamily(
+  family: MurphAgeWearableShadowIncrementFamily,
+): MurphAgeWearableResidualLayerContract {
+  const shadowPolicy = resolveMurphAgeWearableShadowIncrementPolicy(family);
+  const scorePolicy = MURPH_AGE_WEARABLE_SCORE_BEARING_FAMILY_POLICIES.find((candidate) =>
+    candidate.family === family
+  ) ?? null;
+  const signalMetricKeys = scorePolicy?.signalMetricKeys
+    ?? shadowPolicy?.signalMetricKeys
+    ?? [];
+  const qualityMetricKeys = scorePolicy?.qualityMetricKeys
+    ?? shadowPolicy?.requiredQualityMetricKeys
+    ?? [];
+  const deferredFamilyOrder = ([
+    "resting-heart-rate",
+    "sleep",
+    "hrv",
+    "estimated-vo2-max",
+  ] as const).filter((candidate) => candidate !== family);
+
   return {
     anchorCardIds: listMurphAgeWearableShadowAnchorCardIds(),
     parameterPackContract: summarizeMurphAgeWearableParameterPackContract(),
@@ -3902,13 +3933,8 @@ export function summarizeMurphAgeWearableResidualLayerContract(): MurphAgeWearab
     coverageScoringPolicy: "gate-and-control-only-not-age-contribution",
     currentDeploymentStatus: "contract-only-no-validated-parameters",
     deployableParameterizationAvailable: false,
-    deferredFamilyOrder: [
-      "resting-heart-rate",
-      "sleep",
-      "hrv",
-      "estimated-vo2-max",
-    ],
-    family: "activity",
+    deferredFamilyOrder,
+    family,
     featureSetContract: {
       activityVolumeCandidateMetricKeys: [
         "steps",
@@ -3917,38 +3943,50 @@ export function summarizeMurphAgeWearableResidualLayerContract(): MurphAgeWearab
         "peak-30-minute-cadence",
         "sedentary-minutes",
       ],
-      coverageControlMetricKeys: [...MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS],
+      coverageControlMetricKeys: [...qualityMetricKeys],
       firstPassOnlyFamily: "activity",
       methodQualifierRequired: true,
       proprietaryDeviceScoresExcluded: true,
       trailingWindowDays: 28,
     },
-    layerId: "activity-residual-v1",
-    minimumValidDays28d: 14,
+    layerId: MURPH_AGE_WEARABLE_RESIDUAL_LAYER_IDS_BY_FAMILY[family],
+    minimumValidDays28d: scorePolicy?.minimumValidDays28d ?? null,
+    minimumValidNights28d: scorePolicy?.minimumValidNights28d ?? null,
     missingnessPolicy: "missing-or-undercovered-family-zero-delta-widen-uncertainty",
-    nuisanceControlMetricKeys: [...MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS],
+    nuisanceControlMetricKeys: [...qualityMetricKeys],
     primaryDecisionComparisons: [
       "m5-vs-m1-lab-body",
       "m5-vs-m2-coverage-control",
     ],
     productAuthorized: false,
     productMultiplier: 0,
-    qualityGateMetricKeys: [...MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS],
+    qualityGateMetricKeys: [...qualityMetricKeys],
     requiredPromotionSignals: murphAgeWearableRequiredPromotionSignals(),
     researchMultiplier: 0,
     residualDeltaStatus: "zero-until-validated",
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
-    signalMetricKeys: [
-      "steps",
-      "activity-minutes",
-      "mvpa-minutes",
-      "peak-30-minute-cadence",
-      "sedentary-minutes",
-    ],
+    signalMetricKeys: [...signalMetricKeys],
     trailingWindowDays: 28,
   };
+}
+
+export function summarizeMurphAgeWearableResidualLayerContract(): MurphAgeWearableResidualLayerContract {
+  return summarizeMurphAgeWearableResidualLayerContractForFamily("activity");
+}
+
+export function summarizeMurphAgeWearableResidualLayerContracts(): MurphAgeWearableResidualLayerContract[] {
+  return [
+    "activity",
+    "sleep",
+    "resting-heart-rate",
+    "hrv",
+  ].map((family) =>
+    summarizeMurphAgeWearableResidualLayerContractForFamily(
+      family as MurphAgeWearableShadowIncrementFamily,
+    )
+  );
 }
 
 export function summarizeMurphAgeWearableScoreBearingStrategy(): MurphAgeWearableScoreBearingStrategy {
@@ -3996,12 +4034,15 @@ export function applyMurphAgeWearableResidualLayer(input: {
   points?: readonly MetricPoint[];
   referenceRiskCurve?: readonly MurphAgeReferenceRiskPoint[];
 }): MurphAgeWearableResidualLayerApplication {
-  const contract = input.contract ?? summarizeMurphAgeWearableResidualLayerContract();
-  const activityAssessment = input.assessments.find((assessment) => assessment.family === contract.family) ?? null;
+  const contract = input.contract
+    ?? (input.parameterPack
+      ? summarizeMurphAgeWearableResidualLayerContractForFamily(input.parameterPack.family)
+      : summarizeMurphAgeWearableResidualLayerContract());
+  const familyAssessment = input.assessments.find((assessment) => assessment.family === contract.family) ?? null;
   const anchorLogit = logitFromProbability(input.anchorRiskProbability);
   const anchorCompatible = contract.anchorCardIds.includes(input.anchorCardId)
-    && activityAssessment?.anchorCompatible === true;
-  const warnings = activityAssessment?.warnings.map((warning) => ({ ...warning })) ?? [];
+    && familyAssessment?.anchorCompatible === true;
+  const warnings = familyAssessment?.warnings.map((warning) => ({ ...warning })) ?? [];
 
   if (input.anchorRiskProbability !== null && anchorLogit === null) {
     warnings.push({
@@ -4012,7 +4053,7 @@ export function applyMurphAgeWearableResidualLayer(input: {
 
   const status: MurphAgeWearableResidualLayerApplicationStatus = !anchorCompatible
     ? "blocked-incompatible-anchor"
-    : activityAssessment?.status === "ready"
+    : familyAssessment?.status === "ready"
     ? "mechanics-ready-zero-delta"
     : "ineligible-insufficient-coverage";
   const parameterized = status === "mechanics-ready-zero-delta" && input.parameterPack
@@ -4058,7 +4099,7 @@ export function applyMurphAgeWearableResidualLayer(input: {
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
-    selectedMetricKeys: activityAssessment ? [...activityAssessment.selectedMetricKeys] : [],
+    selectedMetricKeys: familyAssessment ? [...familyAssessment.selectedMetricKeys] : [],
     status: parameterizationAvailable ? "research-parameterized-shadow-delta" : status,
     warnings,
   };
@@ -4071,7 +4112,8 @@ export function validateMurphAgeWearableResidualParameterPack(input: {
 }): MurphAgeWearableResidualParameterPackValidationResult {
   return validateMurphAgeWearableResidualParameterPackForContract({
     anchorCardId: input.anchorCardId,
-    contract: input.contract ?? summarizeMurphAgeWearableResidualLayerContract(),
+    contract: input.contract
+      ?? summarizeMurphAgeWearableResidualLayerContractForFamily(input.parameterPack.family),
     pack: input.parameterPack,
   });
 }
