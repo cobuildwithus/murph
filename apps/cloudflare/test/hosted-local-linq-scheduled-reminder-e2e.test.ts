@@ -11,13 +11,6 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-  type HostedRuntimeWorkflowState,
-} from "@murphai/hosted-execution/orchestration-control";
-import {
-  createHostedRuntimeTemporalClientFromEnv,
-} from "@murphai/hosted-orchestrator-temporal/client/temporal-client";
-import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
@@ -37,6 +30,7 @@ import {
 import {
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
+  type ObservedLinqRequest,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
@@ -48,6 +42,8 @@ const scheduledReminderLeadMs = 180_000;
 // Keep Temporal's owner recheck after local runner cold-start/bootstrap, while
 // still well before the reminder due time.
 const scheduledReminderIdleCheckpointDelayMs = 60_000;
+const scheduledReminderMinimumRunwayMs = 45_000;
+const scheduledReminderSendWaitMs = 90_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -107,18 +103,15 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(unscheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
     expect(unscheduledStatus.nextAlarmAt ?? null).toBeNull();
 
-    const signal = await signalHostedManualRunRuntimeForTest({
+    await signalHostedManualRunRuntimeForTest({
       environment: requireScenario().runtimeEnv,
       userId,
     });
-    const scheduledState = await waitForWorkflowNextWakeAt({
+    await waitForHostedWorkspaceNextWakeAt({
       expectedNextWakeAt: scheduledReminderTimes.dueAtIso,
-      runtimeEnv: requireScenario().runtimeEnv,
-      workflowId: signal.workflowId,
+      userId,
     });
-    expect(scheduledState.lastExecutionErrorCode).toBeNull();
-    expect(scheduledState.lastExecutionKind).toBe("runtime_processing_accepted");
-    expect(scheduledState.lastDemandNextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
+    assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
 
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
@@ -127,9 +120,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       }),
     ]);
     await sleepUntil(scheduledReminderTimes.dueAtIso);
-    const sendRequest = await requireLinqStub().waitForSend({
+    const sendRequest = await waitForScheduledReminderSendWithoutNudge({
       expectedPath: `/chats/${encodeURIComponent(scheduledChatId)}/messages`,
-      scenario: requireScenario(),
+      timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
@@ -247,44 +240,37 @@ async function uploadHostedSnapshotArtifact(input: {
   );
 }
 
-async function waitForWorkflowNextWakeAt(input: {
+async function waitForHostedWorkspaceNextWakeAt(input: {
   expectedNextWakeAt: string;
-  runtimeEnv: NodeJS.ProcessEnv;
-  workflowId: string;
-}): Promise<HostedRuntimeWorkflowState> {
-  const client = await createHostedRuntimeTemporalClientFromEnv(input.runtimeEnv);
-  const handle = client.workflow.getHandle(input.workflowId);
+  userId: string;
+}): Promise<void> {
   const startedAt = Date.now();
-  let latestState: HostedRuntimeWorkflowState | null = null;
+  let latestNextWakeAt: string | null = null;
+  let latestNextAlarmAt: string | null = null;
   let latestError: string | null = null;
 
-  try {
-    while ((Date.now() - startedAt) < 180_000) {
-      try {
-        latestState = await handle.query<HostedRuntimeWorkflowState>(
-          HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-        );
-        if (latestState.lastDemandNextWakeAt === input.expectedNextWakeAt) {
-          return latestState;
-        }
-      } catch (error) {
-        latestError = error instanceof Error ? error.message : String(error);
+  while ((Date.now() - startedAt) < 120_000) {
+    try {
+      const status = await requireScenario().harness.readUserStatus(input.userId);
+      latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
+      latestNextAlarmAt = status.nextAlarmAt ?? null;
+      if (latestNextWakeAt === input.expectedNextWakeAt) {
+        return;
       }
-
-      await sleep(1_000);
+    } catch (error) {
+      latestError = error instanceof Error ? error.message : String(error);
     }
-  } finally {
-    await client.connection.close();
+
+    await sleep(1_000);
   }
 
-  throw new Error(
-    [
-      "Timed out waiting for Temporal workflow to schedule the reminder wake.",
-      `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
-      latestState ? `last state: ${JSON.stringify(latestState)}` : null,
-      latestError ? `last query error: ${latestError}` : null,
-    ].filter((line): line is string => Boolean(line)).join("\n"),
-  );
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "Timed out waiting for the hosted workspace to checkpoint the scheduled reminder wake.",
+    `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
+    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
+    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
+    latestError ? `latest status read error: ${latestError}` : null,
+  ].filter((line): line is string => Boolean(line))));
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -301,6 +287,52 @@ async function sleepUntil(dueAtIso: string): Promise<void> {
   if (delayMs > 0) {
     await sleep(delayMs);
   }
+}
+
+function assertScheduledReminderRunway(dueAtIso: string): void {
+  const dueAtMs = Date.parse(dueAtIso);
+  if (!Number.isFinite(dueAtMs)) {
+    throw new Error(`Invalid scheduled reminder due timestamp: ${dueAtIso}`);
+  }
+
+  const remainingMs = dueAtMs - Date.now();
+  if (remainingMs < scheduledReminderMinimumRunwayMs) {
+    throw new Error([
+      "Scheduled reminder E2E reached Temporal scheduling too close to due time.",
+      `remainingMs: ${remainingMs}`,
+      `minimumRunwayMs: ${scheduledReminderMinimumRunwayMs}`,
+      `dueAtIso: ${dueAtIso}`,
+    ].join("\n"));
+  }
+}
+
+async function waitForScheduledReminderSendWithoutNudge(input: {
+  expectedPath: string;
+  timeoutMs: number;
+  userId: string;
+}): Promise<ObservedLinqRequest> {
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < input.timeoutMs) {
+    const matchingRequest = requireLinqStub().observedRequests.find((request) =>
+      request.method === "POST" && request.url === input.expectedPath
+    );
+    if (matchingRequest) return matchingRequest;
+
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "Timed out waiting for the scheduled Linq reminder send without runner nudges.",
+    `expected path: ${input.expectedPath}`,
+    `observed requests: ${JSON.stringify(summarizeObservedLinqRequests())}`,
+  ]));
+}
+
+function summarizeObservedLinqRequests(): Array<{ method: string; url: string }> {
+  return requireLinqStub().observedRequests.slice(-20).map((request) => ({
+    method: request.method,
+    url: request.url,
+  }));
 }
 
 async function writeSyntheticVaultMetadata(

@@ -49,6 +49,7 @@ import {
   MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   resolveMurphAgeSourceRoute,
+  summarizeMurphAgeWearableResidualLayerContractForFamily,
   type MurphAgeFunctionResidualParameterPack,
   type MurphAgeSourceRouteId,
   type MurphAgeSubmittedCalculatorViewBundle,
@@ -561,6 +562,12 @@ const murphAgeWearableResidualLayerIdSchema = z.enum([
   'resting-heart-rate-residual-v1',
   'sleep-residual-v1',
 ])
+const murphAgeWearableSingleFamilyResidualLayerIdSchema = z.enum([
+  'activity-residual-v1',
+  'hrv-residual-v1',
+  'resting-heart-rate-residual-v1',
+  'sleep-residual-v1',
+])
 const murphAgeSourceRouteIdSchema = z.custom<MurphAgeSourceRouteId>(
   (value): value is MurphAgeSourceRouteId =>
     typeof value === 'string' && resolveMurphAgeSourceRoute(value) !== null,
@@ -584,10 +591,21 @@ const murphAgeWearableResidualParameterPackSchema: z.ZodType<MurphAgeWearableRes
   globalWearableCapLogit: z.number().finite().positive().max(1),
   horizonYears: z.literal(10),
   intercept: z.number().finite(),
-  layerId: murphAgeWearableResidualLayerIdSchema,
+  layerId: murphAgeWearableSingleFamilyResidualLayerIdSchema,
   packHash: z.string().min(8).max(128).regex(/^[a-z0-9][a-z0-9._-]+$/u),
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION),
   sourceRouteId: murphAgeSourceRouteIdSchema,
+}).superRefine((pack, context) => {
+  const expectedLayerId = murphAgeWearableSingleFamilyResidualLayerIdSchema.parse(
+    summarizeMurphAgeWearableResidualLayerContractForFamily(pack.family).layerId,
+  )
+  if (pack.layerId !== expectedLayerId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Wearable residual parameter pack layerId must be ${expectedLayerId} for family ${pack.family}.`,
+      path: ['layerId'],
+    })
+  }
 })
 const murphAgeFunctionResidualParameterPackSchema: z.ZodType<MurphAgeFunctionResidualParameterPack> = z.object({
   anchorCardId: murphAgeScoreBearingModelCardIdSchema,
@@ -1488,6 +1506,7 @@ export const murphAgeSubmittedPreviewPayloadSchema = z.object({
   submittedMetrics: z.array(murphAgeSubmittedMetricInputSchema).min(1),
   functionResidualParameterPack: murphAgeFunctionResidualParameterPackSchema.optional(),
   wearableResidualParameterPack: murphAgeWearableResidualParameterPackSchema.optional(),
+  wearableResidualParameterPacks: z.array(murphAgeWearableResidualParameterPackSchema).min(1).optional(),
 })
 type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
 type MurphAgeSubmittedPreviewOptions = {
