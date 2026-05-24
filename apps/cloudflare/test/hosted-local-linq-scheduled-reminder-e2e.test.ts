@@ -44,8 +44,10 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
-const scheduledReminderLeadMs = 90_000;
-const scheduledReminderIdleCheckpointDelayMs = 1_000;
+const scheduledReminderLeadMs = 180_000;
+// Keep Temporal's owner recheck after local runner cold-start/bootstrap, while
+// still well before the reminder due time.
+const scheduledReminderIdleCheckpointDelayMs = 60_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -156,7 +158,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
-  }, 300_000);
+  }, 480_000);
 });
 
 async function startScenario(): Promise<void> {
