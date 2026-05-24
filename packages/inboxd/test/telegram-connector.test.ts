@@ -859,8 +859,24 @@ test("createTelegramPollConnector omits unscoped direct chats without explicit b
                 from: { id: 111, first_name: "Alice" },
               },
             },
+            {
+              update_id: 2,
+              business_message: {
+                message_id: 2,
+                date: 1_773_397_101,
+                text: "business direct",
+                chat: {
+                  id: 20,
+                  type: "supergroup",
+                  title: "Business DM",
+                  is_direct_messages: true,
+                },
+                from: { id: 222, first_name: "Blake" },
+                business_connection_id: "business-1",
+              },
+            },
           ],
-          nextCursor: { updateId: 1 },
+          nextCursor: { updateId: 2 },
         };
       },
       async startWatching() {
@@ -882,9 +898,9 @@ test("createTelegramPollConnector omits unscoped direct chats without explicit b
     return createPersistedCapture(capture);
   });
 
-  assert.equal(connector.id, "telegram:bot");
+  assert.equal(connector.id, "telegram:default");
   assert.deepEqual(emitted, []);
-  assert.deepEqual(cursor, { updateId: 1 });
+  assert.deepEqual(cursor, { updateId: 2 });
 });
 
 test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api shape", async () => {

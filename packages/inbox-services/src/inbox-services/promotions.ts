@@ -245,14 +245,14 @@ export async function preserveCanonicalDocumentAttachments(input: {
 }): Promise<InboxPreserveDocumentAttachmentsResult> {
   const paths = await ensureInitialized(input.loadInbox, input.input.vault)
   const inboxd = await input.loadInbox()
-  const core = await input.loadCore()
+  const core = requireDocumentPromotionCore(await input.loadCore())
   const importers = (await input.loadImporters()).createImporters({ corePort: core })
   const runtime = await inboxd.openInboxRuntime({
     vaultRoot: paths.absoluteVaultRoot,
   })
 
   try {
-    return await withLockedInboxPromotionMutation(paths, core, async () => {
+    return await withLockedInboxPromotionMutation(paths, { core }, async () => {
       const capture = requirePromotionCapture(runtime, input.input.captureId)
       const documents: InboxPreserveDocumentAttachmentsResult['documents'] = []
       const metadata = resolveCanonicalPromotionMetadata({
@@ -334,6 +334,20 @@ export function requireJournalPromotionCore(
 
   return core as CoreRuntimeModule & {
     promoteInboxJournal: NonNullable<CoreRuntimeModule['promoteInboxJournal']>
+  }
+}
+
+export function requireDocumentPromotionCore(
+  core: CoreRuntimeModule,
+): CoreRuntimeModule & {
+  importDocument: NonNullable<CoreRuntimeModule['importDocument']>
+} {
+  if (!core.importDocument) {
+    throw unsupportedPromotion('document')
+  }
+
+  return core as CoreRuntimeModule & {
+    importDocument: NonNullable<CoreRuntimeModule['importDocument']>
   }
 }
 
@@ -1054,12 +1068,21 @@ function resolveCanonicalWriteLockPort(candidate: unknown): CanonicalWriteLockPo
 
   if (candidate && typeof candidate === 'object' && 'core' in candidate) {
     const core = (candidate as { core?: unknown }).core
-    if (isCanonicalWriteLockPort(core)) {
-      return core
-    }
+    return requireCanonicalWriteLockPort(core)
   }
 
   return defaultCanonicalWriteLockPort
+}
+
+function requireCanonicalWriteLockPort(candidate: unknown): CanonicalWriteLockPort {
+  if (isCanonicalWriteLockPort(candidate)) {
+    return candidate
+  }
+
+  throw new VaultCliError(
+    'INBOX_PROMOTION_UNSUPPORTED',
+    'Canonical promotion requires a core runtime with canonical write lock support.',
+  )
 }
 
 function isCanonicalWriteLockPort(value: unknown): value is CanonicalWriteLockPort {
@@ -1136,7 +1159,7 @@ function extractCanonicalString(
 }
 
 function unsupportedPromotion(
-  target: 'journal' | 'experiment-note',
+  target: 'document' | 'journal' | 'experiment-note',
 ): VaultCliError {
   return new VaultCliError(
     'INBOX_PROMOTION_UNSUPPORTED',

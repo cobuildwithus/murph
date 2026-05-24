@@ -381,20 +381,47 @@ async function terminateSpawnedDeviceDaemon(
     return
   }
 
-  dependencies.killProcess(pid, 'SIGTERM')
+  if (!killProcessIfAlive(pid, 'SIGTERM', dependencies)) {
+    return
+  }
   const stopped = await waitForDeviceDaemonExit(
     pid,
     dependencies,
     DEVICE_DAEMON_STOP_TIMEOUT_MS,
   )
   if (!stopped && dependencies.isProcessAlive(pid)) {
-    dependencies.killProcess(pid, 'SIGKILL')
-    await waitForDeviceDaemonExit(
-      pid,
-      dependencies,
-      DEVICE_DAEMON_STOP_TIMEOUT_MS,
-    )
+    if (killProcessIfAlive(pid, 'SIGKILL', dependencies)) {
+      await waitForDeviceDaemonExit(
+        pid,
+        dependencies,
+        DEVICE_DAEMON_STOP_TIMEOUT_MS,
+      )
+    }
   }
+}
+
+function killProcessIfAlive(
+  pid: number,
+  signal: NodeJS.Signals,
+  dependencies: DeviceDaemonDependencies,
+): boolean {
+  try {
+    dependencies.killProcess(pid, signal)
+    return true
+  } catch (error) {
+    if (!isProcessGoneError(error)) {
+      throw error
+    }
+    return false
+  }
+}
+
+function isProcessGoneError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    (error as { code?: unknown }).code === 'ESRCH'
+  )
 }
 
 export async function stopManagedDeviceSyncDaemon(input: {
@@ -447,13 +474,13 @@ export async function stopManagedDeviceSyncDaemon(input: {
     )
   }
 
-  dependencies.killProcess(state.pid, 'SIGTERM')
-
-  const stopped = await waitForDeviceDaemonExit(
-    state.pid,
-    dependencies,
-    DEVICE_DAEMON_STOP_TIMEOUT_MS,
-  )
+  const stopped = killProcessIfAlive(state.pid, 'SIGTERM', dependencies)
+    ? await waitForDeviceDaemonExit(
+        state.pid,
+        dependencies,
+        DEVICE_DAEMON_STOP_TIMEOUT_MS,
+      )
+    : true
 
   if (!stopped) {
     throw new VaultCliError(
@@ -600,10 +627,8 @@ async function recoverUnmanagedReachableDeviceDaemon(input: {
     return true
   }
 
-  try {
-    input.dependencies.killProcess(pid, 'SIGTERM')
-  } catch {
-    return false
+  if (!killProcessIfAlive(pid, 'SIGTERM', input.dependencies)) {
+    return true
   }
 
   return await waitForDeviceDaemonExit(

@@ -454,7 +454,7 @@ export function readTelegramUpdateCheckpoint(cursor: Record<string, unknown> | n
 
 function normalizeTelegramAccountId(accountId: string | null | undefined): string | null {
   if (accountId === undefined) {
-    return "bot";
+    return null;
   }
 
   if (accountId === null) {

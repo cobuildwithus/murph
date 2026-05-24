@@ -321,6 +321,30 @@ test("raw tombstoning skips candidates in directories with malformed manifests",
   );
 });
 
+test("raw tombstoning skips candidates in directories with symlinked manifests", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await fs.symlink(
+    "manifest.json",
+    path.join(vaultRoot, RAW_DIRECTORY, "manifest.symlink.json"),
+  );
+
+  const result = await runWearableStorageMigrationPass({
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    validateAfter: false,
+    vaultRoot,
+  });
+
+  assert.equal(result.tombstonedCanonicalArtifactCount, 0);
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "03-canonical-wearable-records.json"), "utf8"),
+    /sampleValues/u,
+  );
+});
+
 test("raw tombstoning rejects cross-manifest role disagreement", async () => {
   const vaultRoot = await createRawArtifactFixture();
   await writeAdditionalRawManifest(vaultRoot, (manifest) => ({
@@ -436,6 +460,59 @@ test("dense raw timeseries tombstoning treats unicode-escaped ledger raw referen
   assert.equal(result.tombstonedDenseRawArtifactCount, 0);
   const rawText = await fs.readFile(path.join(vaultRoot, rawPath), "utf8");
   assert.match(rawText, /sampleValues/u);
+});
+
+test("dense raw timeseries tombstoning treats malformed ledger shards as blockers", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+  });
+  const rawPath = `${RAW_DIRECTORY}/01-provider-timeseries-heart-rate.json`;
+  const eventShardPath = "ledger/events/2026/2026-05.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `{"rawRef":\n`,
+    "utf8",
+  );
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  assert.ok(result.skippedCount > 0);
+  const rawText = await fs.readFile(path.join(vaultRoot, rawPath), "utf8");
+  assert.match(rawText, /sampleValues/u);
+});
+
+test("canonical raw tombstoning treats malformed ledger shards as blockers", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  const canonicalPath = `${RAW_DIRECTORY}/03-canonical-wearable-records.json`;
+  const eventShardPath = "ledger/events/2026/2026-05.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `{"rawRef":\n`,
+    "utf8",
+  );
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+  });
+
+  assert.equal(result.tombstonedCanonicalArtifactCount, 0);
+  assert.ok(result.skippedCount > 0);
+  const canonicalText = await fs.readFile(path.join(vaultRoot, canonicalPath), "utf8");
+  assert.match(canonicalText, /sampleValues/u);
 });
 
 test("dense raw timeseries tombstoning treats plain ledger raw references as blockers", async () => {
