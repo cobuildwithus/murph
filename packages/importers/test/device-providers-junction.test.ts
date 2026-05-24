@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { workoutSessionSchema } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
@@ -8,6 +9,21 @@ import {
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
 } from "../src/index.ts";
+
+function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
+  for (const event of events) {
+    if (event.fields?.workout === undefined) {
+      continue;
+    }
+
+    const result = workoutSessionSchema.safeParse(event.fields.workout);
+    assert.equal(
+      result.success,
+      true,
+      result.success ? undefined : `workout contract paths: ${result.error.issues.map((issue) => issue.path.join(".")).join(", ")}`,
+    );
+  }
+}
 
 test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   const slugCases: Array<[string, Record<string, unknown>]> = [
@@ -1122,6 +1138,166 @@ test("Junction normalizer treats day-only timestamps as floating wall dates", ()
   assert.equal(stepSample, undefined);
 });
 
+test("Junction normalizer only emits complete sleep and workout sessions", () => {
+  const longProviderWorkoutId = `garmin-workout-${"x".repeat(220)}`;
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "sleep-doc",
+          bedtime_start: "2026-05-20T02:00:00+00:00",
+          bedtime_stop: "2026-05-20T10:00:00+00:00",
+          duration: 28800,
+          sleepScore: 82,
+        },
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "sleep-incomplete",
+          date: "2026-05-21T10:00:00+00:00",
+          bedtime_start: "2026-05-21T02:00:00+00:00",
+          sleepScore: 78,
+        },
+      ],
+      workouts: [
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          provider_id: longProviderWorkoutId,
+          time_start: "2026-05-20T12:00:00+00:00",
+          time_end: "2026-05-20T12:30:00+00:00",
+          moving_time: 1800,
+          sport: {
+            name: "Trail Run",
+          },
+          distance: 5000,
+          calories: 320,
+          average_hr: 145,
+          max_hr: 175,
+        },
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "workout-incomplete",
+          observedAt: "2026-05-20T15:00:00+00:00",
+          sport: {
+            name: "Walk",
+          },
+          distance: 1000,
+          calories: 90,
+          average_hr: 101,
+        },
+      ],
+    },
+  });
+
+  assertWorkoutSessionsMatchContract(payload.events ?? []);
+
+  const sleepSessions = payload.events?.filter((event) => event.kind === "sleep_session") ?? [];
+  assert.equal(sleepSessions.length, 1);
+  assert.equal(sleepSessions[0]?.occurredAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepSessions[0]?.fields?.startAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepSessions[0]?.fields?.endAt, "2026-05-20T10:00:00.000Z");
+  assert.equal(sleepSessions[0]?.fields?.durationMinutes, 480);
+
+  const sleepScoreEvents = payload.events?.filter((event) => event.fields?.metric === "sleep-score") ?? [];
+  assert.equal(sleepScoreEvents.length, 2);
+
+  const workoutSessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+  assert.equal(workoutSessions.length, 1);
+  assert.equal(workoutSessions[0]?.fields?.activityType, "trail-run");
+  assert.equal(workoutSessions[0]?.fields?.durationMinutes, 30);
+  assert.equal(workoutSessions[0]?.fields?.distanceKm, 5);
+  assert.equal("averageHeartRate" in (workoutSessions[0]?.fields ?? {}), false);
+  assert.equal("maxHeartRate" in (workoutSessions[0]?.fields ?? {}), false);
+  assert.equal("totalCalories" in (workoutSessions[0]?.fields ?? {}), false);
+  assert.deepEqual(workoutSessions[0]?.fields?.workout, {
+    sourceApp: "garmin",
+    sourceWorkoutId: longProviderWorkoutId.slice(0, 200),
+    startedAt: "2026-05-20T12:00:00.000Z",
+    endedAt: "2026-05-20T12:30:00.000Z",
+    sessionNote: "Trail Run",
+    exercises: [],
+  });
+
+  const workoutMetrics = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  assert.ok(workoutMetrics.some((event) =>
+    event.fields?.metric === "active-calories"
+    && event.fields.value === 320
+    && event.occurredAt === "2026-05-20T12:00:00.000Z"
+  ));
+  assert.ok(workoutMetrics.some((event) =>
+    event.fields?.metric === "average-heart-rate"
+    && event.fields.value === 145
+    && event.fields.unit === "bpm"
+    && event.occurredAt === "2026-05-20T12:00:00.000Z"
+    && event.dataOrigin?.observedAtRaw === "2026-05-20T12:00:00+00:00"
+    && event.externalRef?.resourceId === workoutSessions[0]?.externalRef?.resourceId
+  ));
+  assert.ok(workoutMetrics.some((event) =>
+    event.fields?.metric === "max-heart-rate"
+    && event.fields.value === 175
+    && event.fields.unit === "bpm"
+    && event.occurredAt === "2026-05-20T12:00:00.000Z"
+  ));
+  assert.ok(workoutMetrics.some((event) =>
+    event.fields?.metric === "active-calories"
+    && event.fields.value === 90
+    && event.occurredAt === "2026-05-20T15:00:00.000Z"
+  ));
+  assert.ok(workoutMetrics.some((event) =>
+    event.fields?.metric === "average-heart-rate"
+    && event.fields.value === 101
+    && event.occurredAt === "2026-05-20T15:00:00.000Z"
+  ));
+
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workouts"));
+});
+
+test("Junction workout provider IDs drive stable summary external refs", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      workouts: [
+        {
+          source: { provider: "garmin" },
+          provider_id: "provider-workout-stable",
+          time_start: "2026-05-20T12:00:00+00:00",
+          time_end: "2026-05-20T12:30:00+00:00",
+          moving_time: 1800,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          provider_id: "provider-workout-stable",
+          time_start: "2026-05-21T12:00:00+00:00",
+          time_end: "2026-05-21T12:45:00+00:00",
+          moving_time: 2700,
+          sport: { name: "Run" },
+        },
+      ],
+    },
+  });
+
+  assertWorkoutSessionsMatchContract(payload.events ?? []);
+
+  const sessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions[0]?.externalRef?.resourceId, sessions[1]?.externalRef?.resourceId);
+});
+
 test("Junction normalizer ignores aggregator provider and ambiguous type provenance fields", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
@@ -1135,6 +1311,7 @@ test("Junction normalizer ignores aggregator provider and ambiguous type provena
         sourceProviderSlug: "oura",
         observedAt: "2026-04-22T12:00:00Z",
         type: "run",
+        durationMinutes: 42,
         distanceKm: 7.2,
       }],
       profile: {
