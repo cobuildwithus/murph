@@ -676,6 +676,53 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
+  it("locks webhook trace owners in deterministic unique order before account deletion", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
+      registry: {
+        get: vi.fn(() => null),
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+      transactionDeviceConnections: [
+        {
+          id: "dsc_whoop",
+          provider: "whoop",
+          providerAccountBlindIndex: "hbdi_c",
+        },
+        {
+          id: "dsc_oura_b",
+          provider: "oura",
+          providerAccountBlindIndex: "hbdi_b",
+        },
+        {
+          id: "dsc_oura_a",
+          provider: "oura",
+          providerAccountBlindIndex: "hbdi_a",
+        },
+        {
+          id: "dsc_oura_a_duplicate",
+          provider: "oura",
+          providerAccountBlindIndex: "hbdi_a",
+        },
+      ],
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.filter((entry) => entry.startsWith("executeRaw:"))).toEqual([
+      "executeRaw:oura:hbdi_a",
+      "executeRaw:oura:hbdi_b",
+      "executeRaw:whoop:hbdi_c",
+    ]);
+  });
+
   it("reports incomplete configured Cloudflare cleanup after Prisma deletion commits", async () => {
     const order: string[] = [];
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
@@ -1456,8 +1503,14 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
-    $executeRaw: async () => {
+    $executeRaw: async (...args: unknown[]) => {
       input.operationOrder?.push("executeRaw");
+      const lockOwner = args.slice(1).find((value): value is string =>
+        typeof value === "string" && value.includes(":")
+      );
+      if (lockOwner) {
+        input.operationOrder?.push(`executeRaw:${lockOwner}`);
+      }
       return 1;
     },
     $queryRaw: async () => {

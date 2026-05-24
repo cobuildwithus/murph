@@ -74,6 +74,18 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
   now: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedWhatsAppMessagingConsentWriteResult> {
+  const eventId = input.eventId ?? generateHostedWhatsAppConsentEventId();
+  if (await isHostedWhatsAppConsentEventDuplicateTx({
+    eventId,
+    prisma: input.prisma,
+  })) {
+    return {
+      applied: false,
+      duplicate: true,
+      stale: false,
+    };
+  }
+
   const existingGrant = await input.prisma.hostedConsentGrant.findUnique({
     where: {
       memberId_scope: {
@@ -83,7 +95,7 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
     },
   });
 
-  if (existingGrant && existingGrant.updatedAt >= input.now) {
+  if (existingGrant && existingGrant.updatedAt > input.now) {
     return {
       applied: false,
       duplicate: false,
@@ -96,37 +108,21 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
     : existingGrant
       ? readHostedWhatsAppConsentDocumentVersions(existingGrant.documentVersionsJson)
       : buildCurrentHostedConsentDocumentVersions(HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE);
-  let event: { id: string };
-
-  try {
-    event = await input.prisma.hostedConsentEvent.create({
-      data: {
-        action: input.action,
-        createdAt: input.now,
-        documentVersionsJson: documentVersions,
-        id: input.eventId ?? generateHostedWhatsAppConsentEventId(),
-        memberId: input.memberId,
-        scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
-        source: "whatsapp",
-      },
+  const createConsentEventResult = () =>
+    createHostedWhatsAppConsentEventAndBuildResultTx({
+      action: input.action,
+      documentVersions,
+      eventId,
+      memberId: input.memberId,
+      now: input.now,
+      prisma: input.prisma,
     });
-  } catch (error) {
-    if (isPrismaUniqueViolation(error)) {
-      return {
-        applied: false,
-        duplicate: true,
-        stale: false,
-      };
-    }
-
-    throw error;
-  }
 
   if (input.action === "granted") {
     const grantData = {
       documentVersionsJson: documentVersions,
       grantedAt: input.now,
-      lastEventId: event.id,
+      lastEventId: eventId,
       revokedAt: null,
       source: "whatsapp",
       status: "granted",
@@ -141,7 +137,11 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
         prisma: input.prisma,
       });
 
-      return buildHostedWhatsAppConsentStaleWriteResult(updated);
+      if (updated.count !== 1) {
+        return buildHostedWhatsAppConsentStaleWriteResult();
+      }
+
+      return await createConsentEventResult();
     }
 
     try {
@@ -170,7 +170,7 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
         },
       });
 
-      if (!racedGrant || racedGrant.updatedAt >= input.now) {
+      if (!racedGrant || racedGrant.updatedAt > input.now) {
         return {
           applied: false,
           duplicate: false,
@@ -185,21 +185,21 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
         prisma: input.prisma,
       });
 
-      return buildHostedWhatsAppConsentStaleWriteResult(updated);
+      if (updated.count !== 1) {
+        return buildHostedWhatsAppConsentStaleWriteResult();
+      }
+
+      return await createConsentEventResult();
     }
 
-    return {
-      applied: true,
-      duplicate: false,
-      stale: false,
-    };
+    return await createConsentEventResult();
   }
 
   if (existingGrant) {
     const updated = await updateHostedWhatsAppConsentGrantIfUnchangedTx({
       data: {
         documentVersionsJson: documentVersions,
-        lastEventId: event.id,
+        lastEventId: eventId,
         revokedAt: input.now,
         source: "whatsapp",
         status: "revoked",
@@ -210,8 +210,49 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
       prisma: input.prisma,
     });
 
-    return buildHostedWhatsAppConsentStaleWriteResult(updated);
+    if (updated.count !== 1) {
+      return buildHostedWhatsAppConsentStaleWriteResult();
+    }
   }
+
+  return await createConsentEventResult();
+}
+
+async function isHostedWhatsAppConsentEventDuplicateTx(input: {
+  eventId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const event = await input.prisma.hostedConsentEvent.findUnique({
+    where: {
+      id: input.eventId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return Boolean(event);
+}
+
+async function createHostedWhatsAppConsentEventAndBuildResultTx(input: {
+  action: HostedWhatsAppConsentAction;
+  documentVersions: Record<string, string>;
+  eventId: string;
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedWhatsAppMessagingConsentWriteResult> {
+  await input.prisma.hostedConsentEvent.create({
+    data: {
+      action: input.action,
+      createdAt: input.now,
+      documentVersionsJson: input.documentVersions,
+      id: input.eventId,
+      memberId: input.memberId,
+      scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
+      source: "whatsapp",
+    },
+  });
 
   return {
     applied: true,
@@ -271,14 +312,11 @@ function readHostedWhatsAppConsentDocumentVersions(value: unknown): Record<strin
   return versions;
 }
 
-function buildHostedWhatsAppConsentStaleWriteResult(input: {
-  count: number;
-}): HostedWhatsAppMessagingConsentWriteResult {
-  const applied = input.count === 1;
+function buildHostedWhatsAppConsentStaleWriteResult(): HostedWhatsAppMessagingConsentWriteResult {
   return {
-    applied,
+    applied: false,
     duplicate: false,
-    stale: !applied,
+    stale: true,
   };
 }
 
