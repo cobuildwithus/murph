@@ -220,15 +220,16 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(output.status, "abstain");
     assert.equal(output.mode, "product");
     assert.equal(output.result, null);
-    assert.equal(output.authorization.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(output.authorization.cardId, "l1b_glycemia_body_10y_acm_research");
     assert.equal(output.authorization.productAuthorized, false);
     assert.equal(output.authorization.riskToAgeDisplayAuthorized, false);
     assert.equal(output.authorization.contextOnlyMetricKeys.includes("steps"), true);
     assert.equal(output.authorization.contextOnlyMetricKeys.includes("adl-limitation-count"), true);
-    assert.equal(output.bundleAssessment.bundleId, "lab9-bp-body");
-    assert.equal(output.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(output.bundleAssessment.bundleId, "l1b-glycemia-body");
+    assert.equal(output.cardPolicy?.cardId, "l1b_glycemia_body_10y_acm_research");
     assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
-    assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:albumin:2026-05-01:lab:0"), true);
+    assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:hba1c:2026-05-01:lab:0"), true);
+    assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:bmi:2026-05-08:measurement:0"), true);
     assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), false);
     assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
     assert.equal(output.contextAssessments[0]?.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
@@ -560,8 +561,8 @@ test("assessMurphAgeWearableShadowReadinessFromVault reports sanitized shadow re
     });
 
     assert.equal(readiness.schemaVersion, "murph.age.wearable-shadow-readiness.v1");
-    assert.equal(readiness.anchor.anchorCardId, "lab9_bp_body_10y_acm_research");
-    assert.equal(readiness.anchor.bundleId, "lab9-bp-body");
+    assert.equal(readiness.anchor.anchorCardId, "l1b_glycemia_body_10y_acm_research");
+    assert.equal(readiness.anchor.bundleId, "l1b-glycemia-body");
     assert.deepEqual(readiness.blockedFamilies, []);
     assert.equal(readiness.readyFamilies.includes("activity"), true);
     assert.equal(readiness.readyFamilies.includes("sleep"), true);
@@ -1016,10 +1017,11 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
         status: "required",
       },
     ]);
-    assert.equal(readiness.bundle.bundleId, "lab9-bp-body");
+    assert.equal(readiness.bundle.bundleId, "l1b-glycemia-body");
     assert.equal(readiness.bundle.status, "ready");
-    assert.equal(readiness.bundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(readiness.bundle.recommendedCardId, "l1b_glycemia_body_10y_acm_research");
     assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
+      "l1b-glycemia-body",
       "lab9-bp-body",
       "lab5-bp-bmi",
       "l1-glycemia",
@@ -1038,7 +1040,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
       false,
     );
     assert.deepEqual(readiness.scoreReadiness, {
-      bundleId: "lab9-bp-body",
+      bundleId: "l1b-glycemia-body",
       contextOnly: false,
       inputReady: true,
       productAgePolicyReady: false,
@@ -1057,15 +1059,16 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
         "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
       ],
       productRiskPolicyReady: false,
-      recommendedCardId: "lab9_bp_body_10y_acm_research",
+      recommendedCardId: "l1b_glycemia_body_10y_acm_research",
       researchModelCardRequired: true,
       researchReadiness: "ready-if-local-model-card-loaded",
       researchUsableIfModelLoaded: true,
       scoreBearingInput: true,
       status: "research-ready-product-blocked",
     });
-    assert.equal(readiness.bundle.availableFeatureKeys.includes("albumin"), true);
-    assert.equal(readiness.bundle.selectedMetricKeys.includes("albumin"), true);
+    assert.deepEqual(readiness.bundle.availableFeatureKeys.sort(), ["bmi", "glycemia"]);
+    assert.equal(readiness.bundle.selectedMetricKeys.includes("hba1c"), true);
+    assert.equal(readiness.bundle.selectedMetricKeys.includes("bmi"), true);
     assert.equal(readiness.contextBundles[0]?.bundleId, "wearable-context");
     assert.equal(readiness.contextBundles[0]?.selectedMetricKeys.includes("steps"), true);
     assert.equal(readiness.wearableBridge.scoreBearing, false);

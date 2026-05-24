@@ -3119,9 +3119,6 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
       "glucose",
       "hba1c",
       "bmi",
-      "systolic-blood-pressure",
-      "diastolic-blood-pressure",
-      "waist-circumference",
     ],
     scoreBearingSourceKinds: ["measurement", "test-result"],
     validationGate: {
@@ -3196,7 +3193,6 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
       "systolic-blood-pressure",
       "diastolic-blood-pressure",
       "bmi",
-      "waist-circumference",
     ],
     scoreBearingSourceKinds: ["measurement", "test-result"],
     validationGate: {

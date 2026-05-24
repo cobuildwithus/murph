@@ -22,12 +22,12 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
     metricPoint("wearable-coverage-index", "score", 0.86, "wearable-summary"),
   ];
   const assessments = assessMurphAgeWearableShadowIncrements({
-    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
     asOf,
     points,
   });
   const parameterPack: MurphAgeWearableResidualParameterPack = {
-    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
     calibrationIntercept: 0,
     calibrationSlope: 1,
     deploymentRights: "research-only",
@@ -65,7 +65,7 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
   ];
 
   const application = applyMurphAgeWearableResidualLayer({
-    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
     anchorRiskProbability: 0.1,
     asOf,
     assessments,
@@ -91,7 +91,7 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
   assert.equal(application.scoreContributionAuthorized, false);
 
   const noReferenceCurveApplication = applyMurphAgeWearableResidualLayer({
-    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
     anchorRiskProbability: 0.1,
     asOf,
     assessments,

@@ -1036,8 +1036,14 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.mode, 'research')
     assert.equal(view.displayStatus, 'research-only')
     assert.equal(view.selectedCardId, 'lab5_bp_bmi_transport_research')
-    assert.equal(view.arbiter.strategy, 'r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context')
-    assert.equal(view.arbiter.labConflictPolicy, 'lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback')
+    assert.equal(
+      view.arbiter.strategy,
+      'r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context',
+    )
+    assert.equal(
+      view.arbiter.labConflictPolicy,
+      'l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback',
+    )
     assert.equal(view.arbiter.wearableScorePolicy, 'context-only-not-score-bearing')
     assert.equal(view.arbiter.selectedCardRole, 'transport-fallback-and-discordance-guard')
     assert.equal(view.arbiter.selectionReason, 'transport-fallback-selected')
@@ -1318,7 +1324,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(productCalculatorView.featureDrivers.older.length, 0)
     assert.equal(productCalculatorView.featureDrivers.younger.length, 0)
     assert.equal(productCalculatorView.scoreReadiness.status, 'validation-pending')
-    assert.equal(productCalculatorView.scoreReadiness.inputBundleId, 'lab5-bp-bmi')
+    assert.equal(productCalculatorView.scoreReadiness.inputBundleId, 'l1b-glycemia-body')
     assert.equal(productCalculatorView.scoreReadiness.contextBundleIds.includes('wearable-context'), true)
     assert.equal(productCalculatorView.scoreReadiness.riskAvailable, false)
     assert.equal(productCalculatorView.scoreReadiness.biologicalAgeAvailable, false)
@@ -1400,6 +1406,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
       'function-context',
     ])
     assert.deepEqual(productOnlyCalculatorBundle.capabilities.scoreBearingBundleIds, [
+      'l1b-glycemia-body',
       'lab9-bp-body',
       'lab5-bp-bmi',
       'l1-glycemia',
@@ -1836,10 +1843,11 @@ test('age inputs reports feature readiness without metric values or point ids', 
         status: 'required',
       },
     ])
-    assert.equal(readiness.bundle.bundleId, 'lab9-bp-body')
+    assert.equal(readiness.bundle.bundleId, 'l1b-glycemia-body')
     assert.equal(readiness.bundle.status, 'ready')
-    assert.equal(readiness.bundle.recommendedCardId, 'lab9_bp_body_10y_acm_research')
+    assert.equal(readiness.bundle.recommendedCardId, 'l1b_glycemia_body_10y_acm_research')
     assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
+      'l1b-glycemia-body',
       'lab9-bp-body',
       'lab5-bp-bmi',
       'l1-glycemia',
@@ -1858,7 +1866,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
       false,
     )
     assert.deepEqual(readiness.scoreReadiness, {
-      bundleId: 'lab9-bp-body',
+      bundleId: 'l1b-glycemia-body',
       contextOnly: false,
       inputReady: true,
       productAgePolicyReady: false,
@@ -1877,18 +1885,19 @@ test('age inputs reports feature readiness without metric values or point ids', 
         'RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED',
       ],
       productRiskPolicyReady: false,
-      recommendedCardId: 'lab9_bp_body_10y_acm_research',
+      recommendedCardId: 'l1b_glycemia_body_10y_acm_research',
       researchModelCardRequired: true,
       researchReadiness: 'ready-if-local-model-card-loaded',
       researchUsableIfModelLoaded: true,
       scoreBearingInput: true,
       status: 'research-ready-product-blocked',
     })
-    assert.equal(readiness.bundle.availableFeatureKeys.includes('albumin'), true)
-    assert.equal(readiness.bundle.selectedMetricKeys.includes('albumin'), true)
+    assert.deepEqual(readiness.bundle.availableFeatureKeys.sort(), ['bmi', 'glycemia'])
+    assert.equal(readiness.bundle.selectedMetricKeys.includes('hba1c'), true)
+    assert.equal(readiness.bundle.selectedMetricKeys.includes('bmi'), true)
     assert.equal(readiness.bundle.featureStatuses.some((feature) =>
-      feature.featureKey === 'albumin'
-        && feature.selectedMetricKey === 'albumin'
+      feature.featureKey === 'glycemia'
+        && feature.selectedMetricKey === 'hba1c'
         && feature.status === 'ready'
     ), true)
     assert.equal(readiness.contextBundles[0]?.bundleId, 'wearable-context')
@@ -1914,8 +1923,8 @@ test('age inputs reports feature readiness without metric values or point ids', 
         && feature.uncertaintyAction === 'context-only'
     ), true)
     assert.equal(readiness.wearableShadow.schemaVersion, 'murph.age.wearable-shadow-readiness.v1')
-    assert.equal(readiness.wearableShadow.anchor.anchorCardId, 'lab9_bp_body_10y_acm_research')
-    assert.equal(readiness.wearableShadow.anchor.bundleId, 'lab9-bp-body')
+    assert.equal(readiness.wearableShadow.anchor.anchorCardId, 'l1b_glycemia_body_10y_acm_research')
+    assert.equal(readiness.wearableShadow.anchor.bundleId, 'l1b-glycemia-body')
     assert.deepEqual(readiness.wearableShadow.blockedFamilies, [])
     assert.equal(readiness.wearableShadow.readyFamilies.includes('activity'), true)
     assert.equal(readiness.wearableShadow.readyFamilies.includes('sleep'), true)
@@ -2076,22 +2085,22 @@ test('age report returns a product-mode public abstention instead of research-on
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
     assert.equal(report.wearableResidualLayer, null)
-    assert.equal(report.inputReadiness.bundle.bundleId, 'lab9-bp-body')
+    assert.equal(report.inputReadiness.bundle.bundleId, 'l1b-glycemia-body')
     assert.equal(report.inputReadiness.bundle.selectedMetricKeys.includes('hba1c'), true)
     assert.equal(report.inputReadiness.contextBundles[0]?.bundleId, 'wearable-context')
     assert.equal(report.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes('steps'), true)
-    assert.equal(report.researchCandidateCards.length, 4)
-    const lab9Candidate = report.researchCandidateCards.find((candidate) =>
-      candidate.cardId === 'lab9_bp_body_10y_acm_research'
+    assert.equal(report.researchCandidateCards.length, 5)
+    const l1bCandidate = report.researchCandidateCards.find((candidate) =>
+      candidate.cardId === 'l1b_glycemia_body_10y_acm_research'
     )
-    assert.ok(lab9Candidate)
-    assert.equal(lab9Candidate.selected, true)
-    assert.equal(lab9Candidate.modelLoaded, false)
-    assert.equal(lab9Candidate.inputStatus, 'ready')
-    assert.equal(lab9Candidate.blockerCodes.includes('LOCAL_MODEL_CARD_NOT_LOADED'), true)
-    assert.equal(lab9Candidate.blockerCodes.includes('PRODUCT_MODE_RESEARCH_ONLY'), true)
-    assert.equal(lab9Candidate.selectedMetricKeys.includes('hba1c'), true)
-    assert.equal(hasOwnKey(lab9Candidate, 'selectedPointIds'), false)
+    assert.ok(l1bCandidate)
+    assert.equal(l1bCandidate.selected, true)
+    assert.equal(l1bCandidate.modelLoaded, false)
+    assert.equal(l1bCandidate.inputStatus, 'ready')
+    assert.equal(l1bCandidate.blockerCodes.includes('LOCAL_MODEL_CARD_NOT_LOADED'), true)
+    assert.equal(l1bCandidate.blockerCodes.includes('PRODUCT_MODE_RESEARCH_ONLY'), true)
+    assert.equal(l1bCandidate.selectedMetricKeys.includes('hba1c'), true)
+    assert.equal(hasOwnKey(l1bCandidate, 'selectedPointIds'), false)
     const withPrivateBundleList = (
       key: 'availableFeatureKeys' | 'missingFeatureKeys' | 'selectedMetricKeys',
       value: string,
