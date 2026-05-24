@@ -76,6 +76,7 @@ const murphAgeEvidenceClassSchema = z.enum([
 ])
 const murphAgeModelCardIdSchema = z.enum([
   'function_context_no_risk',
+  'l1b_glycemia_body_10y_acm_research',
   'l1_tiny_glycemia_10y_acm_research',
   'lab5_bp_bmi_transport_research',
   'lab9_bp_body_10y_acm_research',
@@ -83,6 +84,7 @@ const murphAgeModelCardIdSchema = z.enum([
   'wearable_context_no_risk',
 ])
 const murphAgeScoreBearingModelCardIdSchema = z.enum([
+  'l1b_glycemia_body_10y_acm_research',
   'l1_tiny_glycemia_10y_acm_research',
   'lab5_bp_bmi_transport_research',
   'lab9_bp_body_10y_acm_research',
@@ -200,6 +202,7 @@ const murphAgeInputBundleIdSchema = z.enum([
   'function-context',
   'insufficient',
   'l1-glycemia',
+  'l1b-glycemia-body',
   'lab5-bp-bmi',
   'lab9-bp-body',
   'r399-nhis-proxy-anchor',
@@ -212,6 +215,7 @@ const murphAgeInputFeatureReadinessSchema = z.object({
   requiredFor: z.enum([
     'function-context',
     'l1-glycemia',
+    'l1b-glycemia-body',
     'lab5-fallback',
     'lab9-mainline',
     'optional-context',
@@ -241,6 +245,7 @@ const murphAgeSubmittedCalculatorInputBundleFeatureSpecSchema = z.object({
 const murphAgeSubmittedCalculatorInputBundleSpecIdSchema = z.enum([
   'function-context',
   'l1-glycemia',
+  'l1b-glycemia-body',
   'lab5-bp-bmi',
   'lab9-bp-body',
   'r399-nhis-proxy-anchor',
@@ -266,6 +271,7 @@ const murphAgeSubmittedCalculatorInputBundleSpecSchema = z.object({
     rule: z.enum([
       'all-required-features',
       'all-lab5-features-plus-bmi-or-blood-pressure',
+      'glycemia-plus-body',
       'one-or-more-context-features',
       'one-or-more-glycemia-features',
       'one-or-more-proxy-features',
@@ -321,6 +327,7 @@ const murphAgePublicResearchCandidateCardAssessmentSchema = z.object({
   warnings: z.array(murphAgePublicWarningSchema),
 })
 const murphAgeResearchCardRoleSchema = z.enum([
+  'current-alpha-glycemia-body-core',
   'minimal-glycemia-first-pass',
   'outcome-risk-anchor-and-fallback',
   'primary-lab-bp-body-adjuster',
@@ -333,16 +340,17 @@ const murphAgeResearchArbiterCandidateCardViewSchema =
   })
 const murphAgeResearchArbiterViewSchema = z.object({
   candidateCards: z.array(murphAgeResearchArbiterCandidateCardViewSchema),
-  labConflictPolicy: z.literal('lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback'),
+  labConflictPolicy: z.literal('l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback'),
   selectedCardRole: murphAgeResearchCardRoleSchema.nullable(),
   selectionReason: z.enum([
     'anchor-selected',
+    'current-alpha-glycemia-body-selected',
     'minimal-glycemia-selected',
     'no-score-bearing-card-selected',
     'primary-lab-card-selected',
     'transport-fallback-selected',
   ]),
-  strategy: z.literal('r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context'),
+  strategy: z.literal('r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context'),
   wearableScorePolicy: z.literal('context-only-not-score-bearing'),
 })
 const murphAgeInputScoreReadinessStatusSchema = z.enum([
@@ -942,6 +950,7 @@ const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
     'function-context',
     'insufficient',
     'l1-glycemia',
+    'l1b-glycemia-body',
     'lab5-bp-bmi',
     'lab9-bp-body',
     'r399-nhis-proxy-anchor',
@@ -1423,6 +1432,7 @@ export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
 const strictUtcTimestampSchema = isoTimestampSchema
   .refine((value) => value.endsWith('Z'), 'Expected a UTC timestamp ending in Z.')
 const murphAgeReportCardIdSchema = z.enum([
+  'l1b_glycemia_body_10y_acm_research',
   'l1_tiny_glycemia_10y_acm_research',
   'lab5_bp_bmi_transport_research',
   'lab9_bp_body_10y_acm_research',
