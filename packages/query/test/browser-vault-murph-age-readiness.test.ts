@@ -18,19 +18,20 @@ import {
   type BrowserVaultReplica,
 } from "../src/browser.ts";
 
-test("reports lab9/BP/body Murph Age research readiness without leaking values or model outputs", () => {
+test("reports current-alpha Murph Age research readiness without leaking values or model outputs", () => {
   const readiness = selectBrowserVaultMurphAgeReadiness(clientFromPoints([
     ...lab9BpBodyPoints(),
     ...wearableShadowPoints(),
   ]));
 
   assert.equal(readiness.schemaVersion, "murph.browser-vault.murph-age-readiness.v2");
-  assert.equal(readiness.primaryBundle.bundleId, "lab9-bp-body");
+  assert.equal(readiness.primaryBundle.bundleId, "l1b-glycemia-body");
   assert.equal(readiness.primaryBundle.status, "ready");
-  assert.equal(readiness.primaryBundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(readiness.primaryBundle.recommendedCardId, "l1b_glycemia_body_10y_acm_research");
   assert.equal(readiness.primaryBundle.selectedMetricKeys.includes("hba1c"), true);
-  assert.equal(readiness.primaryBundle.selectedMetricKeys.includes("systolic-blood-pressure"), true);
+  assert.equal(readiness.primaryBundle.selectedMetricKeys.includes("bmi"), true);
   assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
+    "l1b-glycemia-body",
     "lab9-bp-body",
     "lab5-bp-bmi",
     "l1-glycemia",
@@ -57,7 +58,7 @@ test("reports lab9/BP/body Murph Age research readiness without leaking values o
 
   const activity = readiness.wearableShadow.increments.find((increment) => increment.family === "activity");
   assert.equal(activity?.status, "ready");
-  assert.equal(activity?.anchorCardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(activity?.anchorCardId, "l1b_glycemia_body_10y_acm_research");
   assert.equal(activity?.readySignalMetricKeys.includes("steps"), true);
   assert.equal(activity?.selectedMetricKeys.includes("wearable-coverage-index"), true);
   assert.equal(activity?.scoreBearing, false);

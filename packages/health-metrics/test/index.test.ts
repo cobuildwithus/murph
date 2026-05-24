@@ -123,6 +123,7 @@ import {
   type MurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   type MurphAgeRiskModel,
   type MurphAgeSourceRoute,
+  type MurphAgeSubmittedCalculatorInputBundleSpecId,
   type MurphAgeValidationEvidenceTier,
   type MurphAgeIncrementEvaluationCard,
   type MurphAgeFunctionResidualParameterPack,
@@ -2343,9 +2344,9 @@ test("keeps Murph Age feature attributions informative when displayed risk-age i
   );
 });
 
-test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wearable context", () => {
+test("assesses Murph Age research input bundles for current alpha, Lab5 fallback, and wearable context", () => {
   const asOf = "2026-05-10T00:00:00.000Z";
-  const lab9 = assessMurphAgeInputBundle({
+  const currentAlpha = assessMurphAgeInputBundle({
     asOf,
     points: [
       labMetricPoint("albumin", "g/dL", 4.4),
@@ -2400,12 +2401,13 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
     ],
   });
 
-  assert.equal(lab9.status, "ready");
-  assert.equal(lab9.bundleId, "lab9-bp-body");
-  assert.equal(lab9.recommendedCardId, "lab9_bp_body_10y_acm_research");
-  assert.equal(lab9.availableFeatureKeys.includes("glycemia"), true);
-  assert.equal(lab9.selectedMetricKeys.includes("hba1c"), true);
-  assert.equal(lab9.selectedMetricKeys.includes("systolic-blood-pressure"), true);
+  assert.equal(currentAlpha.status, "ready");
+  assert.equal(currentAlpha.bundleId, "l1b-glycemia-body");
+  assert.equal(currentAlpha.recommendedCardId, "l1b_glycemia_body_10y_acm_research");
+  assert.deepEqual(currentAlpha.availableFeatureKeys.sort(), ["bmi", "glycemia"]);
+  assert.equal(currentAlpha.selectedMetricKeys.includes("hba1c"), true);
+  assert.equal(currentAlpha.selectedMetricKeys.includes("bmi"), true);
+  assert.equal(currentAlpha.selectedMetricKeys.includes("systolic-blood-pressure"), false);
 
   const lab5 = assessMurphAgeInputBundle({
     asOf,
@@ -2414,23 +2416,22 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
       labMetricPoint("egfr", "mL/min/1.73m^2", 95),
       labMetricPoint("hdl-c", "mg/dL", 58),
       labMetricPoint("triglycerides", "mg/dL", 95),
-      metricPoint({
-        effectiveDate: "2026-05-08",
-        id: "metric-point:bmi:2026-05-08:fallback:0",
-        metricKey: "bmi",
-        observedAt: "2026-05-08T08:00:00.000Z",
-        recordId: "fallback_bmi",
-        sourceKind: "measurement",
-        unit: "kg/m^2",
-        value: 23.2,
-      }),
+      measurementMetricPoint("systolic-blood-pressure", "mmHg", 118),
+      measurementMetricPoint("diastolic-blood-pressure", "mmHg", 72),
     ],
   });
 
   assert.equal(lab5.status, "ready");
   assert.equal(lab5.bundleId, "lab5-bp-bmi");
   assert.equal(lab5.recommendedCardId, "lab5_bp_bmi_transport_research");
-  assert.deepEqual(lab5.availableFeatureKeys.sort(), ["bmi", "creatinine", "glycemia", "hdl-c", "triglycerides"]);
+  assert.deepEqual(lab5.availableFeatureKeys.sort(), [
+    "creatinine",
+    "diastolic-blood-pressure",
+    "glycemia",
+    "hdl-c",
+    "systolic-blood-pressure",
+    "triglycerides",
+  ]);
   assert.equal(lab5.selectedMetricKeys.includes("egfr"), true);
 
   const wearable = assessMurphAgeInputBundle({
@@ -2623,6 +2624,7 @@ test("exposes submitted Murph Age input bundle specs for calculator integration"
   const registryKeys = new Set(listMurphAgeInputBundleMetricKeys());
 
   assert.deepEqual(specs.map((spec) => spec.bundleId), [
+    "l1b-glycemia-body",
     "lab9-bp-body",
     "lab5-bp-bmi",
     "l1-glycemia",
@@ -2635,6 +2637,16 @@ test("exposes submitted Murph Age input bundle specs for calculator integration"
     true,
   );
   assert.equal(specs.every((spec) => spec.productScoreBearingAuthorized === false), true);
+
+  const l1b = assertDefined(byId.get("l1b-glycemia-body"), "l1b submitted input bundle spec");
+  assert.equal(l1b.researchAgeEstimateEligible, true);
+  assert.equal(l1b.scoreBearing, true);
+  assert.equal(l1b.cardId, "l1b_glycemia_body_10y_acm_research");
+  assert.equal(l1b.completion.rule, "glycemia-plus-body");
+  assert.deepEqual(l1b.completion.requiredFeatureKeys, ["glycemia", "bmi"]);
+  assert.equal(l1b.completion.alternativeFeatureKeyGroups.length, 0);
+  assert.equal(l1b.featureSpecs.find((feature) => feature.featureKey === "glycemia")?.requiredForCompletion, true);
+  assert.equal(l1b.featureSpecs.find((feature) => feature.featureKey === "bmi")?.requiredForCompletion, true);
 
   const lab9 = assertDefined(byId.get("lab9-bp-body"), "lab9 submitted input bundle spec");
   assert.equal(lab9.researchAgeEstimateEligible, true);
@@ -2699,9 +2711,14 @@ test("exposes submitted Murph Age input bundle specs for calculator integration"
 
 test("keeps Murph Age card metrics reachable while wearable research signals stay non-score-bearing", () => {
   const bundleMetricKeys = new Set(listMurphAgeInputBundleMetricKeys());
+  const bundleSpecsById = new Map(listMurphAgeSubmittedCalculatorInputBundleSpecs().map((spec) => [spec.bundleId, spec]));
+  const submittedSpecMetricKeys = (bundleId: MurphAgeSubmittedCalculatorInputBundleSpecId): Set<string> =>
+    new Set(assertDefined(bundleSpecsById.get(bundleId), `submitted bundle ${bundleId} must resolve`)
+      .featureSpecs.flatMap((feature) => feature.metricKeys));
   const bundleMetricKeysById = new Map<string, Set<string>>([
-    ["lab9-bp-body", assessedBundleMetricKeys("lab9-bp-body", completeLab9BpBodyPolicyPoints())],
-    ["lab5-bp-bmi", assessedBundleMetricKeys("lab5-bp-bmi", completeLab5BpBmiPolicyPoints())],
+    ["l1b-glycemia-body", submittedSpecMetricKeys("l1b-glycemia-body")],
+    ["lab9-bp-body", submittedSpecMetricKeys("lab9-bp-body")],
+    ["lab5-bp-bmi", submittedSpecMetricKeys("lab5-bp-bmi")],
     ["l1-glycemia", new Set(["hba1c", "glucose"])],
     ["r399-nhis-proxy-anchor", assessedR399ProxyAnchorMetricKeys()],
     ["function-context", assessedBundleMetricKeys("function-context", completeFunctionContextPoints())],
@@ -3079,10 +3096,13 @@ test("keeps the wearable scoring strategy explicit while product contribution st
     strategy.residualLayerContract.parameterPackContract.supportedDeploymentRights.includes("product-authorized"),
     true,
   );
+  assert.equal(strategy.residualLayerContract.anchorCardIds[0], "l1b_glycemia_body_10y_acm_research");
+  assert.equal(strategy.residualLayerContract.anchorCardIds.includes("l1b_glycemia_body_10y_acm_research"), true);
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
   assert.equal(strategy.residualLayerContract.anchorCardIds.includes("l1_tiny_glycemia_10y_acm_research"), true);
   assert.deepEqual(strategy.residualLayerContract.anchorCardIds, listMurphAgeWearableShadowAnchorCardIds());
+  assert.equal(isMurphAgeWearableShadowAnchorCardId("l1b_glycemia_body_10y_acm_research"), true);
   assert.equal(isMurphAgeWearableShadowAnchorCardId("lab9_bp_body_10y_acm_research"), true);
   assert.equal(isMurphAgeWearableShadowAnchorCardId("lab5_bp_bmi_transport_research"), true);
   assert.equal(isMurphAgeWearableShadowAnchorCardId("l1_tiny_glycemia_10y_acm_research"), true);
@@ -4488,6 +4508,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   const productDefault = calculateMurphAgeFromInputBundle({
     asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
     chronologicalAgeYears: 45,
     models: { lab9_bp_body_10y_acm_research: researchModel },
     points: lab9WithWearableContextPoints,
@@ -4627,6 +4648,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   });
   const productWithFunctionPack = calculateMurphAgeFromInputBundle({
     asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
     chronologicalAgeYears: 45,
     functionResidualParameterPack,
     models: { lab9_bp_body_10y_acm_research: researchModel },
@@ -5316,7 +5338,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
   assert.equal(JSON.stringify(publicResearchReport.wearableResidualLayer).includes("metric-point:"), false);
   assert.equal(JSON.stringify(publicResearchReport.wearableResidualLayer).includes("10000"), false);
-  assert.equal(publicResearchReport.researchCandidateCards.length, 4);
+  assert.equal(publicResearchReport.researchCandidateCards.length, 5);
   const publicLab9Candidate = publicResearchReport.researchCandidateCards.find((candidate) =>
     candidate.cardId === "lab9_bp_body_10y_acm_research"
   );
@@ -5872,8 +5894,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   });
 
   assert.equal(lab5WithoutModel.status, "abstain");
-  assert.equal(lab5WithoutModel.bundleAssessment.bundleId, "lab5-bp-bmi");
-  assert.equal(lab5WithoutModel.cardPolicy?.cardId, "lab5_bp_bmi_transport_research");
+  assert.equal(lab5WithoutModel.bundleAssessment.bundleId, "l1b-glycemia-body");
+  assert.equal(lab5WithoutModel.cardPolicy?.cardId, "l1b_glycemia_body_10y_acm_research");
   assert.equal(lab5WithoutModel.authorization.evidenceClass, "research-transport");
   assert.equal(lab5WithoutModel.warnings.some((warning) => warning.code === "MODEL_FEATURE_MISSING"), true);
 
@@ -6079,6 +6101,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     "wearable-sleep",
   ]);
   assert.deepEqual(submittedCalculatorCapabilities.bundleIds, [
+    "l1b-glycemia-body",
     "lab9-bp-body",
     "lab5-bp-bmi",
     "l1-glycemia",
@@ -6091,12 +6114,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     "function-context",
   ]);
   assert.deepEqual(submittedCalculatorCapabilities.researchAgeEstimateEligibleBundleIds, [
+    "l1b-glycemia-body",
     "lab9-bp-body",
     "lab5-bp-bmi",
     "l1-glycemia",
     "r399-nhis-proxy-anchor",
   ]);
   assert.deepEqual(submittedCalculatorCapabilities.scoreBearingBundleIds, [
+    "l1b-glycemia-body",
     "lab9-bp-body",
     "lab5-bp-bmi",
     "l1-glycemia",
@@ -6439,11 +6464,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.selectedCardId, "lab5_bp_bmi_transport_research");
   assert.equal(
     submittedLab5ResearchView.arbiter.strategy,
-    "r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context",
+    "r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context",
   );
   assert.equal(
     submittedLab5ResearchView.arbiter.labConflictPolicy,
-    "lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback",
+    "l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback",
   );
   assert.equal(submittedLab5ResearchView.arbiter.wearableScorePolicy, "context-only-not-score-bearing");
   assert.equal(submittedLab5ResearchView.arbiter.selectedCardRole, "transport-fallback-and-discordance-guard");
@@ -7004,6 +7029,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   const policyViolation = calculateMurphAgeFromInputBundle({
     asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
     chronologicalAgeYears: 45,
     mode: "research",
     models: {
@@ -7037,6 +7063,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   const wearableSourcedBmiViolation = calculateMurphAgeFromInputBundle({
     asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
     chronologicalAgeYears: 45,
     mode: "research",
     models: { lab9_bp_body_10y_acm_research: researchModel },
@@ -7066,6 +7093,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   const unknownSourceBmiViolation = calculateMurphAgeFromInputBundle({
     asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
     chronologicalAgeYears: 45,
     mode: "research",
     models: { lab9_bp_body_10y_acm_research: researchModel },
@@ -7449,7 +7477,7 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
 
   const publicReport = toPublicMurphAgeCalculatorReport(research);
   assert.equal(publicReport.inputReadiness.bundle.bundleId, "r399-nhis-proxy-anchor");
-  assert.equal(publicReport.researchCandidateCards.length, 4);
+  assert.equal(publicReport.researchCandidateCards.length, 5);
   const publicR399Candidate = publicReport.researchCandidateCards.find((candidate) =>
     candidate.cardId === "r399_nhis_proxy_10y_acm_research"
   );
@@ -8310,41 +8338,6 @@ function assessedBundleMetricKeys(expectedBundleId: string, points: MetricPoint[
   });
   assert.equal(assessment.bundleId, expectedBundleId);
   return new Set(assessment.featureStatuses.flatMap((status) => status.metricKeys));
-}
-
-function completeLab9BpBodyPolicyPoints(): MetricPoint[] {
-  return [
-    labMetricPoint("albumin", "g/dL", 4.4),
-    labMetricPoint("creatinine", "mg/dL", 0.9),
-    labMetricPoint("egfr", "mL/min/1.73m^2", 95),
-    labMetricPoint("hba1c", "percent", 5.2),
-    labMetricPoint("glucose", "mg/dL", 92),
-    labMetricPoint("alkaline-phosphatase", "U/L", 65),
-    labMetricPoint("white-blood-cell-count", "10^3/uL", 5.5),
-    labMetricPoint("lymphocyte-percentage", "percent", 32),
-    labMetricPoint("red-cell-distribution-width", "percent", 12.5),
-    labMetricPoint("hdl-c", "mg/dL", 58),
-    labMetricPoint("triglycerides", "mg/dL", 95),
-    measurementMetricPoint("systolic-blood-pressure", "mmHg", 118),
-    measurementMetricPoint("diastolic-blood-pressure", "mmHg", 72),
-    measurementMetricPoint("bmi", "kg/m^2", 23.2),
-    measurementMetricPoint("waist-circumference", "cm", 82),
-  ];
-}
-
-function completeLab5BpBmiPolicyPoints(): MetricPoint[] {
-  return [
-    labMetricPoint("hba1c", "percent", 5.2),
-    labMetricPoint("glucose", "mg/dL", 92),
-    labMetricPoint("hdl-c", "mg/dL", 58),
-    labMetricPoint("triglycerides", "mg/dL", 95),
-    labMetricPoint("creatinine", "mg/dL", 0.9),
-    labMetricPoint("egfr", "mL/min/1.73m^2", 95),
-    measurementMetricPoint("systolic-blood-pressure", "mmHg", 118),
-    measurementMetricPoint("diastolic-blood-pressure", "mmHg", 72),
-    measurementMetricPoint("bmi", "kg/m^2", 23.2),
-    measurementMetricPoint("waist-circumference", "cm", 82),
-  ];
 }
 
 function completeFunctionContextPoints(): MetricPoint[] {
