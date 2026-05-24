@@ -70,6 +70,7 @@ import {
   listMurphAgeSourceRoutes,
   listMurphAgeSourceRoutesByLayer,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
+  listMurphAgeSubmittedCalculatorMetricInputSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableBridgeMetricSourceHints,
   listMurphAgeWearableShadowAnchorCardIds,
@@ -6077,6 +6078,61 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     submittedCalculatorViewBundle.schemaVersion,
     MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   );
+  assert.deepEqual(
+    submittedCalculatorViewBundle.inputBundleSpecs,
+    listMurphAgeSubmittedCalculatorInputBundleSpecs(),
+  );
+  assert.deepEqual(
+    submittedCalculatorViewBundle.metricInputSpecs,
+    listMurphAgeSubmittedCalculatorMetricInputSpecs(),
+  );
+  assert.equal(
+    submittedCalculatorViewBundle.inputBundleSpecs.some((spec) =>
+      spec.bundleId === "wearable-context" && spec.scoreBearing === false
+    ),
+    true,
+  );
+  const submittedMetricSpecByKey = new Map(
+    submittedCalculatorViewBundle.metricInputSpecs.map((spec) => [spec.metricKey, spec]),
+  );
+  assert.deepEqual(
+    submittedMetricSpecByKey.get("hba1c")?.researchScoreBearingCardIds,
+    [
+      "l1b_glycemia_body_10y_acm_research",
+      "lab9_bp_body_10y_acm_research",
+      "lab5_bp_bmi_transport_research",
+      "l1_tiny_glycemia_10y_acm_research",
+    ],
+  );
+  assert.equal(
+    submittedMetricSpecByKey.get("albumin")?.researchScoreBearingCardIds.includes(
+      "lab9_bp_body_10y_acm_research",
+    ),
+    true,
+  );
+  assert.equal(
+    submittedMetricSpecByKey.get("creatinine")?.researchScoreBearingCardIds.includes(
+      "lab5_bp_bmi_transport_research",
+    ),
+    true,
+  );
+  assert.equal(
+    submittedMetricSpecByKey.get("resting-heart-rate")?.calculatorRoles.includes(
+      "wearable-context",
+    ),
+    true,
+  );
+  assert.equal(
+    submittedMetricSpecByKey.get("resting-heart-rate")?.wearableScoreBearingAuthorized,
+    false,
+  );
+  for (const spec of submittedCalculatorViewBundle.metricInputSpecs.filter((inputSpec) =>
+    inputSpec.calculatorRoles.includes("wearable-context")
+  )) {
+    assert.deepEqual(spec.researchScoreBearingCardIds, []);
+    assert.equal(spec.productScoreBearingAuthorized, false);
+    assert.equal(spec.wearableScoreBearingAuthorized, false);
+  }
   const submittedCalculatorCapabilities = submittedCalculatorViewBundle.capabilities;
   assert.equal(
     submittedCalculatorCapabilities.schemaVersion,

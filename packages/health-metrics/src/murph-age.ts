@@ -31,7 +31,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.research-calculator-view.v13" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
-  "murph.age.submitted-calculator-view-bundle.v3" as const;
+  "murph.age.submitted-calculator-view-bundle.v4" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
   "murph.age.submitted-calculator-capability.v2" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION =
@@ -1460,6 +1460,8 @@ export interface MurphAgeResearchCalculatorReportAndView {
 
 export interface MurphAgeSubmittedCalculatorViewBundle {
   capabilities: MurphAgeSubmittedCalculatorCapabilitySummary;
+  inputBundleSpecs: MurphAgeSubmittedCalculatorInputBundleSpec[];
+  metricInputSpecs: MurphAgeSubmittedCalculatorMetricInputSpec[];
   product: MurphAgeCalculatorReportAndView;
   researchPreview: MurphAgeResearchCalculatorReportAndView | null;
   schemaVersion: typeof MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION;
@@ -7354,6 +7356,8 @@ export function buildMurphAgeSubmittedCalculatorViewBundle(
     : null;
   return {
     capabilities: summarizeMurphAgeSubmittedCalculatorCapabilities(),
+    inputBundleSpecs: listMurphAgeSubmittedCalculatorInputBundleSpecs(),
+    metricInputSpecs: listMurphAgeSubmittedCalculatorMetricInputSpecs(),
     product,
     researchPreview,
     schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,

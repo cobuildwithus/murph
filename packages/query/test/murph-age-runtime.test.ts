@@ -11,6 +11,8 @@ import {
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   listMurphAgeInputBundleMetricKeys,
+  listMurphAgeSubmittedCalculatorInputBundleSpecs,
+  listMurphAgeSubmittedCalculatorMetricInputSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
   normalizeMetricValue,
@@ -978,6 +980,53 @@ test("getMurphAgeSubmittedCalculatorViewBundle returns product-safe output plus 
     assert.equal(bundle.researchPreview?.report.wearableResidualLayer?.scoreBearing, false);
     assert.equal(bundle.capabilities.acceptedMetricKeys.includes("hba1c"), true);
     assert.equal(bundle.capabilities.acceptedMetricKeys.includes("steps"), true);
+    assert.deepEqual(bundle.inputBundleSpecs, listMurphAgeSubmittedCalculatorInputBundleSpecs());
+    assert.deepEqual(bundle.metricInputSpecs, listMurphAgeSubmittedCalculatorMetricInputSpecs());
+    assert.equal(
+      bundle.inputBundleSpecs.some((spec) =>
+        spec.bundleId === "wearable-context" && spec.scoreBearing === false
+      ),
+      true,
+    );
+    const submittedMetricSpecByKey = new Map(
+      bundle.metricInputSpecs.map((spec) => [spec.metricKey, spec]),
+    );
+    assert.deepEqual(
+      submittedMetricSpecByKey.get("hba1c")?.researchScoreBearingCardIds,
+      [
+        "l1b_glycemia_body_10y_acm_research",
+        "lab9_bp_body_10y_acm_research",
+        "lab5_bp_bmi_transport_research",
+        "l1_tiny_glycemia_10y_acm_research",
+      ],
+    );
+    assert.equal(
+      submittedMetricSpecByKey.get("albumin")?.researchScoreBearingCardIds.includes(
+        "lab9_bp_body_10y_acm_research",
+      ),
+      true,
+    );
+    assert.equal(
+      submittedMetricSpecByKey.get("creatinine")?.researchScoreBearingCardIds.includes(
+        "lab5_bp_bmi_transport_research",
+      ),
+      true,
+    );
+    assert.equal(
+      submittedMetricSpecByKey.get("hrv-rmssd")?.calculatorRoles.includes("wearable-context"),
+      true,
+    );
+    assert.equal(
+      submittedMetricSpecByKey.get("hrv-rmssd")?.wearableScoreBearingAuthorized,
+      false,
+    );
+    for (const spec of bundle.metricInputSpecs.filter((inputSpec) =>
+      inputSpec.calculatorRoles.includes("wearable-context")
+    )) {
+      assert.deepEqual(spec.researchScoreBearingCardIds, []);
+      assert.equal(spec.productScoreBearingAuthorized, false);
+      assert.equal(spec.wearableScoreBearingAuthorized, false);
+    }
     assert.deepEqual(bundle.capabilities.outputBoundary, {
       modelParametersExportAllowed: false,
       participantLevelExportAllowed: false,
