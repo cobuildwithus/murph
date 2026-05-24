@@ -317,6 +317,7 @@ export async function startManagedDeviceSyncDaemon(input: {
     await writeDeviceDaemonState(paths, stateRecord, dependencies)
     await writeManagedControlToken(paths, controlToken, dependencies)
   } catch (error) {
+    await terminateSpawnedDeviceDaemon(child.pid, dependencies)
     await dependencies.removeFile(paths.launcherStatePath)
     await removeManagedControlToken(paths, dependencies)
     throw error
@@ -330,9 +331,7 @@ export async function startManagedDeviceSyncDaemon(input: {
   )
 
   if (!healthy) {
-    if (dependencies.isProcessAlive(child.pid)) {
-      dependencies.killProcess(child.pid, 'SIGTERM')
-    }
+    await terminateSpawnedDeviceDaemon(child.pid, dependencies)
     await dependencies.removeFile(paths.launcherStatePath)
     await removeManagedControlToken(paths, dependencies)
     const startupLogSnippet = await readRecentDeviceDaemonLog(
@@ -372,6 +371,30 @@ export async function startManagedDeviceSyncDaemon(input: {
         : 'Murph started and is now managing the local device sync daemon.',
     started: true,
   })
+}
+
+async function terminateSpawnedDeviceDaemon(
+  pid: number,
+  dependencies: DeviceDaemonDependencies,
+): Promise<void> {
+  if (!dependencies.isProcessAlive(pid)) {
+    return
+  }
+
+  dependencies.killProcess(pid, 'SIGTERM')
+  const stopped = await waitForDeviceDaemonExit(
+    pid,
+    dependencies,
+    DEVICE_DAEMON_STOP_TIMEOUT_MS,
+  )
+  if (!stopped && dependencies.isProcessAlive(pid)) {
+    dependencies.killProcess(pid, 'SIGKILL')
+    await waitForDeviceDaemonExit(
+      pid,
+      dependencies,
+      DEVICE_DAEMON_STOP_TIMEOUT_MS,
+    )
+  }
 }
 
 export async function stopManagedDeviceSyncDaemon(input: {

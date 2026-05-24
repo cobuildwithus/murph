@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
@@ -9,7 +9,8 @@ import {
 
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
-import { pathExists, walkVaultFiles } from "./fs.ts";
+import { walkVaultFiles } from "./fs.ts";
+import { readJsonlRecords } from "./jsonl.ts";
 import {
   isRawManifestFileName,
   parseRawImportManifest,
@@ -23,6 +24,7 @@ import {
   normalizeRelativeVaultPath,
   resolveVaultPath,
 } from "./path-safety.ts";
+import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
 import { assertValidVault } from "./vault.ts";
 import {
   compactLegacyWearableReceiptEnvelopes,
@@ -732,14 +734,14 @@ async function rawPathAppearsInLedgerReference(
   vaultRoot: string,
   targetPath: string,
 ): Promise<boolean> {
-  const targetPathVariants = [...new Set([
-    targetPath,
-    targetPath.replaceAll("/", "\\/"),
-  ])];
   for (const directory of ["ledger/events", "ledger/samples", "ledger/metric-samples"]) {
     const files = await walkVaultFiles(vaultRoot, directory, { extension: ".jsonl" });
     for (const file of files) {
-      if (await textFileContainsAny(resolveVaultPath(vaultRoot, file).absolutePath, targetPathVariants)) {
+      const records = await readJsonlRecords({
+        vaultRoot,
+        relativePath: file,
+      });
+      if (records.some((record) => decodedJsonValueContainsString(record, targetPath))) {
         return true;
       }
     }
@@ -747,23 +749,19 @@ async function rawPathAppearsInLedgerReference(
   return false;
 }
 
-async function textFileContainsAny(absolutePath: string, needles: readonly string[]): Promise<boolean> {
-  const stream = createReadStream(absolutePath, { encoding: "utf8" });
-  const overlapLength = Math.max(0, ...needles.map((needle) => needle.length - 1));
-  let suffix = "";
-
-  try {
-    for await (const chunk of stream) {
-      const content = `${suffix}${chunk}`;
-      if (needles.some((needle) => content.includes(needle))) {
-        return true;
-      }
-      suffix = overlapLength === 0 ? "" : content.slice(-overlapLength);
-    }
-    return false;
-  } finally {
-    stream.destroy();
+function decodedJsonValueContainsString(value: unknown, target: string): boolean {
+  if (typeof value === "string") {
+    return value === target;
   }
+  if (Array.isArray(value)) {
+    return value.some((item) => decodedJsonValueContainsString(item, target));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).some((item) =>
+      decodedJsonValueContainsString(item, target)
+    );
+  }
+  return false;
 }
 
 async function assertRawManifestArtifactsMatchFiles(input: {
@@ -789,35 +787,6 @@ async function assertRawManifestArtifactsMatchFiles(input: {
       }
     }
   }
-}
-
-async function statAndHashVaultFile(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<{ byteSize: number; sha256: string } | null> {
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
-  if (!(await pathExists(resolved.absolutePath))) {
-    return null;
-  }
-  const stats = await fs.stat(resolved.absolutePath);
-  if (!stats.isFile()) {
-    return null;
-  }
-  return {
-    byteSize: stats.size,
-    sha256: await sha256File(resolved.absolutePath),
-  };
-}
-
-async function sha256File(absolutePath: string): Promise<string> {
-  const hash = createHash("sha256");
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(absolutePath);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("error", reject);
-    stream.on("end", resolve);
-  });
-  return hash.digest("hex");
 }
 
 function rawArtifactReferencesAgree(references: readonly RawArtifactReference[]): boolean {

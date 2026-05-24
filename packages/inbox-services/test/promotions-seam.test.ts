@@ -920,6 +920,104 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
   )
 })
 
+test('canonical attachment promotion serializes canonical check, create, and promotion-state writes', async () => {
+  const paths = await createTempVault()
+  const capture = createCapture('capture-serialized', {
+    attachments: [
+      createAttachment({
+        ordinal: 1,
+        kind: 'document',
+        storedPath: 'raw/inbox/email/capture-serialized/attachments/serialized.pdf',
+        fileName: 'Serialized.pdf',
+      }),
+    ],
+  })
+  await writeTextFile(
+    paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-serialized/attachments/serialized.pdf',
+    'serialized document',
+  )
+
+  let createCalls = 0
+  const promote = () =>
+    promoteCanonicalAttachmentImport({
+      input: {
+        vault: paths.absoluteVaultRoot,
+        captureId: capture.captureId,
+        requestId: null,
+      },
+      target: 'document',
+      clock: () => new Date('2026-04-08T12:00:00.000Z'),
+      loadInbox: async () => createInboxRuntimeModule(createRuntimeStore([capture])),
+      prepare: async () => ({ prepared: true }),
+      findRequiredAttachment: (candidate) =>
+        candidate.attachments.find(
+          (attachment) =>
+            attachment.kind === 'document' && typeof attachment.storedPath === 'string',
+        ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
+      missingAttachmentError: () =>
+        new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
+      canonicalPromotionSpec: documentCanonicalPromotionSpec,
+      buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
+        documentSha256: await resolveAttachmentSha256(
+          paths.absoluteVaultRoot,
+          capture,
+          attachment,
+        ),
+        title: attachment.fileName,
+      }),
+      createPromotion: async () => {
+        createCalls += 1
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        await writeJsonFile(
+          paths.absoluteVaultRoot,
+          'raw/documents/serialized/manifest.json',
+          {
+            importId: 'document-serialized',
+            importKind: 'document',
+            importedAt: '2026-04-08T12:00:00.000Z',
+            source: 'import',
+            artifacts: [
+              {
+                role: 'source_document',
+                sha256: sha256('serialized document'),
+              },
+            ],
+            provenance: {
+              occurredAt: capture.occurredAt,
+              note: capture.text,
+              lookupId: 'document-serialized',
+              title: 'Serialized.pdf',
+            },
+          },
+        )
+        return {
+          lookupId: 'document-serialized',
+          relatedId: 'document-serialized',
+        }
+      },
+    })
+
+  const results = await Promise.all([promote(), promote()])
+
+  assert.equal(createCalls, 1)
+  assert.deepEqual(
+    results.map((result) => result.created).sort(),
+    [false, true],
+  )
+  assert.deepEqual(
+    results.map((result) => result.relatedId),
+    ['document-serialized', 'document-serialized'],
+  )
+
+  const grouped = await readPromotionsByCapture(paths)
+  assert.equal(grouped.get(capture.captureId)?.length, 1)
+  assert.equal(
+    grouped.get(capture.captureId)?.[0]?.relatedId,
+    'document-serialized',
+  )
+})
+
 test('document preservation and experiment helper branches are deterministic', async () => {
   const paths = await createTempVault()
   const canonicalDocumentPath =
@@ -978,6 +1076,7 @@ test('document preservation and experiment helper branches are deterministic', a
       captureId: capture.captureId,
       requestId: null,
     },
+    loadCore: async () => createCoreRuntimeModule(),
     loadImporters: async () => ({
       createImporters() {
         return {

@@ -25,6 +25,7 @@ export {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   createAssistantInputEventId,
   listAssistantInputEvents,
+  readLatestAssistantInputCursor,
   readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,

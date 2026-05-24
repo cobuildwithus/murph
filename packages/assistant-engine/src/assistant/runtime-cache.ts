@@ -89,11 +89,11 @@ export function createAssistantRuntimeCache<TKey, TValue>(input: {
         expiresAtMs,
       })
       while (entries.size > maxEntries) {
-        const oldestKey = entries.keys().next().value
-        if (oldestKey === undefined) {
+        const oldest = entries.keys().next()
+        if (oldest.done) {
           break
         }
-        entries.delete(oldestKey)
+        entries.delete(oldest.value)
         evictions += 1
       }
       return value

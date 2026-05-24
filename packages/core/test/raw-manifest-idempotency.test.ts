@@ -127,3 +127,66 @@ test("validateVault reports missing raw manifests by raw directory for immutable
     ),
   );
 });
+
+test("validateVault reports raw manifest artifact hash and size drift", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-raw-manifest-integrity");
+  const sourceRoot = await makeTempDirectory("murph-core-raw-manifest-integrity-source");
+  await initializeVault({ vaultRoot });
+
+  const documentPath = path.join(sourceRoot, "visit-summary.md");
+  await fs.writeFile(documentPath, "# Visit summary\n", "utf8");
+
+  const imported = await importDocument({
+    vaultRoot,
+    sourcePath: documentPath,
+    occurredAt: "2026-03-12T10:00:00.000Z",
+    title: "Visit summary",
+  });
+  await fs.writeFile(
+    resolveVaultPath(vaultRoot, imported.raw.relativePath).absolutePath,
+    "# Tampered visit summary\n",
+    "utf8",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_MANIFEST_INVALID"
+        && issue.path === imported.manifestPath
+        && issue.message.includes("bytes or sha256"),
+    ),
+  );
+});
+
+test("validateVault reports raw manifest artifacts that are not safe regular files", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-raw-manifest-invalid-artifact");
+  const sourceRoot = await makeTempDirectory("murph-core-raw-manifest-invalid-artifact-source");
+  await initializeVault({ vaultRoot });
+
+  const documentPath = path.join(sourceRoot, "linked-summary.md");
+  await fs.writeFile(documentPath, "# Linked summary\n", "utf8");
+
+  const imported = await importDocument({
+    vaultRoot,
+    sourcePath: documentPath,
+    occurredAt: "2026-03-12T10:00:00.000Z",
+    title: "Linked summary",
+  });
+  const artifactPath = resolveVaultPath(vaultRoot, imported.raw.relativePath);
+  await fs.rm(artifactPath.absolutePath, { force: true });
+  await fs.symlink(documentPath, artifactPath.absolutePath);
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "VAULT_PATH_SYMLINK"
+        && issue.path === imported.raw.relativePath,
+    ),
+  );
+});

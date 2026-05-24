@@ -363,6 +363,13 @@ export interface ParsersRuntimeModule {
 }
 
 export interface CoreRuntimeModule {
+  acquireCanonicalWriteLock?(input: string): Promise<{
+    release(): Promise<void>
+  }>
+  withCanonicalWriteLockScope?<TResult>(
+    vaultRoot: string,
+    run: () => Promise<TResult>,
+  ): Promise<TResult>
   addMeal(input: {
     vaultRoot: string
     occurredAt?: string
@@ -378,6 +385,19 @@ export interface CoreRuntimeModule {
       id: string
     }
     manifestPath: string
+  }>
+  importDocument?(input: {
+    vaultRoot: string
+    sourcePath: string
+    title?: string
+    occurredAt?: string
+    note?: string
+    source?: EventSource
+  }): Promise<{
+    documentId: string
+    event: {
+      id: string
+    }
   }>
   promoteInboxJournal?(input: {
     vaultRoot: string

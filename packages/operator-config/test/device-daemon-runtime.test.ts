@@ -1438,7 +1438,7 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
     'Authorization: Bearer start-token\nagent token=plain-secret\n',
     'utf8',
   )
-  const killedPids: number[] = []
+  const killedPids: string[] = []
   const removedFiles: string[] = []
 
   await assert.rejects(
@@ -1454,8 +1454,8 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
           },
           fetchImpl: async () => new Response(null, { status: 503 }),
           isProcessAlive: () => true,
-          killProcess: (pid) => {
-            killedPids.push(pid)
+          killProcess: (pid, signal) => {
+            killedPids.push(`${pid}:${String(signal)}`)
           },
           removeFile: async (filePath) => {
             removedFiles.push(filePath)
@@ -1471,7 +1471,7 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
       error.message.includes('[REDACTED]') &&
       error.context?.pid === 9100,
   )
-  assert.deepEqual(killedPids, [9100])
+  assert.deepEqual(killedPids, ['9100:SIGTERM', '9100:SIGKILL'])
   assert.equal(removedFiles.includes(startFailurePaths.launcherStatePath), true)
   assert.equal(resolveManagedControlToken(startFailurePaths), null)
 
@@ -1551,7 +1551,9 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
 
   const writeFailureVault = await createTempVault('operator-config-device-daemon-write-failure-')
   const writeFailurePaths = resolveDeviceDaemonPaths(writeFailureVault)
+  const writeFailureKills: string[] = []
   const writeFailureRemovals: string[] = []
+  let writeFailureNowMs = 0
 
   await assert.rejects(
     () =>
@@ -1562,9 +1564,15 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
         dependencies: {
           chmod: async () => undefined,
           mkdir: async () => undefined,
-          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          now: () => new Date(writeFailureNowMs),
+          sleep: async () => {
+            writeFailureNowMs += 100
+          },
           fetchImpl: async () => new Response(null, { status: 503 }),
-          isProcessAlive: () => false,
+          isProcessAlive: () => true,
+          killProcess: (pid, signal) => {
+            writeFailureKills.push(`${pid}:${String(signal)}`)
+          },
           removeFile: async (filePath) => {
             writeFailureRemovals.push(filePath)
           },
@@ -1579,6 +1587,7 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
       }),
     /cannot persist state/u,
   )
+  assert.deepEqual(writeFailureKills, ['9101:SIGTERM', '9101:SIGKILL'])
   assert.deepEqual(writeFailureRemovals, [
     writeFailurePaths.launcherStatePath,
     path.join(path.dirname(writeFailurePaths.launcherStatePath), 'control-token'),

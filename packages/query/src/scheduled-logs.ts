@@ -1,12 +1,12 @@
 import {
   SCHEDULED_LOG_DOC_TYPE,
   SCHEDULED_LOG_SCHEMA_VERSION,
+  executableScheduleIntentSchema,
   formatScheduleIntentIssues,
-  scheduleIntentSchema,
   scheduledLogActionSchema,
   scheduledLogStatusValues,
   VAULT_LAYOUT,
-  type ScheduleIntent,
+  type ExecutableScheduleIntent,
   type ScheduledLogAction,
   type ScheduledLogStatus,
 } from "@murphai/contracts";
@@ -24,7 +24,7 @@ import { parseFrontmatterDocument, type FrontmatterObject } from "./health/share
 const SCHEDULED_LOGS_DIRECTORY = VAULT_LAYOUT.scheduledLogsDirectory;
 
 export type {
-  ScheduleIntent,
+  ExecutableScheduleIntent,
   ScheduledLogAction,
   ScheduledLogStatus,
 };
@@ -37,7 +37,7 @@ export interface ScheduledLogQueryRecord {
   title: string;
   status: ScheduledLogStatus;
   summary: string | null;
-  schedule: ScheduleIntent;
+  schedule: ExecutableScheduleIntent;
   action: ScheduledLogAction;
   tags: string[];
   createdAt: string;
@@ -89,8 +89,8 @@ function normalizeScheduledLogStatus(value: unknown): ScheduledLogStatus {
   throw new Error(`status must be one of ${scheduledLogStatusValues.join(", ")}.`);
 }
 
-function normalizeScheduleIntent(value: unknown): ScheduleIntent {
-  const parsed = scheduleIntentSchema.safeParse(value);
+function normalizeScheduleIntent(value: unknown): ExecutableScheduleIntent {
+  const parsed = executableScheduleIntentSchema.safeParse(value);
   if (!parsed.success) {
     const message = formatScheduleIntentIssues(parsed.error) ||
       "schedule must match a supported scheduled-log schedule.";

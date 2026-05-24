@@ -179,12 +179,7 @@ export async function finalizeAssistantTurnReceipt(input: {
   const completedAt = input.completedAt ?? new Date().toISOString()
   const statusEvent: AssistantTurnTimelineEvent = assistantTurnTimelineEventSchema.parse({
     at: completedAt,
-    kind:
-      input.status === 'deferred'
-        ? 'turn.deferred'
-        : input.status === 'blocked'
-          ? 'turn.blocked'
-          : 'turn.completed',
+    kind: assistantTurnTimelineKindForStatus(input.status),
     detail:
       input.status === 'failed'
         ? sanitizeAssistantPortableStateString(
@@ -223,6 +218,21 @@ export async function finalizeAssistantTurnReceipt(input: {
       })
     },
   })
+}
+
+function assistantTurnTimelineKindForStatus(
+  status: AssistantTurnReceipt['status'],
+): AssistantTurnTimelineEvent['kind'] {
+  if (status === 'deferred') {
+    return 'turn.deferred'
+  }
+  if (status === 'blocked') {
+    return 'turn.blocked'
+  }
+  if (status === 'failed') {
+    return 'turn.failed'
+  }
+  return 'turn.completed'
 }
 
 export async function listRecentAssistantTurnReceipts(

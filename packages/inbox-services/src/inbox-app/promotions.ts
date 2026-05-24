@@ -47,6 +47,7 @@ export function createInboxPromotionOps(
     async preserveDocumentAttachments(input) {
       return preserveCanonicalDocumentAttachments({
         input,
+        loadCore: env.loadCore,
         loadImporters: env.loadImporters,
         loadInbox: env.loadInbox,
       })
@@ -129,9 +130,13 @@ export function createInboxPromotionOps(
         target: 'document',
         clock: env.clock,
         loadInbox: env.loadInbox,
-        prepare: async () => ({
-          importers: (await env.loadImporters()).createImporters(),
-        }),
+        prepare: async () => {
+          const core = await env.loadCore()
+          return {
+            core,
+            importers: (await env.loadImporters()).createImporters({ corePort: core }),
+          }
+        },
         findRequiredAttachment: (capture) =>
           capture.attachments.find(isStoredDocumentAttachment),
         missingAttachmentError: () =>

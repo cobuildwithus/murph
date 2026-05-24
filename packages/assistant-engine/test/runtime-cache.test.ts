@@ -56,4 +56,31 @@ describe('assistant runtime cache helpers', () => {
       listAssistantRuntimeCacheSnapshots().map((snapshot) => snapshot.name),
     ).toEqual(expect.arrayContaining(['cache-a', 'cache-b']))
   })
+
+  it('evicts an undefined key without treating it as an empty iterator', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T12:00:00.000Z'))
+
+    const {
+      createAssistantRuntimeCache,
+    } = await import('../src/assistant/runtime-cache.ts')
+
+    const cache = createAssistantRuntimeCache<unknown, string>({
+      maxEntries: 1,
+      name: 'cache-undefined-key',
+      ttlMs: 60_000,
+    })
+
+    cache.set(undefined, 'first')
+    cache.set('next', 'second')
+
+    expect(cache.get(undefined)).toBeUndefined()
+    expect(cache.get('next')).toBe('second')
+    expect(cache.snapshot()).toMatchObject({
+      name: 'cache-undefined-key',
+      limit: 1,
+      size: 1,
+      evictions: 1,
+    })
+  })
 })
