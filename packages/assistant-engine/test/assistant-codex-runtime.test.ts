@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
+import { HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
@@ -535,6 +536,249 @@ describe('assistant codex runtime', () => {
         updates: [],
       }),
     )
+  })
+
+  it('ignores custom Codex executable selectors in hosted runtime processes', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-hosted-command-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+          error.code = 'ENOENT'
+          child.emit('error', error)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        codexCommand: '/tmp/attacker-controlled-codex',
+        env: {
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          PATH: '/usr/bin',
+        },
+        prompt: 'hosted command guard',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_NOT_FOUND',
+      message:
+        'Codex app-server executable "/app/node_modules/.bin/codex" was not found. Install @openai/codex or pass --codexCommand.',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledWith(
+      '/app/node_modules/.bin/codex',
+      ['-a', 'never', 'app-server'],
+      expect.objectContaining({
+        cwd: path.resolve(workingDirectory),
+        env: expect.objectContaining({
+          PATH: '/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        }),
+      }),
+    )
+  })
+
+  it('ignores custom Codex home selectors in hosted runtime processes', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-hosted-home-')
+    const profileCodexHome = await createTempDir('assistant-codex-profile-home-')
+    const workingDirectory = await createTempDir('assistant-codex-hosted-home-work-')
+
+    codexMocks.spawn.mockImplementation((_command, _args, options) => {
+      const child = new MockChildProcess()
+
+      expect(options).toMatchObject({
+        env: expect.objectContaining({
+          CODEX_HOME: hostedCodexHome,
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          PATH: '/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        }),
+      })
+      expect(options.env.CODEX_HOME).not.toBe(profileCodexHome)
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: {
+                id: 'thread-hosted-home',
+              },
+            },
+          }))
+
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: {
+                id: 'turn-hosted-home',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-hosted-home',
+                status: 'completed',
+              },
+            },
+          }))
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        codexHome: profileCodexHome,
+        codexCommand: '/tmp/attacker-controlled-codex',
+        env: {
+          CODEX_HOME: hostedCodexHome,
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          PATH: '/usr/bin',
+        },
+        prompt: 'hosted codex home guard',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-hosted-home',
+      threadId: 'thread-hosted-home',
+      turnId: 'turn-hosted-home',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledWith(
+      '/app/node_modules/.bin/codex',
+      ['-a', 'never', 'app-server'],
+      expect.any(Object),
+    )
+  })
+
+  it('uses ambient hosted guards when an explicit child env omits the hosted marker', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-ambient-hosted-home-')
+    const workingDirectory = await createTempDir('assistant-codex-ambient-hosted-work-')
+
+    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+    vi.stubEnv('CODEX_HOME', hostedCodexHome)
+
+    try {
+      codexMocks.spawn.mockImplementation((_command, _args, options) => {
+        const child = new MockChildProcess()
+
+        expect(options.env).toMatchObject({
+          CODEX_HOME: hostedCodexHome,
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          PATH: '/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        })
+
+        queueMicrotask(() => {
+          void (async () => {
+            await waitForRpcMethod(child, 'initialize')
+            const error = new Error('spawn /app/node_modules/.bin/codex ENOENT') as NodeJS.ErrnoException
+            error.code = 'ENOENT'
+            child.emit('error', error)
+          })()
+        })
+
+        return child
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          codexCommand: '/tmp/attacker-controlled-codex',
+          env: {
+            PATH: '/tmp/attacker-controlled-bin',
+          },
+          prompt: 'ambient hosted guard',
+          workingDirectory,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_NOT_FOUND',
+      })
+
+      expect(codexMocks.spawn).toHaveBeenCalledWith(
+        '/app/node_modules/.bin/codex',
+        ['-a', 'never', 'app-server'],
+        expect.any(Object),
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('uses the absolute hosted test stub command only in test environments', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-hosted-stub-home-')
+    const hostedTestCommand = path.join(hostedCodexHome, 'bin', 'codex')
+    const workingDirectory = await createTempDir('assistant-codex-hosted-stub-work-')
+
+    for (const scenario of [
+      {
+        command: hostedTestCommand,
+        nodeEnv: 'test',
+      },
+      {
+        command: '/app/node_modules/.bin/codex',
+        nodeEnv: 'production',
+      },
+    ]) {
+      codexMocks.spawn.mockReset()
+      codexMocks.spawn.mockImplementation((_command, _args, options) => {
+        const child = new MockChildProcess()
+
+        expect(options.env).toMatchObject({
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: hostedTestCommand,
+          CODEX_HOME: hostedCodexHome,
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          NODE_ENV: scenario.nodeEnv,
+        })
+
+        queueMicrotask(() => {
+          void (async () => {
+            await waitForRpcMethod(child, 'initialize')
+            const error = new Error(`spawn ${scenario.command} ENOENT`) as NodeJS.ErrnoException
+            error.code = 'ENOENT'
+            child.emit('error', error)
+          })()
+        })
+
+        return child
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          env: {
+            [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: hostedTestCommand,
+            CODEX_HOME: hostedCodexHome,
+            MURPH_HOSTED_RUNTIME_PROCESS: '1',
+            NODE_ENV: scenario.nodeEnv,
+            PATH: '/usr/bin',
+          },
+          prompt: 'hosted test stub guard',
+          workingDirectory,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_NOT_FOUND',
+      })
+
+      expect(codexMocks.spawn).toHaveBeenCalledWith(
+        scenario.command,
+        ['-a', 'never', 'app-server'],
+        expect.any(Object),
+      )
+    }
   })
 
   it('keeps one Codex app-server process open and steers late input into the active turn', async () => {

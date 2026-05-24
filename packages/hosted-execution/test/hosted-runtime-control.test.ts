@@ -517,6 +517,7 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       kind: "device-sync.snapshot",
       request: {
+        includeCredentialMaterial: false,
         provider: "oura",
         userId: "member_123",
       },

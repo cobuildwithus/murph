@@ -187,6 +187,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
 
   return {
     async listProviders(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'provider list')
       if (hasExplicitControlPlaneTarget(input)) {
         const client = await createControlPlaneClient(input)
         const result = await client.listProviders()
@@ -240,9 +241,15 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async connect(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'connect')
       return resolveDeviceConnectAuthority(input).createConnectLink(input)
     },
     async listAccounts(input) {
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account list')
+        return listAccountsViaHostedBridge(input)
+      }
+
       if (hasExplicitInputControlPlaneTarget(input)) {
         const client = await createControlPlaneClient(input)
         const result = await client.listAccounts({
@@ -256,10 +263,6 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
           sourceProvider: input.sourceProvider ?? null,
           accounts: result.accounts,
         }
-      }
-
-      if (isHostedRuntimeProcessEnv(process.env)) {
-        return listAccountsViaHostedBridge(input)
       }
 
       if (hasExplicitControlPlaneTarget(input)) {
@@ -316,6 +319,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async showAccount(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account show')
       const client = await createControlPlaneClient(input)
       const result = await client.showAccount(input.accountId)
 
@@ -325,6 +329,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async reconcileAccount(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account reconcile')
       const client = await createControlPlaneClient(input)
       const result = await client.reconcileAccount(input.accountId)
 
@@ -335,6 +340,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async disconnectAccount(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account disconnect')
       const client = await createControlPlaneClient(input)
       const result = await client.disconnectAccount(input.accountId)
 
@@ -344,18 +350,21 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async daemonStatus(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'daemon status')
       return await getManagedDeviceSyncDaemonStatus({
         vault: input.vault,
         baseUrl: input.baseUrl,
       })
     },
     async daemonStart(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'daemon start')
       return await startManagedDeviceSyncDaemon({
         vault: input.vault,
         baseUrl: input.baseUrl,
       })
     },
     async daemonStop(input) {
+      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'daemon stop')
       return await stopManagedDeviceSyncDaemon({
         vault: input.vault,
         baseUrl: input.baseUrl,
@@ -397,12 +406,6 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
   function resolveDeviceConnectAuthority(input: {
     baseUrl?: string
   }): DeviceConnectAuthority {
-    if (hasExplicitInputControlPlaneTarget(input)) {
-      return {
-        createConnectLink: connectViaLocalDaemon,
-      }
-    }
-
     if (!isHostedRuntimeProcessEnv(process.env)) {
       return {
         createConnectLink: connectViaLocalDaemon,
@@ -419,6 +422,22 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
         })
       },
     }
+  }
+
+  function assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input: {
+    baseUrl?: string
+  }, command: string): void {
+    if (
+      !isHostedRuntimeProcessEnv(process.env)
+      || !hasExplicitControlPlaneTarget(input)
+    ) {
+      return
+    }
+
+    throw new VaultCliError(
+      'HOSTED_DEVICE_BASE_URL_UNSUPPORTED',
+      `Hosted device ${command} must use the hosted bridge and does not support --base-url or DEVICE_SYNC_BASE_URL.`,
+    )
   }
 
   async function connectViaHostedBridge(input: {

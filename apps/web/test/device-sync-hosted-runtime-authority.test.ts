@@ -1012,6 +1012,52 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("omits stored OAuth token bundles from snapshot responses unless runtime credential material is requested", async () => {
+    const harness = createAuthorityHarness();
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const tokenlessResponse = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(tokenlessResponse.connections[0]?.credential).toEqual({
+      credentialMetadata: {},
+      kind: "oauth_tokens_redacted",
+      tokenVersion: 3,
+    });
+    expect(JSON.stringify(tokenlessResponse)).not.toContain("stored-access-token");
+    expect(JSON.stringify(tokenlessResponse)).not.toContain("stored-refresh-token");
+
+    const runtimeResponse = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(runtimeResponse.connections[0]?.credential).toMatchObject({
+      kind: "oauth_tokens",
+      tokenBundle: {
+        accessToken: "stored-access-token",
+        refreshToken: "stored-refresh-token",
+      },
+    });
+  });
+
   it("reads provider-config hosted snapshots without token material", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({

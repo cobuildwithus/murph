@@ -66,6 +66,11 @@ export type HostedExecutionDeviceSyncRuntimeCredentialSnapshot =
       tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle;
     }
   | {
+      kind: "oauth_tokens_redacted";
+      credentialMetadata: Record<string, unknown>;
+      tokenVersion: number | null;
+    }
+  | {
       kind: "provider_config";
       providerConfigKey: string;
       credentialMetadata: Record<string, unknown>;
@@ -75,8 +80,11 @@ export type HostedExecutionDeviceSyncRuntimeCredentialSnapshot =
       credentialMetadata: Record<string, unknown>;
     };
 
+export type HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot =
+  Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens_redacted" }>;
+
 export type HostedExecutionDeviceSyncRuntimeCredentialUpdate =
-  | HostedExecutionDeviceSyncRuntimeCredentialSnapshot
+  | HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot
   | {
       clearTokens: true;
       kind: "oauth_tokens";
@@ -157,12 +165,13 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
-  credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
+  credential: HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot;
   localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
+  includeCredentialMaterial: boolean;
   provider?: string | null;
   sourceProviderSlug?: string | null;
   userId: string;
@@ -478,6 +487,13 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
     ...(record.connectionId === undefined
       ? {}
       : { connectionId: readNullableStringValue(record.connectionId, "Hosted device-sync runtime snapshot request connectionId") }),
+    includeCredentialMaterial:
+      record.includeCredentialMaterial === undefined
+        ? false
+        : requireBoolean(
+            record.includeCredentialMaterial,
+            "Hosted device-sync runtime snapshot request includeCredentialMaterial",
+          ),
     ...(record.provider === undefined
       ? {}
       : { provider: readNullableStringValue(record.provider, "Hosted device-sync runtime snapshot request provider") }),
@@ -1432,17 +1448,21 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(
     record,
     `Hosted device-sync runtime apply request updates[${index}].seed`,
   );
+  const credential = requireHostedExecutionWritableCredentialSnapshot(
+    fields.credential,
+    `Hosted device-sync runtime apply request updates[${index}].seed.credential`,
+  );
 
   return {
     connection: parseHostedExecutionDeviceSyncRuntimeConnection(
       record.connection,
       `Hosted device-sync runtime apply request updates[${index}].seed.connection`,
     ),
+    credential,
     localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
       record.localState,
       `Hosted device-sync runtime apply request updates[${index}].seed.localState`,
     ),
-    ...fields,
   };
 }
 
@@ -1588,6 +1608,20 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
           `${label}.tokenBundle`,
         ) ?? rejectNullHostedExecutionCredentialTokenBundle(`${label}.tokenBundle`),
       };
+    case "oauth_tokens_redacted":
+      assertHostedExecutionCredentialFields(record, label, [
+        "credentialMetadata",
+        "kind",
+        "tokenVersion",
+      ]);
+      return {
+        credentialMetadata: parseHostedExecutionDeviceSyncCredentialMetadata(
+          record.credentialMetadata,
+          `${label}.credentialMetadata`,
+        ),
+        kind,
+        tokenVersion: readNullablePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
+      };
     case "provider_config": {
       assertHostedExecutionCredentialFields(record, label, [
         "credentialMetadata",
@@ -1633,11 +1667,25 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialUpdate(
     };
   }
 
-  return parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(value, label);
+  return requireHostedExecutionWritableCredentialSnapshot(
+    parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(value, label),
+    label,
+  );
 }
 
 function rejectNullHostedExecutionCredentialTokenBundle(label: string): never {
   throw new TypeError(`${label} must be an object.`);
+}
+
+function requireHostedExecutionWritableCredentialSnapshot(
+  credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot {
+  if (credential.kind === "oauth_tokens_redacted") {
+    throw new TypeError(`${label}.kind is not supported for credential mutations.`);
+  }
+
+  return credential;
 }
 
 function assertHostedExecutionCredentialFields(

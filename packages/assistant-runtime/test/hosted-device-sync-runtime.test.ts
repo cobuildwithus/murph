@@ -918,6 +918,105 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("sync preserves local OAuth tokens when hosted snapshot redacts credential material", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "redacted-oauth",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_redacted_oauth",
+        displayName: connected.account.displayName,
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: connected.account.updatedAt,
+        metadata: connected.account.metadata,
+        credential: {
+          credentialMetadata: {},
+          kind: "oauth_tokens_redacted",
+          tokenVersion: 4,
+        },
+        tokenBundle: null,
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T09:20:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:16:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(state.snapshot?.connections[0]?.credential, {
+        credentialMetadata: {},
+        kind: "oauth_tokens_redacted",
+        tokenVersion: 4,
+      });
+
+      const stored = getStore(service).getAccountById(connected.account.id);
+      assert.ok(stored);
+      assert.equal(stored.hostedObservedTokenVersion, 4);
+      const storedCredential = requireStoredOAuthCredential(stored);
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      assert.equal(
+        codec.decrypt(
+          storedCredential.accessTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        "provider-access-token",
+      );
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:20:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.equal(
+        requireApplyUpdatesRequest(appliedRequest).updates.some((update) =>
+          Object.prototype.hasOwnProperty.call(update, "credential")
+        ),
+        false,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("reconciliation includes provider failure diagnostics when sync failure advances", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

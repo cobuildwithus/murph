@@ -27,6 +27,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeLocalStateUpdate as HostedDeviceSyncRuntimeLocalStateUpdate,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
+  HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot as HostedDeviceSyncRuntimeWritableCredentialSnapshot,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedRuntimeEvent,
@@ -712,7 +713,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
         clearTokens: true,
         kind: "oauth_tokens",
       });
-    } else {
+    } else if (credential.kind !== "oauth_tokens_redacted") {
       assignHostedDeviceSyncRuntimeCredentialUpdate(update, credential);
     }
 
@@ -748,7 +749,7 @@ function hasHostedDeviceSyncRuntimeConnectionUpdateChanges(
 
 function assignHostedDeviceSyncRuntimeCredentialUpdate(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
-  credential: HostedDeviceSyncRuntimeCredentialSnapshot | HostedDeviceSyncRuntimeCredentialUpdate,
+  credential: HostedDeviceSyncRuntimeWritableCredentialSnapshot | HostedDeviceSyncRuntimeCredentialUpdate,
 ): void {
   update.credential = cloneHostedDeviceSyncRuntimeCredentialUpdate(credential);
 }
@@ -784,6 +785,10 @@ function equalHostedDeviceSyncRuntimeCredentials(
     case "oauth_tokens":
       return right.kind === "oauth_tokens"
         && equalHostedDeviceSyncRuntimeTokenBundles(left.tokenBundle, right.tokenBundle);
+    case "oauth_tokens_redacted":
+      return right.kind === "oauth_tokens_redacted"
+        && left.tokenVersion === right.tokenVersion
+        && equalJsonRecords(left.credentialMetadata ?? {}, right.credentialMetadata ?? {});
     case "provider_config":
       return right.kind === "provider_config"
         && left.providerConfigKey === right.providerConfigKey
@@ -815,6 +820,10 @@ function buildHostedDeviceSyncRuntimeCredentialSnapshotFromAccount(input: {
   keyVersion?: string;
   observedTokenVersion: number | null;
 }): HostedDeviceSyncRuntimeCredentialSnapshot {
+  if (input.baselineCredential?.kind === "oauth_tokens_redacted") {
+    return cloneHostedDeviceSyncRuntimeCredentialSnapshot(input.baselineCredential);
+  }
+
   const storedCredential = buildHostedDeviceSyncRuntimeStoredCredentialSnapshot(input.account);
   if (storedCredential) {
     return storedCredential;
@@ -958,7 +967,7 @@ function buildHostedAccountHydrationInput(input: {
   const hostedLocalState = input.entry.localState;
   const hostedCredential = resolveHostedDeviceSyncRuntimeCredentialSnapshot(input.entry);
   const hostedTokenBundle = getHostedDeviceSyncRuntimeOAuthTokenBundle(hostedCredential);
-  const hostedTokenVersion = hostedTokenBundle?.tokenVersion ?? null;
+  const hostedTokenVersion = getHostedDeviceSyncRuntimeObservedTokenVersion(hostedCredential);
   const hostedUpdatedAt = hostedConnection.updatedAt ?? null;
   const previousHostedObservedUpdatedAt = input.existing?.hostedObservedUpdatedAt ?? null;
   const previousHostedObservedTokenVersion = input.existing?.hostedObservedTokenVersion ?? null;
@@ -989,6 +998,7 @@ function buildHostedAccountHydrationInput(input: {
     && !hostedTokenStateReplayed;
   const credential = buildHostedAccountHydrationCredential({
     credential: hostedCredential,
+    existing: input.existing,
   });
   const nextHostedObservedUpdatedAt = hostedConnectionStateStale || hostedConnectionStateReplayed
     ? previousHostedObservedUpdatedAt
@@ -1067,8 +1077,22 @@ function buildHostedAccountHydrationInput(input: {
 }
 
 function buildHostedAccountHydrationCredential(input: {
+  existing: StoredDeviceSyncAccount | null;
   credential: HostedDeviceSyncRuntimeCredentialSnapshot;
 }): HostedAccountHydrationInput["credential"] {
+  if (input.credential.kind === "oauth_tokens_redacted") {
+    if (input.existing) {
+      return undefined;
+    }
+
+    return {
+      credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+        input.credential.credentialMetadata,
+      ),
+      kind: "none",
+    };
+  }
+
   if (input.credential.kind === "provider_config") {
     const credentialMetadata = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
       input.credential.credentialMetadata,
@@ -1106,6 +1130,20 @@ function getHostedDeviceSyncRuntimeOAuthTokenBundle(
     : null;
 }
 
+function getHostedDeviceSyncRuntimeObservedTokenVersion(
+  credential: HostedDeviceSyncRuntimeCredentialSnapshot,
+): number | null {
+  if (credential.kind === "oauth_tokens") {
+    return credential.tokenBundle.tokenVersion;
+  }
+
+  if (credential.kind === "oauth_tokens_redacted") {
+    return credential.tokenVersion;
+  }
+
+  return null;
+}
+
 function cloneHostedDeviceSyncRuntimeCredentialSnapshot(
   credential: HostedDeviceSyncRuntimeCredentialSnapshot,
 ): HostedDeviceSyncRuntimeCredentialSnapshot {
@@ -1114,6 +1152,14 @@ function cloneHostedDeviceSyncRuntimeCredentialSnapshot(
       return {
         kind: "oauth_tokens",
         tokenBundle: cloneHostedDeviceSyncRuntimeTokenBundle(credential.tokenBundle),
+      };
+    case "oauth_tokens_redacted":
+      return {
+        credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+          credential.credentialMetadata,
+        ),
+        kind: "oauth_tokens_redacted",
+        tokenVersion: credential.tokenVersion,
       };
     case "provider_config": {
       const credentialMetadata = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
@@ -1136,7 +1182,7 @@ function cloneHostedDeviceSyncRuntimeCredentialSnapshot(
 }
 
 function cloneHostedDeviceSyncRuntimeCredentialUpdate(
-  credential: HostedDeviceSyncRuntimeCredentialSnapshot | HostedDeviceSyncRuntimeCredentialUpdate,
+  credential: HostedDeviceSyncRuntimeWritableCredentialSnapshot | HostedDeviceSyncRuntimeCredentialUpdate,
 ): HostedDeviceSyncRuntimeCredentialUpdate {
   if (credential.kind === "oauth_tokens" && "clearTokens" in credential) {
     return {
@@ -1145,7 +1191,28 @@ function cloneHostedDeviceSyncRuntimeCredentialUpdate(
     };
   }
 
-  return cloneHostedDeviceSyncRuntimeCredentialSnapshot(credential);
+  switch (credential.kind) {
+    case "oauth_tokens":
+      return {
+        kind: "oauth_tokens",
+        tokenBundle: cloneHostedDeviceSyncRuntimeTokenBundle(credential.tokenBundle),
+      };
+    case "provider_config":
+      return {
+        credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+          credential.credentialMetadata,
+        ),
+        kind: "provider_config",
+        providerConfigKey: credential.providerConfigKey,
+      };
+    case "none":
+      return {
+        credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+          credential.credentialMetadata,
+        ),
+        kind: "none",
+      };
+  }
 }
 
 function cloneHostedDeviceSyncRuntimeTokenBundle(

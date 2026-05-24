@@ -1286,6 +1286,7 @@ function createHostedWebDeviceSyncPort(input: {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
+          includeCredentialMaterial: input.transport.mode === "direct",
           ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
           ...(runtimeInput.sourceProviderSlug ? { sourceProviderSlug: runtimeInput.sourceProviderSlug } : {}),
           userId: input.boundUserId,

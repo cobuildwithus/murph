@@ -3,6 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -86,6 +90,17 @@ const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
+const HOSTED_RUNTIME_PROCESS_ENV_MARKER = HOSTED_RUNTIME_PROCESS_ENV
+const HOSTED_CODEX_APP_SERVER_COMMAND = '/app/node_modules/.bin/codex'
+const HOSTED_RUNNER_EXECUTABLE_PATH = [
+  '/app/node_modules/.bin',
+  '/usr/local/sbin',
+  '/usr/local/bin',
+  '/usr/sbin',
+  '/usr/bin',
+  '/sbin',
+  '/bin',
+].join(path.delimiter)
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
@@ -207,11 +222,22 @@ export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
-  const codexCommand = input.codexCommand?.trim() || 'codex'
+  const hostedRuntimeProcess = isHostedCodexAppServerRuntime(input.env)
   const workingDirectory = path.resolve(input.workingDirectory)
-  const childEnv = await resolveCodexChildEnv({
-    codexHome: input.codexHome,
+  const resolvedChildEnv = await resolveCodexChildEnv({
+    codexHome: resolveCodexAppServerCodexHome({
+      codexHome: input.codexHome,
+      hostedRuntimeProcess,
+    }),
     env: input.env,
+  })
+  const childEnv = hostedRuntimeProcess
+    ? projectHostedCodexAppServerChildEnv(resolvedChildEnv)
+    : resolvedChildEnv
+  const codexCommand = resolveCodexAppServerCommand({
+    codexCommand: input.codexCommand,
+    env: childEnv,
+    hostedRuntimeProcess,
   })
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const imagePaths = await materializeCodexImagePaths({
@@ -239,6 +265,68 @@ export async function executeCodexAppServerTurn(
       recursive: true,
       force: true,
     })
+  }
+}
+
+function resolveCodexAppServerCommand(input: {
+  codexCommand?: string | null
+  env?: NodeJS.ProcessEnv
+  hostedRuntimeProcess: boolean
+}): string {
+  if (input.hostedRuntimeProcess) {
+    return resolveHostedCodexAppServerCommand(input.env ?? process.env)
+  }
+
+  return input.codexCommand?.trim() || 'codex'
+}
+
+function resolveCodexAppServerCodexHome(input: {
+  codexHome?: string | null
+  hostedRuntimeProcess: boolean
+}): string | null | undefined {
+  if (input.hostedRuntimeProcess) {
+    return null
+  }
+
+  return input.codexHome
+}
+
+function isHostedCodexAppServerRuntime(env: NodeJS.ProcessEnv | undefined): boolean {
+  return isHostedRuntimeProcessEnv(process.env) || isHostedRuntimeProcessEnv(env)
+}
+
+function isHostedRuntimeProcessEnv(env: NodeJS.ProcessEnv | undefined): boolean {
+  return env?.[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1'
+}
+
+function resolveHostedCodexAppServerCommand(env: NodeJS.ProcessEnv): string {
+  const testCommand = normalizeNullableString(
+    env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV],
+  )
+
+  if (
+    env.NODE_ENV?.trim() === 'test'
+    && testCommand
+    && path.isAbsolute(testCommand)
+  ) {
+    return testCommand
+  }
+
+  return HOSTED_CODEX_APP_SERVER_COMMAND
+}
+
+function projectHostedCodexAppServerChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const ambientHostedCodexHome = normalizeNullableString(process.env.CODEX_HOME)
+  const providedHostedCodexHome = normalizeNullableString(env.CODEX_HOME)
+  const codexHome = isHostedRuntimeProcessEnv(process.env)
+    ? ambientHostedCodexHome ?? providedHostedCodexHome
+    : providedHostedCodexHome
+
+  return {
+    ...env,
+    ...(codexHome ? { CODEX_HOME: codexHome } : {}),
+    [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
   }
 }
 

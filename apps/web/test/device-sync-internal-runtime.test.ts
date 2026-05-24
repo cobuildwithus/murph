@@ -112,6 +112,7 @@ describe("device-sync hosted runtime helpers", () => {
       provider: "oura",
       userId: "user-123",
     }, "user-123")).toEqual({
+      includeCredentialMaterial: false,
       provider: "oura",
       userId: "user-123",
     });

@@ -1,4 +1,8 @@
 import {
+  HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -12,6 +16,18 @@ import {
 
 export const LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS = [
   "host.docker.internal",
+] as const;
+const HOSTED_WEB_CONTROL_STRIPPED_HEADER_NAMES = [
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
+  "authorization",
+  "cookie",
+  "proxy-authorization",
+  "x-api-key",
+  "x-hosted-runner-bound-user-id",
 ] as const;
 
 export interface HostedWebControlBaseUrlOptions {
@@ -57,7 +73,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
-  const headers = new Headers(input.headers);
+  const headers = createHostedWebControlForwardHeaders(input.headers);
   headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
 
   if (input.body !== undefined) {
@@ -95,6 +111,18 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
         : undefined
     ),
   });
+}
+
+function createHostedWebControlForwardHeaders(
+  inputHeaders: Headers | undefined,
+): Headers {
+  const headers = new Headers(inputHeaders);
+
+  for (const name of HOSTED_WEB_CONTROL_STRIPPED_HEADER_NAMES) {
+    headers.delete(name);
+  }
+
+  return headers;
 }
 
 function requireHostedWebControlBaseUrl(
