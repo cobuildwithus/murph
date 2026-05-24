@@ -539,7 +539,7 @@ async function assistantDaemonFetchJson(
     })
   } catch (error) {
     throw new Error(
-      `Assistant daemon request failed before receiving a response for ${routePath}.`,
+      `Assistant daemon request failed before receiving a response for ${assistantDaemonRouteLabel(routePath)}.`,
       { cause: error },
     )
   }
@@ -555,7 +555,7 @@ async function assistantDaemonFetchJson(
 
   if (!parsedPayload.ok) {
     throw new Error(
-      `Assistant daemon returned an invalid JSON response for ${routePath}.`,
+      `Assistant daemon returned an invalid JSON response for ${assistantDaemonRouteLabel(routePath)}.`,
       { cause: parsedPayload.error },
     )
   }
@@ -818,4 +818,9 @@ function buildAssistantDaemonRoutePath(
   }
   const search = searchParams.toString()
   return search ? `${routePath}?${search}` : routePath
+}
+
+function assistantDaemonRouteLabel(routePath: string): string {
+  const queryStart = routePath.indexOf('?')
+  return queryStart === -1 ? routePath : routePath.slice(0, queryStart)
 }

@@ -98,7 +98,6 @@ describe("upgradeHostedBillingPlan", () => {
       items: [
         ["si_recurring", "price_pulse_recurring"],
         ["si_usage", "price_pulse_usage"],
-        ["si_addon", "price_unknown_addon"],
       ],
       metadata: {
         billingPlanCode: "launch_monthly",
@@ -110,7 +109,6 @@ describe("upgradeHostedBillingPlan", () => {
       customer: "cus_123",
       items: [
         ["si_recurring", "price_edge_recurring"],
-        ["si_addon", "price_unknown_addon"],
       ],
       metadata: {
         billingPlanCode: "launch_edge_monthly",
@@ -240,6 +238,33 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
+  test("rejects unsupported licensed subscription items during Edge upgrade", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+        ["si_addon", "price_unknown_addon"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
   test("recovers when Stripe is already Edge and drops legacy metered items", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
@@ -327,6 +352,33 @@ describe("upgradeHostedBillingPlan", () => {
       items: [
         ["si_recurring", "price_edge_recurring"],
         ["si_unknown_metered", "price_unknown_usage"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+  });
+
+  test("rejects unsupported licensed items when Stripe already has Edge applied", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_addon", "price_unknown_addon"],
       ],
       metadata: {
         billingPlanCode: "launch_edge_monthly",

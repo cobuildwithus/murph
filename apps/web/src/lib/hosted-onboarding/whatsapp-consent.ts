@@ -83,7 +83,7 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
     },
   });
 
-  if (existingGrant && existingGrant.updatedAt > input.now) {
+  if (existingGrant && existingGrant.updatedAt >= input.now) {
     return {
       applied: false,
       duplicate: false,
@@ -123,35 +123,71 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
   }
 
   if (input.action === "granted") {
-    await input.prisma.hostedConsentGrant.upsert({
-      create: {
-        createdAt: input.now,
-        documentVersionsJson: documentVersions,
-        grantedAt: input.now,
-        lastEventId: event.id,
+    const grantData = {
+      documentVersionsJson: documentVersions,
+      grantedAt: input.now,
+      lastEventId: event.id,
+      revokedAt: null,
+      source: "whatsapp",
+      status: "granted",
+      updatedAt: input.now,
+    };
+
+    if (existingGrant) {
+      const updated = await updateHostedWhatsAppConsentGrantIfUnchangedTx({
+        data: grantData,
         memberId: input.memberId,
-        revokedAt: null,
-        scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
-        source: "whatsapp",
-        status: "granted",
-        updatedAt: input.now,
-      },
-      update: {
-        documentVersionsJson: documentVersions,
-        grantedAt: input.now,
-        lastEventId: event.id,
-        revokedAt: null,
-        source: "whatsapp",
-        status: "granted",
-        updatedAt: input.now,
-      },
-      where: {
-        memberId_scope: {
+        observedUpdatedAt: existingGrant.updatedAt,
+        prisma: input.prisma,
+      });
+
+      return buildHostedWhatsAppConsentStaleWriteResult(updated);
+    }
+
+    try {
+      await input.prisma.hostedConsentGrant.create({
+        data: {
+          ...grantData,
+          createdAt: input.now,
           memberId: input.memberId,
           scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
         },
-      },
-    });
+      });
+    } catch (error) {
+      if (!isPrismaUniqueViolation(error)) {
+        throw error;
+      }
+
+      const racedGrant = await input.prisma.hostedConsentGrant.findUnique({
+        where: {
+          memberId_scope: {
+            memberId: input.memberId,
+            scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
+          },
+        },
+        select: {
+          updatedAt: true,
+        },
+      });
+
+      if (!racedGrant || racedGrant.updatedAt >= input.now) {
+        return {
+          applied: false,
+          duplicate: false,
+          stale: true,
+        };
+      }
+
+      const updated = await updateHostedWhatsAppConsentGrantIfUnchangedTx({
+        data: grantData,
+        memberId: input.memberId,
+        observedUpdatedAt: racedGrant.updatedAt,
+        prisma: input.prisma,
+      });
+
+      return buildHostedWhatsAppConsentStaleWriteResult(updated);
+    }
+
     return {
       applied: true,
       duplicate: false,
@@ -160,7 +196,7 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
   }
 
   if (existingGrant) {
-    await input.prisma.hostedConsentGrant.update({
+    const updated = await updateHostedWhatsAppConsentGrantIfUnchangedTx({
       data: {
         documentVersionsJson: documentVersions,
         lastEventId: event.id,
@@ -169,13 +205,12 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
         status: "revoked",
         updatedAt: input.now,
       },
-      where: {
-        memberId_scope: {
-          memberId: input.memberId,
-          scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
-        },
-      },
+      memberId: input.memberId,
+      observedUpdatedAt: existingGrant.updatedAt,
+      prisma: input.prisma,
     });
+
+    return buildHostedWhatsAppConsentStaleWriteResult(updated);
   }
 
   return {
@@ -185,23 +220,45 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
   };
 }
 
-function hostedWhatsAppConsentDocumentVersionsAreCurrent(value: unknown): boolean {
-  const current = buildCurrentHostedConsentDocumentVersions(
-    HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
-  );
-  const stored = readHostedWhatsAppConsentDocumentVersions(value);
-  const currentEntries = Object.entries(current);
+async function updateHostedWhatsAppConsentGrantIfUnchangedTx(input: {
+  data: Prisma.HostedConsentGrantUpdateManyMutationInput;
+  memberId: string;
+  observedUpdatedAt: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<{ count: number }> {
+  return input.prisma.hostedConsentGrant.updateMany({
+    data: input.data,
+    where: {
+      memberId: input.memberId,
+      scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
+      updatedAt: input.observedUpdatedAt,
+    },
+  });
+}
 
-  if (Object.keys(stored).length !== currentEntries.length) {
+function hostedWhatsAppConsentDocumentVersionsAreCurrent(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
 
-  return currentEntries.every(([documentId, version]) => stored[documentId] === version);
+  const current = buildCurrentHostedConsentDocumentVersions(
+    HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
+  );
+  const storedEntries = Object.entries(value);
+  const currentEntries = Object.entries(current);
+
+  if (storedEntries.length !== currentEntries.length) {
+    return false;
+  }
+
+  return storedEntries.every(([documentId, version]) =>
+    typeof version === "string" && current[documentId] === version
+  );
 }
 
 function readHostedWhatsAppConsentDocumentVersions(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return buildCurrentHostedConsentDocumentVersions(HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE);
+    return {};
   }
 
   const versions: Record<string, string> = {};
@@ -212,6 +269,17 @@ function readHostedWhatsAppConsentDocumentVersions(value: unknown): Record<strin
   }
 
   return versions;
+}
+
+function buildHostedWhatsAppConsentStaleWriteResult(input: {
+  count: number;
+}): HostedWhatsAppMessagingConsentWriteResult {
+  const applied = input.count === 1;
+  return {
+    applied,
+    duplicate: false,
+    stale: !applied,
+  };
 }
 
 function generateHostedWhatsAppConsentEventId(): string {

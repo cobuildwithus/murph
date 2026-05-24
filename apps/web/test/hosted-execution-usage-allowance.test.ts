@@ -186,6 +186,20 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(executeRaw).toHaveBeenCalledOnce();
   });
 
+  it("fails closed when the allowance period disappears before spend is incremented", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).rejects.toThrow("allowance period was missing");
+  });
+
   it("does not increment again when allowanceAccountedAt was already set", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -670,14 +684,17 @@ describe("resolveHostedAiUsageGate", () => {
       rawSqlText = sql.join("");
       return 1;
     });
-    const queryRaw = vi.fn(async () => [
-      {
-        allowance_cost_usd_micros: 6_000_000n,
-        allowance_counted: true,
-        occurred_at: new Date("2026-04-20T12:00:00.000Z"),
-        old_period_start: new Date("2026-04-01T00:00:00.000Z"),
-      },
-    ]);
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          allowance_cost_usd_micros: 6_000_000n,
+          allowance_counted: true,
+          occurred_at: new Date("2026-04-20T12:00:00.000Z"),
+          old_period_start: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      ])
+      .mockResolvedValueOnce([]);
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-10T12:00:00.000Z"),
@@ -723,7 +740,7 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 11_000_000n,
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(3);
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(rawSqlText).toContain(
       '"last_usage_at" = CASE',

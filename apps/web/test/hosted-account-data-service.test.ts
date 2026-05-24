@@ -624,6 +624,58 @@ describe("deleteHostedAccountData", () => {
     expect(connectionIndex).toBeGreaterThan(signalIndex);
   });
 
+  it("deletes webhook traces for device connections visible inside the deletion transaction", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
+      registry: {
+        get: vi.fn(() => null),
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      deviceConnections: [
+        {
+          id: "dsc_before",
+          provider: "oura",
+          providerAccountBlindIndex: "hbdi_before",
+        },
+      ],
+      onTransaction: () => undefined,
+      operationOrder,
+      transactionDeviceConnections: [
+        {
+          id: "dsc_current",
+          provider: "oura",
+          providerAccountBlindIndex: "hbdi_current",
+        },
+      ],
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.device_webhook_trace"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "deviceWebhookTrace",
+      where: {
+        OR: [
+          {
+            provider: "oura",
+            providerAccountBlindIndex: "hbdi_current",
+          },
+        ],
+      },
+    });
+    expect(operationOrder.indexOf("executeRaw")).toBeGreaterThanOrEqual(0);
+    expect(operationOrder.indexOf("executeRaw")).toBeLessThan(
+      operationOrder.indexOf("delete:deviceWebhookTrace"),
+    );
+  });
+
   it("reports incomplete configured Cloudflare cleanup after Prisma deletion commits", async () => {
     const order: string[] = [];
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
@@ -1388,15 +1440,37 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   onTransaction: () => void;
+  operationOrder?: string[];
+  transactionDeviceConnections?: Array<{
+    id: string;
+    provider: string;
+    providerAccountBlindIndex: string;
+    sources?: { sourceProviderSlug: string; status: string }[];
+  }>;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     deleteMany: async (args) => {
+      input.operationOrder?.push(`delete:${model}`);
       input.deleteCalls?.push({ model, where: args.where });
       return { count: 1 };
     },
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
-    $executeRaw: async () => 1,
+    $executeRaw: async () => {
+      input.operationOrder?.push("executeRaw");
+      return 1;
+    },
+    $queryRaw: async () => {
+      input.operationOrder?.push("queryRaw");
+      return [{ id: "member_123" }];
+    },
+    deviceConnection: {
+      ...makeDeleteDelegate("deviceConnection"),
+      findMany: async () => {
+        input.operationOrder?.push("find:deviceConnection");
+        return input.transactionDeviceConnections ?? input.deviceConnections ?? [];
+      },
+    },
   }, {
     get(target, property) {
       if (property in target) {
@@ -1434,6 +1508,15 @@ type HostedAccountDeletionPrismaDeleteDelegate = {
 
 type HostedAccountDeletionPrismaTransactionFake = {
   $executeRaw: (...args: unknown[]) => Promise<number>;
+  $queryRaw: (...args: unknown[]) => Promise<Array<{ id: string }>>;
+  deviceConnection: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{
+      id: string;
+      provider: string;
+      providerAccountBlindIndex: string;
+      sources?: { sourceProviderSlug: string; status: string }[];
+    }>>;
+  };
 };
 
 function makeCloudflareDeletionResult() {
