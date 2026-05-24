@@ -11,6 +11,7 @@ import {
   finiteNumber,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
+  minutesBetween,
   pushRawArtifact,
   slugify,
   stringId,
@@ -175,6 +176,12 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: ["restingHeartRate", "resting_heart_rate"] },
   { metric: "respiratory-rate", unit: "breaths_per_minute", title: "Junction respiratory rate", paths: ["respiratoryRate", "respiratory_rate"] },
   { metric: "spo2", unit: "%", title: "Junction blood oxygen", paths: ["spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
+];
+
+const WORKOUT_METRICS: readonly MetricDescriptor[] = [
+  { metric: "active-calories", unit: "kcal", title: "Junction workout calories", paths: ["calories", "totalCalories", "total_calories"] },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction workout average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr"] },
+  { metric: "max-heart-rate", unit: "bpm", title: "Junction workout max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr"] },
 ];
 
 const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>> = Object.freeze({
@@ -487,32 +494,40 @@ function pushSleepSummary(
     resourceContext.sourceProviderSlug,
   );
   const endAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["endAt", "end_at", "bedtimeEnd", "bedtime_end"]),
+    firstValueFromPaths(entry, ["endAt", "end_at", "bedtimeEnd", "bedtime_end", "bedtimeStop", "bedtime_stop"]),
     resourceContext.sourceProviderSlug,
   );
-  const durationMinutes = firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "totalSleepMinutes", "total_sleep_minutes"]);
+  const durationMinutes =
+    normalizePositiveIntegerMinutes(
+      firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "totalSleepMinutes", "total_sleep_minutes"]),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      secondsToMinutes(firstNumberFromPaths(entry, ["durationSeconds", "duration_seconds", "duration", "total"])),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      millisecondsToMinutes(firstNumberFromPaths(entry, ["durationMillis", "duration_millis"])),
+    ) ??
+    normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
 
-  if (startAt || endAt || durationMinutes !== undefined) {
-    const occurredAt = endAt ?? startAt ?? timestamp.occurredAt;
-    if (occurredAt) {
-      context.events.push(stripUndefined({
-        kind: "sleep_session",
-        occurredAt,
-        recordedAt: timestamp.recordedAt,
-        dayKey: timestamp.dayKey,
-        timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
-        source: "device",
-        title: "Junction sleep",
-        rawArtifactRoles: resourceContext.rawArtifactRoles,
-        externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
-        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-        fields: stripUndefined({
-          startAt,
-          endAt,
-          durationMinutes,
-        }),
-      }));
-    }
+  if (startAt && endAt && durationMinutes !== undefined) {
+    const occurredAt = startAt;
+    context.events.push(stripUndefined({
+      kind: "sleep_session",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey: timestamp.dayKey,
+      timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      source: "device",
+      title: "Junction sleep",
+      rawArtifactRoles: resourceContext.rawArtifactRoles,
+      externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        startAt,
+        endAt,
+        durationMinutes,
+      },
+    }));
   }
 
   pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS);
@@ -524,40 +539,79 @@ function pushWorkoutSummary(
   context: NormalizationContext,
 ): void {
   const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const startAtRaw = firstValueFromPaths(entry, ["startAt", "start_at", "start", "timeStart", "time_start"]);
   const startAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["startAt", "start_at", "start"]),
+    startAtRaw,
     resourceContext.sourceProviderSlug,
   );
   const endAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["endAt", "end_at", "end"]),
+    firstValueFromPaths(entry, ["endAt", "end_at", "end", "timeEnd", "time_end"]),
     resourceContext.sourceProviderSlug,
   );
-  const occurredAt = endAt ?? startAt ?? timestamp.occurredAt;
+  const occurredAt = startAt ?? (endAt ? undefined : timestamp.occurredAt);
+  const durationMinutes =
+    normalizePositiveIntegerMinutes(
+      firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "movingTimeMinutes", "moving_time_minutes"]),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      secondsToMinutes(firstNumberFromPaths(entry, ["durationSeconds", "duration_seconds", "movingTime", "moving_time", "duration"])),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      millisecondsToMinutes(firstNumberFromPaths(entry, ["durationMillis", "duration_millis"])),
+    ) ??
+    normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
 
-  if (!occurredAt) {
+  const workoutTimestamp = occurredAt
+    ? withTimestampOverride(timestamp, {
+      occurredAt,
+      dayKey: extractIsoDatePrefix(occurredAt) ?? undefined,
+      observedAtRaw: stringId(startAtRaw) ?? occurredAt,
+    })
+    : timestamp;
+  pushObservationMetrics(entry, resourceContext, context, WORKOUT_METRICS, workoutTimestamp);
+
+  if (!occurredAt || durationMinutes === undefined) {
     return;
   }
+
+  const dayKey = extractIsoDatePrefix(occurredAt) ?? timestamp.dayKey;
+  const rawActivityType = firstStringFromPaths(entry, ["activityType", "activity_type", "sport.slug", "sport.name", "sport", "type"]);
+  const activityType = slugify(rawActivityType, "workout");
+  const title = trimToLength(
+    firstStringFromPaths(entry, ["title", "name", "sport.name", "sport", "activityType", "activity_type"]) ?? "Junction workout",
+    160,
+  );
+  const sourceWorkoutId = trimOptionalToLength(
+    firstStringFromPaths(entry, ["providerId", "provider_id", "id", "workoutId", "workout_id"]),
+    200,
+  );
+  const distanceKm =
+    firstNumberFromPaths(entry, ["distanceKm", "distance_km"]) ??
+    metersToKilometers(firstNumberFromPaths(entry, ["distanceMeters", "distance_meters", "distance"]));
 
   context.events.push(stripUndefined({
     kind: "activity_session",
     occurredAt,
     recordedAt: timestamp.recordedAt,
-    dayKey: timestamp.dayKey,
+    dayKey,
     timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
     source: "device",
-    title: trimToLength(firstStringFromPaths(entry, ["title", "name", "sport", "activityType", "activity_type"]) ?? "Junction workout", 160),
+    title,
     rawArtifactRoles: resourceContext.rawArtifactRoles,
-    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
-    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    externalRef: makeJunctionExternalRef(resourceContext, entry, workoutTimestamp, "session"),
+    dataOrigin: buildDataOrigin(entry, resourceContext, workoutTimestamp),
     fields: stripUndefined({
-      startAt,
-      endAt,
-      durationMinutes: firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "movingTimeMinutes", "moving_time_minutes"]),
-      activityType: firstStringFromPaths(entry, ["activityType", "activity_type", "sport", "type"]),
-      distanceKm: firstNumberFromPaths(entry, ["distanceKm", "distance_km"]),
-      totalCalories: firstNumberFromPaths(entry, ["calories", "totalCalories", "total_calories"]),
-      averageHeartRate: firstNumberFromPaths(entry, ["averageHeartRate", "average_heart_rate", "avg_hr"]),
-      maxHeartRate: firstNumberFromPaths(entry, ["maxHeartRate", "max_heart_rate", "max_hr"]),
+      durationMinutes,
+      activityType,
+      distanceKm,
+      workout: stripUndefined({
+        sourceApp: resourceContext.sourceProviderSlug,
+        sourceWorkoutId,
+        startedAt: startAt ?? occurredAt,
+        endedAt: endAt,
+        sessionNote: title,
+        exercises: [],
+      }),
     }),
   }));
 }
@@ -567,10 +621,12 @@ function pushObservationMetrics(
   resourceContext: ResourceContext,
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
+  timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
 ): void {
-  const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const occurredAt = timestamp.occurredAt;
 
-  if (!timestamp.occurredAt) {
+  if (!occurredAt) {
     return;
   }
 
@@ -582,7 +638,7 @@ function pushObservationMetrics(
 
     context.events.push(stripUndefined({
       kind: "observation",
-      occurredAt: timestamp.occurredAt,
+      occurredAt,
       recordedAt: timestamp.recordedAt,
       dayKey: timestamp.dayKey,
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
@@ -683,6 +739,19 @@ function buildDataOrigin(
   });
 }
 
+function withTimestampOverride(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  override: Partial<ReturnType<typeof resolveRecordTimestamp>>,
+): ReturnType<typeof resolveRecordTimestamp> {
+  return {
+    occurredAt: override.occurredAt ?? timestamp.occurredAt,
+    recordedAt: override.recordedAt ?? timestamp.recordedAt,
+    dayKey: override.dayKey ?? timestamp.dayKey,
+    observedAtRaw: override.observedAtRaw ?? timestamp.observedAtRaw,
+    timestampSemantics: override.timestampSemantics ?? timestamp.timestampSemantics,
+  };
+}
+
 function makeJunctionExternalRef(
   resourceContext: ResourceContext,
   entry: PlainObject,
@@ -719,7 +788,17 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
-  const explicitId = firstStringFromPaths(entry, ["id", "resourceId", "resource_id", "externalId", "external_id"]);
+  const explicitId = firstStringFromPaths(entry, [
+    "id",
+    "resourceId",
+    "resource_id",
+    "externalId",
+    "external_id",
+    "providerId",
+    "provider_id",
+    "workoutId",
+    "workout_id",
+  ]);
 
   if (explicitId) {
     return `${resourceContext.resourceSlug}-${shortHash([
@@ -782,9 +861,17 @@ function resolveRecordTimestamp(
     "end",
     "endAt",
     "end_at",
+    "timeEnd",
+    "time_end",
+    "bedtimeStop",
+    "bedtime_stop",
     "start",
     "startAt",
     "start_at",
+    "timeStart",
+    "time_start",
+    "bedtimeStart",
+    "bedtime_start",
   ]);
   const explicitSemantics = firstTimestampSemantics(entry);
   const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
@@ -1053,6 +1140,46 @@ function firstNullableNumberFromPaths(source: PlainObject | undefined, paths: re
   return undefined;
 }
 
+function normalizePositiveIntegerMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.round(numeric));
+}
+
+function secondsToMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined) {
+    return undefined;
+  }
+
+  return numeric / 60;
+}
+
+function millisecondsToMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined) {
+    return undefined;
+  }
+
+  return numeric / 60000;
+}
+
+function metersToKilometers(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 0) {
+    return undefined;
+  }
+
+  return numeric / 1000;
+}
+
 function firstStringFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | undefined {
   for (const path of paths) {
     const value = readPath(source, path);
@@ -1063,6 +1190,10 @@ function firstStringFromPaths(source: PlainObject | undefined, paths: readonly s
   }
 
   return undefined;
+}
+
+function trimOptionalToLength(value: string | undefined, maxLength: number): string | undefined {
+  return value ? trimToLength(value, maxLength) : undefined;
 }
 
 function firstValueFromPaths(source: PlainObject | undefined, paths: readonly string[]): unknown {
