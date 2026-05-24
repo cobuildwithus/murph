@@ -55,6 +55,7 @@ const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-i
 const HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES = [
   "cloudflare-dev/runnercontainer",
   "cloudflare-dev/deploysmokerunnercontainer",
+  "murph-cloudflare-runner",
 ] as const;
 const HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE = 40;
 const HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES = 16 * 1024;

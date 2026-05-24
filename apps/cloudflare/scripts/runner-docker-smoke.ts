@@ -11,6 +11,9 @@ import {
 import {
   parseHostedRunnerSmokeResult,
 } from "../src/hosted-runner-smoke-contract.js";
+import {
+  removeHostedRunnerFinalImageBestEffort,
+} from "./local-runner-docker-cleanup.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
@@ -90,6 +93,7 @@ async function main(): Promise<void> {
     console.log(`pythonVersion=${result.pythonVersion}`);
   } finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
+    await removeHostedRunnerFinalImageBestEffort();
   }
 }
 
