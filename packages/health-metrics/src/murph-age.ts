@@ -99,6 +99,7 @@ export type MurphAgeInputBundleId =
   | "function-context"
   | "insufficient"
   | "l1-glycemia"
+  | "l1b-glycemia-body"
   | "lab5-bp-bmi"
   | "lab9-bp-body"
   | "r399-nhis-proxy-anchor"
@@ -200,6 +201,7 @@ export interface MurphAgeCalculationInput {
 
 export type MurphAgeModelCardId =
   | "function_context_no_risk"
+  | "l1b_glycemia_body_10y_acm_research"
   | "l1_tiny_glycemia_10y_acm_research"
   | "lab5_bp_bmi_transport_research"
   | "lab9_bp_body_10y_acm_research"
@@ -207,6 +209,7 @@ export type MurphAgeModelCardId =
   | "wearable_context_no_risk";
 
 export type MurphAgeScoreBearingCardId =
+  | "l1b_glycemia_body_10y_acm_research"
   | "l1_tiny_glycemia_10y_acm_research"
   | "lab5_bp_bmi_transport_research"
   | "lab9_bp_body_10y_acm_research"
@@ -740,6 +743,7 @@ export interface MurphAgeSubmittedCalculatorMetricInputSpec {
 export type MurphAgeSubmittedCalculatorInputBundleSpecId =
   | "function-context"
   | "l1-glycemia"
+  | "l1b-glycemia-body"
   | "lab5-bp-bmi"
   | "lab9-bp-body"
   | "r399-nhis-proxy-anchor"
@@ -748,6 +752,7 @@ export type MurphAgeSubmittedCalculatorInputBundleSpecId =
 export type MurphAgeSubmittedCalculatorInputBundleReadinessRule =
   | "all-required-features"
   | "all-lab5-features-plus-bmi-or-blood-pressure"
+  | "glycemia-plus-body"
   | "one-or-more-context-features"
   | "one-or-more-glycemia-features"
   | "one-or-more-proxy-features";
@@ -828,6 +833,7 @@ export interface MurphAgeInputBundleFeatureStatus {
   requiredFor:
     | "function-context"
     | "l1-glycemia"
+    | "l1b-glycemia-body"
     | "lab5-fallback"
     | "lab9-mainline"
     | "optional-context"
@@ -847,6 +853,7 @@ export interface MurphAgeInputBundleAssessment {
   missingFeatureKeys: string[];
   recommendedCardId:
     | "function_context_no_risk"
+    | "l1b_glycemia_body_10y_acm_research"
     | "l1_tiny_glycemia_10y_acm_research"
     | "lab5_bp_bmi_transport_research"
     | "lab9_bp_body_10y_acm_research"
@@ -1360,6 +1367,7 @@ export interface MurphAgeResearchModelStatusView {
 }
 
 export type MurphAgeResearchCardRole =
+  | "current-alpha-glycemia-body-core"
   | "minimal-glycemia-first-pass"
   | "outcome-risk-anchor-and-fallback"
   | "primary-lab-bp-body-adjuster"
@@ -1367,6 +1375,7 @@ export type MurphAgeResearchCardRole =
 
 export type MurphAgeResearchArbiterSelectionReason =
   | "anchor-selected"
+  | "current-alpha-glycemia-body-selected"
   | "minimal-glycemia-selected"
   | "no-score-bearing-card-selected"
   | "primary-lab-card-selected"
@@ -1379,10 +1388,10 @@ export interface MurphAgeResearchArbiterCandidateCardView extends MurphAgePublic
 
 export interface MurphAgeResearchArbiterView {
   candidateCards: MurphAgeResearchArbiterCandidateCardView[];
-  labConflictPolicy: "lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback";
+  labConflictPolicy: "l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback";
   selectedCardRole: MurphAgeResearchCardRole | null;
   selectionReason: MurphAgeResearchArbiterSelectionReason;
-  strategy: "r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context";
+  strategy: "r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context";
   wearableScorePolicy: "context-only-not-score-bearing";
 }
 
@@ -2368,6 +2377,11 @@ const MURPH_AGE_L1_GLYCEMIA_FEATURES = [
   { featureKey: "glycemia", label: "Glycemia", metricKeys: ["hba1c", "glucose"], requiredFor: "l1-glycemia" },
 ] satisfies readonly MurphAgeInputFeatureRequirement[];
 
+const MURPH_AGE_L1B_GLYCEMIA_BODY_FEATURES = [
+  { featureKey: "glycemia", label: "Glycemia", metricKeys: ["hba1c", "glucose"], requiredFor: "l1b-glycemia-body" },
+  { featureKey: "bmi", label: "BMI", metricKeys: ["bmi"], requiredFor: "l1b-glycemia-body" },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
+
 const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
   { featureKey: "steps", label: "Steps", metricKeys: ["steps"], requiredFor: "wearable-context" },
   { featureKey: "activity-minutes", label: "Activity minutes", metricKeys: ["activity-minutes"], requiredFor: "wearable-context" },
@@ -2784,12 +2798,14 @@ const MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_CARD_DEFINITIONS = [
 }>;
 
 const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
+  "l1b_glycemia_body_10y_acm_research",
   "lab9_bp_body_10y_acm_research",
   "lab5_bp_bmi_transport_research",
   "l1_tiny_glycemia_10y_acm_research",
 ] satisfies readonly MurphAgeScoreBearingCardId[];
 
 const MURPH_AGE_FUNCTION_RESIDUAL_ANCHOR_CARD_IDS = [
+  "l1b_glycemia_body_10y_acm_research",
   "lab9_bp_body_10y_acm_research",
   "lab5_bp_bmi_transport_research",
   "l1_tiny_glycemia_10y_acm_research",
@@ -3082,6 +3098,37 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
       productPromotionEvidence: false,
       status: "blocked",
       summary: "Large NHIS outcome-risk anchor only; product promotion and risk-age display require external validation plus locked user-input mapping.",
+    },
+    wearableScoreBearingAuthorized: false,
+  },
+  {
+    acceptedBundleIds: ["l1b-glycemia-body"],
+    cardId: "l1b_glycemia_body_10y_acm_research",
+    evidenceClass: "research-transport",
+    evidenceSummary: "Current alpha research card for glycemia plus body context; broad lab panels and wearables remain secondary shadow layers until external receipts clear.",
+    outcome: {
+      ageEstimateBasis: "risk-age-equivalent",
+      horizonYears: 10,
+      modelEndpoint: "10-year all-cause mortality",
+      riskEndpoint: "all-cause-mortality",
+    },
+    productAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    scoreBearing: true,
+    scoreBearingMetricKeys: [
+      "glucose",
+      "hba1c",
+      "bmi",
+      "systolic-blood-pressure",
+      "diastolic-blood-pressure",
+      "waist-circumference",
+    ],
+    scoreBearingSourceKinds: ["measurement", "test-result"],
+    validationGate: {
+      evidenceTiers: ["internal-anchor", "same-family-sanity"],
+      productPromotionEvidence: false,
+      status: "blocked",
+      summary: "Research-only current alpha; product promotion requires external aggregate validation and risk-to-age display approval.",
     },
     wearableScoreBearingAuthorized: false,
   },
@@ -4585,8 +4632,24 @@ export function listMurphAgeSubmittedCalculatorInputBundleSpecs():
       .map((feature) => feature.featureKey),
   ];
   const lab5RequiredFeatureKeys = MURPH_AGE_LAB5_FEATURES.map((feature) => feature.featureKey);
+  const l1bGlycemiaBodyRequiredFeatureKeys = MURPH_AGE_L1B_GLYCEMIA_BODY_FEATURES.map((feature) => feature.featureKey);
   const l1GlycemiaRequiredFeatureKeys = MURPH_AGE_L1_GLYCEMIA_FEATURES.map((feature) => feature.featureKey);
   return [
+    buildSubmittedCalculatorInputBundleSpec({
+      bundleId: "l1b-glycemia-body",
+      cardId: "l1b_glycemia_body_10y_acm_research",
+      completion: {
+        alternativeFeatureKeyGroups: [],
+        minReadyFeatureCount: null,
+        requiredFeatureKeys: l1bGlycemiaBodyRequiredFeatureKeys,
+        rule: "glycemia-plus-body",
+      },
+      displayName: "L1b glycemia/body current-alpha research bundle",
+      featureRequirements: MURPH_AGE_L1B_GLYCEMIA_BODY_FEATURES,
+      requiredFeatureKeys: l1bGlycemiaBodyRequiredFeatureKeys,
+      researchAgeEstimateEligible: true,
+      scoreBearing: true,
+    }),
     buildSubmittedCalculatorInputBundleSpec({
       bundleId: "lab9-bp-body",
       cardId: "lab9_bp_body_10y_acm_research",
@@ -4914,6 +4977,7 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
       layerId: "clinical-lab-body",
       mode: "score-bearing-research",
       modelCardIds: [
+        "l1b_glycemia_body_10y_acm_research",
         "lab9_bp_body_10y_acm_research",
         "lab5_bp_bmi_transport_research",
         "l1_tiny_glycemia_10y_acm_research",
@@ -6699,6 +6763,7 @@ const MURPH_AGE_SCORE_BEARING_CARD_BUNDLE_RESOLVERS: Record<
   MurphAgeScoreBearingCardId,
   (input: MurphAgeInputBundleAssessmentInput) => MurphAgeInputBundleAssessment
 > = {
+  l1b_glycemia_body_10y_acm_research: assessMurphAgeL1bGlycemiaBody,
   l1_tiny_glycemia_10y_acm_research: assessMurphAgeL1Glycemia,
   lab5_bp_bmi_transport_research: assessMurphAgeLab5BpBmi,
   lab9_bp_body_10y_acm_research: assessMurphAgeLab9BpBody,
@@ -6711,6 +6776,7 @@ const MURPH_AGE_EXPLICIT_PRIMARY_BUNDLE_RESOLVERS: Partial<Record<
 >> = MURPH_AGE_SCORE_BEARING_CARD_BUNDLE_RESOLVERS;
 
 const MURPH_AGE_SCORE_BEARING_CARD_IDS = [
+  "l1b_glycemia_body_10y_acm_research",
   "lab9_bp_body_10y_acm_research",
   "lab5_bp_bmi_transport_research",
   "l1_tiny_glycemia_10y_acm_research",
@@ -8062,18 +8128,20 @@ function buildMurphAgeResearchArbiterView(
       selectedMetricKeys: [...candidate.selectedMetricKeys],
       warnings: candidate.warnings.map((warning) => ({ ...warning })),
     })),
-    labConflictPolicy: "lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback",
+    labConflictPolicy: "l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback",
     selectedCardRole: selectedCandidateCardId
       ? resolveMurphAgeResearchCardRole(selectedCandidateCardId)
       : null,
     selectionReason: resolveMurphAgeResearchArbiterSelectionReason(selectedCandidateCardId),
-    strategy: "r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context",
+    strategy: "r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context",
     wearableScorePolicy: "context-only-not-score-bearing",
   };
 }
 
 function resolveMurphAgeResearchCardRole(cardId: MurphAgeScoreBearingCardId): MurphAgeResearchCardRole {
   switch (cardId) {
+    case "l1b_glycemia_body_10y_acm_research":
+      return "current-alpha-glycemia-body-core";
     case "lab9_bp_body_10y_acm_research":
       return "primary-lab-bp-body-adjuster";
     case "lab5_bp_bmi_transport_research":
@@ -8089,6 +8157,8 @@ function resolveMurphAgeResearchArbiterSelectionReason(
   cardId: MurphAgePublicAuthorization["cardId"],
 ): MurphAgeResearchArbiterSelectionReason {
   switch (cardId) {
+    case "l1b_glycemia_body_10y_acm_research":
+      return "current-alpha-glycemia-body-selected";
     case "lab9_bp_body_10y_acm_research":
       return "primary-lab-card-selected";
     case "lab5_bp_bmi_transport_research":
@@ -8688,6 +8758,9 @@ function toPublicWearableBridgeFeatureReadiness(
 export function assessMurphAgeInputBundle(
   input: MurphAgeInputBundleAssessmentInput,
 ): MurphAgeInputBundleAssessment {
+  const l1bGlycemiaBodyAssessment = assessMurphAgeL1bGlycemiaBody(input);
+  if (l1bGlycemiaBodyAssessment.status === "ready") return l1bGlycemiaBodyAssessment;
+
   const lab9Assessment = assessMurphAgeLab9BpBody(input);
   if (lab9Assessment.status === "ready") return lab9Assessment;
 
@@ -8709,6 +8782,7 @@ export function assessMurphAgeInputBundle(
   return buildInputBundleAssessment({
     bundleId: "insufficient",
     featureStatuses: [
+      ...l1bGlycemiaBodyAssessment.featureStatuses,
       ...lab5Assessment.featureStatuses,
       ...l1GlycemiaAssessment.featureStatuses,
       ...r399Assessment.featureStatuses,
@@ -8729,6 +8803,26 @@ function hasMurphAgeScoreBearingLabIntent(input: MurphAgeInputBundleAssessmentIn
     MURPH_AGE_SCORE_BEARING_LAB_METRIC_KEYS.has(resolveMetricInputKey(point.metricKey))
     && isMurphAgeInputBundleMetricPointAllowed(point)
   );
+}
+
+function assessMurphAgeL1bGlycemiaBody(
+  input: MurphAgeInputBundleAssessmentInput,
+): MurphAgeInputBundleAssessment {
+  const l1bStatuses = assessInputFeatureRequirements(input, MURPH_AGE_L1B_GLYCEMIA_BODY_FEATURES);
+  const ready = l1bStatuses.every((status) => status.status === "ready");
+
+  return buildInputBundleAssessment({
+    bundleId: "l1b-glycemia-body",
+    featureStatuses: l1bStatuses,
+    recommendedCardId: "l1b_glycemia_body_10y_acm_research",
+    status: ready ? "ready" : "abstain",
+    warnings: ready
+      ? []
+      : [{
+        code: "MODEL_FEATURE_MISSING",
+        message: "L1b glycemia/body research card requires glucose or HbA1c plus BMI.",
+      }],
+  });
 }
 
 function assessMurphAgeLab9BpBody(
