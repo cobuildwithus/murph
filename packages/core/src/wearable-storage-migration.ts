@@ -23,9 +23,11 @@ import { runCanonicalWrite } from "./operations/write-batch.ts";
 import {
   normalizeRelativeVaultPath,
   resolveVaultPath,
+  resolveVaultPathOnDisk,
 } from "./path-safety.ts";
 import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
 import { assertValidVault } from "./vault.ts";
+import { VaultError } from "./errors.ts";
 import {
   compactLegacyWearableReceiptEnvelopes,
   detectLegacyWearableReceiptCompaction,
@@ -81,6 +83,10 @@ interface RawManifestReadResult {
   invalidDirectories: Set<string>;
   snapshots: RawManifestSnapshot[];
 }
+
+type LedgerRawReferenceScan =
+  | { kind: "ok"; rawPaths: ReadonlySet<string> }
+  | { kind: "unsafe" };
 
 interface RawArtifactReference {
   artifact: RawImportManifestArtifact;
@@ -417,6 +423,7 @@ async function tombstoneRawArtifactClassLocked(input: {
 }): Promise<RawTombstoneRunResult> {
   const manifestReadResult = await readRawManifestReadResult(input.vaultRoot);
   const manifestSnapshots = manifestReadResult.snapshots;
+  const ledgerRawReferences = await collectLedgerRawReferences(input.vaultRoot);
   const groups = collectRawArtifactReferenceGroups(manifestSnapshots, input.predicate)
     .sort((left, right) => largestReferenceByteSize(right) - largestReferenceByteSize(left));
   const prepared: PreparedRawTombstone[] = [];
@@ -445,6 +452,7 @@ async function tombstoneRawArtifactClassLocked(input: {
       artifactClass: input.artifactClass,
       denseRetentionPolicy: input.denseRetentionPolicy,
       invalidManifestDirectories: manifestReadResult.invalidDirectories,
+      ledgerRawReferences,
       manifestSnapshots,
       now: input.now,
       reason: input.reason,
@@ -547,6 +555,7 @@ async function prepareRawArtifactTombstone(input: {
     includeRecent: boolean;
   };
   invalidManifestDirectories: ReadonlySet<string>;
+  ledgerRawReferences: LedgerRawReferenceScan;
   manifestSnapshots: readonly RawManifestSnapshot[];
   now: Date;
   reason: string;
@@ -587,7 +596,10 @@ async function prepareRawArtifactTombstone(input: {
   ) {
     return null;
   }
-  if (await rawPathAppearsInLedgerReference(input.vaultRoot, targetArtifact.relativePath)) {
+  if (
+    input.ledgerRawReferences.kind === "unsafe"
+    || input.ledgerRawReferences.rawPaths.has(targetArtifact.relativePath)
+  ) {
     return null;
   }
 
@@ -655,15 +667,19 @@ async function readRawManifestReadResult(
   const invalidDirectories = new Set<string>();
 
   for (const relativePath of manifestPaths) {
-    const resolved = resolveVaultPath(vaultRoot, relativePath);
-    const stats = await fs.stat(resolved.absolutePath);
-    if (
-      options.maxManifestBytes !== undefined
-      && stats.size > options.maxManifestBytes
-    ) {
-      continue;
-    }
     try {
+      const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath);
+      const stats = await fs.lstat(resolved.absolutePath);
+      if (!stats.isFile()) {
+        invalidDirectories.add(path.posix.dirname(relativePath));
+        continue;
+      }
+      if (
+        options.maxManifestBytes !== undefined
+        && stats.size > options.maxManifestBytes
+      ) {
+        continue;
+      }
       snapshots.push({
         manifest: parseRawImportManifest(JSON.parse(await fs.readFile(resolved.absolutePath, "utf8"))),
         relativePath,
@@ -730,38 +746,51 @@ async function collectDenseSampleShardCandidates(
   return candidates;
 }
 
-async function rawPathAppearsInLedgerReference(
+async function collectLedgerRawReferences(
   vaultRoot: string,
-  targetPath: string,
-): Promise<boolean> {
+): Promise<LedgerRawReferenceScan> {
+  const rawPaths = new Set<string>();
   for (const directory of ["ledger/events", "ledger/samples", "ledger/metric-samples"]) {
     const files = await walkVaultFiles(vaultRoot, directory, { extension: ".jsonl" });
     for (const file of files) {
-      const records = await readJsonlRecords({
-        vaultRoot,
-        relativePath: file,
-      });
-      if (records.some((record) => decodedJsonValueContainsString(record, targetPath))) {
-        return true;
+      let records: Awaited<ReturnType<typeof readJsonlRecords>>;
+      try {
+        records = await readJsonlRecords({
+          vaultRoot,
+          relativePath: file,
+        });
+      } catch (error) {
+        if (error instanceof VaultError && error.code === "VAULT_INVALID_JSONL") {
+          return { kind: "unsafe" };
+        }
+        throw error;
+      }
+      for (const record of records) {
+        collectRawPathStrings(record, rawPaths);
       }
     }
   }
-  return false;
+  return { kind: "ok", rawPaths };
 }
 
-function decodedJsonValueContainsString(value: unknown, target: string): boolean {
+function collectRawPathStrings(value: unknown, rawPaths: Set<string>): void {
   if (typeof value === "string") {
-    return value === target;
+    if (value === "raw" || value.startsWith("raw/")) {
+      rawPaths.add(value);
+    }
+    return;
   }
   if (Array.isArray(value)) {
-    return value.some((item) => decodedJsonValueContainsString(item, target));
+    for (const item of value) {
+      collectRawPathStrings(item, rawPaths);
+    }
+    return;
   }
   if (value && typeof value === "object") {
-    return Object.values(value).some((item) =>
-      decodedJsonValueContainsString(item, target)
-    );
+    for (const item of Object.values(value)) {
+      collectRawPathStrings(item, rawPaths);
+    }
   }
-  return false;
 }
 
 async function assertRawManifestArtifactsMatchFiles(input: {

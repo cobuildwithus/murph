@@ -13,6 +13,7 @@ import {
   readExperimentPromotionEntries,
   requireExperimentPromotionCore,
   requireExperimentPromotionEntry,
+  requireDocumentPromotionCore,
   requireJournalPromotionCore,
   resolveAttachmentSha256,
   resolveExperimentPromotionTarget,
@@ -131,7 +132,7 @@ export function createInboxPromotionOps(
         clock: env.clock,
         loadInbox: env.loadInbox,
         prepare: async () => {
-          const core = await env.loadCore()
+          const core = requireDocumentPromotionCore(await env.loadCore())
           return {
             core,
             importers: (await env.loadImporters()).createImporters({ corePort: core }),

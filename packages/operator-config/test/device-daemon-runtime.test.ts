@@ -1593,6 +1593,44 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
     path.join(path.dirname(writeFailurePaths.launcherStatePath), 'control-token'),
   ])
 
+  const exitRaceVault = await createTempVault('operator-config-device-daemon-exit-race-')
+  const exitRacePaths = resolveDeviceDaemonPaths(exitRaceVault)
+  const exitRaceRemovals: string[] = []
+
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: exitRaceVault,
+        baseUrl: 'http://127.0.0.1:4318',
+        env: TEST_WHOOP_PROVIDER_ENV,
+        dependencies: {
+          chmod: async () => undefined,
+          mkdir: async () => undefined,
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          fetchImpl: async () => new Response(null, { status: 503 }),
+          isProcessAlive: () => true,
+          killProcess: () => {
+            throw Object.assign(new Error('already exited'), { code: 'ESRCH' })
+          },
+          removeFile: async (filePath) => {
+            exitRaceRemovals.push(filePath)
+          },
+          resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+          spawnProcess: async () => ({ pid: 9103 }),
+          writeFile: async (_filePath, text) => {
+            if (text.includes('"schema"')) {
+              throw new Error('cannot persist state after exit race')
+            }
+          },
+        },
+      }),
+    /cannot persist state after exit race/u,
+  )
+  assert.deepEqual(exitRaceRemovals, [
+    exitRacePaths.launcherStatePath,
+    path.join(path.dirname(exitRacePaths.launcherStatePath), 'control-token'),
+  ])
+
   const staleStopVault = await createTempVault('operator-config-device-daemon-stop-stale-')
   const staleStopPaths = resolveDeviceDaemonPaths(staleStopVault)
   await writeDeviceDaemonState(
@@ -1658,6 +1696,38 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
       startedAt: '2026-04-08T00:00:00.000Z',
     },
   )
+
+  const stopExitRaceVault = await createTempVault('operator-config-device-daemon-stop-exit-race-')
+  const stopExitRacePaths = resolveDeviceDaemonPaths(stopExitRaceVault)
+  await writeDeviceDaemonState(
+    stopExitRacePaths,
+    {
+      pid: 9403,
+      baseUrl: 'http://127.0.0.1:4318',
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
+  )
+  await writeManagedControlToken(stopExitRacePaths, 'managed-token', createFileDependencies())
+
+  const stopExitRaceResult = await stopManagedDeviceSyncDaemon({
+    vault: stopExitRaceVault,
+    baseUrl: 'http://127.0.0.1:4318',
+    dependencies: {
+      isProcessAlive: () => true,
+      killProcess: () => {
+        throw Object.assign(new Error('already exited'), { code: 'ESRCH' })
+      },
+      findUnmanagedDeviceSyncDaemonPid: async () => 9403,
+      resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+    },
+  })
+  assert.equal(stopExitRaceResult.stopped, true)
+  assert.equal(
+    await readDeviceDaemonState(stopExitRacePaths, createFileDependencies()),
+    null,
+  )
+  assert.equal(resolveManagedControlToken(stopExitRacePaths), null)
 
   await assert.rejects(
     () =>

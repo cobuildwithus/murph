@@ -22,6 +22,7 @@ import {
   promoteCanonicalAttachmentImport,
   readExperimentPromotionEntries,
   readPromotionsByCapture,
+  requireDocumentPromotionCore,
   requireExperimentPromotionCore,
   requireExperimentPromotionEntry,
   requireJournalPromotionCore,
@@ -256,6 +257,22 @@ function createCoreRuntimeModule(
         mealId: 'meal-created',
         event: { id: 'meal-created' },
         manifestPath: 'raw/meals/meal-created/manifest.json',
+      }
+    },
+    async acquireCanonicalWriteLock() {
+      return {
+        async release() {
+          return undefined
+        },
+      }
+    },
+    async withCanonicalWriteLockScope(_vaultRoot, run) {
+      return await run()
+    },
+    async importDocument() {
+      return {
+        documentId: 'document-created',
+        event: { id: 'document-created' },
       }
     },
     async promoteInboxJournal() {
@@ -1107,6 +1124,48 @@ test('document preservation and experiment helper branches are deterministic', a
   ])
   assert.equal(closed, 1)
 
+  await assert.rejects(
+    () =>
+      preserveCanonicalDocumentAttachments({
+        input: {
+          vault: paths.absoluteVaultRoot,
+          captureId: capture.captureId,
+          requestId: null,
+        },
+        loadCore: async () => ({
+          async addMeal() {
+            return {
+              mealId: 'meal-created',
+              event: { id: 'meal-created' },
+              manifestPath: 'raw/meals/meal-created/manifest.json',
+            }
+          },
+          async importDocument() {
+            return {
+              documentId: 'document-created',
+              event: { id: 'document-created' },
+            }
+          },
+        }),
+        loadImporters: async () => ({
+          createImporters() {
+            return {
+              async importDocument() {
+                return {
+                  documentId: 'document-created',
+                  event: { id: 'document-created' },
+                }
+              },
+            }
+          },
+        }),
+        loadInbox: async () => createInboxRuntimeModule(createRuntimeStore([capture])),
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'INBOX_PROMOTION_UNSUPPORTED',
+  )
+
   const query = createQueryRuntimeModule([
     {
       path: 'bank/experiments/current.md',
@@ -1241,10 +1300,17 @@ test('document preservation and experiment helper branches are deterministic', a
   )
 
   const supportedCore = createCoreRuntimeModule()
+  assert.equal(requireDocumentPromotionCore(supportedCore).importDocument, supportedCore.importDocument)
   assert.equal(requireJournalPromotionCore(supportedCore).promoteInboxJournal, supportedCore.promoteInboxJournal)
   assert.equal(
     requireExperimentPromotionCore(supportedCore).promoteInboxExperimentNote,
     supportedCore.promoteInboxExperimentNote,
+  )
+  assert.throws(
+    () => requireDocumentPromotionCore({ addMeal: supportedCore.addMeal }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'INBOX_PROMOTION_UNSUPPORTED',
   )
   assert.throws(
     () => requireJournalPromotionCore({ addMeal: supportedCore.addMeal }),
@@ -1639,6 +1705,29 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   })
 
   const ops = createInboxPromotionOps(env)
+  const unsupportedDocumentOps = createInboxPromotionOps(createInboxAppEnvironment({
+    inbox: createInboxRuntimeModule(createRuntimeStore(captures)),
+    core: {
+      async addMeal() {
+        return {
+          mealId: 'meal-created',
+          event: { id: 'meal-created' },
+          manifestPath: 'raw/meals/meal-created/manifest.json',
+        }
+      },
+    },
+  }))
+  await assert.rejects(
+    () =>
+      unsupportedDocumentOps.promoteDocument({
+        vault: paths.absoluteVaultRoot,
+        captureId: 'capture-document-created',
+        requestId: null,
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'INBOX_PROMOTION_UNSUPPORTED',
+  )
 
   const preserved = await ops.preserveDocumentAttachments({
     vault: paths.absoluteVaultRoot,
