@@ -10,6 +10,7 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
@@ -1031,7 +1032,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v13')
+    assert.equal(view.schemaVersion, MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION)
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -1116,7 +1117,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.layeredAgeEstimate?.residualScoreContributionAuthorized, false)
     assert.deepEqual(view.layeredAgeEstimate?.appliedLayerIds, [
       'selected-lab-body-card',
-      'wearable-activity-residual',
+      'wearable-multi-family-residual',
     ])
     assert.equal(view.layeredAgeEstimate?.intervalYears, null)
     assert.equal(view.layeredAgeEstimate?.uncertaintyStatus, 'not-reestimated-for-shadow')
@@ -1146,7 +1147,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(functionPackView.functionResidualLayer?.scoreContributionAuthorized, false)
     assert.equal(functionPackView.layeredAgeEstimate?.status, 'selected-card-only')
     assert.deepEqual(functionPackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
-      'wearable-activity-residual',
+      'wearable-multi-family-residual',
     ])
     const encodedFunctionLayer = JSON.stringify(functionPackView.functionResidualLayer)
     for (const forbidden of [
@@ -1158,14 +1159,14 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]) {
       assert.equal(encodedFunctionLayer.includes(forbidden), false, forbidden)
     }
-    const wearableActivityLayer = view.model.layeredResearchPath.layers.find((layer) =>
-      layer.layerId === 'wearable-activity-residual'
+    const wearableResidualLayer = view.model.layeredResearchPath.layers.find((layer) =>
+      layer.layerId === 'wearable-multi-family-residual'
     )
-    assert.ok(wearableActivityLayer)
-    assert.equal(wearableActivityLayer.status, 'parameter-pack-available-shadow-only')
-    assert.equal(wearableActivityLayer.parameterPackRequired, true)
-    assert.equal(wearableActivityLayer.parameterPackAvailable, true)
-    assert.equal(wearableActivityLayer.metricKeys.includes('steps'), true)
+    assert.ok(wearableResidualLayer)
+    assert.equal(wearableResidualLayer.status, 'parameter-pack-available-shadow-only')
+    assert.equal(wearableResidualLayer.parameterPackRequired, true)
+    assert.equal(wearableResidualLayer.parameterPackAvailable, true)
+    assert.equal(wearableResidualLayer.metricKeys.includes('steps'), true)
     assert.equal(view.model.scoreInterpretation, 'risk-age-equivalent-research-only')
     assert.equal(view.model.selectedResearchCardId, 'lab5_bp_bmi_transport_research')
     assert.equal(view.model.productUseAuthorized, false)
@@ -1250,7 +1251,10 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.wearable.scoreBearing, false)
     assert.equal(view.model.wearable.scoreContributionAuthorized, false)
     assert.equal(view.model.wearable.consumerValidationStatus, 'missing')
-    assert.equal(view.model.wearable.shadowEvidenceConclusion, 'public_activity_shadow_signal_mixed_keep_wearable_context_only')
+    assert.equal(
+      view.model.wearable.shadowEvidenceConclusion,
+      'public_multi_family_wearable_shadow_signal_mixed_keep_context_only',
+    )
     assert.equal(view.model.wearable.externalConsumerLabWearableAggregateStillMissing, true)
     assert.equal(view.model.wearable.usableAsConsumerWearableValidation, false)
     assert.equal(view.model.wearable.nextAction, 'run_external_or_partner_lab_wearable_aggregate_delta')
@@ -1632,7 +1636,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
-    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v13')
+    assert.equal(researchCalculatorView.schemaVersion, MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION)
     assert.equal(researchCalculatorView.researchOnly, true)
     assert.equal(researchCalculatorView.mode, 'research')
     assert.equal(researchCalculatorView.status, 'ready')
@@ -1675,10 +1679,10 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(researchCalculatorView.layeredAgeEstimate?.residualScoreContributionAuthorized, false)
     assert.deepEqual(researchCalculatorView.layeredAgeEstimate?.appliedLayerIds, [
       'selected-lab-body-card',
-      'wearable-activity-residual',
+      'wearable-multi-family-residual',
     ])
     const parameterizedWearableLayer = researchCalculatorView.model.layeredResearchPath.layers.find((layer) =>
-      layer.layerId === 'wearable-activity-residual'
+      layer.layerId === 'wearable-multi-family-residual'
     )
     assert.ok(parameterizedWearableLayer)
     assert.equal(parameterizedWearableLayer.status, 'parameter-pack-available-shadow-only')

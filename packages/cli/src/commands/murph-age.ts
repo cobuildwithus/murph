@@ -548,6 +548,19 @@ const murphAgeWearableParameterPackContractSchema = z.object({
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION),
   supportedDeploymentRights: z.array(z.enum(['not-authorized', 'research-only', 'product-authorized'])),
 })
+const murphAgeWearableShadowFamilySchema = z.enum([
+  'activity',
+  'hrv',
+  'resting-heart-rate',
+  'sleep',
+])
+const murphAgeWearableResidualLayerIdSchema = z.enum([
+  'activity-residual-v1',
+  'hrv-residual-v1',
+  'multi-wearable-residual-v1',
+  'resting-heart-rate-residual-v1',
+  'sleep-residual-v1',
+])
 const murphAgeSourceRouteIdSchema = z.custom<MurphAgeSourceRouteId>(
   (value): value is MurphAgeSourceRouteId =>
     typeof value === 'string' && resolveMurphAgeSourceRoute(value) !== null,
@@ -560,7 +573,7 @@ const murphAgeWearableResidualParameterPackSchema: z.ZodType<MurphAgeWearableRes
   deploymentRights: z.enum(['not-authorized', 'research-only', 'product-authorized']),
   endpoint: z.literal('10-year all-cause mortality'),
   evidenceTier: murphAgeValidationEvidenceTierSchema,
-  family: z.literal('activity'),
+  family: murphAgeWearableShadowFamilySchema,
   featureWeights: z.array(z.object({
     center: z.number().finite(),
     coefficient: z.number().finite(),
@@ -571,7 +584,7 @@ const murphAgeWearableResidualParameterPackSchema: z.ZodType<MurphAgeWearableRes
   globalWearableCapLogit: z.number().finite().positive().max(1),
   horizonYears: z.literal(10),
   intercept: z.number().finite(),
-  layerId: z.literal('activity-residual-v1'),
+  layerId: murphAgeWearableResidualLayerIdSchema,
   packHash: z.string().min(8).max(128).regex(/^[a-z0-9][a-z0-9._-]+$/u),
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION),
   sourceRouteId: murphAgeSourceRouteIdSchema,
@@ -614,10 +627,11 @@ const murphAgeWearableResidualLayerContractSchema = z.object({
   currentDeploymentStatus: z.literal('contract-only-no-validated-parameters'),
   deployableParameterizationAvailable: z.literal(false),
   deferredFamilyOrder: z.array(z.enum(['sleep', 'resting-heart-rate', 'hrv', 'estimated-vo2-max'])),
-  family: z.literal('activity'),
+  family: murphAgeWearableShadowFamilySchema,
   featureSetContract: murphAgeWearableResidualFeatureSetContractSchema,
-  layerId: z.literal('activity-residual-v1'),
-  minimumValidDays28d: z.literal(14),
+  layerId: murphAgeWearableResidualLayerIdSchema,
+  minimumValidDays28d: z.number().int().nonnegative().nullable(),
+  minimumValidNights28d: z.number().int().nonnegative().nullable(),
   missingnessPolicy: z.literal('missing-or-undercovered-family-zero-delta-widen-uncertainty'),
   nuisanceControlMetricKeys: z.array(z.string().min(1)),
   primaryDecisionComparisons: z.array(z.enum([
@@ -670,13 +684,6 @@ const murphAgeWearableScoreBearingStrategySchema = z.object({
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION),
 })
 
-const murphAgeWearableShadowFamilySchema = z.enum([
-  'activity',
-  'hrv',
-  'resting-heart-rate',
-  'sleep',
-])
-
 const murphAgeWearableShadowOutputBoundarySchema = z.object({
   aggregateOnly: z.literal(true),
   coefficientsExportAllowed: z.literal(false),
@@ -727,7 +734,7 @@ const murphAgeWearableResidualLayerViewSchema = z.object({
   eligibleForResidualResearch: z.boolean(),
   finalRiskAgeEquivalentYears: z.number().nullable(),
   finalRiskProbability: z.number().nullable(),
-  layerId: z.literal('activity-residual-v1'),
+  layerId: murphAgeWearableResidualLayerIdSchema,
   parameterPackHash: z.string().min(1).nullable(),
   parameterizationAvailable: z.boolean(),
   productAuthorized: z.literal(false),
@@ -984,6 +991,7 @@ const murphAgeResearchLayerIdSchema = z.enum([
   'r399-outcome-risk-anchor',
   'selected-lab-body-card',
   'wearable-activity-residual',
+  'wearable-multi-family-residual',
 ])
 const murphAgeResearchLayerContractItemSchema = z.object({
   combinationScale: z.enum(['risk-logit', 'risk-logit-residual']),
@@ -997,6 +1005,7 @@ const murphAgeResearchLayerContractItemSchema = z.object({
     'function-mobility-residual',
     'lab-body-risk-adjuster',
     'wearable-activity-residual',
+    'wearable-multi-family-residual',
   ]),
   scoreBearingNow: z.boolean(),
   scoreContributionAuthorized: z.literal(false),
@@ -1066,7 +1075,7 @@ const murphAgeResearchModelStatusViewSchema = z.object({
     nextExternalOrPartnerRouteIdsByPriority: z.array(z.string().min(1)),
     scoreBearing: z.literal(false),
     scoreContributionAuthorized: z.literal(false),
-    shadowEvidenceConclusion: z.literal('public_activity_shadow_signal_mixed_keep_wearable_context_only'),
+    shadowEvidenceConclusion: z.literal('public_multi_family_wearable_shadow_signal_mixed_keep_context_only'),
     shadowEvidencePacketIds: z.array(z.enum([
       'r1038-nhanes-modern-lab-activity-loop',
       'r1049-nhanes-activity-control-diagnostic',
