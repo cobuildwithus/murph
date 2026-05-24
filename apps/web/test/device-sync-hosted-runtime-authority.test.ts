@@ -66,6 +66,9 @@ function buildHostedRecord(
     nextReconcileAt: string | null;
     provider: string;
     providerConfigKey: string | null;
+    refreshLeaseExpiresAt: string | null;
+    refreshLeaseOwner: string | null;
+    refreshLeaseTokenVersion: number | null;
     scopes: string[];
     setupExpiresAt: string | null;
     setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
@@ -95,6 +98,9 @@ function buildHostedRecord(
     nextReconcileAt: null,
     provider: "oura",
     providerConfigKey: null,
+    refreshLeaseExpiresAt: null,
+    refreshLeaseOwner: null,
+    refreshLeaseTokenVersion: null,
     scopes: ["daily"],
     setupExpiresAt: null,
     setupPhase: null,
@@ -507,6 +513,61 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       kind: "oauth_tokens",
       tokens: {
         accessToken: "stored-access-token",
+      },
+    });
+    expect(harness.storedAccount?.tokenVersion).toBe(3);
+  });
+
+  it("skips runtime token writes while an agent refresh lease owns the observed token version", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        refreshLeaseExpiresAt: "2026-04-06T10:15:00.000Z",
+        refreshLeaseOwner: "agent-refresh:active",
+        refreshLeaseTokenVersion: 3,
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              observedTokenVersion: 3,
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+              credential: {
+                kind: "oauth_tokens",
+                tokenBundle: {
+                  accessToken: "runtime-access-token",
+                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                  keyVersion: "kv_runtime",
+                  refreshToken: "runtime-refresh-token",
+                  tokenVersion: 3,
+                },
+              },
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "skipped_version_mismatch",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.storedAccount?.credential).toMatchObject({
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken: "stored-access-token",
+        refreshToken: "stored-refresh-token",
       },
     });
     expect(harness.storedAccount?.tokenVersion).toBe(3);

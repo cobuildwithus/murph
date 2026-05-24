@@ -81,6 +81,12 @@ export interface HostedDeviceSyncDueReconcileConnectionRecord {
   nextReconcileAt: string;
 }
 
+export type HostedConnectionRefreshLeaseClaimResult =
+  | { status: "claimed" }
+  | { status: "in_progress"; leaseExpiresAt: string }
+  | { status: "stale" }
+  | { status: "version_changed" };
+
 export interface UpsertHostedDeviceSyncDirtyConnectionInput {
   connectionId: string;
   userId: string;

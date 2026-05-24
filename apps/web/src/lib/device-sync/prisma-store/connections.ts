@@ -26,6 +26,7 @@ import {
 import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
 import type {
   HostedDeviceSyncDueReconcileConnectionRecord,
+  HostedConnectionRefreshLeaseClaimResult,
   HostedPrismaTransactionClient,
 } from "./types";
 import {
@@ -176,6 +177,9 @@ export class PrismaHostedConnectionStore {
             lastSyncErrorAt: null,
             metadataJson: toPrismaJsonObject(metadata),
             nextReconcileAt: maybeDate(input.nextReconcileAt),
+            refreshLeaseExpiresAt: null,
+            refreshLeaseOwner: null,
+            refreshLeaseTokenVersion: null,
             scopesJson: scopes,
             status: requestedStatus ?? "active",
           },
@@ -309,6 +313,9 @@ export class PrismaHostedConnectionStore {
           lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(input.message),
           lastSyncErrorAt: new Date(input.now),
           nextReconcileAt: null,
+          refreshLeaseExpiresAt: null,
+          refreshLeaseOwner: null,
+          refreshLeaseTokenVersion: null,
           refreshTokenEncrypted: null,
           setupExpiresAt: null,
           setupPhase: "failed",
@@ -401,11 +408,96 @@ export class PrismaHostedConnectionStore {
     return record ? await this.buildStoredConnectionAccount(record, prisma) : null;
   }
 
+  async claimConnectionRefreshLease(input: {
+    connectionId: string;
+    userId: string;
+    tokenVersion: number;
+    leaseOwner: string;
+    leaseExpiresAt: string;
+    now: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRefreshLeaseClaimResult> {
+    const prisma = input.tx ?? this.prisma;
+    const claim = await prisma.deviceConnection.updateMany({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+        tokenVersion: input.tokenVersion,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+      },
+      data: {
+        refreshLeaseExpiresAt: new Date(input.leaseExpiresAt),
+        refreshLeaseOwner: input.leaseOwner,
+        refreshLeaseTokenVersion: input.tokenVersion,
+      },
+    });
+
+    if (claim.count > 0) {
+      return { status: "claimed" };
+    }
+
+    const record = await prisma.deviceConnection.findFirst({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+      },
+      select: {
+        id: true,
+        refreshLeaseExpiresAt: true,
+        refreshLeaseOwner: true,
+        refreshLeaseTokenVersion: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (!record || record.tokenVersion !== input.tokenVersion) {
+      return { status: "version_changed" };
+    }
+
+    if (record.refreshLeaseOwner && record.refreshLeaseExpiresAt) {
+      if (record.refreshLeaseExpiresAt.getTime() > Date.parse(input.now)) {
+        return {
+          status: "in_progress",
+          leaseExpiresAt: record.refreshLeaseExpiresAt.toISOString(),
+        };
+      }
+
+      return { status: "stale" };
+    }
+
+    return { status: "stale" };
+  }
+
+  async clearConnectionRefreshLease(input: {
+    connectionId: string;
+    leaseOwner: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<boolean> {
+    const prisma = input.tx ?? this.prisma;
+    const result = await prisma.deviceConnection.updateMany({
+      where: {
+        id: input.connectionId,
+        refreshLeaseOwner: input.leaseOwner,
+      },
+      data: {
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+      },
+    });
+
+    return result.count > 0;
+  }
+
   async persistStoredConnectionTokenBundle(input: {
     clearExternalAccountId?: boolean;
     connectionId: string;
     externalAccountId?: string | null;
     provider: string;
+    clearRefreshLease?: boolean;
+    refreshLeaseOwner?: string | null;
     tokenBundle: {
       accessToken: string;
       accessTokenExpiresAt: string | null;
@@ -425,6 +517,33 @@ export class PrismaHostedConnectionStore {
 
     if (!record) {
       return;
+    }
+
+    const refreshLeaseOwner = normalizeNullableString(record.refreshLeaseOwner);
+    const inputRefreshLeaseOwner = normalizeNullableString(input.refreshLeaseOwner);
+    const ownsRefreshLease = Boolean(
+      refreshLeaseOwner
+      && inputRefreshLeaseOwner
+      && refreshLeaseOwner === inputRefreshLeaseOwner,
+    );
+    const obsoleteRefreshLease = Boolean(
+      refreshLeaseOwner
+      && record.refreshLeaseTokenVersion !== null
+      && record.refreshLeaseTokenVersion !== record.tokenVersion,
+    );
+
+    if (
+      refreshLeaseOwner
+      && !ownsRefreshLease
+      && !obsoleteRefreshLease
+      && input.clearRefreshLease !== true
+    ) {
+      throw deviceSyncError({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        message: "A hosted device-sync token refresh is already in progress for this connection.",
+        retryable: true,
+        httpStatus: 409,
+      });
     }
 
     const existingExternalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, prisma);
@@ -486,6 +605,13 @@ export class PrismaHostedConnectionStore {
         keyVersion: input.tokenBundle
           ? this.testCodec?.keyVersion ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION
           : null,
+        ...(input.clearRefreshLease === true || obsoleteRefreshLease
+          ? {
+              refreshLeaseExpiresAt: null,
+              refreshLeaseOwner: null,
+              refreshLeaseTokenVersion: null,
+            }
+          : {}),
         refreshTokenEncrypted,
         tokenVersion: input.tokenBundle?.tokenVersion ?? null,
       },

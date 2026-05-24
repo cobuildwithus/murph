@@ -229,6 +229,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceConnectionRefreshLeaseMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026052400_device_connection_refresh_lease/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -259,6 +266,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050900_hosted_web_session_row_cap_index",
       "2026051000_hosted_ai_usage_stripe_meter_skipped",
       "2026051900_device_connection_due_reconcile_sweep_idx",
+      "2026052400_device_connection_refresh_lease",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -378,6 +386,22 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(deviceConnectionDueReconcileSweepIndexMigrationSql).not.toContain("CREATE TABLE");
     expect(deviceConnectionDueReconcileSweepIndexMigrationSql).not.toContain("ALTER TABLE");
+    expect(deviceConnectionRefreshLeaseMigrationSql).toContain(
+      'ADD COLUMN "refresh_lease_owner" TEXT',
+    );
+    expect(deviceConnectionRefreshLeaseMigrationSql).toContain(
+      'ADD COLUMN "refresh_lease_expires_at" TIMESTAMP(3)',
+    );
+    expect(deviceConnectionRefreshLeaseMigrationSql).toContain(
+      'ADD COLUMN "refresh_lease_token_version" INTEGER',
+    );
+    expect(deviceConnectionRefreshLeaseMigrationSql).toContain(
+      'CONSTRAINT "device_connection_refresh_lease_complete_check"',
+    );
+    expect(deviceConnectionRefreshLeaseMigrationSql).not.toContain(
+      "device_connection_refresh_lease_expires_idx",
+    );
+    expect(deviceConnectionRefreshLeaseMigrationSql).not.toContain("CREATE TABLE");
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');

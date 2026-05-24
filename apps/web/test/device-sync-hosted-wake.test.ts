@@ -802,6 +802,7 @@ describe("appendHostedDeviceSyncWake", () => {
       mocks.prismaTx,
     );
     expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
       connectionId: "dsc_123",
       externalAccountId: "acct_sensitive",
       provider: "oura",
@@ -879,6 +880,7 @@ describe("appendHostedDeviceSyncWake", () => {
       mocks.prismaTx,
     );
     expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
       connectionId: "dsc_123",
       externalAccountId: afterRefreshStored.externalAccountId,
       provider: "oura",

@@ -48,6 +48,7 @@ import {
   appendHostedDeviceSyncReconnectNoticeTx,
   startHostedDeviceSyncReconnectNoticeWorkflowBestEffort,
 } from "./reconnect-notice";
+import { normalizeNullableString } from "./shared";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -184,9 +185,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         const connectionWriteRequested = stateMutationRequested || credentialMutationRequested;
         const connectionVersionMismatch = stateMutationRequested
           && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
+        const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
         const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
-          && (getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null) !== update.observedTokenVersion;
-        const versionMismatch = connectionVersionMismatch || tokenVersionMismatch;
+          && baselineTokenVersion !== update.observedTokenVersion;
+        const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
+          && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
+        const versionMismatch = connectionVersionMismatch || tokenVersionMismatch || tokenRefreshLeaseConflict;
         const credentialUpdate = update.credential === undefined
           ? undefined
           : resolveHostedRuntimeCredentialUpdate(update.credential);
@@ -1019,10 +1023,23 @@ async function persistHostedRuntimeCredentialSnapshot(input: {
       providerConfigKey: input.credential.kind === "provider_config"
         ? input.credential.providerConfigKey.trim()
         : null,
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: null,
+      refreshLeaseTokenVersion: null,
       refreshTokenEncrypted: null,
       tokenVersion: null,
     },
   });
+}
+
+function hasHostedRuntimeRefreshLeaseForTokenVersion(
+  record: HostedConnectionRecord,
+  tokenVersion: number | null,
+): boolean {
+  return Boolean(typeof tokenVersion === "number"
+    && normalizeNullableString(record.refreshLeaseOwner)
+    && record.refreshLeaseExpiresAt !== null
+    && record.refreshLeaseTokenVersion === tokenVersion);
 }
 
 function computeNextHostedTokenVersion(

@@ -160,6 +160,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     await input.store.syncDurableConnectionState(disconnectedConnection, tx);
     await input.store.persistStoredConnectionTokenBundle({
       connectionId: input.connectionId,
+      clearRefreshLease: true,
       externalAccountId: freshStoredAccount?.externalAccountId ?? null,
       provider: freshExisting.provider,
       tokenBundle: null,
