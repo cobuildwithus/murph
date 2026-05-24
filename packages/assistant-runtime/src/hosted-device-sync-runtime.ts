@@ -75,13 +75,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client) {
-    if (input.wake.kind === "device-sync.wake") {
-      throw new Error(
-        "Hosted device-sync wake handling requires a configured hosted device-sync control-plane port.",
-      );
-    }
-
-    return createEmptyHostedDeviceSyncRuntimeSyncState();
+    throw new Error(
+      "Hosted device-sync control-plane sync requires a configured hosted device-sync control-plane port.",
+    );
   }
 
   const snapshot = await client.fetchSnapshot();
@@ -165,7 +161,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
 
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client) {
-    return;
+    throw new Error(
+      "Hosted device-sync control-plane reconciliation requires a configured hosted device-sync control-plane port.",
+    );
   }
 
   const codec = createSecretCodec(input.secret);

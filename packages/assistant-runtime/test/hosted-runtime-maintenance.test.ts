@@ -1156,7 +1156,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("logs non-fatal control-plane sync failures for non-device-sync wake events and keeps processing jobs", async () => {
+  it("fails closed on control-plane sync failures when hosted device sync is configured", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 3);
@@ -1171,37 +1171,29 @@ describe("runHostedDeviceSyncPass", () => {
       new Error("sync failed"),
     );
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_continue",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-    );
+    await expect(
+      runHostedDeviceSyncPass(
+        {
+          eventId: "evt_continue",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+      ),
+    ).rejects.toThrow("sync failed");
 
-    assert.deepEqual(result, {
-      nextWakeAt: "2026-04-08T02:00:00.000Z",
-      postCheckpointRecord: null,
-      processedJobs: 3,
-      skipped: false,
-    });
+    expect(runSchedulerOnce).not.toHaveBeenCalled();
+    expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message: "Hosted device-sync control-plane sync failed; continuing hosted job.",
-      }),
-    );
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("logs non-fatal control-plane reconcile failures for non-device-sync wake events and keeps processing jobs", async () => {
+  it("fails closed on control-plane reconcile failures when hosted device sync is configured", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 3);
@@ -1216,32 +1208,24 @@ describe("runHostedDeviceSyncPass", () => {
       new Error("reconcile failed"),
     );
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_reconcile_continue",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-    );
+    await expect(
+      runHostedDeviceSyncPass(
+        {
+          eventId: "evt_reconcile_continue",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+      ),
+    ).rejects.toThrow("reconcile failed");
 
-    assert.deepEqual(result, {
-      nextWakeAt: "2026-04-08T02:00:00.000Z",
-      postCheckpointRecord: null,
-      processedJobs: 3,
-      skipped: false,
-    });
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message: "Hosted device-sync control-plane reconcile failed; continuing hosted job.",
-      }),
-    );
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
 

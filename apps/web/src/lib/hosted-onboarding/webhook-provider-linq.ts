@@ -20,7 +20,7 @@ import {
 } from "./hosted-member-store";
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
-  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+  lookupHostedMemberRoutingByPendingLinqParticipantContact,
   readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
 import {
@@ -70,7 +70,7 @@ export type {
 import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
-import type { HostedLinqParticipantContact } from "./linq-participant-contact";
+import { type HostedLinqParticipantContact } from "./linq-participant-contact";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -161,8 +161,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
   const existingPendingLinqContactLookup = existingMemberLookup
     ? null
-    : await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
-        lookupKey: participantContact.lookupKey,
+    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+        contact: participantContact,
         prisma: input.prisma,
       });
   const existingHomeLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -35,6 +37,7 @@ import { resolveHostedMemberActivationLinqRoute } from "@/src/lib/hosted-onboard
 describe("resolveHostedMemberActivationLinqRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: [],
@@ -228,6 +231,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
       memberId: "member_123",

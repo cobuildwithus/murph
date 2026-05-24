@@ -4,6 +4,7 @@ export type {
 } from "./contact-privacy-core";
 export {
   createHostedEmailLookupKey,
+  createHostedEmailLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedOpaqueIdentifier,
@@ -27,6 +28,7 @@ export {
   hostedLookupKeyMatchesValue,
   hostedPhoneLookupKeyMatchesValue,
   normalizeHostedEmailAddress,
+  normalizeHostedOpaqueInput,
   parseHostedBlindIndex,
   readHostedContactPrivacyCurrentVersion,
   readHostedPhoneHint,

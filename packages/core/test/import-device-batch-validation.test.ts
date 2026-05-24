@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { importDeviceBatch, initializeVault } from "@murphai/core";
+import { importDeviceBatch as importDeviceBatchWithoutPublicLock } from "../src/mutations.ts";
 
 const createdVaultRoots: string[] = [];
 
@@ -118,6 +119,81 @@ describe("importDeviceBatch", () => {
       }),
     ).rejects.toMatchObject({
       code: "VAULT_INVALID_INPUT",
+    });
+  });
+
+  it("rejects device event fields that try to override canonical event identity", async () => {
+    const vaultRoot = await createTestVaultRoot();
+
+    await expect(
+      importDeviceBatch({
+        vaultRoot,
+        provider: "oura",
+        events: invalidTestValue<typeof VALID_DEVICE_EVENT[]>([
+          {
+            ...VALID_DEVICE_EVENT,
+            fields: {
+              ...VALID_DEVICE_EVENT.fields,
+              id: "evt_01JRV2E6E2H6A0A0N0D0H0B0C2",
+              lifecycle: {
+                revision: 999,
+              },
+            },
+          },
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_INVALID_EVENT_FIELDS",
+      details: {
+        field: "id",
+        index: 0,
+      },
+    });
+  });
+
+  it("rejects device event fields that try to spoof canonical attachments", async () => {
+    const vaultRoot = await createTestVaultRoot();
+
+    await expect(
+      importDeviceBatch({
+        vaultRoot,
+        provider: "oura",
+        events: invalidTestValue<typeof VALID_DEVICE_EVENT[]>([
+          {
+            ...VALID_DEVICE_EVENT,
+            fields: {
+              ...VALID_DEVICE_EVENT.fields,
+              attachments: [
+                {
+                  raw: {
+                    relativePath: "raw/provider/snapshot.json",
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_INVALID_EVENT_FIELDS",
+      details: {
+        field: "attachments",
+        index: 0,
+      },
+    });
+  });
+
+  it("requires the public canonical write-lock wrapper before planning JSONL appends", async () => {
+    const vaultRoot = await createTestVaultRoot();
+
+    await expect(
+      importDeviceBatchWithoutPublicLock({
+        vaultRoot,
+        provider: "oura",
+        events: [VALID_DEVICE_EVENT],
+      }),
+    ).rejects.toMatchObject({
+      code: "CANONICAL_WRITE_LOCK_REQUIRED",
     });
   });
 });

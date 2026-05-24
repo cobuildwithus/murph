@@ -5,7 +5,15 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedEmailLookupKeyReadCandidates,
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqParticipantContact,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   buildHostedMemberRoutingPrivateColumns,
   readHostedMemberRoutingTelegramPrivateState,
@@ -13,6 +21,7 @@ import {
 
 import {
   composeHostedMemberSnapshot,
+  lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   type HostedMemberCoreState,
@@ -34,6 +43,8 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
+  lookupHostedMemberRoutingByHomeLinqChatId,
+  lookupHostedMemberRoutingByPendingLinqParticipantContact,
   lookupHostedMemberRoutingByTelegramUserId,
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberIdByReplyAliasLookupKey,
@@ -42,6 +53,7 @@ import {
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberReplyAliasLookupKeyTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
+  upsertHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
@@ -145,6 +157,122 @@ describe("hosted-member-store", () => {
     expect(snapshot.identity?.phoneLookupKey).toBe(identity.phoneLookupKey);
     expect(snapshot.routing?.linqChatId).toBe(routing.linqChatId);
     expect(snapshot.billingRef?.stripeSubscriptionId).toBe(billingRef.stripeSubscriptionId);
+  });
+
+  it("looks up verified email members across readable blind-index versions", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const address = "Member@example.test";
+    const lookupKeys = createHostedEmailLookupKeyReadCandidates(address);
+    const member = createHostedMember({
+      id: "member_email",
+    });
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        directPublicSenderAddressEncrypted: null,
+        directPublicSenderAuthorizedAt: null,
+        directPublicSenderLookupKey: null,
+        member,
+        memberId: member.id,
+        stripeCheckoutEmailAddressEncrypted: null,
+        stripeCheckoutEmailCollectedAt: null,
+        verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-email-authorization.verified-email",
+          memberId: member.id,
+          value: address.toLowerCase(),
+        }),
+        verifiedEmailLookupKey: lookupKeys.find((key) => key.includes(":v1:")) ?? null,
+        verifiedEmailVerifiedAt: new Date("2026-04-07T01:00:00.000Z"),
+      },
+    ]);
+    const prisma = {
+      hostedMemberEmailAuthorization: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberByVerifiedEmailAddress({
+        address,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      core: {
+        id: "member_email",
+      },
+      emailAuthorization: {
+        memberId: "member_email",
+        verifiedEmail: {
+          address: "member@example.test",
+        },
+      },
+      matchedBy: "verifiedEmail",
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        verifiedEmailLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:email:v2:/u),
+            expect.stringMatching(/^hbidx:email:v1:/u),
+          ]),
+        },
+        verifiedEmailVerifiedAt: {
+          not: null,
+        },
+      },
+    }));
+  });
+
+  it("fails closed when verified email read candidates match multiple members", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        directPublicSenderAddressEncrypted: null,
+        directPublicSenderAuthorizedAt: null,
+        directPublicSenderLookupKey: null,
+        member: createHostedMember({ id: "member_email_one" }),
+        memberId: "member_email_one",
+        stripeCheckoutEmailAddressEncrypted: null,
+        stripeCheckoutEmailCollectedAt: null,
+        verifiedEmailAddressEncrypted: null,
+        verifiedEmailLookupKey: "hbidx:email:v1:one",
+        verifiedEmailVerifiedAt: new Date("2026-04-07T01:00:00.000Z"),
+      },
+      {
+        directPublicSenderAddressEncrypted: null,
+        directPublicSenderAuthorizedAt: null,
+        directPublicSenderLookupKey: null,
+        member: createHostedMember({ id: "member_email_two" }),
+        memberId: "member_email_two",
+        stripeCheckoutEmailAddressEncrypted: null,
+        stripeCheckoutEmailCollectedAt: null,
+        verifiedEmailAddressEncrypted: null,
+        verifiedEmailLookupKey: "hbidx:email:v2:two",
+        verifiedEmailVerifiedAt: new Date("2026-04-07T01:05:00.000Z"),
+      },
+    ]);
+    const prisma = {
+      hostedMemberEmailAuthorization: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberByVerifiedEmailAddress({
+        address: "member@example.test",
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS",
+      httpStatus: 500,
+      retryable: true,
+    });
   });
 
   it("looks up identity by privy user id without exposing blind-index columns", async () => {
@@ -919,9 +1047,11 @@ describe("hosted-member-store", () => {
   });
 
   it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         updateMany,
         upsert,
@@ -938,7 +1068,9 @@ describe("hosted-member-store", () => {
     expect(updateMany).toHaveBeenCalledTimes(2);
     expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
-        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
         NOT: {
           memberId: "member_123",
         },
@@ -952,7 +1084,9 @@ describe("hosted-member-store", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: {
-        pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        pendingLinqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
         NOT: {
           memberId: "member_123",
         },
@@ -968,6 +1102,7 @@ describe("hosted-member-store", () => {
         pendingLinqRecipientPhoneLookupKey: null,
       },
     });
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -998,7 +1133,157 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("clears Linq chat conflicts across readable blind-index versions before rebinding", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberHomeLinqBindingTx({
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: expect.objectContaining({
+        linqChatLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+            expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+          ]),
+        },
+      }),
+    }));
+    expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({
+        pendingLinqChatLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+            expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+          ]),
+        },
+      }),
+    }));
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+      }),
+      update: expect.objectContaining({
+        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+      }),
+    }));
+  });
+
+  it("looks up home Linq chat routing across readable blind-index versions", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const [currentLookupKey, previousLookupKey] =
+      createHostedLinqChatLookupKeyReadCandidates("chat_123");
+    const member = createHostedMember({
+      id: "member_123",
+    });
+    const findMany = vi.fn().mockResolvedValue([
+      createHostedMemberRoutingLookupRecord({
+        linqChatLookupKey: previousLookupKey,
+        member,
+      }),
+    ]);
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: "chat_123",
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      core: {
+        id: "member_123",
+      },
+      matchedBy: "linqChatLookupKey",
+      routing: {
+        memberId: "member_123",
+      },
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        linqChatLookupKey: {
+          in: expect.arrayContaining([
+            currentLookupKey,
+            previousLookupKey,
+          ]),
+        },
+      },
+    }));
+  });
+
+  it("fails closed when home Linq chat lookup matches multiple rotated blind-index owners", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const memberOne = createHostedMember({
+      id: "member_123",
+    });
+    const memberTwo = createHostedMember({
+      id: "member_456",
+    });
+    const findMany = vi.fn().mockResolvedValue([
+      createHostedMemberRoutingLookupRecord({ member: memberOne }),
+      createHostedMemberRoutingLookupRecord({ member: memberTwo }),
+    ]);
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: "chat_123",
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: 2,
+        matchedBy: "linqChatLookupKey",
+      },
+    });
+  });
+
   it("does not retry Linq binding writes inside the same transaction after a unique race", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn()
       .mockRejectedValueOnce(
@@ -1009,6 +1294,7 @@ describe("hosted-member-store", () => {
       )
       .mockResolvedValueOnce({});
     const prisma = {
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         updateMany,
         upsert,
@@ -1134,6 +1420,166 @@ describe("hosted-member-store", () => {
         linqRecipientPhoneLookupKey: true,
       },
     });
+  });
+
+  it("counts home-line assignments across readable recipient-phone blind-index versions", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const homePhone = "+15550100001";
+    const [currentLookupKey, previousLookupKey] = createHostedPhoneLookupKeyReadCandidates(homePhone);
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        linqRecipientPhoneLookupKey: previousLookupKey,
+      },
+      {
+        linqRecipientPhoneLookupKey: currentLookupKey,
+      },
+    ]);
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      countHostedMemberHomeLinqBindingsByRecipientPhone({
+        prisma,
+        recipientPhones: [homePhone],
+      }),
+    ).resolves.toEqual(new Map([[homePhone, 2]]));
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        linqRecipientPhoneLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:phone:v2:/u),
+            expect.stringMatching(/^hbidx:phone:v1:/u),
+          ]),
+        },
+      }),
+    }));
+  });
+
+  it("rejects pending Linq participant contact writes that match another readable blind-index version", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const contact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "contact@example.test",
+    });
+    if (!contact) {
+      throw new Error("Expected test contact to normalize.");
+    }
+
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findMany = vi.fn().mockResolvedValue([{ memberId: "member_existing" }]);
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(
+      upsertHostedMemberPendingLinqParticipantContactTx({
+        contact,
+        memberId: "member_123",
+        observedAt: new Date("2026-04-07T01:00:00.000Z"),
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "P2002",
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        pendingLinqParticipantContactLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:email:v2:/u),
+            expect.stringMatching(/^hbidx:email:v1:/u),
+          ]),
+        },
+      },
+      select: {
+        memberId: true,
+      },
+    });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("looks up pending Linq participant contacts across readable blind-index versions", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const contact = createHostedLinqParticipantContact({
+      kind: "email",
+      value: "contact@example.test",
+    });
+    if (!contact) {
+      throw new Error("Expected test contact to normalize.");
+    }
+
+    const member = createHostedMember({
+      id: "member_123",
+    });
+    const findMany = vi.fn().mockResolvedValue([
+      createHostedMemberRoutingLookupRecord({
+        member,
+        pendingLinqParticipantContactKind: "email",
+        pendingLinqParticipantContactLookupKey: contact.lookupKey,
+        pendingLinqParticipantContactObservedAt: new Date("2026-04-07T01:00:00.000Z"),
+      }),
+    ]);
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberRoutingByPendingLinqParticipantContact({
+        contact,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      core: {
+        id: "member_123",
+      },
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: "member_123",
+      },
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        pendingLinqParticipantContactLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:email:v2:/u),
+            expect.stringMatching(/^hbidx:email:v1:/u),
+          ]),
+        },
+      },
+    }));
   });
 
   it("upserts Telegram bindings into the routing table", async () => {
@@ -2363,5 +2809,32 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     suspendedAt: null,
     updatedAt: new Date("2026-04-06T00:00:00.000Z"),
     ...overrides,
+  };
+}
+
+function createHostedMemberRoutingLookupRecord(input: {
+  linqChatLookupKey?: string | null;
+  member: HostedMember;
+  pendingLinqParticipantContactKind?: string | null;
+  pendingLinqParticipantContactLookupKey?: string | null;
+  pendingLinqParticipantContactObservedAt?: Date | null;
+}) {
+  return {
+    linqChatIdEncrypted: null,
+    linqChatLookupKey: input.linqChatLookupKey ?? null,
+    linqRecipientPhoneEncrypted: null,
+    member: input.member,
+    memberId: input.member.id,
+    pendingLinqChatIdEncrypted: null,
+    pendingLinqParticipantContactEncrypted: null,
+    pendingLinqParticipantContactKind: input.pendingLinqParticipantContactKind ?? null,
+    pendingLinqParticipantContactLookupKey:
+      input.pendingLinqParticipantContactLookupKey ?? null,
+    pendingLinqParticipantContactObservedAt:
+      input.pendingLinqParticipantContactObservedAt ?? null,
+    pendingLinqRecipientPhoneEncrypted: null,
+    replyAliasLookupKey: null,
+    telegramUserIdEncrypted: null,
+    telegramUserLookupKey: null,
   };
 }

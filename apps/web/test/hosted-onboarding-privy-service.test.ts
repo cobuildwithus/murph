@@ -99,6 +99,7 @@ type HostedMemberRoutingDelegate = {
   }) => Promise<unknown>;
 };
 type HostedMemberEmailAuthorizationDelegate = {
+  findMany?: (input: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown[]>;
   findUnique?: (input: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
   upsert?: (input: {
     create: Record<string, unknown>;
@@ -2412,6 +2413,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
       configurable: true,
       value: {
         ...(hostedMemberEmailAuthorization ?? {}),
+        findMany: vi.fn(async () => []),
         findUnique: vi.fn(async () => null),
         upsert: vi.fn(async ({
           create,
@@ -2424,6 +2426,29 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
           ...update,
         })),
       },
+    });
+  } else if (typeof prismaWithQueryRaw.hostedMemberEmailAuthorization.findMany !== "function") {
+    Object.defineProperty(prismaWithQueryRaw.hostedMemberEmailAuthorization, "findMany", {
+      configurable: true,
+      value: vi.fn(async (input: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => {
+        const lookupKeys = Array.isArray(
+          (input.where?.verifiedEmailLookupKey as { in?: unknown[] } | undefined)?.in,
+        )
+          ? (input.where?.verifiedEmailLookupKey as { in: unknown[] }).in
+          : [];
+        const [lookupKey] = lookupKeys;
+        const record = await hostedMemberEmailAuthorization?.findUnique?.({
+          select: input.select,
+          where: {
+            ...(typeof lookupKey === "string"
+              ? {
+                  verifiedEmailLookupKey: lookupKey,
+                }
+              : {}),
+          },
+        });
+        return record ? [record] : [];
+      }),
     });
   }
 
@@ -2539,10 +2564,17 @@ function readHostedMemberEmailAuthorizationDelegate(
 
   const findUnique: HostedMemberEmailAuthorizationDelegate["findUnique"] | undefined =
     Reflect.get(value, "findUnique");
+  const findMany: HostedMemberEmailAuthorizationDelegate["findMany"] | undefined =
+    Reflect.get(value, "findMany");
   const upsert: HostedMemberEmailAuthorizationDelegate["upsert"] | undefined =
     Reflect.get(value, "upsert");
 
   return {
+    ...(typeof findMany === "function"
+      ? {
+          findMany,
+        }
+      : {}),
     ...(typeof findUnique === "function"
       ? {
           findUnique,

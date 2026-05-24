@@ -814,25 +814,16 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let controlPlaneSynced = false;
-  const failHardOnControlPlaneError = wake.kind === "device-sync.wake";
 
   try {
     if (secret) {
-      try {
-        syncState = await syncHostedDeviceSyncControlPlaneState({
-          deviceSyncPort,
-          wake,
-          secret,
-          service,
-        });
-        controlPlaneSynced = true;
-      } catch (error) {
-        if (failHardOnControlPlaneError) {
-          throw error;
-        }
-
-        reportHostedDeviceSyncControlPlaneFailure("sync", wake, error);
-      }
+      syncState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake,
+        secret,
+        service,
+      });
+      controlPlaneSynced = true;
     }
 
     await service.runSchedulerOnce();
@@ -846,21 +837,13 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (secret && controlPlaneSynced) {
-      try {
-        await reconcileHostedDeviceSyncControlPlaneState({
-          deviceSyncPort,
-          wake,
-          secret,
-          service,
-          state: syncState,
-        });
-      } catch (error) {
-        if (failHardOnControlPlaneError) {
-          throw error;
-        }
-
-        reportHostedDeviceSyncControlPlaneFailure("reconcile", wake, error);
-      }
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake,
+        secret,
+        service,
+        state: syncState,
+      });
     }
 
     const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
@@ -956,21 +939,6 @@ function earliestHostedMaintenanceWakeAt(left: string | null, right: string | nu
   }
 
   return Date.parse(left) <= Date.parse(right) ? left : right;
-}
-
-function reportHostedDeviceSyncControlPlaneFailure(
-  phase: "reconcile" | "sync",
-  wake: HostedRuntimeEvent,
-  error: unknown,
-): void {
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    wake,
-    error,
-    level: "warn",
-    message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,
-    phase: "wake.running",
-  });
 }
 
 function reportHostedDeviceSyncConfigMissing(wake: HostedRuntimeEvent): void {

@@ -683,9 +683,11 @@ describe("abortHostedInvitePhoneCode", () => {
 
 describe("upsertHostedMemberHomeLinqBinding", () => {
   it("stores the latest Linq home chat id in the routing table for future activation welcomes", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         updateMany,
         upsert,
@@ -710,7 +712,9 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         NOT: {
           memberId: "member_123",
         },
-        linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
       },
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
@@ -728,9 +732,12 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         NOT: {
           memberId: "member_123",
         },
-        pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        pendingLinqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
       },
     });
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -765,6 +772,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     const upsert = vi.fn();
     const updateMany = vi.fn();
     const prisma = asRootPrisma({
+      $executeRaw: vi.fn(),
       hostedMemberRouting: {
         updateMany,
         upsert,
@@ -820,9 +828,11 @@ interface HostedMemberIdentityTestDelegate {
 }
 
 function asRootPrisma<T extends object>(tx: T): T & {
+  $executeRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
 } {
   const prisma = tx as T & {
+    $executeRaw?: ReturnType<typeof vi.fn>;
     hostedMember?: {
       delete?: ReturnType<typeof vi.fn>;
     };
@@ -832,6 +842,8 @@ function asRootPrisma<T extends object>(tx: T): T & {
     };
   };
 
+  const executeRaw = prisma.$executeRaw ?? vi.fn().mockResolvedValue(0);
+  prisma.$executeRaw = executeRaw;
   prisma.hostedMember ??= {};
   prisma.hostedMember.delete ??= vi.fn().mockResolvedValue({});
   if (prisma.hostedMemberIdentity) {
@@ -847,6 +859,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
 
   return {
     ...prisma,
+    $executeRaw: executeRaw,
     $transaction: vi.fn(async (callback: (innerTx: T) => Promise<unknown>) => callback(prisma)),
   };
 }
