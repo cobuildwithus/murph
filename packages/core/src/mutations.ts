@@ -60,6 +60,7 @@ import {
 } from "./nutrition.ts";
 import { stageRawImportManifest } from "./operations/raw-manifests.ts";
 import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
+import { assertCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
@@ -78,6 +79,26 @@ import type { DateInput, UnknownRecord } from "./types.ts";
 
 type EventRecordByKind<K extends EventKind> = Extract<EventRecord, { kind: K }>;
 type LooseRecord = Record<string, unknown>;
+
+const RESERVED_DEVICE_EVENT_FIELD_NAMES = new Set([
+  "schemaVersion",
+  "id",
+  "kind",
+  "occurredAt",
+  "recordedAt",
+  "dayKey",
+  "timeZone",
+  "source",
+  "title",
+  "note",
+  "tags",
+  "links",
+  "rawRefs",
+  "externalRef",
+  "dataOrigin",
+  "lifecycle",
+  "attachments",
+]);
 
 interface EnsureJournalDayInput {
   vaultRoot: string;
@@ -812,6 +833,7 @@ function buildEventContractInput<K extends EventKind>(
   lifecycle?: EventRecord["lifecycle"],
 ): UnknownRecord {
   return compactRecord({
+    ...seed.fields,
     schemaVersion: EVENT_SCHEMA_VERSION,
     id: recordId,
     kind: seed.kind,
@@ -828,7 +850,6 @@ function buildEventContractInput<K extends EventKind>(
     externalRef: seed.externalRef,
     dataOrigin: seed.dataOrigin,
     lifecycle,
-    ...seed.fields,
   });
 }
 
@@ -1078,6 +1099,8 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
     dedupeWithinPlan?: boolean;
   } = {},
 ): Promise<JsonlAppendPlan> {
+  assertCanonicalWriteLockScope(vaultRoot);
+
   const payloads = new Map<string, string>();
   const existingIdsByShard = new Map<string, Set<string>>();
   const targetShardPaths = [...new Set(entries.map((entry) => entry.relativePath))].sort();
@@ -1140,6 +1163,7 @@ function normalizeDeviceEventInputs(
       "VAULT_INVALID_EVENT_FIELDS",
       `Device event ${index + 1} fields must be a plain object.`,
     ) ?? {};
+    assertNoReservedDeviceEventFields(fields, index);
     const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
     assertNoLegacyRelatedIds({
       value: eventInput.relatedIds,
@@ -1178,6 +1202,25 @@ function normalizeDeviceEventInputs(
       ),
     };
   });
+}
+
+function assertNoReservedDeviceEventFields(fields: LooseRecord, index: number): void {
+  const reservedFieldName = Object.keys(fields).find((fieldName) =>
+    RESERVED_DEVICE_EVENT_FIELD_NAMES.has(fieldName),
+  );
+
+  if (!reservedFieldName) {
+    return;
+  }
+
+  throw new VaultError(
+    "VAULT_INVALID_EVENT_FIELDS",
+    `Device event ${index + 1} fields cannot override reserved event field "${reservedFieldName}".`,
+    {
+      field: reservedFieldName,
+      index,
+    },
+  );
 }
 
 function normalizeDeviceSampleInputs(

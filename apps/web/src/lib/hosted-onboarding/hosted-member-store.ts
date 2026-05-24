@@ -10,7 +10,11 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import { createHostedEmailLookupKey } from "./contact-privacy";
+import {
+  createHostedEmailLookupKey,
+  createHostedEmailLookupKeyReadCandidates,
+} from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
 import {
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
@@ -278,24 +282,25 @@ export async function lookupHostedMemberByVerifiedEmailAddress(input: {
   address: string | null | undefined;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberEmailAuthorizationLookup | null> {
-  const lookupKey = createHostedEmailLookupKey(input.address);
+  const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.address);
 
-  if (!lookupKey) {
+  if (lookupKeys.length === 0) {
     return null;
   }
 
-  const record = await input.prisma.hostedMemberEmailAuthorization.findUnique({
+  const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
     where: {
-      verifiedEmailLookupKey: lookupKey,
+      verifiedEmailLookupKey: {
+        in: lookupKeys,
+      },
+      verifiedEmailVerifiedAt: {
+        not: null,
+      },
     },
     select: hostedMemberEmailAuthorizationLookupSelect,
   });
 
-  if (!record || !record.verifiedEmailVerifiedAt) {
-    return null;
-  }
-
-  return projectHostedMemberEmailAuthorizationLookup(record, input.prisma);
+  return resolveHostedMemberVerifiedEmailLookup(records, input.prisma);
 }
 
 export async function upsertHostedMemberEmailAuthorization(
@@ -508,6 +513,49 @@ async function projectHostedMemberEmailAuthorizationLookup(
     emailAuthorization: await projectHostedMemberEmailAuthorizationState(record, prisma),
     matchedBy: "verifiedEmail",
   };
+}
+
+async function resolveHostedMemberVerifiedEmailLookup(
+  records: Array<Prisma.HostedMemberEmailAuthorizationGetPayload<{
+    select: typeof hostedMemberEmailAuthorizationLookupSelect;
+  }>>,
+  prisma: HostedOnboardingReadClient,
+): Promise<HostedMemberEmailAuthorizationLookup | null> {
+  const verifiedRecordByMemberId = new Map<
+    string,
+    Prisma.HostedMemberEmailAuthorizationGetPayload<{
+      select: typeof hostedMemberEmailAuthorizationLookupSelect;
+    }>
+  >();
+
+  for (const record of records) {
+    if (!record.verifiedEmailVerifiedAt || verifiedRecordByMemberId.has(record.memberId)) {
+      continue;
+    }
+
+    verifiedRecordByMemberId.set(record.memberId, record);
+  }
+
+  if (verifiedRecordByMemberId.size === 0) {
+    return null;
+  }
+
+  if (verifiedRecordByMemberId.size !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: verifiedRecordByMemberId.size,
+        matchedBy: "verifiedEmail",
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member verified email lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+
+  const [record] = [...verifiedRecordByMemberId.values()];
+  return await projectHostedMemberEmailAuthorizationLookup(record, prisma);
 }
 
 export async function updateHostedMemberCoreState(input: {

@@ -1,5 +1,6 @@
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -142,6 +143,10 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   if (environment.linqConversationPhoneNumbers.length === 0) {
     return preferredRecipientPhone;
   }
+
+  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+    prisma: input.prisma,
+  });
 
   const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
     prisma: input.prisma,

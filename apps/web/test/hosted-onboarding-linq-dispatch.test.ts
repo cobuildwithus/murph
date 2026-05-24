@@ -320,12 +320,14 @@ type HostedMemberIdentityFixture = {
 };
 
 type HostedMemberEmailAuthorizationFixture = {
-  findUnique?: MockedFunction;
+  findMany?: (input: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown[]>;
+  findUnique?: (input: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
 };
 
 type HostedMemberRoutingFixture = {
   createMany?: MockedFunction;
   findFirst?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
+  findMany?: (input: { where: Record<string, unknown> }) => Promise<unknown[]>;
   findUnique?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
   updateMany?: (input: {
     data: Record<string, unknown>;
@@ -1807,7 +1809,7 @@ https://join.example.test/join/code_first_text`);
         update: vi.fn(),
       },
       hostedMemberEmailAuthorization: {
-        findUnique: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -1850,7 +1852,7 @@ https://join.example.test/join/code_first_text`);
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(prismaMocks.hostedMemberEmailAuthorization.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -3194,6 +3196,10 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   const hostedMemberIdentity = prisma.hostedMemberIdentity;
   const hostedMemberRouting = prisma.hostedMemberRouting;
   const hostedMember = prisma.hostedMember;
+  const hostedMemberEmailAuthorization = prisma.hostedMemberEmailAuthorization;
+
+  prisma.$executeRaw ??= vi.fn(async () => 0);
+  prisma.$queryRaw ??= vi.fn(async () => []);
 
   if (hostedInvite && !hostedInvite.findUnique && hostedInvite.findFirst) {
     hostedInvite.findUnique = vi.fn(async (input: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
@@ -3206,6 +3212,17 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 
   if (hostedMember && !hostedMember.updateMany) {
     hostedMember.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  }
+
+  if (
+    hostedMemberEmailAuthorization
+    && !hostedMemberEmailAuthorization.findMany
+    && hostedMemberEmailAuthorization.findUnique
+  ) {
+    hostedMemberEmailAuthorization.findMany = vi.fn(async () => {
+      const record = await hostedMemberEmailAuthorization.findUnique?.({});
+      return record ? [record] : [];
+    });
   }
 
   if (!hostedMemberIdentity?.findUnique) {
@@ -3317,6 +3334,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       configurable: true,
       value: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
@@ -3328,6 +3346,16 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
   if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.createMany) {
     prisma.hostedMemberRouting.createMany = vi.fn().mockResolvedValue({ count: 1 });
+  }
+  if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.findMany) {
+    prisma.hostedMemberRouting.findMany = vi.fn(async (input: { where: Record<string, unknown> }) => {
+      const record = await readHostedMemberRoutingFromMockLookup({
+        findFirst: prisma.hostedMemberRouting?.findFirst,
+        findUnique: prisma.hostedMemberRouting?.findUnique,
+        input,
+      });
+      return record ? [record] : [];
+    });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {
@@ -3378,6 +3406,52 @@ function withPrismaTransaction<
     $queryRaw: MockedFunction;
     $transaction: MockedFunction;
   };
+}
+
+async function readHostedMemberRoutingFromMockLookup(input: {
+  findFirst?: (query: { where: Record<string, unknown> }) => Promise<unknown>;
+  findUnique?: (query: { where: Record<string, unknown> }) => Promise<unknown>;
+  input: { where: Record<string, unknown> };
+}): Promise<unknown> {
+  if (input.findFirst) {
+    return await input.findFirst(input.input);
+  }
+
+  if (!input.findUnique) {
+    return null;
+  }
+
+  const where = input.input.where;
+  const linqChatLookupKey = readFirstLookupCandidate(where.linqChatLookupKey);
+  const pendingLinqParticipantContactLookupKey = readFirstLookupCandidate(
+    where.pendingLinqParticipantContactLookupKey,
+  );
+
+  return await input.findUnique({
+    where: {
+      ...(typeof linqChatLookupKey === "string" ? { linqChatLookupKey } : {}),
+      ...(typeof pendingLinqParticipantContactLookupKey === "string"
+        ? { pendingLinqParticipantContactLookupKey }
+        : {}),
+    },
+  });
+}
+
+function readFirstLookupCandidate(value: unknown): string | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    Array.isArray((value as { in?: unknown[] }).in)
+  ) {
+    const [first] = (value as { in: unknown[] }).in;
+    return typeof first === "string" && first.trim().length > 0 ? first : null;
+  }
+
+  return null;
 }
 
 

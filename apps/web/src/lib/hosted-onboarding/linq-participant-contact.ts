@@ -1,6 +1,8 @@
 import {
   createHostedEmailLookupKey,
+  createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
   normalizeHostedEmailAddress,
 } from "./contact-privacy";
 import { normalizePhoneNumber } from "./phone";
@@ -60,6 +62,23 @@ export function createHostedLinqParticipantContactLookupKey(input: {
       const exhaustive: never = input.kind;
       void exhaustive;
       return null;
+    }
+  }
+}
+
+export function createHostedLinqParticipantContactLookupKeyReadCandidates(input: {
+  kind: HostedLinqParticipantContactKind;
+  value: string | null | undefined;
+}): string[] {
+  switch (input.kind) {
+    case "email":
+      return createHostedEmailLookupKeyReadCandidates(input.value);
+    case "phone":
+      return createHostedPhoneLookupKeyReadCandidates(input.value);
+    default: {
+      const exhaustive: never = input.kind;
+      void exhaustive;
+      return [];
     }
   }
 }

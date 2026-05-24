@@ -28,7 +28,7 @@ import {
   readHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
-  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+  lookupHostedMemberRoutingByPendingLinqParticipantContact,
   tryCreateHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-store";
@@ -57,7 +57,7 @@ import {
   lookupHostedMemberForPrivyPrincipal,
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-lookup";
-import type { HostedLinqParticipantContact } from "./linq-participant-contact";
+import { type HostedLinqParticipantContact } from "./linq-participant-contact";
 
 export {
   createHostedPrivyIdentityConflictError,
@@ -168,8 +168,8 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   }
 
   const existingRoutingLookup =
-    await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
-      lookupKey: input.contact.lookupKey,
+    await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+      contact: input.contact,
       prisma: input.prisma,
     });
 
@@ -179,8 +179,8 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   }
 
   const existingIdentityLookup = input.contact.kind === "phone"
-    ? await lookupHostedMemberIdentityByPhoneLookupKey({
-        phoneLookupKey: input.contact.lookupKey,
+    ? await lookupHostedMemberIdentityByPhoneNumber({
+        phoneNumber: input.contact.value,
         prisma: input.prisma,
       })
     : null;
@@ -237,8 +237,8 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     },
   });
   const concurrentRoutingLookup =
-    await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
-      lookupKey: input.contact.lookupKey,
+    await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+      contact: input.contact,
       prisma: input.prisma,
     });
 

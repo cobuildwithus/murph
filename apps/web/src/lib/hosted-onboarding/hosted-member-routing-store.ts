@@ -5,10 +5,14 @@ import { Prisma } from "@prisma/client";
 
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import {
-  createHostedLinqChatLookupKey,
+  createHostedLinqChatLookupKeyReadCandidates,
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import {
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+  type HostedLinqParticipantContact,
+} from "./linq-participant-contact";
 import {
   hostedMemberHomeLinqRouteSelect,
   hostedMemberRoutingLookupSelect,
@@ -23,6 +27,7 @@ import {
 import { type HostedOnboardingReadClient } from "./shared";
 
 export {
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -136,49 +141,59 @@ export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
     : null;
 }
 
-export async function lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey(input: {
-  lookupKey: string;
+export async function lookupHostedMemberRoutingByPendingLinqParticipantContact(input: {
+  contact: HostedLinqParticipantContact;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberRoutingLookup | null> {
-  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+  const lookupKeys = createHostedLinqParticipantContactLookupKeyReadCandidates({
+    kind: input.contact.kind,
+    value: input.contact.value,
+  });
+  if (lookupKeys.length === 0) {
+    return null;
+  }
+
+  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
     where: {
-      pendingLinqParticipantContactLookupKey: input.lookupKey,
+      pendingLinqParticipantContactLookupKey: {
+        in: lookupKeys,
+      },
     },
     select: hostedMemberRoutingLookupSelect,
   });
 
-  return routingRecord
-    ? await projectHostedMemberRoutingLookup(
-        routingRecord,
-        "pendingLinqParticipantContactLookupKey",
-        input.prisma,
-      )
-    : null;
+  return resolveUniqueHostedMemberRoutingLookup({
+    ambiguityCode: "LINQ_PENDING_CONTACT_ROUTING_LOOKUP_AMBIGUOUS",
+    matchedBy: "pendingLinqParticipantContactLookupKey",
+    prisma: input.prisma,
+    routingRecords,
+  });
 }
 
 export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
   linqChatId: string | null | undefined;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberRoutingLookup | null> {
-  const lookupKey = createHostedLinqChatLookupKey(input.linqChatId);
-  if (!lookupKey) {
+  const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
+  if (lookupKeys.length === 0) {
     return null;
   }
 
-  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
     where: {
-      linqChatLookupKey: lookupKey,
+      linqChatLookupKey: {
+        in: lookupKeys,
+      },
     },
     select: hostedMemberRoutingLookupSelect,
   });
 
-  return routingRecord
-    ? await projectHostedMemberRoutingLookup(
-        routingRecord,
-        "linqChatLookupKey",
-        input.prisma,
-      )
-    : null;
+  return resolveUniqueHostedMemberRoutingLookup({
+    ambiguityCode: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+    matchedBy: "linqChatLookupKey",
+    prisma: input.prisma,
+    routingRecords,
+  });
 }
 
 export async function lookupHostedMemberRoutingByTelegramUserId(input: {
@@ -266,6 +281,43 @@ function buildHostedTelegramRoutingLookupAmbiguousError(matchCount: number) {
   });
 }
 
+async function resolveUniqueHostedMemberRoutingLookup(input: {
+  ambiguityCode: string;
+  matchedBy: Parameters<typeof projectHostedMemberRoutingLookup>[1];
+  prisma: HostedOnboardingReadClient;
+  routingRecords: HostedMemberRoutingLookupRecord[];
+}): Promise<HostedMemberRoutingLookup | null> {
+  if (input.routingRecords.length === 0) {
+    return null;
+  }
+
+  const routingRecordByMemberId = new Map<string, HostedMemberRoutingLookupRecord>();
+  for (const routingRecord of input.routingRecords) {
+    if (!routingRecordByMemberId.has(routingRecord.memberId)) {
+      routingRecordByMemberId.set(routingRecord.memberId, routingRecord);
+    }
+  }
+
+  if (routingRecordByMemberId.size !== 1) {
+    throw hostedOnboardingError({
+      code: input.ambiguityCode,
+      details: {
+        matchCount: routingRecordByMemberId.size,
+        matchedBy: input.matchedBy,
+      },
+      httpStatus: 500,
+      message: "Hosted member routing lookup matched multiple members.",
+      retryable: true,
+    });
+  }
+
+  const [routingRecord] = [...routingRecordByMemberId.values()];
+  return await projectHostedMemberRoutingLookup(
+    routingRecord,
+    input.matchedBy,
+    input.prisma,
+  );
+}
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;

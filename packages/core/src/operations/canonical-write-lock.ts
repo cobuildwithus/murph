@@ -203,6 +203,23 @@ export async function withCanonicalWriteLockScope<TResult>(
   );
 }
 
+export function assertCanonicalWriteLockScope(vaultRoot: string): void {
+  const absoluteRoot = normalizeVaultRoot(vaultRoot);
+  const context = canonicalWriteLockContextStorage.getStore();
+
+  if (context?.vaultRoot === absoluteRoot) {
+    return;
+  }
+
+  throw new VaultError(
+    "CANONICAL_WRITE_LOCK_REQUIRED",
+    "Canonical write planning requires the canonical write lock scope.",
+    {
+      relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
+    },
+  );
+}
+
 export async function acquireCanonicalWriteLock(
   vaultRoot: string,
   options: {

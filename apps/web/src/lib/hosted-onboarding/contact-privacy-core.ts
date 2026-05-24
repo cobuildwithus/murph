@@ -53,6 +53,12 @@ export function createHostedEmailLookupKey(value: string | null | undefined): st
   return createHostedLookupKey("email", normalizeHostedEmailAddress(value));
 }
 
+export function createHostedEmailLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("email", normalizeHostedEmailAddress(value));
+}
+
 export function createHostedPrivyUserLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("privy-user", normalizeHostedOpaqueInput(value));
 }

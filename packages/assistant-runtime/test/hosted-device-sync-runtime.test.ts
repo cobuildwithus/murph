@@ -455,7 +455,7 @@ function clearAccountCredentialForTesting(service: DeviceSyncService, accountId:
 }
 
 describe("hosted device-sync runtime", () => {
-  test("sync returns an empty state when no device-sync client is available", async () => {
+  test("sync fails closed when no device-sync client is available", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -464,17 +464,15 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const state = await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: null,
-        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
-        secret: DEVICE_SYNC_SECRET,
-        service,
-      });
-
-      assert.equal(state.snapshot, null);
-      assert.equal(state.hostedToLocalAccountIds.size, 0);
-      assert.equal(state.localToHostedAccountIds.size, 0);
-      assert.equal(state.observedTokenVersions.size, 0);
+      await assert.rejects(
+        () => syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: null,
+          wake: buildCronWake("2026-04-06T09:10:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        }),
+        /configured hosted device-sync control-plane port/u,
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4109,22 +4107,25 @@ describe("hosted device-sync runtime", () => {
         },
       });
 
-      await reconcileHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: null,
-        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
-        secret: DEVICE_SYNC_SECRET,
-        service,
-        state: {
-          hostedToLocalAccountIds: new Map(),
-          localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
-          observedTokenVersions: new Map(),
-          pendingDirtyAck: null,
-          snapshot: buildRuntimeSnapshot({
-            connectionId: "hosted_missing",
-            externalAccountId: "demo-missing",
-          }),
-        },
-      });
+      await assert.rejects(
+        () => reconcileHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: null,
+          wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+          state: {
+            hostedToLocalAccountIds: new Map(),
+            localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
+            observedTokenVersions: new Map(),
+            pendingDirtyAck: null,
+            snapshot: buildRuntimeSnapshot({
+              connectionId: "hosted_missing",
+              externalAccountId: "demo-missing",
+            }),
+          },
+        }),
+        /configured hosted device-sync control-plane port/u,
+      );
 
       assert.equal(applyUpdatesCalls, 0);
     } finally {
