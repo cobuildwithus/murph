@@ -317,6 +317,7 @@ describe("cleanupHostedRunnerImages", () => {
         stdout: [
           "cloudflare-dev/runnercontainer:abc123",
           "cloudflare-dev/deploysmokerunnercontainer:abc123",
+          "murph-cloudflare-runner:latest",
           "postgres:15",
           "cloudflare-dev/runnercontainer:<none>",
         ].join("\n"),
@@ -348,6 +349,7 @@ describe("cleanupHostedRunnerImages", () => {
       "-f",
       "cloudflare-dev/runnercontainer:abc123",
       "cloudflare-dev/deploysmokerunnercontainer:abc123",
+      "murph-cloudflare-runner:latest",
     ]);
   });
 
@@ -366,7 +368,7 @@ describe("cleanupHostedRunnerImages", () => {
     const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
       {
         exitCode: 0,
-        stdout: "cloudflare-dev/runnercontainer:old\n",
+        stdout: "cloudflare-dev/runnercontainer:old\nmurph-cloudflare-runner:latest\n",
       },
       { exitCode: 0, stdout: "" },
     ]);
@@ -389,6 +391,7 @@ describe("cleanupHostedRunnerImages", () => {
       "rm",
       "-f",
       "cloudflare-dev/runnercontainer:old",
+      "murph-cloudflare-runner:latest",
     ]);
   });
 });

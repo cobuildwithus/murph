@@ -1,19 +1,24 @@
 import { spawn } from "node:child_process";
 
+import {
+  removeHostedRunnerFinalImageBestEffort,
+} from "./local-runner-docker-cleanup.js";
+
 const IMAGE_TAG = "murph-cloudflare-runner";
 
 async function main(): Promise<void> {
-  const containerId = (await runDockerCommand([
-    "run",
-    "--detach",
-    "--platform",
-    "linux/amd64",
-    "--network",
-    "none",
-    IMAGE_TAG,
-  ])).trim();
+  let containerId: string | null = null;
 
   try {
+    containerId = (await runDockerCommand([
+      "run",
+      "--detach",
+      "--platform",
+      "linux/amd64",
+      "--network",
+      "none",
+      IMAGE_TAG,
+    ])).trim();
     await runDockerCommand([
       "exec",
       containerId,
@@ -30,7 +35,10 @@ async function main(): Promise<void> {
       buildPythonPathProbeScript(),
     ]);
   } finally {
-    await removeContainer(containerId);
+    if (containerId !== null) {
+      await removeContainer(containerId);
+    }
+    await removeHostedRunnerFinalImageBestEffort();
   }
 
   console.log("Hosted runner final-image Python PATH smoke passed.");

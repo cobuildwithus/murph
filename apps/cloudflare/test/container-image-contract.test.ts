@@ -17,6 +17,18 @@ import {
 const hostedRunnerBaseImageTag =
   "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en";
 
+const runnerDockerSmokeFinallyCleanupBlock = `} finally {
+    await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
+    await removeHostedRunnerFinalImageBestEffort();
+  }`;
+
+const runnerPythonPathFinallyCleanupBlock = `} finally {
+    if (containerId !== null) {
+      await removeContainer(containerId);
+    }
+    await removeHostedRunnerFinalImageBestEffort();
+  }`;
+
 function createDeployEnvironment() {
   return {
     allowedRunnerSecretKeys: null,
@@ -592,9 +604,11 @@ describe("hosted runner container image contract", () => {
     expect(runnerDockerSmokeScript).toContain("codexHostedCliVaultWriteProofCount=");
     expect(runnerDockerSmokeScript).toContain("pythonVersion=");
     expect(runnerPythonPathScript).toContain('const IMAGE_TAG = "murph-cloudflare-runner"');
+    expect(runnerDockerSmokeScript).toContain(runnerDockerSmokeFinallyCleanupBlock);
+    expect(runnerPythonPathScript).toContain(runnerPythonPathFinallyCleanupBlock);
     expect(runnerPythonPathScript).toContain('"--detach"');
-    expect(runnerPythonPathScript).toContain('"--platform",\n    "linux/amd64"');
-    expect(runnerPythonPathScript).toContain('"--network",\n    "none"');
+    expect(runnerPythonPathScript).toContain('"--platform",\n      "linux/amd64"');
+    expect(runnerPythonPathScript).toContain('"--network",\n      "none"');
     expect(runnerPythonPathScript).not.toContain("--entrypoint");
     expect(runnerPythonPathScript).toContain('"exec",\n      containerId,\n      "node"');
     expect(runnerPythonPathScript).toContain("cloudflare-hosted-runner-node");
