@@ -14,6 +14,7 @@ import {
   MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
   listMurphAgeSubmittedCalculatorMetricInputSpecs,
   normalizeMetricValue,
@@ -24,6 +25,7 @@ import {
   type MurphAgeResearchCalculatorView,
   type MurphAgeRiskModel,
   type MurphAgeSubmittedCalculatorViewBundle,
+  type MurphAgeWearableResidualParameterPack,
 } from '@murphai/health-metrics'
 import {
   defaultMurphAgeModelCardArtifactRoot,
@@ -840,12 +842,58 @@ test('age scaffold emits a submitted-data research preview payload', async () =>
   assert.equal(metricKeys.includes('wearable_coverage_index'), true)
 })
 
+test('age submitted preview payload keeps wearable residual family and layer ids paired', () => {
+  const basePayload = {
+    asOf: '2026-05-10T00:00:00.000Z',
+    chronologicalAgeYears: 45,
+    sex: 'female',
+    submittedMetrics: [
+      { metricKey: 'HbA1c', sourceKind: 'test-result', unit: '%', value: 5.4 },
+    ],
+  }
+  const sleepPack = testWearableResidualParameterPack({
+    center: 420,
+    coefficient: -0.04,
+    family: 'sleep',
+    layerId: 'sleep-residual-v1',
+    metricKey: 'total-sleep-minutes',
+    scale: 30,
+  })
+
+  assert.equal(murphAgeSubmittedPreviewPayloadSchema.safeParse({
+    ...basePayload,
+    wearableResidualParameterPacks: [sleepPack],
+  }).success, true)
+  assert.equal(murphAgeSubmittedPreviewPayloadSchema.safeParse({
+    ...basePayload,
+    wearableResidualParameterPacks: [{
+      ...sleepPack,
+      layerId: 'activity-residual-v1',
+    }],
+  }).success, false)
+  assert.equal(murphAgeSubmittedPreviewPayloadSchema.safeParse({
+    ...basePayload,
+    wearableResidualParameterPack: {
+      ...sleepPack,
+      layerId: 'activity-residual-v1',
+    },
+  }).success, false)
+  assert.equal(murphAgeSubmittedPreviewPayloadSchema.safeParse({
+    ...basePayload,
+    wearableResidualParameterPack: {
+      ...sleepPack,
+      layerId: 'multi-wearable-residual-v1',
+    },
+  }).success, false)
+})
+
 test('age preview scores submitted labs and wearable context without a vault', async () => {
   const artifactRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-model-cards-'))
   const payloadControlledArtifactRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-payload-model-cards-'))
   const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-preview-'))
   const payloadPath = path.join(payloadRoot, 'payload.json')
   const functionPayloadPath = path.join(payloadRoot, 'function-payload.json')
+  const multiWearablePayloadPath = path.join(payloadRoot, 'multi-wearable-payload.json')
   const productPayloadPath = path.join(payloadRoot, 'product-payload.json')
   const functionPackHash = 'sha256:3333333333333333333333333333333333333333333333333333333333333333'
   try {
@@ -901,6 +949,52 @@ test('age preview scores submitted labs and wearable context without a vault', a
         schemaVersion: 'murph.age.wearable-residual-parameter-pack.v1',
         sourceRouteId: 'nhanes-activity-shadow-lmf',
       },
+    }))
+    await writeFile(multiWearablePayloadPath, JSON.stringify({
+      asOf: '2026-05-10T00:00:00.000Z',
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [
+        { metricKey: 'HbA1c', sourceKind: 'test-result', unit: '%', value: 5.3 },
+        { metricKey: 'HDL_C', unit: 'mg/dL', value: 60 },
+        { metricKey: 'Triglycerides', unit: 'mg/dL', value: 90 },
+        { metricKey: 'creatinine', unit: 'mg/dL', value: 0.85 },
+        { metricKey: 'SBP', sourceKind: 'measurement', unit: 'mmHg', value: 118 },
+        { metricKey: 'diastolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 72 },
+        { metricKey: 'body_mass_index', sourceKind: 'measurement', unit: 'kg/m2', value: 23.2 },
+        { metricKey: 'total-sleep-minutes', sourceKind: 'sleep-summary', unit: 'minutes', value: 450 },
+        { metricKey: 'wearable_valid_night_count_28d', sourceKind: 'sleep-summary', unit: 'count', value: 22 },
+        { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.91 },
+        { metricKey: 'resting-heart-rate', sourceKind: 'wearable-summary', unit: 'bpm', value: 54 },
+        { metricKey: 'wearable_valid_day_count_28d', sourceKind: 'wearable-summary', unit: 'count', value: 24 },
+        { metricKey: 'hrv-rmssd', sourceKind: 'wearable-summary', unit: 'ms', value: 70 },
+      ],
+      wearableResidualParameterPacks: [
+        testWearableResidualParameterPack({
+          center: 420,
+          coefficient: -0.04,
+          family: 'sleep',
+          layerId: 'sleep-residual-v1',
+          metricKey: 'total-sleep-minutes',
+          scale: 30,
+        }),
+        testWearableResidualParameterPack({
+          center: 60,
+          coefficient: 0.05,
+          family: 'resting-heart-rate',
+          layerId: 'resting-heart-rate-residual-v1',
+          metricKey: 'resting-heart-rate',
+          scale: 10,
+        }),
+        testWearableResidualParameterPack({
+          center: 50,
+          coefficient: -0.02,
+          family: 'hrv',
+          layerId: 'hrv-residual-v1',
+          metricKey: 'hrv-rmssd',
+          scale: 20,
+        }),
+      ],
     }))
     await writeFile(functionPayloadPath, JSON.stringify({
       asOf: '2026-05-10T00:00:00.000Z',
@@ -1159,6 +1253,25 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]) {
       assert.equal(encodedFunctionLayer.includes(forbidden), false, forbidden)
     }
+    const multiWearableView = requireData(await runSliceCli<MurphAgeResearchCalculatorView>([
+      'age',
+      'calculate',
+      '--input',
+      `@${multiWearablePayloadPath}`,
+      '--mode',
+      'research',
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+    assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(multiWearableView).success, true)
+    assert.equal(multiWearableView.wearableResidualLayer?.layerId, 'multi-wearable-residual-v1')
+    assert.equal(multiWearableView.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
+    assert.equal(multiWearableView.wearableResidualLayer?.residualDeltaLogit, -0.09)
+    assert.equal(multiWearableView.wearableResidualLayer?.selectedMetricKeys.includes('total-sleep-minutes'), true)
+    assert.equal(multiWearableView.wearableResidualLayer?.selectedMetricKeys.includes('resting-heart-rate'), true)
+    assert.equal(multiWearableView.wearableResidualLayer?.selectedMetricKeys.includes('hrv-rmssd'), true)
+    assert.equal(multiWearableView.wearableResidualLayer?.scoreBearing, false)
+    assert.equal(multiWearableView.wearableResidualLayer?.scoreContributionAuthorized, false)
     const wearableResidualLayer = view.model.layeredResearchPath.layers.find((layer) =>
       layer.layerId === 'wearable-multi-family-residual'
     )
@@ -3728,6 +3841,39 @@ function labFeature(
     metricKey,
     moduleId: 'clinical',
     transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean, standardDeviation },
+  }
+}
+
+function testWearableResidualParameterPack(input: {
+  center: number;
+  coefficient: number;
+  family: MurphAgeWearableResidualParameterPack['family'];
+  layerId: MurphAgeWearableResidualParameterPack['layerId'];
+  metricKey: string;
+  scale: number;
+}): MurphAgeWearableResidualParameterPack {
+  return {
+    anchorCardId: 'lab5_bp_bmi_transport_research',
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: 'research-only',
+    endpoint: '10-year all-cause mortality',
+    evidenceTier: 'true-external-validation',
+    family: input.family,
+    featureWeights: [{
+      center: input.center,
+      coefficient: input.coefficient,
+      metricKey: input.metricKey,
+      scale: input.scale,
+      transform: 'center-scale',
+    }],
+    globalWearableCapLogit: 0.25,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: input.layerId,
+    packHash: `research-pack-${input.family.replaceAll('-', '_')}-v1`,
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: 'all-of-us-fitbit-labs-ehr',
   }
 }
 

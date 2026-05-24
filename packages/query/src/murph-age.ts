@@ -311,6 +311,7 @@ export async function calculateMurphAgeFromVaultInputBundle(
     points,
     sex: input.sex,
     wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
   });
   return withPrependedWarnings(output, localModelCards.warnings);
 }
@@ -354,6 +355,7 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
     submittedMetrics: input.submittedMetrics,
     functionResidualParameterPack: input.functionResidualParameterPack,
     wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
   });
   return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, localModelCards.warnings));
 }
@@ -369,6 +371,7 @@ export async function getMurphAgeSubmittedCalculatorViewBundle(
     sex: input.sex,
     submittedMetrics: input.submittedMetrics,
     wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
   };
   const productOutput = calculateMurphAgeFromSubmittedInputs({
     ...sharedInput,

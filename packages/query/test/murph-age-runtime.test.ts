@@ -917,6 +917,60 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
     assert.equal(publicReport.researchCandidateCards.some((card) =>
       card.cardId === "lab5_bp_bmi_transport_research" && card.modelLoaded && card.selected
     ), true);
+    const multiWearableReport = await getMurphAgeResearchPreviewForSubmittedInputs({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics: [
+        { metricKey: "HbA1c", unit: "%", value: 5.3 },
+        { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+        { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+        { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+        { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+        { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+        { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+        { metricKey: "total-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 450 },
+        { metricKey: "wearable_valid_night_count_28d", sourceKind: "sleep-summary", unit: "count", value: 22 },
+        { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.91 },
+        { metricKey: "resting-heart-rate", sourceKind: "wearable-summary", unit: "bpm", value: 54 },
+        { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+        { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 70 },
+      ],
+      wearableResidualParameterPacks: [
+        fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+          center: 420,
+          coefficient: -0.04,
+          family: "sleep",
+          layerId: "sleep-residual-v1",
+          metricKey: "total-sleep-minutes",
+          scale: 30,
+        }),
+        fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+          center: 60,
+          coefficient: 0.05,
+          family: "resting-heart-rate",
+          layerId: "resting-heart-rate-residual-v1",
+          metricKey: "resting-heart-rate",
+          scale: 10,
+        }),
+        fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+          center: 50,
+          coefficient: -0.02,
+          family: "hrv",
+          layerId: "hrv-residual-v1",
+          metricKey: "hrv-rmssd",
+          scale: 20,
+        }),
+      ],
+    });
+    assert.equal(multiWearableReport.wearableResidualLayer?.layerId, "multi-wearable-residual-v1");
+    assert.equal(multiWearableReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+    assert.equal(multiWearableReport.wearableResidualLayer?.residualDeltaLogit, -0.09);
+    assert.equal(multiWearableReport.wearableResidualLayer?.selectedMetricKeys.includes("total-sleep-minutes"), true);
+    assert.equal(multiWearableReport.wearableResidualLayer?.selectedMetricKeys.includes("resting-heart-rate"), true);
+    assert.equal(multiWearableReport.wearableResidualLayer?.selectedMetricKeys.includes("hrv-rmssd"), true);
+    assert.equal(multiWearableReport.wearableResidualLayer?.scoreContributionAuthorized, false);
     const encodedReport = JSON.stringify(publicReport);
     assert.equal(encodedReport.includes(modelCardArtifactRoot), false);
     assert.equal(encodedReport.includes("fixture-lab5-research-model"), false);
@@ -2192,6 +2246,27 @@ function wearableFeatureValue(
 function fixtureActivityWearableResidualParameterPack(
   anchorCardId: MurphAgeScoreBearingCardId,
 ): MurphAgeWearableResidualParameterPack {
+  return fixtureWearableResidualParameterPack(anchorCardId, {
+    center: 8_000,
+    coefficient: -0.08,
+    family: "activity",
+    layerId: "activity-residual-v1",
+    metricKey: "steps",
+    scale: 2_000,
+  });
+}
+
+function fixtureWearableResidualParameterPack(
+  anchorCardId: MurphAgeScoreBearingCardId,
+  input: {
+    center: number;
+    coefficient: number;
+    family: MurphAgeWearableResidualParameterPack["family"];
+    layerId: MurphAgeWearableResidualParameterPack["layerId"];
+    metricKey: string;
+    scale: number;
+  },
+): MurphAgeWearableResidualParameterPack {
   return {
     anchorCardId,
     calibrationIntercept: 0,
@@ -2199,19 +2274,19 @@ function fixtureActivityWearableResidualParameterPack(
     deploymentRights: "research-only",
     endpoint: "10-year all-cause mortality",
     evidenceTier: "true-external-validation",
-    family: "activity",
+    family: input.family,
     featureWeights: [{
-      center: 8_000,
-      coefficient: -0.08,
-      metricKey: "steps",
-      scale: 2_000,
+      center: input.center,
+      coefficient: input.coefficient,
+      metricKey: input.metricKey,
+      scale: input.scale,
       transform: "center-scale",
     }],
-    globalWearableCapLogit: 0.2,
+    globalWearableCapLogit: 0.25,
     horizonYears: 10,
     intercept: 0,
-    layerId: "activity-residual-v1",
-    packHash: "research-pack-activity-v1",
+    layerId: input.layerId,
+    packHash: input.family === "activity" ? "research-pack-activity-v1" : `research-pack-${input.family}-v1`,
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
   };

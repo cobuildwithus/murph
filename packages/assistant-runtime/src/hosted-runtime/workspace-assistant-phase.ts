@@ -14,9 +14,9 @@ import type {
 } from "@murphai/assistant-engine";
 import {
   compareAssistantInputCursors,
-  listAssistantInputEvents,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
+  readLatestAssistantInputCursor,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   readAssistantAutomationState,
@@ -299,11 +299,24 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
       wake,
     });
-    if (systemMailboxMaintenance.result) {
+    if (
+      systemMailboxMaintenance.result
+      && !systemMailboxMaintenance.continueAssistantLane
+    ) {
       return systemMailboxMaintenance.result;
     }
+    const continuingSystemMailboxResult = systemMailboxMaintenance.continueAssistantLane
+      ? systemMailboxMaintenance.result
+      : null;
     const initialProviderCleanupCheckpoint =
       systemMailboxMaintenance.initialProviderCleanupCheckpoint;
+    const mergeContinuingSystemMailboxResult = (
+      assistantResult: HostedWorkspaceRunnerAssistantPhaseResult,
+    ): HostedWorkspaceRunnerAssistantPhaseResult =>
+      mergeContinuingSystemMailboxAssistantPhaseResult({
+        assistantResult,
+        systemMailboxResult: continuingSystemMailboxResult,
+      });
 
     const skipDeviceSync = shouldSkipDeviceSyncForAssistantPhase(input);
     const foregroundReplayInputIds = resolveHostedForegroundReplayInputIds(input);
@@ -371,7 +384,7 @@ export async function runHostedWorkspaceAssistantPhase(
       terminalLinqCleanup,
     });
     if (foregroundAssistantPass) {
-      return await runForegroundAssistantReplyPhase({
+      const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
         deferredProviderCleanupWakeAt: providerCleanupPhase.deferredProviderCleanupWakeAt,
@@ -380,6 +393,7 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxWakeAt,
         wake,
       });
+      return mergeContinuingSystemMailboxResult(foregroundAssistantResult);
     }
     const providerCleanupCheckpoint = providerCleanupPhase.providerCleanupCheckpoint;
     const providerCleanupDue = providerCleanupPhase.providerCleanupDue;
@@ -459,16 +473,16 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(postDelivery.redactedStatus ?? {}),
       };
       if (!phaseProgressed) {
-        return {
+        return mergeContinuingSystemMailboxResult({
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
             : {}),
           progressed: false,
           redactedStatus,
-        };
+        });
       }
-      return {
+      return mergeContinuingSystemMailboxResult({
         checkpointReason: postDelivery.checkpointReason,
         nextWakeAt,
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
@@ -476,7 +490,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         progressed: true,
         redactedStatus,
-      };
+      });
     }
 
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
@@ -537,17 +551,17 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      return {
+      return mergeContinuingSystemMailboxResult({
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
           ? { nextWakeReason: nextWake.reason }
           : {}),
         progressed: false,
         redactedStatus,
-      };
+      });
     }
 
-    return {
+    return mergeContinuingSystemMailboxResult({
       ...(hasPostCommitProviderCleanup
         ? {
             afterCheckpoint: async () => {
@@ -623,7 +637,7 @@ export async function runHostedWorkspaceAssistantPhase(
         : {}),
       progressed: true,
       redactedStatus,
-    };
+    });
   } finally {
     typingAbortController.abort();
   }
@@ -664,6 +678,197 @@ function isHostedForegroundAssistantDeliveryPass(input: {
     || input.assistantMetrics.activeTurnInputIngested === true;
 }
 
+function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
+  assistantResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  systemMailboxResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  if (!input.systemMailboxResult) {
+    return input.assistantResult;
+  }
+
+  const hasNextWakeAt = Object.hasOwn(input.systemMailboxResult, "nextWakeAt")
+    || Object.hasOwn(input.assistantResult, "nextWakeAt");
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      input.systemMailboxResult.nextWakeAt ?? null,
+      input.systemMailboxResult.nextWakeReason ?? "assistant",
+    ),
+    createHostedRuntimeWakeCandidate(
+      input.assistantResult.nextWakeAt ?? null,
+      input.assistantResult.nextWakeReason ?? "assistant",
+    ),
+  ]);
+  const redactedStatus = mergeHostedRuntimeRedactedStatus(
+    input.systemMailboxResult.redactedStatus,
+    input.assistantResult.redactedStatus,
+  );
+  const afterCheckpoint = composeHostedAssistantPhaseAfterCheckpoint({
+    baseNextWake: hasNextWakeAt ? nextWake : null,
+    callbacks: [
+      input.systemMailboxResult.afterCheckpoint,
+      input.assistantResult.afterCheckpoint,
+    ],
+  });
+
+  const progressedResult = input.assistantResult.progressed === true
+    ? input.assistantResult
+    : input.systemMailboxResult.progressed === true
+    ? input.systemMailboxResult
+    : null;
+  if (progressedResult) {
+    return {
+      ...(afterCheckpoint ? { afterCheckpoint } : {}),
+      checkpointReason: progressedResult.checkpointReason,
+      ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+      ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
+        ? { nextWakeReason: nextWake.reason }
+        : {}),
+      progressed: true,
+      ...(redactedStatus ? { redactedStatus } : {}),
+    };
+  }
+
+  return {
+    ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+    ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
+      ? { nextWakeReason: nextWake.reason }
+      : {}),
+    progressed: false,
+    ...(redactedStatus ? { redactedStatus } : {}),
+  };
+}
+
+function composeHostedAssistantPhaseAfterCheckpoint(input: {
+  baseNextWake: HostedRuntimeWakeCandidate | null;
+  callbacks: readonly HostedWorkspaceRunnerAssistantPhaseResult["afterCheckpoint"][];
+}): HostedWorkspaceRunnerAssistantPhaseResult["afterCheckpoint"] {
+  const activeCallbacks = input.callbacks.filter(
+    (callback): callback is NonNullable<
+      HostedWorkspaceRunnerAssistantPhaseResult["afterCheckpoint"]
+    > => callback !== null && callback !== undefined,
+  );
+  if (activeCallbacks.length === 0) {
+    return null;
+  }
+
+  return async () => {
+    let merged: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
+    for (const callback of activeCallbacks) {
+      const result = await callback();
+      if (!result) {
+        continue;
+      }
+      const base = merged ?? buildHostedAssistantPhaseBasePostCheckpoint(input.baseNextWake);
+      merged = mergeHostedAssistantPhasePostCheckpoint(base, result);
+    }
+    return merged;
+  };
+}
+
+function buildHostedAssistantPhaseBasePostCheckpoint(
+  baseNextWake: HostedRuntimeWakeCandidate | null,
+): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
+  if (!baseNextWake) {
+    return null;
+  }
+
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    nextWakeAt: baseNextWake.at,
+    ...(shouldExposeHostedAssistantPhaseNextWakeReason(baseNextWake.reason)
+      ? { nextWakeReason: baseNextWake.reason }
+      : {}),
+  };
+}
+
+function mergeHostedAssistantPhasePostCheckpoint(
+  previous: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null,
+  current: HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
+): HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
+  if (!previous) {
+    return current;
+  }
+
+  const hasNextWakeAt = Object.hasOwn(previous, "nextWakeAt")
+    || Object.hasOwn(current, "nextWakeAt");
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      previous.nextWakeAt ?? null,
+      previous.nextWakeReason ?? "assistant",
+    ),
+    createHostedRuntimeWakeCandidate(
+      current.nextWakeAt ?? null,
+      current.nextWakeReason ?? "assistant",
+    ),
+  ]);
+  const redactedStatus = mergeHostedRuntimeRedactedStatus(
+    previous.redactedStatus,
+    current.redactedStatus,
+  );
+
+  return {
+    checkpointReason: current.checkpointReason,
+    ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+    ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
+      ? { nextWakeReason: nextWake.reason }
+      : {}),
+    ...(redactedStatus ? { redactedStatus } : {}),
+  };
+}
+
+function mergeHostedRuntimeRedactedStatus(
+  first: HostedRuntimeRedactedJson | null | undefined,
+  second: HostedRuntimeRedactedJson | null | undefined,
+): HostedRuntimeRedactedJson | null {
+  if (!first && !second) {
+    return null;
+  }
+
+  const merged: HostedRuntimeRedactedJson = {
+    ...(first ?? {}),
+    ...(second ?? {}),
+  };
+  const systemMailboxPrepared =
+    readHostedRuntimeRedactedNumber(first, "hostedSystemMailboxPrepared")
+    + readHostedRuntimeRedactedNumber(second, "hostedSystemMailboxPrepared");
+  const systemMailboxRetryableFailed =
+    readHostedRuntimeRedactedNumber(first, "hostedSystemMailboxRetryableFailed")
+    + readHostedRuntimeRedactedNumber(second, "hostedSystemMailboxRetryableFailed");
+  if (systemMailboxPrepared > 0) {
+    merged.hostedSystemMailboxPrepared = systemMailboxPrepared;
+  }
+  if (systemMailboxRetryableFailed > 0) {
+    merged.hostedSystemMailboxRetryableFailed = systemMailboxRetryableFailed;
+  }
+  if (
+    first?.hostedAssistantProgressed === true
+    || second?.hostedAssistantProgressed === true
+  ) {
+    merged.hostedAssistantProgressed = true;
+  }
+
+  return merged;
+}
+
+function readHostedRuntimeRedactedNumber(
+  value: HostedRuntimeRedactedJson | null | undefined,
+  key: string,
+): number {
+  const field = value?.[key];
+  return typeof field === "number" ? field : 0;
+}
+
+function shouldContinueAssistantLaneAfterSystemMailboxPreparation(
+  systemMailboxPreparation: NonNullable<
+    Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
+  >,
+): boolean {
+  return "item" in systemMailboxPreparation
+    && systemMailboxPreparation.status === "processed"
+    && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
+    && systemMailboxPreparation.item.wake.kind === "runtime.manual-requested";
+}
+
 type HostedAssistantDeliveryEffects = Awaited<
   ReturnType<typeof collectHostedAssistantDeliverySideEffects>
 >;
@@ -679,11 +884,13 @@ async function runSystemMailboxMaintenancePhase(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<{
+  continueAssistantLane: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   if (input.hasFreshConversationInput) {
     return {
+      continueAssistantLane: false,
       initialProviderCleanupCheckpoint: null,
       result: null,
     };
@@ -702,6 +909,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
   if (!systemMailboxPreparation) {
     return {
+      continueAssistantLane: false,
       initialProviderCleanupCheckpoint,
       result: null,
     };
@@ -814,6 +1022,8 @@ async function runSystemMailboxMaintenancePhase(input: {
   });
 
   return {
+    continueAssistantLane:
+      shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
     result: {
       ...(shouldRunPostSystemCheckpoint
@@ -1502,10 +1712,9 @@ async function resolvePendingAssistantInputWakeAt(
 
   const [automationState, latestInputCursor] = await Promise.all([
     readAssistantAutomationState(input.restored.vaultRoot),
-    listAssistantInputEvents({
-      limit: Number.MAX_SAFE_INTEGER,
+    readLatestAssistantInputCursor({
       vault: input.restored.vaultRoot,
-    }).then((listed) => listed.events.at(-1)?.cursor ?? null),
+    }),
   ]);
   if (!latestInputCursor) {
     return null;
@@ -2154,12 +2363,20 @@ function hostedAssistantWakeStateProgressed(input: {
     );
   }
 
-  if (!consumedScheduledWorkspaceWake(input.input)) {
+  const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;
+  if (input.nextWakeAt === existingWakeAt) {
     return false;
   }
 
-  const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;
-  if (input.nextWakeAt === existingWakeAt) {
+  if (input.input.request.reason !== "alarm") {
+    return (
+      input.nextWakeAt !== null
+      && !hasFreshHostedConversationInput(input.input)
+      && input.assistantMetrics.activeTurnInputIngested !== true
+    );
+  }
+
+  if (!consumedScheduledWorkspaceWake(input.input)) {
     return false;
   }
 
