@@ -1740,6 +1740,13 @@ test("summarizeSampleWindow summarizes stored sample windows with oxygen thresho
       data: { value: 97, unit: "%" },
     }),
     createSampleRecord({
+      id: "smp_spo2_outside_window_unit",
+      occurredAt: "2026-04-17T00:00:05.000Z",
+      stream: "spo2",
+      sourcePath: "ledger/samples/spo2/2026/2026-04.jsonl",
+      data: { value: 0.97, unit: "fraction" },
+    }),
+    createSampleRecord({
       id: "smp_hr_01",
       occurredAt: "2026-04-17T00:00:01.000Z",
       stream: "heart_rate",

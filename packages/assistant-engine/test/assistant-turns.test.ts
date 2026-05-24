@@ -143,7 +143,7 @@ describe('assistant turns', () => {
     expect(finalized?.timeline.at(-1)).toEqual({
       at: '2026-04-08T00:02:00.000Z',
       detail: 'provider send failed',
-      kind: 'turn.completed',
+      kind: 'turn.failed',
       metadata: {},
     })
 

@@ -114,6 +114,7 @@ export const assistantTurnTimelineEventKindValues = [
   'turn.blocked',
   'turn.completed',
   'turn.deferred',
+  'turn.failed',
 ] as const
 export const assistantAskResultStatusValues = ['completed'] as const
 export const assistantOnboardingStatusValues = ['open', 'completed'] as const

@@ -139,7 +139,10 @@ export function summarizeSampleWindow(
       unit: getString(sample.attributes.unit),
     }))
     .filter((sample) => sample.recordedAt.length > 0);
-  const units = [...new Set(samples.map((sample) => sample.unit).filter((unit): unit is string => unit !== null))].sort();
+  const windowSamples = samples.filter((sample) =>
+    sampleRecordedAtIsInWindow(sample.recordedAt, filters.from, filters.to)
+  );
+  const units = [...new Set(windowSamples.map((sample) => sample.unit).filter((unit): unit is string => unit !== null))].sort();
 
   return summarizeSampleSeries({
     stream: filters.stream,
@@ -151,6 +154,29 @@ export function summarizeSampleWindow(
     gapSeconds: filters.gapSeconds,
     profile: filters.profile,
   });
+}
+
+function sampleRecordedAtIsInWindow(
+  recordedAt: string,
+  from: string | undefined,
+  to: string | undefined,
+): boolean {
+  const epochMs = Date.parse(recordedAt);
+  if (!Number.isFinite(epochMs)) {
+    return false;
+  }
+
+  const fromMs = from ? Date.parse(from) : null;
+  if (fromMs !== null && epochMs < fromMs) {
+    return false;
+  }
+
+  const toMs = to ? Date.parse(to) : null;
+  if (toMs !== null && epochMs > toMs) {
+    return false;
+  }
+
+  return true;
 }
 
 function isSummarizableSample(sample: CanonicalEntity): boolean {

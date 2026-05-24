@@ -408,6 +408,36 @@ test("dense raw timeseries tombstoning treats escaped ledger raw references as b
   assert.match(rawText, /sampleValues/u);
 });
 
+test("dense raw timeseries tombstoning treats unicode-escaped ledger raw references as blockers", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+  });
+  const rawPath = `${RAW_DIRECTORY}/01-provider-timeseries-heart-rate.json`;
+  const eventShardPath = "ledger/events/2026/2026-05.jsonl";
+  const escapedRawPath = rawPath.replaceAll("/", "\\u002f");
+  await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `{"rawRef":"${escapedRawPath}"}\n`,
+    "utf8",
+  );
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  const rawText = await fs.readFile(path.join(vaultRoot, rawPath), "utf8");
+  assert.match(rawText, /sampleValues/u);
+});
+
 test("dense raw timeseries tombstoning treats plain ledger raw references as blockers", async () => {
   const vaultRoot = await createRawArtifactFixture();
   await runWearableStorageMigrationPass({

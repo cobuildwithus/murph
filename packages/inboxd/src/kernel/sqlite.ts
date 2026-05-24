@@ -674,8 +674,8 @@ function createInboxRuntimeStore(
         and (
           ? is null
           or ? is null
-          or occurred_at > ?
-          or (occurred_at = ? and capture_id > ?)
+          or occurred_at < ?
+          or (occurred_at = ? and capture_id < ?)
         )
       order by occurred_at desc, capture_id desc
       limit ?
@@ -690,8 +690,8 @@ function createInboxRuntimeStore(
         and (
           ? is null
           or ? is null
-          or created_at > ?
-          or (created_at = ? and capture_id > ?)
+          or created_at < ?
+          or (created_at = ? and capture_id < ?)
         )
       order by created_at desc, capture_id desc
       limit ?

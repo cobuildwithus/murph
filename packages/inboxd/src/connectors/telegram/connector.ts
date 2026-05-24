@@ -213,6 +213,8 @@ export function createTelegramPollConnector({
   resetWebhookOnStart,
 }: TelegramConnectorOptions) {
   const normalizedAccountId = normalizeTelegramAccountId(accountId);
+  const allowUnscopedDirectMessages =
+    accountId !== undefined && normalizedAccountId === "bot";
   const authorizedTarget = parseAuthorizedTelegramTarget(normalizedAccountId);
   const connectorId = id ?? `${source}:${normalizedAccountId ?? "default"}`;
   const effectiveTransportMode = resolveTelegramPollTransportMode({
@@ -267,7 +269,9 @@ export function createTelegramPollConnector({
       };
     },
     normalize: async ({ message, source, accountId, context }) =>
-      isAuthorizedTelegramPollUpdate(message, authorizedTarget)
+      isAuthorizedTelegramPollUpdate(message, authorizedTarget, {
+        allowUnscopedDirectMessages,
+      })
         ? normalizeTelegramUpdate({
             update: message,
             source,
@@ -464,14 +468,15 @@ function normalizeTelegramAccountId(accountId: string | null | undefined): strin
 function isAuthorizedTelegramPollUpdate(
   update: TelegramUpdateLike,
   allowedTarget: TelegramThreadTarget | null,
+  options: { allowUnscopedDirectMessages: boolean },
 ): boolean {
-  if (!allowedTarget) {
-    return false;
-  }
-
   const message = extractTelegramMessage(update);
   if (!message) {
     return false;
+  }
+
+  if (!allowedTarget) {
+    return options.allowUnscopedDirectMessages && isDirectTelegramPollMessage(message);
   }
 
   const messageTarget = buildTelegramThreadTarget(message);
@@ -510,6 +515,10 @@ function telegramTargetMatchesAllowedTarget(
   }
 
   return true;
+}
+
+function isDirectTelegramPollMessage(message: TelegramMessageLike): boolean {
+  return message.chat.type === "private" || message.chat.is_direct_messages === true;
 }
 
 function nextUpdateOffset(cursor: Record<string, unknown> | null | undefined): number {

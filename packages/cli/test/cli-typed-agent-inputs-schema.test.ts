@@ -315,7 +315,7 @@ const canonicalTypedCommands = [
   {
     label: 'event edit',
     commandNames: ['event edit'],
-    fieldHints: ['kind', 'title', 'note', 'occurredAt', 'dayKeyPolicy'],
+    fieldHints: ['title', 'note', 'occurredAt', 'dayKeyPolicy'],
   },
   {
     label: 'meal edit',

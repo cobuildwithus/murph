@@ -210,6 +210,7 @@ test('provider, food, recipe, and event edit/delete schemas expose shared record
   assert.equal('set' in eventEditSchema.options.properties, false)
   assert.equal('clear' in eventEditSchema.options.properties, false)
   assert.equal('title' in eventEditSchema.options.properties, true)
+  assert.equal('kind' in eventEditSchema.options.properties, false)
   assert.equal('dayKeyPolicy' in eventEditSchema.options.properties, true)
   assert.deepEqual(eventEditSchema.options.required, ['vault'])
 

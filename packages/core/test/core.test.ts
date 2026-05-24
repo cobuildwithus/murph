@@ -2281,6 +2281,58 @@ test("validateVault checks raw manifests and referenced artifacts", async () => 
   );
 });
 
+test("validateVault checks canonical event attachment paths even without rawRefs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const eventId = "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9";
+  const attachmentPath = `raw/measurements/2026/03/${eventId}/missing-photo.jpg`;
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: eventId,
+      kind: "body_measurement",
+      occurredAt: "2026-03-12T08:05:00.000Z",
+      title: "Weekly check-in",
+      measurements: [
+        {
+          type: "weight",
+          value: 182.4,
+          unit: "lb",
+        },
+      ],
+      attachments: [
+        {
+          role: "media_1",
+          kind: "photo",
+          relativePath: attachmentPath,
+          mediaType: "image/jpeg",
+          sha256: createHash("sha256").update("missing").digest("hex"),
+          originalFileName: "missing-photo.jpg",
+        },
+      ],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_REFERENCE_MISSING"
+        && issue.path === attachmentPath,
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "RAW_MANIFEST_INVALID"
+        && issue.path === path.posix.dirname(attachmentPath),
+    ),
+  );
+});
+
 test("validateVault accepts workout and body-measurement media references", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -3229,7 +3281,7 @@ test("validateVault allows inbox attachment recovery manifests without envelope.
           originalFileName: "photo.jpg",
           mediaType: "image/jpeg",
           byteSize: 10,
-          sha256: "a".repeat(64),
+          sha256: createHash("sha256").update("jpeg-bytes").digest("hex"),
         },
       ],
       provenance: {
@@ -4346,6 +4398,8 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
         },
         {
           relativePath: "../escape.txt",
+          byteSize: 3,
+          sha256: createHash("sha256").update("raw").digest("hex"),
         },
       ],
     }),
@@ -4397,6 +4451,13 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
         issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes('rawDirectory must equal "raw/documents/2026/03/mismatched"') &&
         issue.path === "raw/documents/2026/03/mismatched/manifest.json",
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "VAULT_INVALID_PATH" &&
+        issue.path === "../escape.txt",
     ),
   );
 });

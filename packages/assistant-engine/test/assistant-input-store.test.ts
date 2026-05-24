@@ -8,6 +8,7 @@ import {
   createAssistantInputEventId,
   listAssistantInputEvents,
   readAssistantInputEvent,
+  readLatestAssistantInputCursor,
   resolveAssistantInputEventPath,
   resolveAssistantInputEventsDirectory,
   updateAssistantInputProjection,
@@ -1735,6 +1736,55 @@ describe('assistant input event store', () => {
     })
     expect(skipped.events).toEqual([])
     expect(failures).toEqual([path.basename(inputPath)])
+  })
+
+  it('reads the latest cursor without requiring full-list consumers to sort events', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-latest-cursor-',
+    )
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_latest_cursor_later',
+        occurredAt: '2026-04-22T10:05:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'later',
+        threadId: 'chat_1',
+      }),
+    })
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_latest_cursor_earlier',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:41',
+        text: 'earlier',
+        threadId: 'chat_1',
+      }),
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      path.join(resolveAssistantInputEventsDirectory(paths), 'corrupt.json'),
+      '{"not":"a versioned event"}',
+    )
+
+    await expect(
+      readLatestAssistantInputCursor({
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(/versioned murph\.assistant-input-event\.v1/u)
+
+    const failures: string[] = []
+    const latest = await readLatestAssistantInputCursor({
+      vault: vaultRoot,
+      skipInvalidRecords: true,
+      onInvalidRecord(failure) {
+        failures.push(failure.fileName)
+      },
+    })
+
+    expect(latest).toEqual(later.cursor)
+    expect(failures).toEqual(['corrupt.json'])
   })
 
   it('fails closed on corrupt records and can explicitly skip invalid files', async () => {

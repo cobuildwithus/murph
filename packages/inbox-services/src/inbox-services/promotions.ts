@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
+import {
+  acquireCanonicalWriteLock as acquireDefaultCanonicalWriteLock,
+  normalizeOpaquePathSegment,
+  normalizeRelativeVaultPath,
+  withCanonicalWriteLockScope as withDefaultCanonicalWriteLockScope,
+} from '@murphai/core'
 import {
   hasLocalStatePath,
   readVersionedJsonStateFile,
@@ -56,10 +61,25 @@ interface PromotionScope<TPrepared, TDerived> {
   existing: InboxPromotionEntry | undefined
 }
 
+interface CanonicalWriteLockPort {
+  acquireCanonicalWriteLock(vaultRoot: string): Promise<{
+    release(): Promise<void>
+  }>
+  withCanonicalWriteLockScope<TResult>(
+    vaultRoot: string,
+    run: () => Promise<TResult>,
+  ): Promise<TResult>
+}
+
 interface CanonicalPromotionMetadata {
   note: string | null
   occurredAt: string | null
   source: string | null
+}
+
+const defaultCanonicalWriteLockPort: CanonicalWriteLockPort = {
+  acquireCanonicalWriteLock: acquireDefaultCanonicalWriteLock,
+  withCanonicalWriteLockScope: withDefaultCanonicalWriteLockScope,
 }
 
 export async function readPromotionsByCapture(
@@ -203,8 +223,9 @@ export async function promoteCanonicalAttachmentImport<
 
 export async function preserveCanonicalDocumentAttachments(input: {
   input: PromoteInput
+  loadCore: () => Promise<CoreRuntimeModule>
   loadImporters: () => Promise<{
-    createImporters(): {
+    createImporters(input?: { corePort?: CoreRuntimeModule }): {
       importDocument(input: {
         filePath: string
         vaultRoot: string
@@ -224,98 +245,113 @@ export async function preserveCanonicalDocumentAttachments(input: {
 }): Promise<InboxPreserveDocumentAttachmentsResult> {
   const paths = await ensureInitialized(input.loadInbox, input.input.vault)
   const inboxd = await input.loadInbox()
-  const importers = (await input.loadImporters()).createImporters()
+  const core = await input.loadCore()
+  const importers = (await input.loadImporters()).createImporters({ corePort: core })
   const runtime = await inboxd.openInboxRuntime({
     vaultRoot: paths.absoluteVaultRoot,
   })
 
   try {
-    const capture = requirePromotionCapture(runtime, input.input.captureId)
-    const documents: InboxPreserveDocumentAttachmentsResult['documents'] = []
-    const metadata = resolveCanonicalPromotionMetadata({
-      capture,
-      defaultSource: 'import',
-    })
+    return await withLockedInboxPromotionMutation(paths, core, async () => {
+      const capture = requirePromotionCapture(runtime, input.input.captureId)
+      const documents: InboxPreserveDocumentAttachmentsResult['documents'] = []
+      const metadata = resolveCanonicalPromotionMetadata({
+        capture,
+        defaultSource: 'import',
+      })
 
-    for (const attachment of capture.attachments.filter(isStoredDocumentAttachment)) {
-      const title = resolveDocumentAttachmentTitle(attachment)
-      const canonicalPromotion = await findCanonicalPromotionMatch({
-        captureId: capture.captureId,
-        absoluteVaultRoot: paths.absoluteVaultRoot,
-        spec: documentCanonicalPromotionSpec,
-        context: {
-          documentSha256: await resolveAttachmentSha256(
+      for (const attachment of capture.attachments.filter(isStoredDocumentAttachment)) {
+        const title = resolveDocumentAttachmentTitle(attachment)
+        const canonicalPromotion = await findCanonicalPromotionMatch({
+          captureId: capture.captureId,
+          absoluteVaultRoot: paths.absoluteVaultRoot,
+          spec: documentCanonicalPromotionSpec,
+          context: {
+            documentSha256: await resolveAttachmentSha256(
+              paths.absoluteVaultRoot,
+              capture,
+              attachment,
+            ),
+            title,
+          },
+          metadata,
+        })
+
+        if (canonicalPromotion) {
+          documents.push({
+            attachmentId: attachment.attachmentId ?? null,
+            ordinal: attachment.ordinal,
+            lookupId: canonicalPromotion.lookupId,
+            relatedId: canonicalPromotion.relatedId,
+            created: false,
+          })
+          continue
+        }
+
+        const result = await importers.importDocument({
+          filePath: await resolvePromotionAttachmentFilePath(
             paths.absoluteVaultRoot,
             capture,
             attachment,
           ),
-          title,
-        },
-        metadata,
-      })
+          vaultRoot: paths.absoluteVaultRoot,
+          occurredAt: metadata.occurredAt ?? undefined,
+          title: title ?? undefined,
+          note: metadata.note ?? undefined,
+          source: metadata.source ?? undefined,
+        })
 
-      if (canonicalPromotion) {
         documents.push({
           attachmentId: attachment.attachmentId ?? null,
           ordinal: attachment.ordinal,
-          lookupId: canonicalPromotion.lookupId,
-          relatedId: canonicalPromotion.relatedId,
-          created: false,
+          lookupId: result.documentId,
+          relatedId: result.documentId,
+          created: true,
         })
-        continue
       }
 
-      const result = await importers.importDocument({
-        filePath: await resolvePromotionAttachmentFilePath(
-          paths.absoluteVaultRoot,
-          capture,
-          attachment,
-        ),
-        vaultRoot: paths.absoluteVaultRoot,
-        occurredAt: metadata.occurredAt ?? undefined,
-        title: title ?? undefined,
-        note: metadata.note ?? undefined,
-        source: metadata.source ?? undefined,
+      return inboxPreserveDocumentAttachmentsResultSchema.parse({
+        vault: paths.absoluteVaultRoot,
+        captureId: capture.captureId,
+        preservedCount: documents.length,
+        createdCount: documents.filter((document) => document.created).length,
+        documents,
       })
-
-      documents.push({
-        attachmentId: attachment.attachmentId ?? null,
-        ordinal: attachment.ordinal,
-        lookupId: result.documentId,
-        relatedId: result.documentId,
-        created: true,
-      })
-    }
-
-    return inboxPreserveDocumentAttachmentsResultSchema.parse({
-      vault: paths.absoluteVaultRoot,
-      captureId: capture.captureId,
-      preservedCount: documents.length,
-      createdCount: documents.filter((document) => document.created).length,
-      documents,
     })
   } finally {
     runtime.close()
   }
 }
 
-export function requireJournalPromotionCore(core: CoreRuntimeModule) {
+export function requireJournalPromotionCore(
+  core: CoreRuntimeModule,
+): CoreRuntimeModule & {
+  promoteInboxJournal: NonNullable<CoreRuntimeModule['promoteInboxJournal']>
+} {
   if (!core.promoteInboxJournal) {
     throw unsupportedPromotion('journal')
   }
 
-  return {
-    promoteInboxJournal: core.promoteInboxJournal,
+  return core as CoreRuntimeModule & {
+    promoteInboxJournal: NonNullable<CoreRuntimeModule['promoteInboxJournal']>
   }
 }
 
-export function requireExperimentPromotionCore(core: CoreRuntimeModule) {
+export function requireExperimentPromotionCore(
+  core: CoreRuntimeModule,
+): CoreRuntimeModule & {
+  promoteInboxExperimentNote: NonNullable<
+    CoreRuntimeModule['promoteInboxExperimentNote']
+  >
+} {
   if (!core.promoteInboxExperimentNote) {
     throw unsupportedPromotion('experiment-note')
   }
 
-  return {
-    promoteInboxExperimentNote: core.promoteInboxExperimentNote,
+  return core as CoreRuntimeModule & {
+    promoteInboxExperimentNote: NonNullable<
+      CoreRuntimeModule['promoteInboxExperimentNote']
+    >
   }
 }
 
@@ -966,31 +1002,75 @@ export async function withPromotionScope<TPrepared, TDerived, TResult>(input: {
   })
 
   try {
-    const capture = requirePromotionCapture(runtime, input.input.captureId)
-    const derived = await input.deriveBeforePromotionStore({
-      paths,
-      capture,
-      prepared,
-    })
-    const promotionStore = await readPromotionStore(paths)
-    const existing = findAppliedPromotionEntry(
-      promotionStore,
-      input.input.captureId,
-      input.target,
-    )
+    return await withLockedInboxPromotionMutation(paths, prepared, async () => {
+      const capture = requirePromotionCapture(runtime, input.input.captureId)
+      const derived = await input.deriveBeforePromotionStore({
+        paths,
+        capture,
+        prepared,
+      })
+      const promotionStore = await readPromotionStore(paths)
+      const existing = findAppliedPromotionEntry(
+        promotionStore,
+        input.input.captureId,
+        input.target,
+      )
 
-    return input.run({
-      input: input.input,
-      paths,
-      capture,
-      prepared,
-      derived,
-      promotionStore,
-      existing,
+      return input.run({
+        input: input.input,
+        paths,
+        capture,
+        prepared,
+        derived,
+        promotionStore,
+        existing,
+      })
     })
   } finally {
     runtime.close()
   }
+}
+
+async function withLockedInboxPromotionMutation<TResult>(
+  paths: InboxPaths,
+  lockPortCandidate: unknown,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const lockPort = resolveCanonicalWriteLockPort(lockPortCandidate)
+  return await lockPort.withCanonicalWriteLockScope(paths.absoluteVaultRoot, async () => {
+    const lock = await lockPort.acquireCanonicalWriteLock(paths.absoluteVaultRoot)
+    try {
+      return await run()
+    } finally {
+      await lock.release()
+    }
+  })
+}
+
+function resolveCanonicalWriteLockPort(candidate: unknown): CanonicalWriteLockPort {
+  if (isCanonicalWriteLockPort(candidate)) {
+    return candidate
+  }
+
+  if (candidate && typeof candidate === 'object' && 'core' in candidate) {
+    const core = (candidate as { core?: unknown }).core
+    if (isCanonicalWriteLockPort(core)) {
+      return core
+    }
+  }
+
+  return defaultCanonicalWriteLockPort
+}
+
+function isCanonicalWriteLockPort(value: unknown): value is CanonicalWriteLockPort {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { acquireCanonicalWriteLock?: unknown })
+      .acquireCanonicalWriteLock === 'function' &&
+    typeof (value as { withCanonicalWriteLockScope?: unknown })
+      .withCanonicalWriteLockScope === 'function'
+  )
 }
 
 async function listCanonicalManifestPaths(

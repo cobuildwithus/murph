@@ -621,15 +621,53 @@ export async function readLatestAssistantInputCursor(input: {
   skipInvalidRecords?: boolean
   vault?: string
 }): Promise<AssistantInputCursor | null> {
-  const listed = await listAssistantInputEvents({
-    limit: Number.MAX_SAFE_INTEGER,
-    onInvalidRecord: input.onInvalidRecord,
-    paths: input.paths,
-    skipInvalidRecords: input.skipInvalidRecords,
-    vault: input.vault,
-  })
+  const { paths } = resolveAssistantInputContext(input)
+  const onInvalidRecord = input.onInvalidRecord ?? null
+  const skipInvalidRecords = input.skipInvalidRecords ?? false
+  const directory = resolveAssistantInputEventsDirectory(paths)
 
-  return listed.events.at(-1)?.cursor ?? null
+  try {
+    const entries = await readdir(directory, {
+      withFileTypes: true,
+    })
+    let latest: AssistantInputCursor | null = null
+
+    for (const entry of entries) {
+      if (!entry.name.endsWith('.json')) {
+        continue
+      }
+
+      try {
+        if (!entry.isFile()) {
+          throw new TypeError(
+            'Assistant input event entries must be regular JSON files.',
+          )
+        }
+        const filePath = path.join(directory, entry.name)
+        await assertAssistantStatePathHasNoSymlinks(filePath)
+        const raw = await readFile(filePath, 'utf8')
+        const record = parseAssistantInputEventFile(JSON.parse(raw))
+        if (!latest || compareAssistantInputCursors(record.cursor, latest) > 0) {
+          latest = record.cursor
+        }
+      } catch (error) {
+        if (!skipInvalidRecords) {
+          throw error
+        }
+        onInvalidRecord?.({
+          error,
+          fileName: entry.name,
+        })
+      }
+    }
+
+    return latest
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
 }
 
 export async function updateAssistantInputProjection(input: {

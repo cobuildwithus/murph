@@ -387,14 +387,6 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         },
         description:
           'Edit one canonical event from typed fields.',
-        options: {
-          kind: z.string().min(1).optional().describe('Replace the canonical event kind.'),
-        },
-        buildPatch(options) {
-          const set: string[] = []
-          appendTypedSet(set, 'kind', stringOption(options.kind))
-          return { set: emptyToUndefined(set) }
-        },
         async run(input) {
           const result = await editEventRecord({
             vault: input.vault,

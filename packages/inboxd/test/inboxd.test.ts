@@ -517,6 +517,16 @@ test("listCaptures supports oldest-first paging with a persisted after cursor", 
     ["third", "second"],
   );
 
+  const newestSecondPage = runtime.listCaptures({
+    limit: 2,
+    afterOccurredAt: newestFirst[1]?.occurredAt ?? null,
+    afterCaptureId: newestFirst[1]?.captureId ?? null,
+  });
+  assert.deepEqual(
+    newestSecondPage.map((capture) => capture.text),
+    ["first"],
+  );
+
   pipeline.close();
 });
 

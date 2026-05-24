@@ -6915,11 +6915,6 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
-                        },
-                        "kind": {
-                          "description": "Replace the canonical event kind.",
-                          "type": "string",
-                          "minLength": 1
                         }
                       }
                     }

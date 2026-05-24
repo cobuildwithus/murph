@@ -300,6 +300,40 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await writeVaultFile(
       vaultRoot,
+      "bank/scheduled-logs/too-frequent.md",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.scheduled-log.v1",
+        "docType: scheduled_log",
+        "scheduledLogId: slog_01JX8TAQY2M5ZBV64ZP4N1DRA",
+        "slug: too-frequent",
+        "title: Too frequent",
+        "schedule:",
+        "  kind: every",
+        "  everyMs: 1000",
+        "action:",
+        "  kind: intervention_session.add",
+        "  title: Too frequent",
+        "  interventionType: sauna",
+        "createdAt: 2026-04-22T07:00:00.000Z",
+        "updatedAt: 2026-04-22T07:00:00.000Z",
+        "---",
+      ].join("\n"),
+    );
+
+    await assert.rejects(
+      () => readScheduledLog(vaultRoot, "slog_01JX8TAQY2M5ZBV64ZP4N1DRA"),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "schedule.everyMs must be at least 60000 ms.",
+    );
+
+    await rm(path.join(vaultRoot, "bank/scheduled-logs/too-frequent.md"), {
+      force: true,
+    });
+
+    await writeVaultFile(
+      vaultRoot,
       "bank/scheduled-logs/bad-status.md",
       [
         "---",

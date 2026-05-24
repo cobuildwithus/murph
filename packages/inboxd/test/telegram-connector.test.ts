@@ -747,6 +747,146 @@ test("createTelegramPollConnector drops updates outside the configured Telegram 
   assert.deepEqual(cursor, { updateId: 3 });
 });
 
+test("createTelegramPollConnector explicit bot binding captures direct chats without widening group capture", async () => {
+  const emitted: string[] = [];
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "murph_bot" };
+      },
+      async getMessages({ cursor }) {
+        if (cursor) {
+          return {
+            messages: [],
+          };
+        }
+
+        return {
+          messages: [
+            {
+              update_id: 1,
+              message: {
+                message_id: 1,
+                date: 1_773_397_100,
+                text: "private direct",
+                chat: { id: 10, type: "private", first_name: "Alice" },
+                from: { id: 111, first_name: "Alice" },
+              },
+            },
+            {
+              update_id: 2,
+              message: {
+                message_id: 2,
+                date: 1_773_397_101,
+                text: "group",
+                chat: { id: -20, type: "group", title: "Group" },
+                from: { id: 222, first_name: "Eve" },
+              },
+            },
+            {
+              update_id: 3,
+              message: {
+                message_id: 3,
+                date: 1_773_397_102,
+                text: "channel",
+                chat: { id: -30, type: "channel", title: "Channel" },
+                sender_chat: { id: -30, type: "channel", title: "Channel" },
+              },
+            },
+            {
+              update_id: 4,
+              business_message: {
+                message_id: 4,
+                date: 1_773_397_103,
+                text: "business direct",
+                chat: { id: 40, type: "private", first_name: "Blake" },
+                from: { id: 444, first_name: "Blake" },
+                business_connection_id: "business-1",
+              },
+            },
+          ],
+          nextCursor: { updateId: 4 },
+        };
+      },
+      async startWatching() {
+        return undefined;
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+    },
+    accountId: "bot",
+    downloadAttachments: false,
+    transportMode: "require-no-webhook",
+  });
+
+  const cursor = await connector.backfill(null, async (capture) => {
+    emitted.push(capture.text ?? "");
+    return createPersistedCapture(capture);
+  });
+
+  assert.equal(connector.id, "telegram:bot");
+  assert.deepEqual(emitted, ["private direct", "business direct"]);
+  assert.deepEqual(cursor, { updateId: 4 });
+});
+
+test("createTelegramPollConnector omits unscoped direct chats without explicit bot binding", async () => {
+  const emitted: string[] = [];
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "murph_bot" };
+      },
+      async getMessages({ cursor }) {
+        if (cursor) {
+          return {
+            messages: [],
+          };
+        }
+
+        return {
+          messages: [
+            {
+              update_id: 1,
+              message: {
+                message_id: 1,
+                date: 1_773_397_100,
+                text: "private direct",
+                chat: { id: 10, type: "private", first_name: "Alice" },
+                from: { id: 111, first_name: "Alice" },
+              },
+            },
+          ],
+          nextCursor: { updateId: 1 },
+        };
+      },
+      async startWatching() {
+        return undefined;
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+    },
+    downloadAttachments: false,
+    transportMode: "require-no-webhook",
+  });
+
+  const cursor = await connector.backfill(null, async (capture) => {
+    emitted.push(capture.text ?? "");
+    return createPersistedCapture(capture);
+  });
+
+  assert.equal(connector.id, "telegram:bot");
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(cursor, { updateId: 1 });
+});
+
 test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api shape", async () => {
   const updateCalls: Array<Record<string, unknown>> = [];
   const deleteWebhookCalls: Array<Record<string, unknown>> = [];

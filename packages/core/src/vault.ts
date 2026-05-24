@@ -37,6 +37,7 @@ import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
+import { safeStatAndHashVaultFile } from "./raw-artifact-integrity.ts";
 import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
   isTerminalWriteOperationStatus,
@@ -692,6 +693,9 @@ async function validateEventRecordReferences(
     Array.isArray((record as { workout?: { media?: unknown } }).workout?.media)
       ? (((record as { workout: { media: unknown[] } }).workout.media))
       : [],
+    Array.isArray((record as { attachments?: unknown }).attachments)
+      ? ((record as { attachments: unknown[] }).attachments)
+      : [],
   ];
 
   for (const mediaList of mediaLists) {
@@ -827,7 +831,9 @@ async function validateRawManifestFile(
       continue;
     }
 
-    if (path.posix.dirname(artifact.relativePath) !== expectedRawDirectory) {
+    const artifactInsideExpectedRawDirectory =
+      path.posix.dirname(artifact.relativePath) === expectedRawDirectory;
+    if (!artifactInsideExpectedRawDirectory) {
       issues.push(
         validationIssue(
           "RAW_MANIFEST_INVALID",
@@ -837,14 +843,47 @@ async function validateRawManifestFile(
       );
     }
 
-    issues.push(
-      ...(await validateExistingVaultFile(
-        vaultRoot,
-        artifact.relativePath,
-        "RAW_REFERENCE_MISSING",
-        `Manifest artifact "${artifact.relativePath}" is missing.`,
-      )),
+    const artifactReferenceIssues = await validateExistingVaultFile(
+      vaultRoot,
+      artifact.relativePath,
+      "RAW_REFERENCE_MISSING",
+      `Manifest artifact "${artifact.relativePath}" is missing.`,
     );
+    issues.push(...artifactReferenceIssues);
+
+    if (
+      artifactInsideExpectedRawDirectory
+      && artifactReferenceIssues.length === 0
+      && typeof artifact.byteSize === "number"
+      && Number.isFinite(artifact.byteSize)
+      && typeof artifact.sha256 === "string"
+      && artifact.sha256.length > 0
+    ) {
+      const actual = await safeStatAndHashVaultFile(vaultRoot, artifact.relativePath);
+      if (actual.kind === "invalid") {
+        issues.push(
+          validationIssue(
+            actual.code,
+            actual.message,
+            artifact.relativePath,
+          ),
+        );
+      } else if (
+        actual.kind === "ok"
+        && (
+          actual.integrity.byteSize !== artifact.byteSize
+          || actual.integrity.sha256 !== artifact.sha256
+        )
+      ) {
+        issues.push(
+          validationIssue(
+            "RAW_MANIFEST_INVALID",
+            `artifact ${index + 1} bytes or sha256 do not match "${artifact.relativePath}".`,
+            relativePath,
+          ),
+        );
+      }
+    }
   }
 
   return issues;
