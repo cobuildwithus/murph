@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v13" as const;
+  "murph.age.research-calculator-view.v14" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v4" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
@@ -1281,13 +1281,15 @@ export type MurphAgeResearchLayerId =
   | "function-disability-sidecar"
   | "r399-outcome-risk-anchor"
   | "selected-lab-body-card"
-  | "wearable-activity-residual";
+  | "wearable-activity-residual"
+  | "wearable-multi-family-residual";
 
 export type MurphAgeResearchLayerRole =
   | "base-outcome-risk"
   | "function-mobility-residual"
   | "lab-body-risk-adjuster"
-  | "wearable-activity-residual";
+  | "wearable-activity-residual"
+  | "wearable-multi-family-residual";
 
 export type MurphAgeResearchLayerStatus =
   | "active-research-score"
@@ -3910,6 +3912,8 @@ const MURPH_AGE_WEARABLE_RESIDUAL_LAYER_IDS_BY_FAMILY = {
 
 const MURPH_AGE_MULTI_WEARABLE_RESIDUAL_LAYER_ID =
   "multi-wearable-residual-v1" as const satisfies MurphAgeWearableResidualLayerId;
+const MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID =
+  "wearable-multi-family-residual" as const satisfies MurphAgeResearchLayerId;
 
 export function summarizeMurphAgeWearableResidualLayerContractForFamily(
   family: MurphAgeWearableShadowIncrementFamily,
@@ -8107,7 +8111,7 @@ function buildMurphAgeResearchLayeredAgeEstimateView(input: {
     && wearableShadow.finalRiskProbability !== null
   ) {
     if (functionShadowApplied) appliedResidualLayerIds.push("function-disability-sidecar");
-    appliedResidualLayerIds.push("wearable-activity-residual");
+    appliedResidualLayerIds.push(MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID);
     finalRiskAgeEquivalentYears = wearableShadow.finalRiskAgeEquivalentYears;
     finalRiskProbability = wearableShadow.finalRiskProbability;
   }
@@ -8327,7 +8331,8 @@ function buildMurphAgeResearchLayeredPathStatus(input: {
   selectedScoreBearingMetricKeys: readonly string[];
   wearableResidualLayer: MurphAgePublicWearableResidualLayerView | null;
 }): MurphAgeResearchLayeredPathStatus {
-  const wearableContract = summarizeMurphAgeWearableResidualLayerContract();
+  const wearableContracts = summarizeMurphAgeWearableResidualLayerContracts();
+  const wearableSignalMetricKeys = uniqueStrings(wearableContracts.flatMap((contract) => contract.signalMetricKeys));
   const selectedCardId = input.selectedResearchCardId;
   const functionParameterPackAvailable = input.functionResidualLayer?.parameterizationAvailable === true;
   const wearableParameterPackAvailable = input.wearableResidualLayer?.parameterizationAvailable === true;
@@ -8346,7 +8351,7 @@ function buildMurphAgeResearchLayeredPathStatus(input: {
     parameterPackBlockedLayerIds.push("function-disability-sidecar");
   }
   if (!wearableParameterPackAvailable) {
-    parameterPackBlockedLayerIds.push("wearable-activity-residual");
+    parameterPackBlockedLayerIds.push(MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID);
   }
 
   return {
@@ -8357,7 +8362,7 @@ function buildMurphAgeResearchLayeredPathStatus(input: {
       "r399-outcome-risk-anchor",
       "selected-lab-body-card",
       "function-disability-sidecar",
-      "wearable-activity-residual",
+      MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID,
     ],
     layers: [
       {
@@ -8417,12 +8422,12 @@ function buildMurphAgeResearchLayeredPathStatus(input: {
       },
       {
         combinationScale: "risk-logit-residual",
-        layerId: "wearable-activity-residual",
-        metricKeys: [...wearableContract.signalMetricKeys],
+        layerId: MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID,
+        metricKeys: wearableSignalMetricKeys,
         parameterPackAvailable: wearableParameterPackAvailable,
         parameterPackRequired: true,
         productAuthorized: false,
-        role: "wearable-activity-residual",
+        role: "wearable-multi-family-residual",
         scoreBearingNow: false,
         scoreContributionAuthorized: false,
         selected: false,

@@ -4809,7 +4809,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(parameterizedFunctionLayer.scoreBearingNow, false);
   assert.equal(parameterizedFunctionLayer.scoreContributionAuthorized, false);
   assert.deepEqual(researchWithFunctionPackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
-    "wearable-activity-residual",
+    "wearable-multi-family-residual",
   ]);
   assert.equal(
     researchWithFunctionPackView.model.composition.nextArchitectureStep,
@@ -4864,14 +4864,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.deepEqual(researchWithWearablePackView.layeredAgeEstimate?.appliedLayerIds, [
     "selected-lab-body-card",
-    "wearable-activity-residual",
+    "wearable-multi-family-residual",
   ]);
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.intervalYears, null);
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.productAuthorized, false);
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.residualScoreContributionAuthorized, false);
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.uncertaintyStatus, "not-reestimated-for-shadow");
   const parameterizedWearableLayer = researchWithWearablePackView.model.layeredResearchPath.layers.find((layer) =>
-    layer.layerId === "wearable-activity-residual"
+    layer.layerId === "wearable-multi-family-residual"
   );
   assert.ok(parameterizedWearableLayer);
   assert.equal(parameterizedWearableLayer.status, "parameter-pack-available-shadow-only");
@@ -4908,7 +4908,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.deepEqual(researchWithBothResidualPacksView.layeredAgeEstimate?.appliedLayerIds, [
     "selected-lab-body-card",
     "function-disability-sidecar",
-    "wearable-activity-residual",
+    "wearable-multi-family-residual",
   ]);
   assert.equal(
     researchWithBothResidualPacksView.layeredAgeEstimate?.riskProbability,
@@ -6581,14 +6581,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     "r399-outcome-risk-anchor",
     "selected-lab-body-card",
     "function-disability-sidecar",
-    "wearable-activity-residual",
+    "wearable-multi-family-residual",
   ]);
   assert.deepEqual(submittedLab5ResearchView.model.layeredResearchPath.activeResearchScoreLayerIds, [
     "selected-lab-body-card",
   ]);
   assert.deepEqual(submittedLab5ResearchView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
     "function-disability-sidecar",
-    "wearable-activity-residual",
+    "wearable-multi-family-residual",
   ]);
   assert.equal(submittedLab5ResearchView.model.layeredResearchPath.productAuthorized, false);
   const functionLayer = submittedLab5ResearchView.model.layeredResearchPath.layers.find((layer) =>
@@ -6606,7 +6606,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     "adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count",
   );
   const wearableActivityLayer = submittedLab5ResearchView.model.layeredResearchPath.layers.find((layer) =>
-    layer.layerId === "wearable-activity-residual"
+    layer.layerId === "wearable-multi-family-residual"
   );
   assert.ok(wearableActivityLayer);
   assert.equal(wearableActivityLayer.status, "validation-receipt-needed");
@@ -6614,6 +6614,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableActivityLayer.parameterPackAvailable, false);
   assert.equal(wearableActivityLayer.scoreBearingNow, false);
   assert.equal(wearableActivityLayer.metricKeys.includes("steps"), true);
+  assert.equal(wearableActivityLayer.metricKeys.includes("total-sleep-minutes"), true);
+  assert.equal(wearableActivityLayer.metricKeys.includes("resting-heart-rate"), true);
+  assert.equal(wearableActivityLayer.metricKeys.includes("hrv-rmssd"), true);
   const selectedLabLayer = submittedLab5ResearchView.model.layeredResearchPath.layers.find((layer) =>
     layer.layerId === "selected-lab-body-card"
   );
