@@ -3,8 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
-const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
-
 type MutableSignal = {
   id: number;
   userId: string;
@@ -88,13 +86,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
   };
 }
 
-function createWebhookTraceStore(
-  seed: MutableWebhookTrace[] = [],
-  options: {
-    releaseBeforeFindUniqueTraceIds?: string[];
-    uniqueViolationTraceIds?: string[];
-  } = {},
-) {
+function createWebhookTraceStore(seed: MutableWebhookTrace[] = []) {
   const traces = new Map<string, MutableWebhookTrace>(
     seed.map((trace) => [
       `${trace.provider}:${trace.traceId}`,
@@ -105,22 +97,12 @@ function createWebhookTraceStore(
       },
     ]),
   );
-  const releaseBeforeFindUniqueTraceIds = new Set(options.releaseBeforeFindUniqueTraceIds ?? []);
-  const uniqueViolationTraceIds = new Set(options.uniqueViolationTraceIds ?? []);
-  const uniqueViolationsTriggered = new Set<string>();
+  const executeRaw = vi.fn(async () => 0);
 
   const deviceWebhookTrace = {
     create: async ({ data }: { data: Record<string, unknown> }) => {
       const trace = normalizeWebhookTraceRecord(data);
       const key = `${trace.provider}:${trace.traceId}`;
-
-      if (
-        uniqueViolationTraceIds.has(trace.traceId)
-        && !uniqueViolationsTriggered.has(trace.traceId)
-      ) {
-        uniqueViolationsTriggered.add(trace.traceId);
-        throw { code: "P2002" };
-      }
 
       if (traces.has(key)) {
         throw { code: "P2002" };
@@ -138,12 +120,6 @@ function createWebhookTraceStore(
       const traceId = typeof where.provider_traceId.traceId === "string" ? where.provider_traceId.traceId : null;
 
       if (!provider || !traceId) {
-        return null;
-      }
-
-      if (releaseBeforeFindUniqueTraceIds.has(traceId)) {
-        traces.delete(`${provider}:${traceId}`);
-        releaseBeforeFindUniqueTraceIds.delete(traceId);
         return null;
       }
 
@@ -179,10 +155,17 @@ function createWebhookTraceStore(
     },
   };
 
+  const prisma = {
+    $executeRaw: executeRaw,
+    $transaction: vi.fn(),
+    deviceWebhookTrace,
+  };
+  prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => Promise<unknown>) =>
+    callback(prisma)
+  );
+
   const store = new PrismaDeviceSyncControlPlaneStore({
-    prisma: {
-      deviceWebhookTrace,
-    } as never,
+    prisma: prisma as never,
     providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     codec: {
       keyVersion: "v1",
@@ -192,6 +175,7 @@ function createWebhookTraceStore(
   });
 
   return {
+    executeRaw,
     store,
     traces,
   };
@@ -377,11 +361,8 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
     });
   });
 
-  it("retries the hosted claim when a conflicting processing row is released before the follow-up read", async () => {
-    const { traces, store } = createWebhookTraceStore([], {
-      releaseBeforeFindUniqueTraceIds: ["trace-raced"],
-      uniqueViolationTraceIds: ["trace-raced"],
-    });
+  it("claims hosted webhook traces while holding the provider-account owner lock", async () => {
+    const { executeRaw, traces, store } = createWebhookTraceStore();
 
     await expect(
       store.claimWebhookTrace({
@@ -397,8 +378,9 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
 
     expect(traces.get("oura:trace-raced")).toMatchObject({
       status: "processing",
-      providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
+      providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-raced"),
     });
+    expect(executeRaw).toHaveBeenCalledOnce();
   });
 });
 

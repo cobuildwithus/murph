@@ -101,6 +101,7 @@ export class PrismaDeviceSyncControlPlaneStore
     });
     this.webhookTraces = new PrismaHostedWebhookTraceStore({
       prisma: this.prisma,
+      providerAccountBlindIndexKey: input.providerAccountBlindIndexKey,
     });
     this.signals = new PrismaHostedSignalStore(this.prisma);
     this.dirtyConnections = new PrismaHostedDirtyConnectionStore(this.prisma);

@@ -318,9 +318,7 @@ function buildHostedBillingPlanUpgradeSubscriptionItems(input: {
       continue;
     }
 
-    if (isHostedStripeMeteredPrice(item.price)) {
-      throw buildHostedBillingSubscriptionItemsUnsupportedError();
-    }
+    throw buildHostedBillingSubscriptionItemsUnsupportedError();
   }
 
   return items;
@@ -388,9 +386,7 @@ function buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems(input: {
       continue;
     }
 
-    if (isHostedStripeMeteredPrice(item.price)) {
-      throw buildHostedBillingSubscriptionItemsUnsupportedError();
-    }
+    throw buildHostedBillingSubscriptionItemsUnsupportedError();
   }
 
   return cleanupItems;
@@ -499,12 +495,6 @@ function findHostedStripeSubscriptionItemByPriceId(
   priceId: string,
 ): Stripe.SubscriptionItem | null {
   return subscription.items.data.find((item) => item.price?.id === priceId) ?? null;
-}
-
-function isHostedStripeMeteredPrice(
-  price: Stripe.Price | null | undefined,
-): boolean {
-  return price?.recurring?.usage_type === "metered";
 }
 
 function isHostedStripeLicensedMonthlyItem(item: Stripe.SubscriptionItem): boolean {

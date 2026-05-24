@@ -7,6 +7,7 @@ import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
 } from "../device-sync/provider-label";
+import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   readHostedMemberSnapshot,
@@ -1264,16 +1265,28 @@ export async function deleteHostedAccountData(input: {
     reason: "account-deleted",
     userId: input.memberId,
   });
-  const deviceConnectionIdentities = await listDeviceConnectionIdentities({
+  const providerRevocationConnectionIdentities = await listDeviceConnectionIdentities({
     memberId: input.memberId,
     prisma: input.prisma,
   });
   const providerRevocations = await revokeDeviceProvidersBestEffort({
-    connections: deviceConnectionIdentities,
+    connections: providerRevocationConnectionIdentities,
     memberId: input.memberId,
     request: input.request,
   });
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    const deviceConnectionIdentities = await listDeviceConnectionIdentities({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    await lockDeviceWebhookTraceOwnersForAccountDeletionTx({
+      connectionIdentities: deviceConnectionIdentities,
+      prisma: tx,
+    });
     return deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
       memberId: input.memberId,
@@ -1527,6 +1540,59 @@ async function listDeviceConnectionIdentities(input: {
     },
     where: { userId: input.memberId },
   });
+}
+
+async function lockHostedMemberForAccountDeletionTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM hosted_member
+    WHERE id = ${input.memberId}
+    FOR UPDATE
+  `;
+
+  if (rows.length === 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 404,
+      message: "Your hosted member record was not found.",
+    });
+  }
+}
+
+async function lockDeviceWebhookTraceOwnersForAccountDeletionTx(input: {
+  connectionIdentities: readonly DeviceConnectionIdentity[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const seenTraceOwners = new Set<string>();
+  const traceOwners = input.connectionIdentities
+    .filter((connection) => connection.providerAccountBlindIndex.length > 0)
+    .map((connection) => ({
+      provider: connection.provider,
+      providerAccountBlindIndex: connection.providerAccountBlindIndex,
+    }))
+    .filter((traceOwner) => {
+      const key = `${traceOwner.provider}:${traceOwner.providerAccountBlindIndex}`;
+      if (seenTraceOwners.has(key)) {
+        return false;
+      }
+      seenTraceOwners.add(key);
+      return true;
+    })
+    .sort((left, right) =>
+      `${left.provider}:${left.providerAccountBlindIndex}`
+        .localeCompare(`${right.provider}:${right.providerAccountBlindIndex}`)
+    );
+
+  for (const traceOwner of traceOwners) {
+    await acquireHostedWebhookTraceOwnerLockTx({
+      prisma: input.prisma,
+      provider: traceOwner.provider,
+      providerAccountBlindIndex: traceOwner.providerAccountBlindIndex,
+    });
+  }
 }
 
 async function revokeDeviceProvidersBestEffort(input: {

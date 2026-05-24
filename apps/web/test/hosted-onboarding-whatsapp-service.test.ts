@@ -82,6 +82,10 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 import {
   handleHostedOnboardingWhatsAppWebhook as handleHostedOnboardingWhatsAppWebhookImpl,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import {
+  grantHostedWhatsAppMessagingConsentTx,
+  revokeHostedWhatsAppMessagingConsentTx,
+} from "@/src/lib/hosted-onboarding/whatsapp-consent";
 
 type HostedOnboardingWhatsAppWebhookInput =
   Parameters<typeof handleHostedOnboardingWhatsAppWebhookImpl>[0];
@@ -203,9 +207,9 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
         source: "whatsapp",
       }),
     });
-    expect(prisma.hostedConsentGrant.upsert).toHaveBeenCalledWith(
+    expect(prisma.hostedConsentGrant.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({
+        data: expect.objectContaining({
           memberId: "member_whatsapp_123",
           status: "granted",
         }),
@@ -236,8 +240,47 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       routedTextCount: 0,
     });
 
-    expect(prisma.hostedConsentGrant.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedConsentGrant.create).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("re-reads a raced WhatsApp consent grant before deciding whether the START command is stale", async () => {
+    const now = new Date("2026-05-08T14:00:00.000Z");
+    const racedUpdatedAt = new Date("2026-05-08T13:59:59.000Z");
+    const prisma = createWhatsAppPrismaHarness({
+      memberId: "member_whatsapp_123",
+    });
+    prisma.hostedConsentGrant.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        updatedAt: racedUpdatedAt,
+      });
+    prisma.hostedConsentGrant.create.mockRejectedValueOnce({ code: "P2002" });
+
+    await expect(grantHostedWhatsAppMessagingConsentTx({
+      memberId: "member_whatsapp_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      applied: true,
+      duplicate: false,
+      stale: false,
+    });
+
+    expect(prisma.hostedConsentGrant.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedConsentGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "granted",
+          updatedAt: now,
+        }),
+        where: expect.objectContaining({
+          memberId: "member_whatsapp_123",
+          scope: "feature.whatsapp-messaging",
+          updatedAt: racedUpdatedAt,
+        }),
+      }),
+    );
   });
 
   it("fails closed when WhatsApp phone lookup matches multiple members", async () => {
@@ -305,7 +348,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
         scope: "feature.whatsapp-messaging",
       }),
     });
-    expect(prisma.hostedConsentGrant.update).toHaveBeenCalledWith(
+    expect(prisma.hostedConsentGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: "revoked",
@@ -313,6 +356,58 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       }),
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a raced STOP command as applied when newer consent wins", async () => {
+    const staleCommandAt = new Date("2026-05-08T13:59:59.000Z");
+    const prisma = createWhatsAppPrismaHarness({
+      consentGrantUpdateManyCount: 0,
+      consentGranted: true,
+      consentUpdatedAt: new Date("2026-05-08T13:00:00.000Z"),
+      memberId: "member_whatsapp_123",
+    });
+
+    await expect(revokeHostedWhatsAppMessagingConsentTx({
+      memberId: "member_whatsapp_123",
+      now: staleCommandAt,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      applied: false,
+      duplicate: false,
+      stale: true,
+    });
+
+    expect(prisma.hostedConsentGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          memberId: "member_whatsapp_123",
+          scope: "feature.whatsapp-messaging",
+          updatedAt: new Date("2026-05-08T13:00:00.000Z"),
+        }),
+      }),
+    );
+  });
+
+  it("treats same-timestamp WhatsApp consent commands as stale", async () => {
+    const commandAt = new Date("2026-05-08T14:00:00.000Z");
+    const prisma = createWhatsAppPrismaHarness({
+      consentGranted: true,
+      consentUpdatedAt: commandAt,
+      memberId: "member_whatsapp_123",
+    });
+
+    await expect(revokeHostedWhatsAppMessagingConsentTx({
+      memberId: "member_whatsapp_123",
+      now: commandAt,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      applied: false,
+      duplicate: false,
+      stale: true,
+    });
+
+    expect(prisma.hostedConsentEvent.create).not.toHaveBeenCalled();
+    expect(prisma.hostedConsentGrant.updateMany).not.toHaveBeenCalled();
   });
 
   it("appends opted-in WhatsApp texts to the hosted mailbox and nudges the runner", async () => {
@@ -453,6 +548,42 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["non-object versions", []],
+    ["extra malformed entry", {
+      "consumer-health-data-notice": "2026-04-29",
+      "privacy-policy": "2026-04-29",
+      "terms-of-service": "2026-04-29",
+      extra: 123,
+    }],
+  ])("requires WhatsApp consent when stored consent document versions have %s", async (
+    _label,
+    consentDocumentVersionsJson,
+  ) => {
+    const prisma = createWhatsAppPrismaHarness({
+      consentDocumentVersionsJson,
+      consentGranted: true,
+      memberId: "member_whatsapp_123",
+    });
+    const rawBody = buildWhatsAppInboundTextBody("CHECKIN");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: true,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "whatsapp-consent-required",
+      routedTextCount: 0,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the WhatsApp app secret is not configured", async () => {
     vi.stubEnv("WHATSAPP_APP_SECRET", "");
 
@@ -556,9 +687,9 @@ type WhatsAppPrismaHarness = {
     create: ReturnType<typeof vi.fn>;
   };
   hostedConsentGrant: {
+    create: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
-    upsert: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
   hostedMemberIdentity: {
     findMany: ReturnType<typeof vi.fn>;
@@ -579,7 +710,10 @@ async function handleHostedOnboardingWhatsAppWebhook(
 }
 
 function createWhatsAppPrismaHarness(input: {
+  consentDocumentVersionsJson?: unknown;
+  consentGrantUpdateManyCount?: number;
   consentGranted?: boolean;
+  consentUpdatedAt?: Date;
   memberId?: string;
 } = {}): WhatsAppPrismaHarness {
   const memberId = input.memberId ?? null;
@@ -597,7 +731,7 @@ function createWhatsAppPrismaHarness(input: {
     hostedConsentGrant: {
       findUnique: vi.fn(async () => consentGranted && memberId
         ? {
-            documentVersionsJson: {
+            documentVersionsJson: input.consentDocumentVersionsJson ?? {
               "consumer-health-data-notice": "2026-04-29",
               "privacy-policy": "2026-04-29",
               "terms-of-service": "2026-04-29",
@@ -605,11 +739,11 @@ function createWhatsAppPrismaHarness(input: {
             grantedAt: now,
             revokedAt: null,
             status: "granted",
-            updatedAt: now,
+            updatedAt: input.consentUpdatedAt ?? now,
           }
         : null),
-      update: vi.fn(async () => ({})),
-      upsert: vi.fn(async () => ({})),
+      create: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: input.consentGrantUpdateManyCount ?? 1 })),
     },
     hostedMemberIdentity: {
       findMany: vi.fn(async () => memberId

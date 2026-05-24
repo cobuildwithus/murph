@@ -1,3 +1,7 @@
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,7 +10,10 @@ import {
   isAllowedDeclarationArtifactContents,
   shouldSkipSourceArtifactDirectory,
 } from "./check-no-js.ts";
-import { generatedArtifactDirectories } from "./prune-generated-source-sidecars.ts";
+import {
+  generatedArtifactDirectories,
+  pruneKnownGeneratedArtifactDirectory,
+} from "./prune-generated-source-sidecars.ts";
 
 describe("check-no-js hygiene guards", () => {
   it("skips generated deploy and smoke output directories during source scans", () => {
@@ -32,6 +39,26 @@ describe("check-no-js hygiene guards", () => {
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/.deploy");
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/dry-run");
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/smoke-dist");
+  });
+
+  it("refuses to prune through symlinked generated artifact parents", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-prune-test-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "murph-prune-target-"));
+
+    try {
+      await mkdir(path.join(root, "apps/cloudflare"), { recursive: true });
+      await mkdir(path.join(outside, "dry-run"), { recursive: true });
+      await writeFile(path.join(outside, "dry-run/keep.txt"), "keep");
+      await symlink(outside, path.join(root, "apps/cloudflare/.deploy"), "dir");
+
+      await expect(
+        pruneKnownGeneratedArtifactDirectory(root, "apps/cloudflare/.deploy/dry-run"),
+      ).rejects.toThrow("symlinked parent");
+      await expect(access(path.join(outside, "dry-run/keep.txt"))).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
+    }
   });
 
   it("allows generated next-env.d.ts variants for stable and suffixed Next output directories", () => {

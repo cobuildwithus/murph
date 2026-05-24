@@ -5,48 +5,42 @@ import type {
   DeviceSyncWebhookTraceClaimResult,
 } from "@murphai/device-syncd/public-ingress";
 
-import { isUniqueViolation } from "./prisma-errors";
+import { buildHostedProviderAccountBlindIndex } from "../routing-index";
+import { acquireHostedWebhookTraceOwnerLockTx } from "../webhook-trace-owner-lock";
 import type { HostedPrismaTransactionClient } from "./types";
 
 const HOSTED_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
-// Hosted webhook dedupe is keyed by provider + trace id, so trace rows do not
-// need a user-linked provider-account blind index.
 const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
 
 export class PrismaHostedWebhookTraceStore {
   readonly prisma: PrismaClient;
+  private readonly providerAccountBlindIndexKey: Buffer | null;
 
-  constructor(input: { prisma: PrismaClient }) {
+  constructor(input: {
+    prisma: PrismaClient;
+    providerAccountBlindIndexKey?: Buffer | null;
+  }) {
     this.prisma = input.prisma;
+    this.providerAccountBlindIndexKey = input.providerAccountBlindIndexKey ?? null;
   }
 
   async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
     const claimedAt = new Date(input.receivedAt);
     const processingExpiresAt = new Date(input.processingExpiresAt);
+    const providerAccountBlindIndex = this.buildProviderAccountBlindIndex({
+      externalAccountId: input.externalAccountId,
+      provider: input.provider,
+    });
     await this.pruneProcessedWebhookTraces(this.prisma, new Date());
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        await this.prisma.deviceWebhookTrace.create({
-          data: {
-            provider: input.provider,
-            traceId: input.traceId,
-            claimToken: input.claimToken,
-            providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
-            eventType: input.eventType,
-            processingExpiresAt,
-            receivedAt: claimedAt,
-            status: "processing",
-          },
-        });
-        return "claimed";
-      } catch (error) {
-        if (!isUniqueViolation(error)) {
-          throw error;
-        }
-      }
+    return this.prisma.$transaction(async (tx) => {
+      await acquireHostedWebhookTraceOwnerLockTx({
+        prisma: tx,
+        provider: input.provider,
+        providerAccountBlindIndex,
+      });
 
-      const existing = await this.prisma.deviceWebhookTrace.findUnique({
+      const existing = await tx.deviceWebhookTrace.findUnique({
         where: {
           provider_traceId: {
             provider: input.provider,
@@ -60,7 +54,19 @@ export class PrismaHostedWebhookTraceStore {
       });
 
       if (!existing) {
-        continue;
+        await tx.deviceWebhookTrace.create({
+          data: {
+            provider: input.provider,
+            traceId: input.traceId,
+            claimToken: input.claimToken,
+            providerAccountBlindIndex,
+            eventType: input.eventType,
+            processingExpiresAt,
+            receivedAt: claimedAt,
+            status: "processing",
+          },
+        });
+        return "claimed";
       }
 
       if (existing.status === "processed") {
@@ -71,7 +77,7 @@ export class PrismaHostedWebhookTraceStore {
         return "processing";
       }
 
-      const takeover = await this.prisma.deviceWebhookTrace.updateMany({
+      const takeover = await tx.deviceWebhookTrace.updateMany({
         where: {
           provider: input.provider,
           traceId: input.traceId,
@@ -88,7 +94,7 @@ export class PrismaHostedWebhookTraceStore {
           ],
         },
         data: {
-          providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
+          providerAccountBlindIndex,
           eventType: input.eventType,
           claimToken: input.claimToken,
           processingExpiresAt,
@@ -98,9 +104,7 @@ export class PrismaHostedWebhookTraceStore {
       });
 
       return takeover.count > 0 ? "claimed" : "processing";
-    }
-
-    return "processing";
+    });
   }
 
   async completeWebhookTrace(
@@ -156,6 +160,21 @@ export class PrismaHostedWebhookTraceStore {
           lt: retentionCutoff,
         },
       },
+    });
+  }
+
+  private buildProviderAccountBlindIndex(input: {
+    externalAccountId: string;
+    provider: string;
+  }): string {
+    if (!this.providerAccountBlindIndexKey) {
+      return MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL;
+    }
+
+    return buildHostedProviderAccountBlindIndex({
+      key: this.providerAccountBlindIndexKey,
+      externalAccountId: input.externalAccountId,
+      provider: input.provider,
     });
   }
 }

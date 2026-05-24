@@ -630,6 +630,11 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       spentUsdMicros: true,
     },
   });
+  await lockHostedAiUsageAllowancePeriodTx({
+    memberId: input.memberId,
+    periodStart: resolved.periodStart,
+    tx: input.tx,
+  });
   await carryOverHostedAiUsageFallbackPeriodTx({
     memberId: input.memberId,
     now: input.now,
@@ -1040,6 +1045,12 @@ async function recomputeHostedAiUsageAllowancePeriodSpendTx(input: {
   periodStart: Date;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  await lockHostedAiUsageAllowancePeriodTx({
+    memberId: input.memberId,
+    periodStart: input.periodStart,
+    tx: input.tx,
+  });
+
   const period = await input.tx.hostedAiUsagePeriod.findUnique({
     where: {
       memberId_periodStart: {
@@ -1111,7 +1122,7 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
   tx: Prisma.TransactionClient;
   usageAt: Date;
 }): Promise<void> {
-  await input.tx.$executeRaw`
+  const updated = await input.tx.$executeRaw`
     UPDATE "hosted_ai_usage_period"
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.deltaUsdMicros},
@@ -1129,6 +1140,24 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
       "updated_at" = ${input.now}
     WHERE "member_id" = ${input.memberId}
       AND "period_start" = ${input.periodStart}
+  `;
+
+  if (updated !== 1) {
+    throw new Error("Hosted AI usage allowance period was missing during spend accounting.");
+  }
+}
+
+async function lockHostedAiUsageAllowancePeriodTx(input: {
+  memberId: string;
+  periodStart: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.$queryRaw`
+    SELECT 1
+    FROM "hosted_ai_usage_period"
+    WHERE "member_id" = ${input.memberId}
+      AND "period_start" = ${input.periodStart}
+    FOR UPDATE
   `;
 }
 

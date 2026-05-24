@@ -324,7 +324,12 @@ test('daemon client rejects invalid JSON success payloads with route-specific co
 
   await assert.rejects(
     () => maybeListAssistantCronJobsViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
-    /invalid JSON response for \/cron\/jobs/u,
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /invalid JSON response for \/cron\/jobs/u)
+      assert.doesNotMatch(error.message, /vault|%2Ftmp/u)
+      return true
+    },
   )
 })
 
@@ -494,6 +499,14 @@ test('daemon client converts pre-response fetch failures into route-specific err
         },
         TEST_ENV,
       ),
-    /request failed before receiving a response for \/cron\/status/u,
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(
+        error.message,
+        /request failed before receiving a response for \/cron\/status/u,
+      )
+      assert.doesNotMatch(error.message, /vault|%2Ftmp/u)
+      return true
+    },
   )
 })
