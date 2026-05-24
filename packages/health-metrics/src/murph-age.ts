@@ -393,6 +393,7 @@ export type MurphAgeWearableScoreBearingPromotionSignal =
 export type MurphAgeWearableResidualLayerId =
   | "activity-residual-v1"
   | "hrv-residual-v1"
+  | "multi-wearable-residual-v1"
   | "resting-heart-rate-residual-v1"
   | "sleep-residual-v1";
 
@@ -687,6 +688,7 @@ export interface MurphAgeCalculatorInput {
   points: readonly MetricPoint[];
   sex: MurphAgeSex;
   wearableResidualParameterPack?: MurphAgeWearableResidualParameterPack | null;
+  wearableResidualParameterPacks?: readonly MurphAgeWearableResidualParameterPack[] | null;
 }
 
 export type MurphAgeSubmittedMetricSourceKind =
@@ -3906,6 +3908,9 @@ const MURPH_AGE_WEARABLE_RESIDUAL_LAYER_IDS_BY_FAMILY = {
   sleep: "sleep-residual-v1",
 } satisfies Record<MurphAgeWearableShadowIncrementFamily, MurphAgeWearableResidualLayerId>;
 
+const MURPH_AGE_MULTI_WEARABLE_RESIDUAL_LAYER_ID =
+  "multi-wearable-residual-v1" as const satisfies MurphAgeWearableResidualLayerId;
+
 export function summarizeMurphAgeWearableResidualLayerContractForFamily(
   family: MurphAgeWearableShadowIncrementFamily,
 ): MurphAgeWearableResidualLayerContract {
@@ -4105,6 +4110,96 @@ export function applyMurphAgeWearableResidualLayer(input: {
   };
 }
 
+export function applyMurphAgeWearableResidualLayers(input: {
+  anchorCardId: MurphAgeScoreBearingCardId;
+  anchorRiskProbability: number | null;
+  assessments: readonly MurphAgeWearableShadowIncrementAssessment[];
+  asOf?: string;
+  parameterPacks?: readonly MurphAgeWearableResidualParameterPack[] | null;
+  points?: readonly MetricPoint[];
+  referenceRiskCurve?: readonly MurphAgeReferenceRiskPoint[];
+}): MurphAgeWearableResidualLayerApplication {
+  const packs = [...(input.parameterPacks ?? [])];
+  if (packs.length <= 1) {
+    return applyMurphAgeWearableResidualLayer({
+      anchorCardId: input.anchorCardId,
+      anchorRiskProbability: input.anchorRiskProbability,
+      asOf: input.asOf,
+      assessments: input.assessments,
+      parameterPack: packs[0] ?? null,
+      points: input.points,
+      referenceRiskCurve: input.referenceRiskCurve,
+    });
+  }
+
+  const applications = packs.map((pack) =>
+    applyMurphAgeWearableResidualLayer({
+      anchorCardId: input.anchorCardId,
+      anchorRiskProbability: input.anchorRiskProbability,
+      asOf: input.asOf,
+      assessments: input.assessments,
+      parameterPack: pack,
+      points: input.points,
+      referenceRiskCurve: input.referenceRiskCurve,
+    })
+  );
+  const warnings = applications.flatMap((application) =>
+    application.warnings.map((warning) => ({ ...warning }))
+  );
+  const validApplications = applications.filter((application) =>
+    application.parameterizationAvailable
+  );
+  const residualDeltaLogit = roundContribution(
+    validApplications.reduce((sum, application) => sum + application.residualDeltaLogit, 0),
+  );
+  const anchorLogit = logitFromProbability(input.anchorRiskProbability);
+  const finalLogit = anchorLogit === null ? null : roundContribution(anchorLogit + residualDeltaLogit);
+  const finalRiskProbability = finalLogit === null
+    ? input.anchorRiskProbability
+    : roundProbability(logistic(finalLogit));
+  const anchorRiskAgeEquivalentYears = mapRiskToReferenceAgeEquivalentOrNull({
+    referenceRiskCurve: input.referenceRiskCurve,
+    riskProbability: input.anchorRiskProbability,
+  });
+  const finalRiskAgeEquivalentYears = mapRiskToReferenceAgeEquivalentOrNull({
+    referenceRiskCurve: input.referenceRiskCurve,
+    riskProbability: finalRiskProbability,
+  });
+  const parameterizationAvailable = validApplications.length > 0;
+  const anchorCompatible = applications.some((application) => application.anchorCompatible);
+
+  return {
+    anchorCardId: input.anchorCardId,
+    anchorRiskAgeEquivalentYears,
+    anchorCompatible,
+    anchorLogit,
+    eligibleForResidualResearch: applications.some((application) => application.eligibleForResidualResearch),
+    finalRiskAgeEquivalentYears,
+    finalLogit,
+    finalRiskProbability,
+    layerId: MURPH_AGE_MULTI_WEARABLE_RESIDUAL_LAYER_ID,
+    parameterPackHash: parameterizationAvailable
+      ? `multi-${validApplications.map((application) => application.layerId).join("-")}`
+      : null,
+    parameterizationAvailable,
+    productAuthorized: false,
+    residualDeltaYears: anchorRiskAgeEquivalentYears !== null && finalRiskAgeEquivalentYears !== null
+      ? roundYears(finalRiskAgeEquivalentYears - anchorRiskAgeEquivalentYears)
+      : null,
+    residualDeltaLogit,
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    selectedMetricKeys: uniqueStrings(applications.flatMap((application) => application.selectedMetricKeys)),
+    status: parameterizationAvailable
+      ? "research-parameterized-shadow-delta"
+      : applications.some((application) => application.status === "ineligible-insufficient-coverage")
+      ? "ineligible-insufficient-coverage"
+      : applications[0]?.status ?? "blocked-incompatible-anchor",
+    warnings,
+  };
+}
+
 export function validateMurphAgeWearableResidualParameterPack(input: {
   anchorCardId: MurphAgeScoreBearingCardId;
   contract?: MurphAgeWearableResidualLayerContract;
@@ -4116,6 +4211,15 @@ export function validateMurphAgeWearableResidualParameterPack(input: {
       ?? summarizeMurphAgeWearableResidualLayerContractForFamily(input.parameterPack.family),
     pack: input.parameterPack,
   });
+}
+
+function wearableResidualParameterPacksForInput(
+  input: Pick<MurphAgeCalculatorInput, "wearableResidualParameterPack" | "wearableResidualParameterPacks">,
+): MurphAgeWearableResidualParameterPack[] {
+  if (input.wearableResidualParameterPacks && input.wearableResidualParameterPacks.length > 0) {
+    return [...input.wearableResidualParameterPacks];
+  }
+  return input.wearableResidualParameterPack ? [input.wearableResidualParameterPack] : [];
 }
 
 function evaluateMurphAgeWearableResidualParameterPack(input: {
@@ -7049,12 +7153,12 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
   const wearableAnchorRiskProbability = functionResidualLayerApplication.parameterizationAvailable
     ? functionResidualLayerApplication.finalRiskProbability
     : result.risk?.probability ?? null;
-  const wearableResidualLayerApplication = applyMurphAgeWearableResidualLayer({
+  const wearableResidualLayerApplication = applyMurphAgeWearableResidualLayers({
     anchorCardId: cardPolicy.cardId,
     anchorRiskProbability: wearableAnchorRiskProbability,
     asOf: input.asOf,
     assessments: wearableShadowIncrementAssessments,
-    parameterPack: mode === "research" ? input.wearableResidualParameterPack : null,
+    parameterPacks: mode === "research" ? wearableResidualParameterPacksForInput(input) : null,
     points: input.points,
     referenceRiskCurve: model.referenceRiskCurve,
   });
@@ -7371,6 +7475,7 @@ export function calculateMurphAgeFromSubmittedInputs(
     points: submitted.points,
     sex: input.sex,
     wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
   });
   return prependCalculatorWarnings(output, submitted.warnings);
 }
