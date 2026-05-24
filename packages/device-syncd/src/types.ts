@@ -248,6 +248,11 @@ export interface ProviderConnectionSeed {
   nextReconcileAt?: string | null;
 }
 
+export interface UpsertPublicDeviceSyncExistingAccountGuard {
+  expectedAccountId: string;
+  rejectIfDisconnected?: boolean;
+}
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
@@ -260,6 +265,7 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   credential?: DeviceAccountCredential;
   tokens?: ProviderAuthTokens;
   metadata?: Record<string, unknown>;
+  existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
   connectedAt: string;
   nextReconcileAt?: string | null;
 }

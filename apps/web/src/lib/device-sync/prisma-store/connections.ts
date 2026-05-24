@@ -130,6 +130,8 @@ export class PrismaHostedConnectionStore {
       });
 
       if (existing) {
+        assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
+
         if (ownerId && existing.userId !== ownerId) {
           throw deviceSyncError({
             code: "CONNECTION_OWNERSHIP_CONFLICT",
@@ -180,6 +182,8 @@ export class PrismaHostedConnectionStore {
           ...hostedConnectionRecordArgs,
         });
       }
+
+      assertHostedUpsertExistingConnectionGuard(null, input.existingAccountGuard ?? null);
 
       if (!ownerId) {
         throw deviceSyncError({
@@ -745,6 +749,33 @@ function buildHostedConnectionSetupWrite(
     }),
     setupPhase,
   };
+}
+
+function assertHostedUpsertExistingConnectionGuard(
+  existing: HostedConnectionRecord | null,
+  guard: UpsertPublicDeviceSyncConnectionInput["existingAccountGuard"] | null,
+): void {
+  if (!guard) {
+    return;
+  }
+
+  if (!existing || existing.id !== guard.expectedAccountId) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+      message: "Device sync connection callback referenced an unexpected seeded account.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  if (guard.rejectIfDisconnected && existing.status === "disconnected") {
+    throw deviceSyncError({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
 }
 
 function requireHostedDeviceSyncSetupPhase(

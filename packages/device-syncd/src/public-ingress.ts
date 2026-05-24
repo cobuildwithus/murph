@@ -599,6 +599,12 @@ export class DeviceSyncPublicIngress {
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
     const connectSourceId = readConnectSourceId(stateRecord.metadata);
     const connectTarget = readConnectTarget(stateRecord.metadata);
+    const callbackContext = {
+      connectSourceId,
+      connectTarget,
+      provider: provider.provider,
+      returnTo,
+    };
     let connection: ProviderConnectionResult | null = null;
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
@@ -606,12 +612,15 @@ export class DeviceSyncPublicIngress {
     let seededAccount = seededAccountId ? await this.store.getConnectionById(seededAccountId) : null;
 
     if (seededAccount && seededAccount.provider !== provider.provider) {
-      throw deviceSyncError({
-        code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
-        message: "Device sync connection callback referenced a seeded account for another provider.",
-        retryable: false,
-        httpStatus: 400,
-      });
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+          message: "Device sync connection callback referenced a seeded account for another provider.",
+          retryable: false,
+          httpStatus: 400,
+        }),
+        callbackContext,
+      );
     }
 
     seededExternalAccountId = seededAccount?.externalAccountId ?? seededExternalAccountId ?? null;
@@ -623,12 +632,15 @@ export class DeviceSyncPublicIngress {
       );
 
       if (seededAccount?.status === "disconnected") {
-        throw deviceSyncError({
-          code: "CONNECTION_ALREADY_DISCONNECTED",
-          message: "Device sync connection callback was received after the seeded account was disconnected.",
-          retryable: false,
-          httpStatus: 409,
-        });
+        throw attachOAuthCallbackContext(
+          deviceSyncError({
+            code: "CONNECTION_ALREADY_DISCONNECTED",
+            message: "Device sync connection callback was received after the seeded account was disconnected.",
+            retryable: false,
+            httpStatus: 409,
+          }),
+          callbackContext,
+        );
       }
     }
 
@@ -665,6 +677,17 @@ export class DeviceSyncPublicIngress {
         seededExternalAccountId,
         connection,
       });
+      if (seededAccountId) {
+        const currentSeededAccount = await this.store.getConnectionById(seededAccountId);
+        if (currentSeededAccount?.status === "disconnected") {
+          throw deviceSyncError({
+            code: "CONNECTION_ALREADY_DISCONNECTED",
+            message: "Device sync connection callback was received after the seeded account was disconnected.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+      }
       const initialJobs = connection.initialJobs?.map((job) =>
         normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "oauth callback")
       );
@@ -690,6 +713,12 @@ export class DeviceSyncPublicIngress {
             : [...descriptor.defaultScopes],
         credential: resolveAndValidateProviderConnectionCredential(provider, connection),
         metadata: connection.metadata ?? {},
+        existingAccountGuard: seededAccountId
+          ? {
+              expectedAccountId: seededAccountId,
+              rejectIfDisconnected: true,
+            }
+          : null,
         connectedAt: now,
         nextReconcileAt: connection.nextReconcileAt ?? null,
       });
@@ -718,38 +747,25 @@ export class DeviceSyncPublicIngress {
         try {
           if (connectionPersisted && account) {
             await this.cleanupPersistedOAuthConnection(provider, account, connection, now, error);
+          } else if (isSeededAccountDisconnectedGuardError(error)) {
+            await this.cleanupFailedOAuthConnection(provider, connection, now);
           } else if (seededAccountId) {
             await this.markSeededConnectionSetupFailed(provider, seededAccountId, connection, now, error);
           } else {
             await this.cleanupFailedOAuthConnection(provider, connection, now);
           }
         } catch (cleanupError) {
-          throw attachOAuthCallbackContext(cleanupError, {
-            connectSourceId,
-            connectTarget,
-            provider: provider.provider,
-            returnTo,
-          });
+          throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
       } else if (seededAccountId) {
         try {
           await this.markSeededConnectionSetupFailed(provider, seededAccountId, null, now, error);
         } catch (cleanupError) {
-          throw attachOAuthCallbackContext(cleanupError, {
-            connectSourceId,
-            connectTarget,
-            provider: provider.provider,
-            returnTo,
-          });
+          throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
       }
 
-      throw attachOAuthCallbackContext(error, {
-        connectSourceId,
-        connectTarget,
-        provider: provider.provider,
-        returnTo,
-      });
+      throw attachOAuthCallbackContext(error, callbackContext);
     }
   }
 
@@ -1123,6 +1139,10 @@ export class DeviceSyncPublicIngress {
       });
     }
   }
+}
+
+function isSeededAccountDisconnectedGuardError(error: unknown): boolean {
+  return isDeviceSyncError(error) && error.code === "CONNECTION_ALREADY_DISCONNECTED";
 }
 
 async function completeClaimedWebhookTrace(

@@ -191,6 +191,7 @@ class DeviceSyncServiceController {
                 record.tokens,
               ),
               metadata: record.metadata,
+              existingAccountGuard: record.existingAccountGuard ?? null,
               connectedAt: record.connectedAt,
               nextReconcileAt: record.nextReconcileAt ?? null,
             }),

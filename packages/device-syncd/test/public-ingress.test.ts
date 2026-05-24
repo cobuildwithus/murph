@@ -114,6 +114,8 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     const key = `${input.provider}:${input.externalAccountId}`;
     const existingId = this.accountsByProviderExternal.get(key) ?? null;
     const existing = existingId ? this.accounts.get(existingId) ?? null : null;
+    assertExistingAccountGuard(existing, input.existingAccountGuard ?? null);
+
     const now = input.connectedAt;
     const id = existing?.id ?? `acct_${String(++this.accountCounter).padStart(2, "0")}`;
     const tokens = readOAuthCredentialTokens(input);
@@ -123,6 +125,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     const setupExpiresAt = Object.prototype.hasOwnProperty.call(input, "setupExpiresAt")
       ? input.setupExpiresAt ?? null
       : existing?.setupExpiresAt ?? null;
+
     const record: PublicDeviceSyncAccount = {
       id,
       provider: input.provider,
@@ -298,6 +301,33 @@ function readOAuthCredentialTokens(input: UpsertPublicDeviceSyncConnectionInput)
   }
 
   return input.tokens ?? null;
+}
+
+function assertExistingAccountGuard(
+  existing: PublicDeviceSyncAccount | null,
+  guard: UpsertPublicDeviceSyncConnectionInput["existingAccountGuard"] | null,
+): void {
+  if (!guard) {
+    return;
+  }
+
+  if (!existing || existing.id !== guard.expectedAccountId) {
+    throw deviceSyncError({
+      code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+      message: "Device sync connection callback referenced an unexpected seeded account.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  if (guard.rejectIfDisconnected && existing.status === "disconnected") {
+    throw deviceSyncError({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      message: "Device sync connection callback was received after the seeded account was disconnected.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
 }
 
 function completeWebhookAcceptDurably(
@@ -1047,7 +1077,10 @@ test("public ingress rejects stale external-link callbacks after seeded accounts
 
   const begin = await ingress.startConnection({
     provider: "junction",
+    returnTo: "/device-sync/connect/complete?source=connect&connectSource=garmin&connectTarget=garmin",
     ownerId: "<REDACTED_OWNER_ID>",
+    connectSourceId: "garmin",
+    connectTarget: "garmin",
   });
   const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
   assert.ok(seeded);
@@ -1062,16 +1095,133 @@ test("public ingress rejects stale external-link callbacks after seeded accounts
           result: "success",
         }),
       }),
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "CONNECTION_ALREADY_DISCONNECTED"
-      && error.httpStatus === 409,
+    (error: unknown) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "CONNECTION_ALREADY_DISCONNECTED");
+      assert.equal(error.httpStatus, 409);
+      assert.equal(error.details?.connectSourceId, "garmin");
+      assert.equal(error.details?.connectTarget, "garmin");
+      assert.equal(error.details?.provider, "junction");
+      assert.equal(
+        error.details?.returnTo,
+        "https://sync.example.test/device-sync/connect/complete?source=connect&connectSource=garmin&connectTarget=garmin",
+      );
+      assert.equal(Object.values(error.details ?? {}).includes(seeded.id), false);
+      assert.equal(Object.values(error.details ?? {}).includes(seeded.externalAccountId), false);
+      return true;
+    },
   );
 
   const disconnected = store.getConnectionByExternalAccount("junction", "external-account-1");
   assert.equal(disconnected?.status, "disconnected");
   assert.equal(disconnected?.setupPhase, "pending_link");
   assert.equal(completeCalls, 0);
+});
+
+test("public ingress rejects seeded callbacks that finish after the seeded account is disconnected", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let completeCalls = 0;
+  let resolveProviderCompletionStarted: (() => void) | null = null;
+  let releaseProviderCompletion: () => void = () => {
+    throw new Error("Provider completion release was not initialized.");
+  };
+  const providerCompletionStarted = new Promise<void>((resolve) => {
+    resolveProviderCompletionStarted = resolve;
+  });
+  const providerCompletionRelease = new Promise<void>((resolve) => {
+    releaseProviderCompletion = resolve;
+  });
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    beginConnection: async (input) => ({
+      authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+      connectionSeed: {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      },
+    }),
+    completeConnection: async () => {
+      completeCalls += 1;
+      resolveProviderCompletionStarted?.();
+      await providerCompletionRelease;
+      return {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "junction",
+    returnTo: "/device-sync/connect/complete?source=connect&connectSource=garmin&connectTarget=garmin",
+    ownerId: "<REDACTED_OWNER_ID>",
+    connectSourceId: "garmin",
+    connectTarget: "garmin",
+  });
+  const seeded = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.ok(seeded);
+  const callback = ingress.handleConnectionCallback({
+    provider: "junction",
+    query: new URLSearchParams({
+      murph_state: begin.state,
+      result: "success",
+    }),
+  });
+  await providerCompletionStarted;
+  store.patchAccountStatus(seeded.id, "disconnected");
+  releaseProviderCompletion();
+
+  await assert.rejects(
+    () => callback,
+    (error: unknown) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "CONNECTION_ALREADY_DISCONNECTED");
+      assert.equal(error.httpStatus, 409);
+      assert.equal(error.details?.connectSourceId, "garmin");
+      assert.equal(error.details?.connectTarget, "garmin");
+      assert.equal(error.details?.provider, "junction");
+      return true;
+    },
+  );
+
+  const disconnected = store.getConnectionByExternalAccount("junction", "external-account-1");
+  assert.equal(disconnected?.status, "disconnected");
+  assert.equal(disconnected?.setupPhase, "pending_link");
+  assert.equal(completeCalls, 1);
 });
 
 test("public ingress marks seeded external-link accounts failed when callbacks fail before upsert", async () => {
@@ -2796,8 +2946,8 @@ test("public ingress discards tampered persisted returnTo values before reuse", 
     provider: "demo",
     returnTo: "javascript:alert(1)",
     metadata: {},
-    createdAt: "2026-05-24T00:00:00.000Z",
-    expiresAt: "2026-05-24T01:00:00.000Z",
+    createdAt: "2099-05-24T00:00:00.000Z",
+    expiresAt: "2099-05-24T01:00:00.000Z",
   });
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   const ingress = createDeviceSyncPublicIngress({

@@ -11,6 +11,9 @@ import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/contro
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
+const HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE =
+  "Something went wrong while finishing the device connection. Please retry from Murph.";
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ provider: string }> },
@@ -54,7 +57,11 @@ export async function GET(
         error,
       });
 
-      return redirect ?? callbackHtml("Device connection failed", error.message, error.httpStatus);
+      return redirect ?? callbackHtml(
+        "Device connection failed",
+        HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
+        error.httpStatus,
+      );
     }
 
     if (error instanceof InvalidRouteParamEncodingError) {
@@ -75,7 +82,7 @@ export async function GET(
     });
     return callbackHtml(
       "Device connection failed",
-      "Something went wrong while finishing the device connection. Please retry from Murph.",
+      HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
       500,
     );
   }
