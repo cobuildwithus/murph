@@ -7,10 +7,13 @@ import {
   MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   METRIC_POINT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   assessMurphAgeSecondaryContextBundles,
   assessMurphAgeWearableShadowIncrements,
+  buildMurphAgePublicCalculatorView,
+  buildMurphAgeResearchCalculatorView,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   calculateMurphAgeFromSubmittedInputs,
@@ -30,6 +33,7 @@ import {
   resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
   summarizeMurphAgeCalculatorPublicOutput,
+  summarizeMurphAgeSubmittedCalculatorCapabilities,
   summarizeMurphAgePublicWearableBridgeFromInputBundle,
   toPublicMurphAgeCalculatorReport,
   validateMurphAgeRiskModel,
@@ -52,6 +56,7 @@ import {
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
   type MurphAgeSubmittedCalculatorInputBundleSpec,
+  type MurphAgeSubmittedCalculatorViewBundle,
   type MurphAgeSubmittedCalculatorInput,
   type MurphAgeWearableShadowIncrementAssessment,
   type MurphAgeWearableShadowIncrementFamily,
@@ -84,6 +89,13 @@ export interface GetMurphAgeResearchPreviewForSubmittedInputsInput
   extends Omit<MurphAgeSubmittedCalculatorInput, "mode" | "models"> {
   modelCardArtifactRoot?: string;
   mode?: "research";
+  models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
+}
+
+export interface GetMurphAgeSubmittedCalculatorViewBundleInput
+  extends Omit<MurphAgeSubmittedCalculatorInput, "mode" | "models"> {
+  includeResearchPreview?: boolean;
+  modelCardArtifactRoot?: string;
   models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
 }
 
@@ -343,6 +355,54 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
     wearableResidualParameterPack: input.wearableResidualParameterPack,
   });
   return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, localModelCards.warnings));
+}
+
+export async function getMurphAgeSubmittedCalculatorViewBundle(
+  input: GetMurphAgeSubmittedCalculatorViewBundleInput,
+): Promise<MurphAgeSubmittedCalculatorViewBundle> {
+  const sharedInput = {
+    asOf: input.asOf,
+    cardId: input.cardId,
+    chronologicalAgeYears: input.chronologicalAgeYears,
+    functionResidualParameterPack: input.functionResidualParameterPack,
+    sex: input.sex,
+    submittedMetrics: input.submittedMetrics,
+    wearableResidualParameterPack: input.wearableResidualParameterPack,
+  };
+  const productOutput = calculateMurphAgeFromSubmittedInputs({
+    ...sharedInput,
+    mode: "product",
+    models: {},
+  });
+  const productReport = toPublicMurphAgeCalculatorReport(productOutput);
+  const researchPreview = input.includeResearchPreview === true
+    ? await (async () => {
+      const localModelCards = await loadMurphAgeLocalModelCardArtifacts({
+        modelCardArtifactRoot: input.modelCardArtifactRoot,
+      });
+      const researchOutput = calculateMurphAgeFromSubmittedInputs({
+        ...sharedInput,
+        mode: "research",
+        models: { ...localModelCards.models, ...input.models },
+      });
+      const report = toPublicMurphAgeCalculatorReport(
+        withPrependedWarnings(researchOutput, localModelCards.warnings),
+      );
+      return {
+        report,
+        view: buildMurphAgeResearchCalculatorView(report),
+      };
+    })()
+    : null;
+  return {
+    capabilities: summarizeMurphAgeSubmittedCalculatorCapabilities(),
+    product: {
+      report: productReport,
+      view: buildMurphAgePublicCalculatorView(productReport),
+    },
+    researchPreview,
+    schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
+  };
 }
 
 export async function assessMurphAgeInputReadinessFromVault(
@@ -764,6 +824,12 @@ function withPrependedWarnings(
   if (warnings.length === 0) return output;
   return {
     ...output,
+    result: output.result
+      ? {
+        ...output.result,
+        warnings: [...warnings, ...output.result.warnings],
+      }
+      : null,
     warnings: [...warnings, ...output.warnings],
   };
 }

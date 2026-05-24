@@ -34,6 +34,7 @@ import {
   defaultMurphAgeModelCardArtifactRoot,
   getMurphAgeResearchPreviewForSubmittedInputs,
   getMurphAgeResearchPreviewForVault,
+  getMurphAgeSubmittedCalculatorViewBundle,
   loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
@@ -921,6 +922,109 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
     assert.equal(encodedReport.includes("\"value\""), false);
     assert.equal(encodedReport.includes("coefficient"), false);
     assert.equal(encodedReport.includes("10000"), false);
+  } finally {
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+  }
+});
+
+test("getMurphAgeSubmittedCalculatorViewBundle returns product-safe output plus research preview", async () => {
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  try {
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab5.json", {
+      cardId: "lab5_bp_bmi_transport_research",
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+
+    const submittedMetrics = [
+      { metricKey: "HbA1c", unit: "%", value: 5.3 },
+      { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+      { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+      { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+      { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+      { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+      { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
+      { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 22 },
+      { metricKey: "sleep_duration_hours", sourceKind: "sleep-summary", unit: "h", value: 7.4 },
+      { metricKey: "resting_heart_rate", sourceKind: "wearable-summary", unit: "bpm", value: 58 },
+      { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 47 },
+    ] as const;
+    const wearableResidualParameterPack = fixtureActivityWearableResidualParameterPack(
+      "lab5_bp_bmi_transport_research",
+    );
+    const bundle = await getMurphAgeSubmittedCalculatorViewBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      includeResearchPreview: true,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics,
+      wearableResidualParameterPack,
+    });
+
+    assert.equal(bundle.product.report.mode, "product");
+    assert.equal(bundle.product.report.displaySummary.displayStatus, "abstain");
+    assert.equal(bundle.product.view.displayStatus, "abstain");
+    assert.equal(bundle.product.view.ageEstimate, null);
+    assert.equal(bundle.product.view.risk.probability, null);
+    assert.equal(bundle.product.view.selectedCardId, null);
+    assert.equal(bundle.product.report.result, null);
+    assert.equal(bundle.researchPreview?.report.mode, "research");
+    assert.equal(bundle.researchPreview?.view.researchOnly, true);
+    assert.equal(bundle.researchPreview?.view.selectedCardId, "lab5_bp_bmi_transport_research");
+    assert.equal(typeof bundle.researchPreview?.view.ageEstimate?.biologicalAgeYears, "number");
+    assert.equal(bundle.researchPreview?.view.product.productUseAuthorized, false);
+    assert.equal(bundle.researchPreview?.report.result?.authorization.cardId, "lab5_bp_bmi_transport_research");
+    assert.equal(bundle.researchPreview?.report.wearableResidualLayer?.scoreBearing, false);
+    assert.equal(bundle.capabilities.acceptedMetricKeys.includes("hba1c"), true);
+    assert.equal(bundle.capabilities.acceptedMetricKeys.includes("steps"), true);
+    assert.deepEqual(bundle.capabilities.outputBoundary, {
+      modelParametersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      productScoreDisplayAuthorized: false,
+      researchPreviewRequiresExplicitOptIn: true,
+      rowValuesExportAllowed: false,
+      submittedMetricScalarEchoAllowed: false,
+    });
+    const productOnlyBundle = await getMurphAgeSubmittedCalculatorViewBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      includeResearchPreview: false,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics,
+      wearableResidualParameterPack,
+    });
+    const defaultBundle = await getMurphAgeSubmittedCalculatorViewBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics,
+      wearableResidualParameterPack,
+    });
+    assert.equal(productOnlyBundle.researchPreview, null);
+    assert.equal(defaultBundle.product.view.selectedCardId, null);
+    assert.equal(defaultBundle.researchPreview, null);
+    const defaultWarningCount = defaultBundle.product.report.warnings.length;
+    await writeFile(path.join(modelCardArtifactRoot, "invalid.json"), "{");
+    const productOnlyWithInvalidResearchRoot = await getMurphAgeSubmittedCalculatorViewBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics,
+    });
+    assert.equal(productOnlyWithInvalidResearchRoot.product.report.warnings.length, defaultWarningCount);
+    assert.equal(productOnlyWithInvalidResearchRoot.product.report.result, null);
+    assert.equal(productOnlyWithInvalidResearchRoot.researchPreview, null);
+    const encodedBundle = JSON.stringify(bundle);
+    assert.equal(encodedBundle.includes(modelCardArtifactRoot), false);
+    assert.equal(encodedBundle.includes("fixture-lab5-research-model"), false);
+    assert.equal(encodedBundle.includes("metric-point:"), false);
+    assert.equal(encodedBundle.includes("\"value\""), false);
+    assert.equal(encodedBundle.includes("coefficient"), false);
+    assert.equal(encodedBundle.includes("10000"), false);
   } finally {
     await rm(modelCardArtifactRoot, { force: true, recursive: true });
   }

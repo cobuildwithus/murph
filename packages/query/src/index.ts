@@ -366,6 +366,7 @@ export type {
   CalculateMurphAgeFromVaultInputBundleInput,
   GetMurphAgeResearchPreviewForSubmittedInputsInput,
   GetMurphAgeResearchPreviewForVaultInput,
+  GetMurphAgeSubmittedCalculatorViewBundleInput,
   MurphAgeInputReadinessForVault,
   MurphAgeLocalModelCardArtifact,
   MurphAgeLocalModelCardLoadResult,
@@ -424,6 +425,13 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
 ): Promise<import("@murphai/health-metrics").MurphAgePublicCalculatorReport> {
   const mod = await import("./murph-age.ts");
   return mod.getMurphAgeResearchPreviewForSubmittedInputs(input);
+}
+
+export async function getMurphAgeSubmittedCalculatorViewBundle(
+  input: import("./murph-age.ts").GetMurphAgeSubmittedCalculatorViewBundleInput,
+): Promise<import("@murphai/health-metrics").MurphAgeSubmittedCalculatorViewBundle> {
+  const mod = await import("./murph-age.ts");
+  return mod.getMurphAgeSubmittedCalculatorViewBundle(input);
 }
 
 export async function listMetricTargets(
