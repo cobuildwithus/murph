@@ -39,6 +39,9 @@ type MutableConnectionRecord = {
   externalAccountIdEncrypted: string | null;
   keyVersion: string | null;
   metadataJson: Record<string, unknown> | null;
+  refreshLeaseExpiresAt: Date | null;
+  refreshLeaseOwner: string | null;
+  refreshLeaseTokenVersion: number | null;
   refreshTokenEncrypted: string | null;
   scopesJson: string[] | null;
   setupExpiresAt: Date | null;
@@ -738,6 +741,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       lastErrorMessage: "Reconnect required.",
       lastSyncErrorAt: new Date("2026-03-25T08:00:00.000Z"),
       provider: "whoop",
+      refreshLeaseExpiresAt: new Date("2026-03-25T08:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:old",
+      refreshLeaseTokenVersion: 1,
       refreshTokenEncrypted: null,
       status: "disconnected",
       tokenVersion: null,
@@ -794,6 +800,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         lastErrorCode: null,
         lastErrorMessage: null,
         lastSyncErrorAt: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
         refreshTokenEncrypted: "enc:new-refresh-token",
         status: "active",
         tokenVersion: 1,
@@ -803,6 +812,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(stored.lastErrorCode).toBeNull();
     expect(stored.lastErrorMessage).toBeNull();
     expect(stored.lastSyncErrorAt).toBeNull();
+    expect(stored.refreshLeaseOwner).toBeNull();
   });
 
   it("rejects guarded hosted callback upserts when the seeded connection was disconnected", async () => {
@@ -866,6 +876,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
       keyVersion: "v1",
       nextReconcileAt: new Date("2026-03-26T05:00:00.000Z"),
+      refreshLeaseExpiresAt: new Date("2026-03-26T04:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:setup",
+      refreshLeaseTokenVersion: 3,
       refreshTokenEncrypted: "enc:refresh-token",
       status: "active",
       tokenVersion: 3,
@@ -908,6 +921,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         lastErrorCode: "OAUTH_SETUP_FAILED",
         lastErrorMessage: "post-connect setup failed",
         nextReconcileAt: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
         refreshTokenEncrypted: null,
         setupExpiresAt: null,
         setupPhase: "failed",
@@ -924,6 +940,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     }));
     expect(stored.accessTokenEncrypted).toBeNull();
     expect(stored.refreshTokenEncrypted).toBeNull();
+    expect(stored.refreshLeaseOwner).toBeNull();
     expect(stored.setupPhase).toBe("failed");
   });
 
@@ -1250,6 +1267,21 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
                 : data.refreshTokenEncrypted === null
                   ? null
                   : connection.refreshTokenEncrypted,
+              refreshLeaseExpiresAt: data.refreshLeaseExpiresAt instanceof Date
+                ? data.refreshLeaseExpiresAt
+                : data.refreshLeaseExpiresAt === null
+                  ? null
+                  : connection.refreshLeaseExpiresAt,
+              refreshLeaseOwner: typeof data.refreshLeaseOwner === "string"
+                ? data.refreshLeaseOwner
+                : data.refreshLeaseOwner === null
+                  ? null
+                  : connection.refreshLeaseOwner,
+              refreshLeaseTokenVersion: typeof data.refreshLeaseTokenVersion === "number"
+                ? data.refreshLeaseTokenVersion
+                : data.refreshLeaseTokenVersion === null
+                  ? null
+                  : connection.refreshLeaseTokenVersion,
               tokenVersion: typeof data.tokenVersion === "number"
                 ? data.tokenVersion
                 : data.tokenVersion === null
@@ -1309,6 +1341,103 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         tokenVersion: 1,
       }),
     );
+  });
+
+  it("blocks token writes while another actor owns the current refresh lease", async () => {
+    const connection = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+      externalAccountIdEncrypted: "enc:acct_456",
+      keyVersion: "v1",
+      provider: "oura",
+      refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:active",
+      refreshLeaseTokenVersion: 2,
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+    const update = vi.fn();
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findUnique: async ({ where }: { where: { id?: string } }) =>
+            where.id === connection.id ? cloneConnection(connection) : null,
+          update,
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.persistStoredConnectionTokenBundle({
+      connectionId: "dsc_123",
+      externalAccountId: null,
+      provider: "oura",
+      tokenBundle: {
+        accessToken: "fresh-access-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+        keyVersion: "v1",
+        refreshToken: "fresh-refresh-token",
+        tokenVersion: 3,
+      },
+    })).rejects.toMatchObject({
+      code: "TOKEN_REFRESH_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("allows the refresh lease owner to persist the next rotating token bundle", async () => {
+    let connection = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+      externalAccountIdEncrypted: "enc:acct_456",
+      keyVersion: "v1",
+      provider: "oura",
+      refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:active",
+      refreshLeaseTokenVersion: 2,
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findUnique: async ({ where }: { where: { id?: string } }) =>
+            where.id === connection.id ? cloneConnection(connection) : null,
+          update: async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+            connection = {
+              ...connection,
+              ...data,
+            };
+            return cloneConnection(connection);
+          },
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await store.persistStoredConnectionTokenBundle({
+      connectionId: "dsc_123",
+      externalAccountId: null,
+      provider: "oura",
+      refreshLeaseOwner: "agent-refresh:active",
+      tokenBundle: {
+        accessToken: "fresh-access-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+        keyVersion: "v1",
+        refreshToken: "fresh-refresh-token",
+        tokenVersion: 3,
+      },
+    });
+
+    expect(connection.tokenVersion).toBe(3);
+    expect(connection.refreshLeaseOwner).toBe("agent-refresh:active");
   });
 
   it("fails closed when OAuth token rows store invalid token versions", async () => {
@@ -1497,6 +1626,7 @@ function cloneConnection(record: MutableConnectionRecord | null): MutableConnect
         lastSyncCompletedAt: record.lastSyncCompletedAt ? new Date(record.lastSyncCompletedAt) : null,
         lastSyncErrorAt: record.lastSyncErrorAt ? new Date(record.lastSyncErrorAt) : null,
         nextReconcileAt: record.nextReconcileAt ? new Date(record.nextReconcileAt) : null,
+        refreshLeaseExpiresAt: record.refreshLeaseExpiresAt ? new Date(record.refreshLeaseExpiresAt) : null,
         createdAt: new Date(record.createdAt),
         updatedAt: new Date(record.updatedAt),
       }
@@ -1523,6 +1653,9 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
     externalAccountIdEncrypted: overrides.externalAccountIdEncrypted ?? "enc:acct_456",
     keyVersion: overrides.keyVersion ?? null,
     metadataJson: overrides.metadataJson ?? {},
+    refreshLeaseExpiresAt: overrides.refreshLeaseExpiresAt ?? null,
+    refreshLeaseOwner: overrides.refreshLeaseOwner ?? null,
+    refreshLeaseTokenVersion: overrides.refreshLeaseTokenVersion ?? null,
     refreshTokenEncrypted: overrides.refreshTokenEncrypted ?? null,
     scopesJson: overrides.scopesJson ?? [],
     setupExpiresAt: overrides.setupExpiresAt ?? null,
@@ -1555,6 +1688,9 @@ function normalizeCreatedConnection(data: Record<string, unknown>): MutableConne
       : null,
     metadataJson: (data.metadataJson as Record<string, unknown> | null) ?? {},
     providerConfigKey: typeof data.providerConfigKey === "string" ? data.providerConfigKey : null,
+    refreshLeaseExpiresAt: data.refreshLeaseExpiresAt instanceof Date ? data.refreshLeaseExpiresAt : null,
+    refreshLeaseOwner: typeof data.refreshLeaseOwner === "string" ? data.refreshLeaseOwner : null,
+    refreshLeaseTokenVersion: typeof data.refreshLeaseTokenVersion === "number" ? data.refreshLeaseTokenVersion : null,
     setupExpiresAt: data.setupExpiresAt instanceof Date ? data.setupExpiresAt : null,
     setupPhase: (data.setupPhase as MutableConnectionRecord["setupPhase"]) ?? null,
     status: (data.status as MutableConnectionRecord["status"]) ?? "active",

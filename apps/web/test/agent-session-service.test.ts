@@ -49,6 +49,9 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
 
     const createSignalRecord = vi.fn<DeviceSyncSignalCreate>(async () => ({ id: 1 }));
     let lockDepth = 0;
+    let refreshLeaseOwner: string | null = null;
+    let refreshLeaseExpiresAt: Date | null = null;
+    let refreshLeaseTokenVersion: number | null = null;
     const updateConnectionRecord = vi.fn<DeviceConnectionUpdate>(async () => ({
       ...createConnectionRecord(),
       status: "reauthorization_required",
@@ -58,7 +61,12 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     }));
     const tx = {
       deviceConnection: {
-        findFirst: vi.fn(async () => createConnectionRecord()),
+        findFirst: vi.fn(async () => ({
+          ...createConnectionRecord(),
+          refreshLeaseExpiresAt,
+          refreshLeaseOwner,
+          refreshLeaseTokenVersion,
+        })),
         update: updateConnectionRecord,
       },
       deviceSyncSignal: {
@@ -67,6 +75,9 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     };
     const touchAgentSession = vi.fn(async () => {
       throw new Error("session touch should not run when refresh fails");
+    });
+    const persistStoredConnectionTokenBundle = vi.fn(async () => {
+      return;
     });
     const transactionClient: HostedPrismaTransactionClient = Object.assign(Object.create(null), tx);
     const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
@@ -135,8 +146,26 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         async getStoredConnectionAccountForUser() {
           return createConnectionRecord();
         },
-        async persistStoredConnectionTokenBundle() {
-          return;
+        persistStoredConnectionTokenBundle,
+        async claimConnectionRefreshLease(input: {
+          leaseExpiresAt: string;
+          leaseOwner: string;
+          tokenVersion: number;
+        }) {
+          refreshLeaseExpiresAt = new Date(input.leaseExpiresAt);
+          refreshLeaseOwner = input.leaseOwner;
+          refreshLeaseTokenVersion = input.tokenVersion;
+          return { status: "claimed" as const };
+        },
+        async clearConnectionRefreshLease(input: { leaseOwner: string }) {
+          if (input.leaseOwner !== refreshLeaseOwner) {
+            return false;
+          }
+
+          refreshLeaseExpiresAt = null;
+          refreshLeaseOwner = null;
+          refreshLeaseTokenVersion = null;
+          return true;
         },
         async withConnectionMutationLock<TResult>(
           _connectionId: string,
@@ -148,12 +177,6 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
           } finally {
             lockDepth--;
           }
-        },
-        async withConnectionRefreshLock<TResult>(
-          _connectionId: string,
-          callback: () => Promise<TResult>,
-        ): Promise<TResult> {
-          return await callback();
         },
         touchAgentSession,
       },
@@ -213,6 +236,11 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         userId: "user-1",
       },
     });
+    expect(persistStoredConnectionTokenBundle).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "conn-1",
+      refreshLeaseOwner: expect.stringMatching(/^agent-refresh:/u),
+      tokenBundle: null,
+    }));
     expect(touchAgentSession).not.toHaveBeenCalled();
   });
 });
@@ -252,6 +280,19 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
             credentialKind: "provider_config",
           };
         }),
+        async withConnectionMutationLock<TResult>(
+          _connectionId: string,
+          callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+        ): Promise<TResult> {
+          return await callback(Object.assign(Object.create(null), {
+            deviceConnection: {
+              findFirst: async () => ({
+                credentialKind: "provider_config",
+                id: "conn-1",
+              }),
+            },
+          }));
+        },
       },
     );
     const registry = createDeviceSyncRegistry([createWhoopProvider()]);
@@ -359,6 +400,75 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
 
       await expect(expiredService.requireAgentSession()).rejects.toMatchObject({
         code: "AGENT_AUTH_EXPIRED",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects token export while a matching refresh lease is active", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+
+      harness.setRefreshLease({
+        leaseExpiresAt: "2026-04-01T00:15:00.000Z",
+        leaseOwner: "agent-refresh:active",
+        tokenVersion: 2,
+      });
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.exportTokenBundle(session, "conn-1")).rejects.toMatchObject({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        retryable: true,
+      });
+      expect(harness.audits).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed instead of exporting when a refresh lease expired on the same token version", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+
+      harness.setRefreshLease({
+        leaseExpiresAt: "2026-04-01T00:09:00.000Z",
+        leaseOwner: "agent-refresh:lost",
+        tokenVersion: 2,
+      });
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.exportTokenBundle(session, "conn-1")).rejects.toMatchObject({
+        accountStatus: "reauthorization_required",
+        code: "TOKEN_REFRESH_STATE_UNKNOWN",
+        retryable: false,
+      });
+
+      expect(harness.audits).toHaveLength(0);
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      expect(harness.signals).toHaveLength(1);
+      expect(harness.getPublicConnection()).toMatchObject({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        nextReconcileAt: null,
+        status: "reauthorization_required",
       });
     } finally {
       vi.useRealTimers();
@@ -534,7 +644,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
-  it("serializes overlapping provider refreshes for the same connection", async () => {
+  it("rejects overlapping provider refreshes without holding a database transaction open", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
@@ -583,8 +693,12 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         force: true,
       });
 
+      await expect(secondRefresh).rejects.toMatchObject({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        retryable: true,
+      });
       releaseRefresh();
-      const [firstResult, secondResult] = await Promise.all([firstRefresh, secondRefresh]);
+      const firstResult = await firstRefresh;
 
       expect(firstResult).toMatchObject({
         refreshed: true,
@@ -592,16 +706,183 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
           tokenVersion: 3,
         },
       });
-      expect(secondResult).toMatchObject({
+      expect(firstResult.connection).not.toHaveProperty("credential");
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+
+      const retrySession = await secondService.requireAgentSession();
+      const retryRefresh = await secondService.refreshTokenBundle(retrySession, "conn-1", {
+        expectedTokenVersion: 2,
+      });
+      expect(retryRefresh).toMatchObject({
         refreshed: false,
         tokenVersionChanged: true,
         tokenBundle: {
           tokenVersion: 3,
         },
       });
-      expect(firstResult.connection).not.toHaveProperty("credential");
-      expect(secondResult.connection).not.toHaveProperty("credential");
+      expect(retryRefresh.connection).not.toHaveProperty("credential");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not return a newer token version while that version has its own refresh lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => {
+        harness.setStoredTokenBundle({
+          accessToken: "access-token-newer",
+          accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+          keyVersion: "v1",
+          refreshToken: "refresh-token-newer",
+          tokenVersion: 3,
+        });
+        harness.setRefreshLease({
+          leaseExpiresAt: "2026-04-01T00:15:00.000Z",
+          leaseOwner: "agent-refresh:newer",
+          tokenVersion: 3,
+        });
+        return {
+          accessToken: "access-token-refreshed",
+          accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+          refreshToken: "refresh-token-refreshed",
+        };
+      });
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        retryable: true,
+      });
       expect(refreshTokens).toHaveBeenCalledTimes(1);
+      expect(harness.audits).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries the post-provider token persistence before asking the provider again", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      let persistAttempts = 0;
+      const originalPersistStoredConnectionTokenBundle =
+        harness.store.persistStoredConnectionTokenBundle.bind(harness.store);
+      harness.store.persistStoredConnectionTokenBundle = async (
+        input: Parameters<PrismaDeviceSyncControlPlaneStore["persistStoredConnectionTokenBundle"]>[0],
+      ) => {
+        persistAttempts++;
+        if (persistAttempts === 1) {
+          throw new Error("transient token persistence failure");
+        }
+
+        await originalPersistStoredConnectionTokenBundle(input);
+      };
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "access-token-refreshed",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "refresh-token-refreshed",
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      const refresh = await service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      });
+
+      expect(refresh).toMatchObject({
+        refreshed: true,
+        tokenBundle: {
+          accessToken: "access-token-refreshed",
+          refreshToken: "refresh-token-refreshed",
+          tokenVersion: 3,
+        },
+      });
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+      expect(persistAttempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when an expired refresh lease makes provider state unknowable", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "access-token-refreshed",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "refresh-token-refreshed",
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      harness.setRefreshLease({
+        leaseExpiresAt: "2026-04-01T00:09:00.000Z",
+        leaseOwner: "agent-refresh:lost",
+        tokenVersion: 2,
+      });
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        accountStatus: "reauthorization_required",
+        code: "TOKEN_REFRESH_STATE_UNKNOWN",
+        retryable: false,
+      });
+
+      expect(refreshTokens).not.toHaveBeenCalled();
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      expect(harness.signals).toHaveLength(1);
+      expect(harness.signals[0]).toMatchObject({
+        kind: "reauthorization_required",
+        provider: "whoop",
+        reason: "token_refresh_state_unknown",
+        revokeWarning: {
+          code: "TOKEN_REFRESH_STATE_UNKNOWN",
+        },
+      });
+      expect(harness.getPublicConnection()).toMatchObject({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        nextReconcileAt: null,
+        status: "reauthorization_required",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -775,7 +1056,17 @@ type MutableSessionState = HostedAgentSessionRecord & {
 
 function createRetrySafeStoreHarness(bearerToken: string): {
   audits: Array<Record<string, unknown>>;
+  getPublicConnection: () => Record<string, unknown>;
   sessionState: MutableSessionState;
+  setRefreshLease: (lease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null) => void;
+  setStoredTokenBundle: (tokenBundle: {
+    accessToken: string;
+    accessTokenExpiresAt: string | null;
+    keyVersion: string;
+    refreshToken: string | null;
+    tokenVersion: number;
+  }) => void;
+  signals: Array<Record<string, unknown>>;
   store: PrismaDeviceSyncControlPlaneStore;
 } {
   const sessionState: MutableSessionState = {
@@ -783,8 +1074,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
     tokenHash: sha256Hex(bearerToken),
   };
   const audits: Array<Record<string, unknown>> = [];
+  const signals: Array<Record<string, unknown>> = [];
   const connection = createConnectionRecord();
-  let refreshTail: Promise<unknown> = Promise.resolve();
+  let hasStoredTokenBundle = true;
+  let refreshLease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null = null;
   let publicConnection = {
     ...connection,
     accessTokenExpiresAt: connection.accessTokenExpiresAt.toISOString(),
@@ -874,11 +1167,20 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           ...input,
         };
       },
+      async createSignal(input: Record<string, unknown>) {
+        signals.push(input);
+        return {
+          id: signals.length,
+          ...input,
+        };
+      },
       async getConnectionForUser(userId: string, connectionId: string) {
         return userId === SESSION.userId && connectionId === connection.id ? { ...publicConnection } : null;
       },
       async getStoredConnectionAccountForUser(userId: string, connectionId: string) {
-        return userId === SESSION.userId && connectionId === connection.id ? { ...storedConnection } : null;
+        return userId === SESSION.userId && connectionId === connection.id && hasStoredTokenBundle
+          ? { ...storedConnection }
+          : null;
       },
       async persistStoredConnectionTokenBundle(input: {
         connectionId: string;
@@ -890,12 +1192,18 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           keyVersion: string;
           refreshToken: string | null;
           tokenVersion: number;
-        };
+        } | null;
       }) {
         if (input.connectionId !== connection.id) {
           return;
         }
 
+        if (!input.tokenBundle) {
+          hasStoredTokenBundle = false;
+          return;
+        }
+
+        hasStoredTokenBundle = true;
         storedConnection = {
           ...storedConnection,
           accessToken: input.tokenBundle.accessToken,
@@ -916,6 +1224,45 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           updatedAt: sessionState.updatedAt,
         };
       },
+      async claimConnectionRefreshLease(input: {
+        leaseExpiresAt: string;
+        leaseOwner: string;
+        now: string;
+        tokenVersion: number;
+      }) {
+        if (!hasStoredTokenBundle || storedConnection.tokenVersion !== input.tokenVersion) {
+          return { status: "version_changed" as const };
+        }
+
+        if (refreshLease) {
+          if (
+            refreshLease.tokenVersion === input.tokenVersion
+            && Date.parse(refreshLease.leaseExpiresAt) > Date.parse(input.now)
+          ) {
+            return {
+              status: "in_progress" as const,
+              leaseExpiresAt: refreshLease.leaseExpiresAt,
+            };
+          }
+
+          return { status: "stale" as const };
+        }
+
+        refreshLease = {
+          leaseExpiresAt: input.leaseExpiresAt,
+          leaseOwner: input.leaseOwner,
+          tokenVersion: input.tokenVersion,
+        };
+        return { status: "claimed" as const };
+      },
+      async clearConnectionRefreshLease(input: { leaseOwner: string }) {
+        if (!refreshLease || refreshLease.leaseOwner !== input.leaseOwner) {
+          return false;
+        }
+
+        refreshLease = null;
+        return true;
+      },
       async syncDurableConnectionState(account: typeof publicConnection) {
         publicConnection = {
           ...publicConnection,
@@ -935,38 +1282,50 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           {
             deviceConnection: {
               findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
-                where.id === connection.id && where.userId === SESSION.userId ? { id: connection.id } : null,
+                where.id === connection.id && where.userId === SESSION.userId
+                  ? {
+                      id: connection.id,
+                      refreshLeaseExpiresAt: refreshLease ? new Date(refreshLease.leaseExpiresAt) : null,
+                      refreshLeaseOwner: refreshLease?.leaseOwner ?? null,
+                      refreshLeaseTokenVersion: refreshLease?.tokenVersion ?? null,
+                    }
+                  : null,
             },
           },
         );
 
         return callback(transactionClient);
       },
-      async withConnectionRefreshLock<TResult>(
-        _connectionId: string,
-        callback: () => Promise<TResult>,
-      ): Promise<TResult> {
-        const previous = refreshTail;
-        let releaseCurrent!: () => void;
-        refreshTail = previous
-          .catch(() => undefined)
-          .then(() => new Promise<void>((resolve) => {
-            releaseCurrent = resolve;
-          }));
-        await previous.catch(() => undefined);
-
-        try {
-          return await callback();
-        } finally {
-          releaseCurrent();
-        }
-      },
     },
   );
 
   return {
     audits,
+    getPublicConnection: () => ({ ...publicConnection }),
     sessionState,
+    setRefreshLease: (lease) => {
+      refreshLease = lease;
+    },
+    setStoredTokenBundle: (tokenBundle) => {
+      hasStoredTokenBundle = true;
+      storedConnection = {
+        ...storedConnection,
+        accessToken: tokenBundle.accessToken,
+        accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? storedConnection.accessTokenExpiresAt,
+        credential: {
+          kind: "oauth_tokens",
+          tokens: {
+            accessToken: tokenBundle.accessToken,
+            accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? storedConnection.accessTokenExpiresAt ?? null,
+            refreshToken: tokenBundle.refreshToken,
+          } satisfies ProviderAuthTokens,
+        },
+        keyVersion: tokenBundle.keyVersion,
+        refreshToken: tokenBundle.refreshToken,
+        tokenVersion: tokenBundle.tokenVersion,
+      };
+    },
+    signals,
     store,
   };
 }

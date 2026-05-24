@@ -52,6 +52,7 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
   currentTokenBundle: HostedStoredTokenBundle;
   error: unknown;
   now: string;
+  refreshLeaseOwner?: string | null;
   userId: string;
 }): Promise<void> {
   if (!isDeviceSyncError(input.error) || !input.error.accountStatus) {
@@ -85,11 +86,15 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
     tx: input.tx,
   });
   await input.store.syncDurableConnectionState(seedAccount, input.tx);
+  const shouldClearTokenBundle = input.error.accountStatus === "reauthorization_required"
+    || input.error.accountStatus === "disconnected";
+
   await input.store.persistStoredConnectionTokenBundle({
     connectionId: input.account.id,
     externalAccountId: input.account.externalAccountId,
     provider: input.account.provider,
-    tokenBundle: input.error.accountStatus === "disconnected"
+    refreshLeaseOwner: input.refreshLeaseOwner ?? null,
+    tokenBundle: shouldClearTokenBundle
       ? null
       : { ...input.currentTokenBundle },
     tx: input.tx,

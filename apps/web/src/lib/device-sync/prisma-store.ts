@@ -29,6 +29,7 @@ import type {
   CreateHostedTokenAuditInput,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
+  HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
@@ -62,6 +63,7 @@ export type {
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedDeviceSyncDirtyResource,
+  HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
   HostedAgentSessionRecord,
@@ -211,6 +213,8 @@ export class PrismaDeviceSyncControlPlaneStore
     connectionId: string;
     externalAccountId?: string | null;
     provider: string;
+    clearRefreshLease?: boolean;
+    refreshLeaseOwner?: string | null;
     tokenBundle: {
       accessToken: string;
       accessTokenExpiresAt: string | null;
@@ -221,6 +225,26 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient;
   }): Promise<void> {
     return this.connections.persistStoredConnectionTokenBundle(input);
+  }
+
+  async claimConnectionRefreshLease(input: {
+    connectionId: string;
+    userId: string;
+    tokenVersion: number;
+    leaseOwner: string;
+    leaseExpiresAt: string;
+    now: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRefreshLeaseClaimResult> {
+    return this.connections.claimConnectionRefreshLease(input);
+  }
+
+  async clearConnectionRefreshLease(input: {
+    connectionId: string;
+    leaseOwner: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<boolean> {
+    return this.connections.clearConnectionRefreshLease(input);
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
@@ -369,18 +393,4 @@ export class PrismaDeviceSyncControlPlaneStore
     });
   }
 
-  async withConnectionRefreshLock<TResult>(
-    connectionId: string,
-    callback: () => Promise<TResult>,
-  ): Promise<TResult> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`
-        select pg_advisory_xact_lock(hashtext('hosted-device-token-refresh'), hashtext(${connectionId}))
-      `;
-      return await callback();
-    }, {
-      maxWait: 10_000,
-      timeout: 120_000,
-    });
-  }
 }

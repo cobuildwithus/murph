@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import type {
@@ -28,6 +30,7 @@ import {
   shouldRefreshHostedToken,
 } from "./agent-session-token-bundle";
 import {
+  type HostedProviderTokenRefreshResult,
   persistProviderTokenRefreshErrorStatus,
   refreshProviderTokens,
 } from "./agent-session-token-refresh";
@@ -46,6 +49,8 @@ export interface HostedTokenBundleRefreshResponse extends HostedTokenBundleExpor
 }
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
+const HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS = 5 * 60_000;
+const HOSTED_DEVICE_TOKEN_REFRESH_PERSIST_ATTEMPTS = 3;
 const HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES = {
   required:
     "Hosted device-sync agent routes require a bearer token created by /api/device-sync/agents/pair.",
@@ -61,11 +66,51 @@ type HostedTokenRefreshSuccess = {
   tokenVersionChanged: boolean;
 };
 
-type HostedTokenRefreshLockResult =
+type HostedTokenRefreshCurrentResult =
   | HostedTokenRefreshSuccess
   | {
       status: "refresh_required";
       account: HostedStoredDeviceSyncAccount;
+      currentTokenBundle: HostedStoredTokenBundle;
+    };
+
+type HostedTokenRefreshLockResult =
+  | HostedTokenRefreshCurrentResult
+  | {
+      status: "stale_refresh_lease";
+      currentTokenBundle: HostedStoredTokenBundle;
+    };
+
+type HostedTokenRefreshLeaseResult =
+  | HostedTokenRefreshSuccess
+  | {
+      status: "lease_claimed";
+      account: HostedStoredDeviceSyncAccount;
+      currentTokenBundle: HostedStoredTokenBundle;
+      leaseOwner: string;
+    };
+
+type HostedTokenRefreshPersistResult =
+  | HostedTokenRefreshSuccess
+  | { status: "refresh_error"; error: unknown };
+
+type HostedTokenRefreshStaleLeaseResult =
+  | HostedTokenRefreshSuccess
+  | { status: "stale_failed_closed"; error: unknown };
+
+type HostedTokenRefreshLeaseStatus =
+  | { status: "none" }
+  | { status: "in_progress"; leaseExpiresAt: string }
+  | { status: "stale" };
+
+type HostedTokenExportResponseResult = HostedTokenBundleExportResponse & {
+  status?: undefined;
+};
+
+type HostedTokenExportLockResult =
+  | HostedTokenExportResponseResult
+  | {
+      status: "stale_refresh_lease";
       currentTokenBundle: HostedStoredTokenBundle;
     };
 
@@ -108,43 +153,104 @@ export class HostedDeviceSyncAgentSessionService {
     connectionId: string,
   ): Promise<HostedTokenBundleExportResponse> {
     const now = toIsoTimestamp(new Date());
-    const connection = await this.requireOwnedConnection(session.userId, connectionId);
-    const storedAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId);
-    if (!storedAccount) {
-      const record = await this.store.getConnectionRecordForUser(session.userId, connectionId);
-      throwIfHostedTokenBundleUnsupported(record, connectionId);
-    } else {
-      throwIfHostedTokenBundleUnsupported({
-        credentialKind: storedAccount.credential.kind,
-      }, connectionId);
-    }
-
-    const tokenBundle = buildTokenExport(
-      requireHostedDeviceSyncStoredTokenBundle({
-        connectionId,
-        storedTokenBundle: buildStoredTokenBundle(storedAccount),
-        userId: session.userId,
-      }),
-      now,
-    );
-    await this.recordTokenAudit({
-      userId: session.userId,
+    const result = await this.store.withConnectionMutationLock<HostedTokenExportLockResult>(
       connectionId,
-      provider: connection.provider,
-      action: "token_exported",
-      channel: "agent_export",
-      sessionId: session.id,
-      tokenVersion: tokenBundle.tokenVersion,
-      keyVersion: tokenBundle.keyVersion,
-      createdAt: now,
-    });
+      async (tx) => {
+        const record = await tx.deviceConnection.findFirst({
+          where: {
+            id: connectionId,
+            userId: session.userId,
+          },
+          select: {
+            credentialKind: true,
+            id: true,
+          },
+        });
+
+        if (!record) {
+          throw deviceSyncError({
+            code: "CONNECTION_NOT_FOUND",
+            message: "Hosted device-sync connection was not found for the current user.",
+            retryable: false,
+            httpStatus: 404,
+          });
+        }
+
+        const storedAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId, tx);
+        if (!storedAccount) {
+          throwIfHostedTokenBundleUnsupported(record, connectionId);
+          throw deviceSyncError({
+            code: "CONNECTION_SECRET_MISSING",
+            message: "Hosted device-sync connection no longer has a stored token bundle.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+        throwIfHostedTokenBundleUnsupported(record, connectionId);
+        throwIfHostedTokenBundleUnsupported({
+          credentialKind: storedAccount.credential.kind,
+        }, connectionId);
+
+        const storedTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
+          connectionId,
+          storedTokenBundle: buildStoredTokenBundle(storedAccount),
+          userId: session.userId,
+        });
+        const leaseStatus = await this.readRefreshLeaseStatus({
+          connectionId,
+          now,
+          tokenVersion: storedTokenBundle.tokenVersion,
+          tx,
+          userId: session.userId,
+        });
+        if (leaseStatus.status === "in_progress") {
+          throw buildHostedTokenRefreshInProgressError(leaseStatus.leaseExpiresAt);
+        }
+        if (leaseStatus.status === "stale") {
+          return {
+            status: "stale_refresh_lease",
+            currentTokenBundle: storedTokenBundle,
+          };
+        }
+
+        const tokenBundle = buildTokenExport(storedTokenBundle, now);
+        await this.recordTokenAudit({
+          userId: session.userId,
+          connectionId,
+          provider: storedAccount.provider,
+          action: "token_exported",
+          channel: "agent_export",
+          sessionId: session.id,
+          tokenVersion: tokenBundle.tokenVersion,
+          keyVersion: tokenBundle.keyVersion,
+          createdAt: now,
+          tx,
+        });
+
+        return {
+          connection: toPublicHostedDeviceSyncAccount(storedAccount),
+          tokenBundle,
+        } satisfies HostedTokenExportResponseResult;
+      },
+    );
+
+    if (result.status === "stale_refresh_lease") {
+      const resolvedResult = await this.failClosedStaleRefreshLease({
+        baseTokenBundle: result.currentTokenBundle,
+        connectionId,
+        forceRefresh: false,
+        now,
+        session,
+      });
+      return {
+        connection: resolvedResult.connection,
+        tokenBundle: resolvedResult.tokenBundle,
+      };
+    }
 
     await this.assertCurrentAgentSessionStillActive();
 
-    return {
-      connection,
-      tokenBundle,
-    };
+    return result;
   }
 
   async refreshTokenBundle(
@@ -195,6 +301,23 @@ export class HostedDeviceSyncAgentSessionService {
         storedTokenBundle: buildStoredTokenBundle(currentAccount),
         userId: session.userId,
       });
+
+      const refreshLeaseStatus = await this.readRefreshLeaseStatus({
+        connectionId,
+        now,
+        tokenVersion: currentTokenBundle.tokenVersion,
+        tx,
+        userId: session.userId,
+      });
+      if (refreshLeaseStatus.status === "in_progress") {
+        throw buildHostedTokenRefreshInProgressError(refreshLeaseStatus.leaseExpiresAt);
+      }
+      if (refreshLeaseStatus.status === "stale") {
+        return {
+          status: "stale_refresh_lease",
+          currentTokenBundle,
+        };
+      }
 
       const currentConnection = currentAccount;
       const publicCurrentConnection = toPublicHostedDeviceSyncAccount(currentAccount);
@@ -272,6 +395,14 @@ export class HostedDeviceSyncAgentSessionService {
         now,
         session,
       })
+      : result.status === "stale_refresh_lease"
+        ? await this.failClosedStaleRefreshLease({
+          baseTokenBundle: result.currentTokenBundle,
+          connectionId,
+          forceRefresh,
+          now,
+          session,
+        })
       : result;
 
     if (finalizedResult.refreshed) {
@@ -320,8 +451,8 @@ export class HostedDeviceSyncAgentSessionService {
     forceRefresh: boolean;
     now: string;
     session: HostedAgentSessionRecord;
-  }): Promise<HostedTokenRefreshLockResult> {
-    return await this.store.withConnectionMutationLock<HostedTokenRefreshLockResult>(input.connectionId, async (tx) => {
+  }): Promise<HostedTokenRefreshCurrentResult> {
+    return await this.store.withConnectionMutationLock<HostedTokenRefreshCurrentResult>(input.connectionId, async (tx) => {
       const currentAccount = await this.store.getStoredConnectionAccountForUser(
         input.session.userId,
         input.connectionId,
@@ -346,6 +477,13 @@ export class HostedDeviceSyncAgentSessionService {
       });
 
       if (currentTokenBundle.tokenVersion !== input.baseTokenBundle.tokenVersion) {
+        await this.assertTokenBundleRefreshLeaseExportable({
+          connectionId: input.connectionId,
+          now: input.now,
+          tokenVersion: currentTokenBundle.tokenVersion,
+          tx,
+          userId: input.session.userId,
+        });
         const tokenBundle = buildTokenExport(currentTokenBundle, input.now);
         await this.recordTokenAudit({
           userId: input.session.userId,
@@ -387,28 +525,347 @@ export class HostedDeviceSyncAgentSessionService {
     now: string;
     session: HostedAgentSessionRecord;
   }): Promise<HostedTokenRefreshSuccess> {
-    return await this.store.withConnectionRefreshLock(input.connectionId, async () => {
-      const currentRefreshState = await this.resolveCurrentRefreshState({
-        baseTokenBundle: input.baseTokenBundle,
+    const leaseOwner = `agent-refresh:${randomUUID()}`;
+    const currentRefreshState = await this.claimRefreshLeaseOrResolveCurrent({
+      ...input,
+      leaseOwner,
+    });
+
+    if (currentRefreshState.status === "success") {
+      return currentRefreshState;
+    }
+
+    const provider = requireHostedDeviceSyncProvider(this.registry, currentRefreshState.account.provider);
+    const refreshResult = await refreshProviderTokens({
+      account: currentRefreshState.account,
+      provider,
+    });
+
+    const persistedResult = await this.persistProviderRefreshResultWithLease({
+      ...input,
+      leaseOwner: currentRefreshState.leaseOwner,
+      refreshResult,
+    });
+
+    if (persistedResult.status === "refresh_error") {
+      throw persistedResult.error;
+    }
+
+    return persistedResult;
+  }
+
+  private async readRefreshLeaseStatus(input: {
+    connectionId: string;
+    now: string;
+    tokenVersion: number;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<HostedTokenRefreshLeaseStatus> {
+    const lease = await input.tx.deviceConnection.findFirst({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+      },
+      select: {
+        refreshLeaseExpiresAt: true,
+        refreshLeaseOwner: true,
+        refreshLeaseTokenVersion: true,
+      },
+    });
+
+    if (
+      !lease
+      || (
+        !lease.refreshLeaseOwner
+        && !lease.refreshLeaseExpiresAt
+        && lease.refreshLeaseTokenVersion === null
+      )
+    ) {
+      return { status: "none" };
+    }
+
+    if (
+      !lease.refreshLeaseOwner
+      || !lease.refreshLeaseExpiresAt
+      || lease.refreshLeaseTokenVersion !== input.tokenVersion
+    ) {
+      return { status: "stale" };
+    }
+
+    if (lease.refreshLeaseExpiresAt.getTime() > Date.parse(input.now)) {
+      return {
+        status: "in_progress",
+        leaseExpiresAt: lease.refreshLeaseExpiresAt.toISOString(),
+      };
+    }
+
+    return { status: "stale" };
+  }
+
+  private async assertTokenBundleRefreshLeaseExportable(input: {
+    connectionId: string;
+    now: string;
+    tokenVersion: number;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<void> {
+    const leaseStatus = await this.readRefreshLeaseStatus(input);
+
+    switch (leaseStatus.status) {
+      case "none":
+        return;
+      case "in_progress":
+        throw buildHostedTokenRefreshInProgressError(leaseStatus.leaseExpiresAt);
+      case "stale":
+        throw buildHostedTokenRefreshRetryRequiredError();
+    }
+  }
+
+  private async claimRefreshLeaseOrResolveCurrent(input: {
+    baseTokenBundle: HostedStoredTokenBundle;
+    connectionId: string;
+    forceRefresh: boolean;
+    leaseOwner: string;
+    now: string;
+    session: HostedAgentSessionRecord;
+  }): Promise<HostedTokenRefreshLeaseResult> {
+    const currentRefreshState = await this.resolveCurrentRefreshState({
+      baseTokenBundle: input.baseTokenBundle,
+      connectionId: input.connectionId,
+      forceRefresh: input.forceRefresh,
+      now: input.now,
+      session: input.session,
+    });
+
+    if (currentRefreshState.status === "success") {
+      return currentRefreshState;
+    }
+
+    const nowMs = Date.parse(input.now);
+    const leaseExpiresAt = new Date(nowMs + HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS).toISOString();
+    const claim = await this.store.withConnectionMutationLock(input.connectionId, async (tx) =>
+      this.store.claimConnectionRefreshLease({
         connectionId: input.connectionId,
-        forceRefresh: input.forceRefresh,
+        leaseExpiresAt,
+        leaseOwner: input.leaseOwner,
         now: input.now,
-        session: input.session,
-      });
+        tokenVersion: input.baseTokenBundle.tokenVersion,
+        tx,
+        userId: input.session.userId,
+      })
+    );
 
-      if (currentRefreshState.status === "success") {
-        return currentRefreshState;
+    switch (claim.status) {
+      case "claimed":
+        return {
+          status: "lease_claimed",
+          account: currentRefreshState.account,
+          currentTokenBundle: currentRefreshState.currentTokenBundle,
+          leaseOwner: input.leaseOwner,
+        };
+      case "version_changed": {
+        const resolvedState = await this.resolveCurrentRefreshState({
+          baseTokenBundle: input.baseTokenBundle,
+          connectionId: input.connectionId,
+          forceRefresh: input.forceRefresh,
+          now: input.now,
+          session: input.session,
+        });
+        if (resolvedState.status === "refresh_required") {
+          throw buildHostedTokenRefreshRetryRequiredError();
+        }
+        return resolvedState;
       }
+      case "in_progress":
+        throw buildHostedTokenRefreshInProgressError(claim.leaseExpiresAt);
+      case "stale":
+        return await this.failClosedStaleRefreshLease(input);
+    }
+  }
 
-      const provider = requireHostedDeviceSyncProvider(this.registry, currentRefreshState.account.provider);
-      const refreshResult = await refreshProviderTokens({
-        account: currentRefreshState.account,
-        provider,
-      });
+  private async failClosedStaleRefreshLease(input: {
+    baseTokenBundle: HostedStoredTokenBundle;
+    connectionId: string;
+    forceRefresh: boolean;
+    now: string;
+    session: HostedAgentSessionRecord;
+  }): Promise<HostedTokenRefreshSuccess> {
+    const result = await this.store.withConnectionMutationLock<HostedTokenRefreshStaleLeaseResult>(
+      input.connectionId,
+      async (tx) => {
+        const currentAccount = await this.store.getStoredConnectionAccountForUser(
+          input.session.userId,
+          input.connectionId,
+          tx,
+        );
+        if (!currentAccount) {
+          throw deviceSyncError({
+            code: "CONNECTION_SECRET_MISSING",
+            message: "Hosted device-sync connection no longer has a stored token bundle.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+        throwIfHostedTokenBundleUnsupported({
+          credentialKind: currentAccount.credential.kind,
+        }, input.connectionId);
 
-      const persistedResult = await this.store.withConnectionMutationLock<
-        HostedTokenRefreshSuccess | { status: "refresh_error"; error: unknown }
-      >(input.connectionId, async (tx) => {
+        const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
+          connectionId: input.connectionId,
+          storedTokenBundle: buildStoredTokenBundle(currentAccount),
+          userId: input.session.userId,
+        });
+
+        if (currentTokenBundle.tokenVersion !== input.baseTokenBundle.tokenVersion) {
+          await this.assertTokenBundleRefreshLeaseExportable({
+            connectionId: input.connectionId,
+            now: input.now,
+            tokenVersion: currentTokenBundle.tokenVersion,
+            tx,
+            userId: input.session.userId,
+          });
+          const tokenBundle = buildTokenExport(currentTokenBundle, input.now);
+          await this.recordTokenAudit({
+            userId: input.session.userId,
+            connectionId: input.connectionId,
+            provider: currentAccount.provider,
+            action: "token_exported",
+            channel: "agent_refresh",
+            sessionId: input.session.id,
+            tokenVersion: tokenBundle.tokenVersion,
+            keyVersion: tokenBundle.keyVersion,
+            createdAt: input.now,
+            forceRefresh: input.forceRefresh,
+            refreshOutcome: "skipped_version_mismatch",
+            tokenVersionChanged: true,
+            tx,
+          });
+
+          return {
+            status: "success",
+            connection: toPublicHostedDeviceSyncAccount(currentAccount),
+            tokenBundle,
+            refreshed: false,
+            tokenVersionChanged: true,
+          };
+        }
+
+        const lease = await tx.deviceConnection.findFirst({
+          where: {
+            id: input.connectionId,
+            userId: input.session.userId,
+          },
+          select: {
+            refreshLeaseExpiresAt: true,
+            refreshLeaseOwner: true,
+            refreshLeaseTokenVersion: true,
+          },
+        });
+
+        if (!lease?.refreshLeaseOwner || !lease.refreshLeaseExpiresAt) {
+          throw buildHostedTokenRefreshRetryRequiredError();
+        }
+
+        if (lease.refreshLeaseExpiresAt.getTime() > Date.parse(input.now)) {
+          throw buildHostedTokenRefreshInProgressError(lease.refreshLeaseExpiresAt.toISOString());
+        }
+
+        if (lease.refreshLeaseTokenVersion !== currentTokenBundle.tokenVersion) {
+          throw buildHostedTokenRefreshRetryRequiredError();
+        }
+
+        const currentConnection = toPublicHostedDeviceSyncAccount(currentAccount);
+        const nextConnection: PublicDeviceSyncAccount = {
+          ...currentConnection,
+          lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+          lastErrorMessage: "Token refresh state is unknown. Reconnect this source.",
+          lastSyncErrorAt: input.now,
+          nextReconcileAt: null,
+          status: "reauthorization_required",
+          updatedAt: input.now,
+        };
+
+        await this.store.createSignal({
+          userId: input.session.userId,
+          connectionId: input.connectionId,
+          provider: currentAccount.provider,
+          kind: "reauthorization_required",
+          occurredAt: input.now,
+          reason: "token_refresh_state_unknown",
+          revokeWarning: {
+            code: "TOKEN_REFRESH_STATE_UNKNOWN",
+            message: "Token refresh state is unknown. Reconnect this source.",
+          },
+          createdAt: input.now,
+          tx,
+        });
+        await this.store.syncDurableConnectionState(nextConnection, tx);
+        await this.store.persistStoredConnectionTokenBundle({
+          connectionId: input.connectionId,
+          externalAccountId: currentAccount.externalAccountId,
+          provider: currentAccount.provider,
+          refreshLeaseOwner: lease.refreshLeaseOwner,
+          tokenBundle: null,
+          tx,
+        });
+
+        const cleared = await this.store.clearConnectionRefreshLease({
+          connectionId: input.connectionId,
+          leaseOwner: lease.refreshLeaseOwner,
+          tx,
+        });
+        if (!cleared) {
+          throw buildHostedTokenRefreshRetryRequiredError();
+        }
+
+        return {
+          status: "stale_failed_closed",
+          error: buildHostedTokenRefreshStateUnknownError(),
+        };
+      },
+    );
+
+    if (result.status === "stale_failed_closed") {
+      throw result.error;
+    }
+
+    return result;
+  }
+
+  private async persistProviderRefreshResultWithLease(input: {
+    baseTokenBundle: HostedStoredTokenBundle;
+    connectionId: string;
+    forceRefresh: boolean;
+    leaseOwner: string;
+    now: string;
+    refreshResult: HostedProviderTokenRefreshResult;
+    session: HostedAgentSessionRecord;
+  }): Promise<HostedTokenRefreshPersistResult> {
+    for (let attempt = 1; attempt <= HOSTED_DEVICE_TOKEN_REFRESH_PERSIST_ATTEMPTS; attempt++) {
+      try {
+        return await this.persistProviderRefreshResultWithLeaseOnce(input);
+      } catch (error) {
+        if (attempt === HOSTED_DEVICE_TOKEN_REFRESH_PERSIST_ATTEMPTS) {
+          throw error;
+        }
+      }
+    }
+
+    throw buildHostedTokenRefreshRetryRequiredError();
+  }
+
+  private async persistProviderRefreshResultWithLeaseOnce(input: {
+    baseTokenBundle: HostedStoredTokenBundle;
+    connectionId: string;
+    forceRefresh: boolean;
+    leaseOwner: string;
+    now: string;
+    refreshResult: HostedProviderTokenRefreshResult;
+    session: HostedAgentSessionRecord;
+  }): Promise<HostedTokenRefreshPersistResult> {
+    return await this.store.withConnectionMutationLock<HostedTokenRefreshPersistResult>(
+      input.connectionId,
+      async (tx) => {
         const currentAccount = await this.store.getStoredConnectionAccountForUser(
           input.session.userId,
           input.connectionId,
@@ -434,6 +891,13 @@ export class HostedDeviceSyncAgentSessionService {
         });
 
         if (currentTokenBundle.tokenVersion !== input.baseTokenBundle.tokenVersion) {
+          await this.assertTokenBundleRefreshLeaseExportable({
+            connectionId: input.connectionId,
+            now: input.now,
+            tokenVersion: currentTokenBundle.tokenVersion,
+            tx,
+            userId: input.session.userId,
+          });
           const tokenBundle = buildTokenExport(currentTokenBundle, input.now);
           await this.recordTokenAudit({
             userId: input.session.userId,
@@ -450,6 +914,11 @@ export class HostedDeviceSyncAgentSessionService {
             tokenVersionChanged: true,
             tx,
           });
+          await this.store.clearConnectionRefreshLease({
+            connectionId: input.connectionId,
+            leaseOwner: input.leaseOwner,
+            tx,
+          });
 
           return {
             status: "success",
@@ -460,24 +929,38 @@ export class HostedDeviceSyncAgentSessionService {
           };
         }
 
-        if (refreshResult.status === "error") {
+        await this.requireOwnedRefreshLease({
+          connectionId: input.connectionId,
+          leaseOwner: input.leaseOwner,
+          tokenVersion: currentTokenBundle.tokenVersion,
+          tx,
+          userId: input.session.userId,
+        });
+
+        if (input.refreshResult.status === "error") {
           await persistProviderTokenRefreshErrorStatus({
             store: this.store,
             tx,
             account: currentAccount,
             currentTokenBundle,
-            error: refreshResult.error,
+            error: input.refreshResult.error,
             now: input.now,
+            refreshLeaseOwner: input.leaseOwner,
             userId: input.session.userId,
+          });
+          await this.store.clearConnectionRefreshLease({
+            connectionId: input.connectionId,
+            leaseOwner: input.leaseOwner,
+            tx,
           });
 
           return {
             status: "refresh_error",
-            error: refreshResult.error,
+            error: input.refreshResult.error,
           };
         }
 
-        const nextTokens = refreshResult.tokens;
+        const nextTokens = input.refreshResult.tokens;
         const nextStoredTokenBundle = {
           accessToken: nextTokens.accessToken,
           accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
@@ -501,9 +984,18 @@ export class HostedDeviceSyncAgentSessionService {
           connectionId: input.connectionId,
           externalAccountId: currentAccount.externalAccountId,
           provider: currentAccount.provider,
+          refreshLeaseOwner: input.leaseOwner,
           tokenBundle: nextStoredTokenBundle,
           tx,
         });
+        const cleared = await this.store.clearConnectionRefreshLease({
+          connectionId: input.connectionId,
+          leaseOwner: input.leaseOwner,
+          tx,
+        });
+        if (!cleared) {
+          throw buildHostedTokenRefreshRetryRequiredError();
+        }
 
         return {
           status: "success",
@@ -512,14 +1004,35 @@ export class HostedDeviceSyncAgentSessionService {
           refreshed: true,
           tokenVersionChanged,
         };
-      });
+      },
+    );
+  }
 
-      if (persistedResult.status === "refresh_error") {
-        throw persistedResult.error;
-      }
-
-      return persistedResult;
+  private async requireOwnedRefreshLease(input: {
+    connectionId: string;
+    leaseOwner: string;
+    tokenVersion: number;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<void> {
+    const lease = await input.tx.deviceConnection.findFirst({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+      },
+      select: {
+        refreshLeaseOwner: true,
+        refreshLeaseTokenVersion: true,
+      },
     });
+
+    if (
+      !lease
+      || lease.refreshLeaseOwner !== input.leaseOwner
+      || lease.refreshLeaseTokenVersion !== input.tokenVersion
+    ) {
+      throw buildHostedTokenRefreshRetryRequiredError();
+    }
   }
 
   async revokeAgentSession(session: HostedAgentSessionRecord): Promise<{
@@ -587,21 +1100,6 @@ export class HostedDeviceSyncAgentSessionService {
     });
   }
 
-  private async requireOwnedConnection(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount> {
-    const connection = await this.store.getConnectionForUser(userId, connectionId);
-
-    if (!connection) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    return connection;
-  }
-
   private async assertCurrentAgentSessionStillActive(): Promise<void> {
     await this.agentSessions.requireAgentSession();
   }
@@ -652,5 +1150,36 @@ function throwIfHostedTokenBundleUnsupported(
       connectionId,
       credentialKind,
     },
+  });
+}
+
+function buildHostedTokenRefreshInProgressError(leaseExpiresAt: string) {
+  return deviceSyncError({
+    code: "TOKEN_REFRESH_IN_PROGRESS",
+    message: "A hosted device-sync token refresh is already in progress for this connection.",
+    retryable: true,
+    httpStatus: 409,
+    details: {
+      leaseExpiresAt,
+    },
+  });
+}
+
+function buildHostedTokenRefreshRetryRequiredError() {
+  return deviceSyncError({
+    code: "TOKEN_REFRESH_RETRY_REQUIRED",
+    message: "Hosted device-sync token refresh state changed before it could be confirmed.",
+    retryable: true,
+    httpStatus: 409,
+  });
+}
+
+function buildHostedTokenRefreshStateUnknownError() {
+  return deviceSyncError({
+    code: "TOKEN_REFRESH_STATE_UNKNOWN",
+    message: "Hosted device-sync token refresh state is unknown. Reconnect this source before syncing again.",
+    retryable: false,
+    httpStatus: 409,
+    accountStatus: "reauthorization_required",
   });
 }
