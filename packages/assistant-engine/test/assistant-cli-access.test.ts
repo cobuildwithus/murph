@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import { describe, expect, it } from "vitest";
@@ -80,6 +81,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
       [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
       MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
       MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_123",
       MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "7",
@@ -106,6 +108,9 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.VAULT).toBe("/tmp/murph-vault");
     expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
     expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
+    expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]).toBe(
+      "/tmp/murph-home/.codex-hosted/bin/codex",
+    );
     expect(env.OPENAI_API_KEY).toBe("openai-secret");
     expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");
     expect(env.CODEX_CA_CERTIFICATE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");

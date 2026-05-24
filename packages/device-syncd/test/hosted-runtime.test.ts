@@ -43,6 +43,20 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ),
     ).toEqual({
       connectionId: null,
+      includeCredentialMaterial: false,
+      provider: "oura",
+      userId: "trusted-user",
+    });
+    expect(
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          includeCredentialMaterial: true,
+          provider: "oura",
+        },
+        "trusted-user",
+      ),
+    ).toEqual({
+      includeCredentialMaterial: true,
       provider: "oura",
       userId: "trusted-user",
     });
@@ -131,6 +145,25 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       generatedAt: "2026-04-07T00:00:00.000Z",
       userId: "user_123",
     });
+  });
+
+  it("rejects non-object and invalid hosted runtime snapshot requests", () => {
+    for (const value of [null, "not-json-object", ["not-json-object"]]) {
+      expect(() =>
+        parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(value, "trusted-user"),
+      ).toThrowError(/Hosted device-sync runtime snapshot request must be an object/u);
+    }
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          includeCredentialMaterial: "true",
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(
+      /Hosted device-sync runtime snapshot request includeCredentialMaterial must be a boolean/u,
+    );
   });
 
   it("keeps only the supported internal projection paths", () => {
@@ -236,7 +269,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
-  it("parses OAuth and none credential snapshots and none credential updates", () => {
+  it("parses OAuth, redacted OAuth, and none credential snapshots and none credential updates", () => {
     const localState = {
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -297,6 +330,31 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             },
             localState,
           },
+          {
+            connection: {
+              accessTokenExpiresAt: "2026-04-12T10:00:00.000Z",
+              connectedAt: "2026-04-12T08:10:00.000Z",
+              createdAt: "2026-04-12T08:10:00.000Z",
+              displayName: "Redacted OAuth",
+              externalAccountId: "redacted-oauth-user-credential",
+              id: "conn_redacted_oauth_credential",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-12T08:11:00.000Z",
+            },
+            credential: {
+              credentialMetadata: {
+                safeCounter: 9,
+                tokenHint: "blocked",
+                tokenVersionNote: "blocked",
+              },
+              kind: "oauth_tokens_redacted",
+              tokenVersion: 9,
+            },
+            localState,
+          },
         ],
         generatedAt: "2026-04-12T08:07:00.000Z",
         userId: "user_123",
@@ -343,6 +401,29 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           },
           localState,
         },
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-04-12T10:00:00.000Z",
+            connectedAt: "2026-04-12T08:10:00.000Z",
+            createdAt: "2026-04-12T08:10:00.000Z",
+            displayName: "Redacted OAuth",
+            externalAccountId: "redacted-oauth-user-credential",
+            id: "conn_redacted_oauth_credential",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "active",
+            updatedAt: "2026-04-12T08:11:00.000Z",
+          },
+          credential: {
+            credentialMetadata: {
+              safeCounter: 9,
+            },
+            kind: "oauth_tokens_redacted",
+            tokenVersion: 9,
+          },
+          localState,
+        },
       ],
       generatedAt: "2026-04-12T08:07:00.000Z",
       userId: "user_123",
@@ -375,6 +456,23 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       userId: "user_123",
     });
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_redacted_oauth_credential",
+            credential: {
+              credentialMetadata: {},
+              kind: "oauth_tokens_redacted",
+              tokenVersion: 9,
+            },
+            observedTokenVersion: 9,
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/credential\.kind is not supported for credential mutations/u);
   });
 
   it("accepts string error fields while keeping timestamp fields strict", () => {

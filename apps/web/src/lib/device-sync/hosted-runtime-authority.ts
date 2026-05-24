@@ -106,6 +106,9 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         storedAccount,
         storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
         sources.map(toHostedRuntimeConnectionSourceSnapshot),
+        {
+          includeCredentialMaterial: parsed.includeCredentialMaterial,
+        },
       );
     }),
   );
@@ -172,6 +175,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           storedAccount,
           durableExternalAccountId,
           sources.map(toHostedRuntimeConnectionSourceSnapshot),
+          {
+            includeCredentialMaterial: true,
+          },
         );
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
         const credentialMutationRequested = update.credential !== undefined;
@@ -195,7 +201,10 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;
         let tokenBundlePersistenceRequested = false;
         let credentialToPersist:
-          | Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens" }>
+          | Exclude<
+            HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
+            { kind: "oauth_tokens" } | { kind: "oauth_tokens_redacted" }
+          >
           | undefined;
 
         if (!versionMismatch && update.connection) {
@@ -461,6 +470,11 @@ function buildHostedRuntimeConnectionSnapshot(
   storedAccount: HostedStoredDeviceSyncAccount | null,
   fallbackExternalAccountId: string | null = null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[] = [],
+  options: {
+    includeCredentialMaterial: boolean;
+  } = {
+    includeCredentialMaterial: false,
+  },
 ): HostedRuntimeConnectionSnapshot {
   const mappedRecord = mapHostedConnectionRecord(record);
   const publicConnection = storedAccount
@@ -472,6 +486,7 @@ function buildHostedRuntimeConnectionSnapshot(
         },
       });
   const credential = buildHostedRuntimeCredentialSnapshot({
+    includeCredentialMaterial: options.includeCredentialMaterial,
     record: mappedRecord,
     storedAccount,
   });
@@ -580,15 +595,24 @@ function sortHostedRuntimeConnectionSnapshots(
 }
 
 function buildHostedRuntimeCredentialSnapshot(input: {
+  includeCredentialMaterial: boolean;
   record: HostedStaticDeviceSyncConnectionRecord;
   storedAccount: HostedStoredDeviceSyncAccount | null;
 }): HostedExecutionDeviceSyncRuntimeCredentialSnapshot {
   const storedTokenBundle = buildStoredTokenBundle(input.storedAccount);
 
-  if (storedTokenBundle) {
+  if (storedTokenBundle && input.includeCredentialMaterial) {
     return {
       kind: "oauth_tokens",
       tokenBundle: storedTokenBundle,
+    };
+  }
+
+  if (input.record.credentialKind === "oauth_tokens" && !input.includeCredentialMaterial) {
+    return {
+      credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(input.record.credentialMetadata),
+      kind: "oauth_tokens_redacted",
+      tokenVersion: storedTokenBundle?.tokenVersion ?? null,
     };
   }
 
@@ -895,10 +919,7 @@ function toHostedRuntimeApplyLogCode(value: string | null | undefined): string {
 
 function resolveHostedRuntimeCredentialUpdate(
   credential: HostedExecutionDeviceSyncRuntimeCredentialUpdate,
-): HostedExecutionDeviceSyncRuntimeCredentialSnapshot | Extract<
-  HostedExecutionDeviceSyncRuntimeCredentialUpdate,
-  { clearTokens: true; kind: "oauth_tokens" }
-> {
+): HostedExecutionDeviceSyncRuntimeCredentialUpdate {
   if (credential.kind === "oauth_tokens" && "clearTokens" in credential) {
     return credential;
   }
@@ -908,10 +929,9 @@ function resolveHostedRuntimeCredentialUpdate(
 
 function validateHostedRuntimeCredentialMutation(input: {
   baseline: HostedRuntimeConnectionSnapshot;
-  credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot | Extract<
-    HostedExecutionDeviceSyncRuntimeCredentialUpdate,
-    { clearTokens: true; kind: "oauth_tokens" }
-  >;
+  credential:
+    | Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens_redacted" }>
+    | Extract<HostedExecutionDeviceSyncRuntimeCredentialUpdate, { clearTokens: true; kind: "oauth_tokens" }>;
   provider: string;
 }): void {
   const manifest = resolveConfiguredDeviceSyncProviderManifest(input.provider);
@@ -972,7 +992,10 @@ function validateHostedRuntimeCredentialMutation(input: {
 
 async function persistHostedRuntimeCredentialSnapshot(input: {
   connectionId: string;
-  credential: Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens" }>;
+  credential: Exclude<
+    HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
+    { kind: "oauth_tokens" } | { kind: "oauth_tokens_redacted" }
+  >;
   tx: HostedPrismaTransactionClient;
 }): Promise<void> {
   if (input.credential.kind === "provider_config" && !input.credential.providerConfigKey.trim()) {

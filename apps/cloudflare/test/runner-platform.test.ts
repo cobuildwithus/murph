@@ -2191,6 +2191,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       expect(body).toEqual({
         connectionId: "conn_123",
+        includeCredentialMaterial: true,
         userId: "member_123",
       });
 
@@ -2511,6 +2512,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("content-type")).toBe("application/json");
     await expect(request.json()).resolves.toEqual({
       connectionId: "conn_123",
+      includeCredentialMaterial: false,
       userId: "member_123",
     });
   });

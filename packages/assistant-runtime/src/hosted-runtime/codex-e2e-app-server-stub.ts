@@ -4,6 +4,9 @@ import path from "node:path";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
@@ -593,6 +596,7 @@ async function installHostedE2ECodexShim(input: {
     binDir,
     input.runtimeEnv.PATH ?? process.env.PATH ?? DEFAULT_HOSTED_CODEX_PATH,
   );
+  input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV] = codexPath;
 }
 
 function readHostedE2ECodexAppServerStubBaseUrl(

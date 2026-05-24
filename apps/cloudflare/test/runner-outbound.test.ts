@@ -130,6 +130,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       connectionId: "conn_123",
+      includeCredentialMaterial: true,
       userId: "member_123",
     },
     name: "device-sync runtime snapshot",
@@ -471,6 +472,11 @@ describe("handleRunnerOutboundRequest", () => {
               ? {}
               : {
                   "content-type": "application/json; charset=utf-8",
+                  authorization: "Bearer child-supplied-token",
+                  "x-api-key": "child-supplied-key",
+                  "x-hosted-execution-signature": "child-signature",
+                  "x-hosted-execution-user-id": "member_spoofed",
+                  "x-hosted-runner-bound-user-id": "member_spoofed",
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -507,10 +513,21 @@ describe("handleRunnerOutboundRequest", () => {
       const [url, init] = firstCall;
       expect(String(url)).toBe(`https://web.example.test${path}`);
       expect(init?.method).toBe("POST");
-      expect(init?.body).toBe(body === undefined ? undefined : JSON.stringify(body));
+      const expectedForwardedBody = path === "/api/internal/device-sync/runtime/snapshot"
+        ? JSON.stringify({
+            ...body,
+            includeCredentialMaterial: false,
+          })
+        : body === undefined ? undefined : JSON.stringify(body);
+      expect(init?.body).toBe(expectedForwardedBody);
       const headers = new Headers(init?.headers);
       expect(headers.get("content-type")).toBe(body === undefined ? null : "application/json");
       expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+      expect(headers.get("authorization")).toBeNull();
+      expect(headers.get("x-api-key")).toBeNull();
+      expect(headers.get("x-hosted-execution-signature")).toBeTruthy();
+      expect(headers.get("x-hosted-execution-signature")).not.toBe("child-signature");
+      expect(headers.get("x-hosted-runner-bound-user-id")).toBeNull();
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );

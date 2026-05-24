@@ -36,6 +36,7 @@ import {
   handleRunnerMailboxPayloadDecodeRequest,
 } from "./mailbox-payload-decode.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   readHostedRunnerWebControlPolicy,
 } from "./shared-web-control-policy.ts";
 import {
@@ -289,6 +290,13 @@ function augmentHostedRunnerWebControlBody(input: {
   userId: string;
 }): string | undefined {
   if (
+    input.body !== undefined
+    && input.path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
+  ) {
+    return forceHostedRunnerRuntimeSnapshotTokenless(input.body);
+  }
+
+  if (
     input.body === undefined
     || input.path !== HOSTED_RUNTIME_USAGE_RECORD_PATH
   ) {
@@ -319,6 +327,23 @@ function augmentHostedRunnerWebControlBody(input: {
   });
 }
 
+function forceHostedRunnerRuntimeSnapshotTokenless(body: string): string {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isJsonObject(payload)) {
+    return body;
+  }
+
+  return JSON.stringify({
+    ...payload,
+    includeCredentialMaterial: false,
+  });
+}
+
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {
   const bodyText = await readRequestBodyText(request, {
     limitBytes: HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES,
@@ -329,12 +354,16 @@ async function readOptionalHostedRunnerWebControlBody(request: Request): Promise
 function isHostedRunnerRecord(value: unknown): value is {
   usage: Record<string, unknown>;
 } {
-  return typeof value === "object"
-    && value !== null
-    && !Array.isArray(value)
+  return isJsonObject(value)
     && typeof (value as { usage?: unknown }).usage === "object"
     && (value as { usage?: unknown }).usage !== null
     && !Array.isArray((value as { usage?: unknown }).usage);
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value);
 }
 
 function readRunnerStringEnv(
