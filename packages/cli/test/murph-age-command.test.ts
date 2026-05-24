@@ -13,6 +13,8 @@ import {
   MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+  listMurphAgeSubmittedCalculatorInputBundleSpecs,
+  listMurphAgeSubmittedCalculatorMetricInputSpecs,
   normalizeMetricValue,
   type MetricPoint,
   type MurphAgePublicCalculatorReport,
@@ -1502,6 +1504,53 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.deepEqual(calculatorBundle.capabilities.productScoreBearingMetricKeys, [])
     assert.equal(calculatorBundle.capabilities.productAgeDisplayAuthorized, false)
     assert.equal(calculatorBundle.capabilities.productRiskDisplayAuthorized, false)
+    assert.deepEqual(calculatorBundle.inputBundleSpecs, listMurphAgeSubmittedCalculatorInputBundleSpecs())
+    assert.deepEqual(calculatorBundle.metricInputSpecs, listMurphAgeSubmittedCalculatorMetricInputSpecs())
+    assert.equal(
+      calculatorBundle.inputBundleSpecs.some((spec) =>
+        spec.bundleId === 'wearable-context' && spec.scoreBearing === false
+      ),
+      true,
+    )
+    const submittedMetricSpecByKey = new Map(
+      calculatorBundle.metricInputSpecs.map((spec) => [spec.metricKey, spec]),
+    )
+    assert.deepEqual(
+      submittedMetricSpecByKey.get('hba1c')?.researchScoreBearingCardIds,
+      [
+        'l1b_glycemia_body_10y_acm_research',
+        'lab9_bp_body_10y_acm_research',
+        'lab5_bp_bmi_transport_research',
+        'l1_tiny_glycemia_10y_acm_research',
+      ],
+    )
+    assert.equal(
+      submittedMetricSpecByKey.get('albumin')?.researchScoreBearingCardIds.includes(
+        'lab9_bp_body_10y_acm_research',
+      ),
+      true,
+    )
+    assert.equal(
+      submittedMetricSpecByKey.get('creatinine')?.researchScoreBearingCardIds.includes(
+        'lab5_bp_bmi_transport_research',
+      ),
+      true,
+    )
+    assert.equal(
+      submittedMetricSpecByKey.get('resting-heart-rate')?.calculatorRoles.includes('wearable-context'),
+      true,
+    )
+    assert.equal(
+      submittedMetricSpecByKey.get('resting-heart-rate')?.wearableScoreBearingAuthorized,
+      false,
+    )
+    for (const spec of calculatorBundle.metricInputSpecs.filter((inputSpec) =>
+      inputSpec.calculatorRoles.includes('wearable-context')
+    )) {
+      assert.deepEqual(spec.researchScoreBearingCardIds, [])
+      assert.equal(spec.productScoreBearingAuthorized, false)
+      assert.equal(spec.wearableScoreBearingAuthorized, false)
+    }
     assert.deepEqual(calculatorBundle.capabilities.outputBoundary, {
       modelParametersExportAllowed: false,
       participantLevelExportAllowed: false,
@@ -1554,7 +1603,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
       payloadPath,
       'private metric',
       'fixture-lab5-research-model',
-      'fasting',
+      'fastingStatus',
       'manual-cuff',
       'metric-point:',
       '"value"',

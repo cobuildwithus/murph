@@ -25,6 +25,7 @@ import {
   isMurphAgeWearableBridgeValidDayMetricPoint,
   isMurphAgeWearableBridgeValidNightMetricPoint,
   isMurphAgeWearableShadowAnchorCardId,
+  listMurphAgeSubmittedCalculatorMetricInputSpecs,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
@@ -396,6 +397,8 @@ export async function getMurphAgeSubmittedCalculatorViewBundle(
     : null;
   return {
     capabilities: summarizeMurphAgeSubmittedCalculatorCapabilities(),
+    inputBundleSpecs: listMurphAgeSubmittedCalculatorInputBundleSpecs(),
+    metricInputSpecs: listMurphAgeSubmittedCalculatorMetricInputSpecs(),
     product: {
       report: productReport,
       view: buildMurphAgePublicCalculatorView(productReport),
