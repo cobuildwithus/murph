@@ -78,6 +78,132 @@ export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "workouts",
   "body",
 ] as const);
+const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
+  "activity",
+  "sleep",
+  "workouts",
+  "body",
+] as const);
+type JunctionHistoricalBackfillCompletionSummaryResource =
+  (typeof JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES)[number];
+const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<string>(
+  JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
+);
+const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
+  activity: [
+    "steps",
+    "step_count",
+    "daily_steps",
+    "activeCalories",
+    "active_calories",
+    "calories",
+    "totalCalories",
+    "total_calories",
+    "distanceKm",
+    "distance_km",
+    "activityScore",
+    "activity_score",
+    "score",
+  ],
+  body: [
+    "weightKg",
+    "weight_kg",
+    "weight",
+    "bmi",
+    "body_mass_index",
+    "bodyFatPercentage",
+    "body_fat_percentage",
+    "body_fat_percent",
+  ],
+  sleep: [
+    "sleepScore",
+    "sleep_score",
+    "score",
+    "totalSleepMinutes",
+    "total_sleep_minutes",
+    "asleep_minutes",
+    "deepMinutes",
+    "deep_minutes",
+    "remMinutes",
+    "rem_minutes",
+    "lightMinutes",
+    "light_minutes",
+    "awakeMinutes",
+    "awake_minutes",
+    "hrv",
+    "hrvRmssd",
+    "hrv_rmssd",
+    "restingHeartRate",
+    "resting_heart_rate",
+    "respiratoryRate",
+    "respiratory_rate",
+    "spo2",
+    "bloodOxygen",
+    "blood_oxygen",
+    "oxygen_saturation",
+  ],
+  workouts: [
+    "calories",
+    "totalCalories",
+    "total_calories",
+    "averageHeartRate",
+    "average_heart_rate",
+    "average_hr",
+    "avg_hr",
+    "maxHeartRate",
+    "max_heart_rate",
+    "max_hr",
+  ],
+} satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
+const JUNCTION_SLEEP_START_TIMESTAMP_PATHS = Object.freeze([
+  "startAt",
+  "start_at",
+  "bedtimeStart",
+  "bedtime_start",
+] as const);
+const JUNCTION_SLEEP_END_TIMESTAMP_PATHS = Object.freeze([
+  "endAt",
+  "end_at",
+  "bedtimeEnd",
+  "bedtime_end",
+  "bedtimeStop",
+  "bedtime_stop",
+] as const);
+const JUNCTION_WORKOUT_START_TIMESTAMP_PATHS = Object.freeze([
+  "startAt",
+  "start_at",
+  "start",
+  "timeStart",
+  "time_start",
+] as const);
+const JUNCTION_WORKOUT_END_TIMESTAMP_PATHS = Object.freeze([
+  "endAt",
+  "end_at",
+  "end",
+  "timeEnd",
+  "time_end",
+] as const);
+const JUNCTION_WORKOUT_DURATION_MINUTE_PATHS = Object.freeze([
+  "durationMinutes",
+  "duration_minutes",
+  "movingTimeMinutes",
+  "moving_time_minutes",
+] as const);
+const JUNCTION_WORKOUT_DURATION_SECOND_PATHS = Object.freeze([
+  "durationSeconds",
+  "duration_seconds",
+  "movingTime",
+  "moving_time",
+  "duration",
+] as const);
+const JUNCTION_WORKOUT_DURATION_MILLISECOND_PATHS = Object.freeze([
+  "durationMillis",
+  "duration_millis",
+] as const);
+const JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
+  "abbott_libreview",
+  "freestyle_libre",
+]);
 export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "steps",
   "heartrate",
@@ -262,27 +388,28 @@ export function createJunctionDeviceSyncProvider(
       ? resolveCurrentSummaryWindow(context.now, reconcileDays)
       : window;
     const summaries = await fetchSummarySnapshots(context, summaryWindow.windowStart, summaryWindow.windowEnd);
-    const summaryHasRecords = hasJunctionSnapshotRecords(summaries);
+    const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    await context.importSnapshot({
-      provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.id),
-      connectionId: context.account.id,
-      importedAt: summaryWindow.windowEnd,
-      windowStart: summaryWindow.windowStart,
-      windowEnd: summaryWindow.windowEnd,
-      connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
-      timeseries: {},
-    });
-    let timeseriesHasRecords = false;
+    if (job.kind !== "backfill" || historicalSummaryHasRecords) {
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.id),
+        connectionId: context.account.id,
+        importedAt: summaryWindow.windowEnd,
+        windowStart: summaryWindow.windowStart,
+        windowEnd: summaryWindow.windowEnd,
+        connections: sanitizeJunctionImportConnections(sourceProviders),
+        summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
+        timeseries: {},
+      });
+    }
     if (
       job.kind === "backfill"
       || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
     ) {
-      timeseriesHasRecords = await importTimeseriesDailySnapshots(
+      await importTimeseriesDailySnapshots(
         context,
         sourceProviders,
         timeseriesWindowStart,
@@ -292,7 +419,7 @@ export function createJunctionDeviceSyncProvider(
 
     const backfillFollowUp = job.kind === "backfill"
       ? buildHistoricalBackfillFollowUp({
-          hasRecords: summaryHasRecords || timeseriesHasRecords,
+          hasRecords: historicalSummaryHasRecords,
           metadata: context.account.metadata,
           now: context.now,
           windowStart: window.windowStart,
@@ -522,9 +649,7 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string,
     windowEnd: string,
     resources?: readonly string[],
-  ): Promise<boolean> {
-    let importedRecords = false;
-
+  ): Promise<void> {
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
       const timeseries = await fetchTimeseriesSnapshots(
         context,
@@ -535,7 +660,6 @@ export function createJunctionDeviceSyncProvider(
       if (!hasJunctionSnapshotRecords(timeseries)) {
         continue;
       }
-      importedRecords = true;
 
       await context.importSnapshot({
         provider: "junction",
@@ -549,8 +673,6 @@ export function createJunctionDeviceSyncProvider(
         timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
       });
     }
-
-    return importedRecords;
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -1124,6 +1246,265 @@ function floorUtcDayTimestamp(timestamp: string): string {
 
 function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolean {
   return Object.values(snapshot).some((records) => records.length > 0);
+}
+
+function hasJunctionHistoricalBackfillSummaryRecords(
+  snapshot: Record<string, unknown[]>,
+  sourceProviders: readonly JunctionProviderConnection[],
+): boolean {
+  const sourceReferences = buildJunctionSourceReferenceMap(sourceProviders);
+
+  return Object.entries(snapshot).some(([resource, records]) =>
+    isJunctionHistoricalBackfillCompletionSummaryResource(resource)
+      && records.some((record) =>
+        expandJunctionHistoricalBackfillSummaryRecord(record).some(({ entry, originFallback }) =>
+          hasUsefulJunctionHistoricalBackfillSummaryRecord(
+            resource,
+            entry,
+            resolveJunctionSummarySourceProviderSlug(entry, originFallback, sourceReferences),
+          )
+        )
+      )
+  );
+}
+
+function isJunctionHistoricalBackfillCompletionSummaryResource(
+  resource: string,
+): resource is JunctionHistoricalBackfillCompletionSummaryResource {
+  return JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET.has(resource);
+}
+
+function hasUsefulJunctionHistoricalBackfillSummaryRecord(
+  resource: JunctionHistoricalBackfillCompletionSummaryResource,
+  entry: Record<string, unknown>,
+  sourceProviderSlug: string | null,
+): boolean {
+  if (!sourceProviderSlug) {
+    return false;
+  }
+
+  if (
+    !isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug)
+    && hasFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS[resource])
+  ) {
+    return true;
+  }
+
+  if (resource === "sleep") {
+    return hasPositiveJunctionTimestampRange(
+      entry,
+      JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+      JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+      sourceProviderSlug,
+    );
+  }
+
+  if (resource === "workouts") {
+    return hasUsefulJunctionWorkoutSessionRecord(entry, sourceProviderSlug);
+  }
+
+  return false;
+}
+
+function expandJunctionHistoricalBackfillSummaryRecord(
+  value: unknown,
+): Array<{ entry: Record<string, unknown>; originFallback?: Record<string, unknown> }> {
+  const record = readPlainObject(value);
+  if (!record) {
+    return [];
+  }
+
+  const nestedEntries = readNestedJunctionHistoricalBackfillSummaryEntries(record);
+  if (!nestedEntries) {
+    return [{ entry: record }];
+  }
+
+  return nestedEntries.map((entry) => ({
+    entry,
+    originFallback: record,
+  }));
+}
+
+function readNestedJunctionHistoricalBackfillSummaryEntries(
+  record: Record<string, unknown>,
+): Record<string, unknown>[] | null {
+  for (const key of ["data", "results", "items", "records"]) {
+    const entries = readJunctionRecordArray(record[key]).flatMap((entry) => {
+      const normalized = readPlainObject(entry);
+      return normalized ? [normalized] : [];
+    });
+    if (entries.length > 0) {
+      return entries;
+    }
+  }
+
+  return null;
+}
+
+function resolveJunctionSummarySourceProviderSlug(
+  entry: Record<string, unknown>,
+  originFallback: Record<string, unknown> | undefined,
+  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+): string | null {
+  const resolvedOrigin = resolveJunctionOrigin(
+    entry,
+    buildJunctionSummarySourceFallback(entry, originFallback, sourceReferences),
+  );
+  return resolvedOrigin.sourceProviderSlug ?? null;
+}
+
+function buildJunctionSummarySourceFallback(
+  entry: Record<string, unknown>,
+  originFallback: Record<string, unknown> | undefined,
+  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  const entryReference = readJunctionSourceReference(entry, sourceReferences);
+  const fallbackReference = originFallback
+    ? readJunctionSourceReference(originFallback, sourceReferences)
+    : {};
+
+  return {
+    ...(originFallback ?? {}),
+    ...fallbackReference,
+    ...entryReference,
+  };
+}
+
+function hasUsefulJunctionWorkoutSessionRecord(
+  entry: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  const hasDuration =
+    hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_WORKOUT_DURATION_MINUTE_PATHS)
+    || hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_WORKOUT_DURATION_SECOND_PATHS)
+    || hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_WORKOUT_DURATION_MILLISECOND_PATHS)
+    || hasPositiveJunctionTimestampRange(
+      entry,
+      JUNCTION_WORKOUT_START_TIMESTAMP_PATHS,
+      JUNCTION_WORKOUT_END_TIMESTAMP_PATHS,
+      sourceProviderSlug,
+    );
+  if (!hasDuration) {
+    return false;
+  }
+
+  const startAt = firstJunctionTimestampMillisFromPaths(
+    entry,
+    JUNCTION_WORKOUT_START_TIMESTAMP_PATHS,
+    sourceProviderSlug,
+  );
+  const endAt = firstJunctionTimestampMillisFromPaths(
+    entry,
+    JUNCTION_WORKOUT_END_TIMESTAMP_PATHS,
+    sourceProviderSlug,
+  );
+  return startAt !== null || (endAt === null && !isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug));
+}
+
+function hasFiniteNumberFromJunctionRecordPaths(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+): boolean {
+  return paths.some((path) => finiteJunctionNumber(readJunctionRecordPath(entry, path)) !== undefined);
+}
+
+function hasPositiveFiniteNumberFromJunctionRecordPaths(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+): boolean {
+  return paths.some((path) => {
+    const numeric = finiteJunctionNumber(readJunctionRecordPath(entry, path));
+    return numeric !== undefined && numeric > 0;
+  });
+}
+
+function hasPositiveJunctionTimestampRange(
+  entry: Record<string, unknown>,
+  startPaths: readonly string[],
+  endPaths: readonly string[],
+  sourceProviderSlug: string,
+): boolean {
+  const startAt = firstJunctionTimestampMillisFromPaths(entry, startPaths, sourceProviderSlug);
+  const endAt = firstJunctionTimestampMillisFromPaths(entry, endPaths, sourceProviderSlug);
+  return startAt !== null && endAt !== null && endAt > startAt;
+}
+
+function firstJunctionTimestampMillisFromPaths(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+  sourceProviderSlug: string,
+): number | null {
+  for (const path of paths) {
+    const timestamp = junctionTimestampMillis(readJunctionRecordPath(entry, path), sourceProviderSlug);
+    if (timestamp !== null) {
+      return timestamp;
+    }
+  }
+
+  return null;
+}
+
+function readJunctionRecordPath(entry: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, key) => {
+    const record = readPlainObject(current);
+    return record ? record[key] : undefined;
+  }, entry);
+}
+
+function readJunctionRecordArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function finiteJunctionNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : undefined;
+  }
+
+  return undefined;
+}
+
+function junctionTimestampMillis(value: unknown, sourceProviderSlug: string): number | null {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.getTime();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (isRejectedJunctionSafeTimestampString(trimmed, sourceProviderSlug)) {
+    return null;
+  }
+
+  const parsed = Date.parse(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isRejectedJunctionSafeTimestampString(value: string, sourceProviderSlug: string): boolean {
+  if (isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug)) {
+    return true;
+  }
+
+  return /^\d{4}-\d{2}-\d{2}(?:$|[ t]\d{2}:\d{2})/iu.test(value)
+    && !/z$/iu.test(value)
+    && !/[+-]\d{2}:?\d{2}$/u.test(value);
+}
+
+function isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug: string): boolean {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  return normalizedSourceProviderSlug
+    ? JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS.has(normalizedSourceProviderSlug)
+    : false;
 }
 
 function buildHistoricalBackfillFollowUp(input: {
