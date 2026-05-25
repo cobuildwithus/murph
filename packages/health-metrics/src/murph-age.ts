@@ -728,6 +728,14 @@ export interface MurphAgeSubmittedCalculatorInput extends Omit<MurphAgeCalculato
   submittedMetrics: readonly MurphAgeSubmittedMetricInput[];
 }
 
+export interface MurphAgeResearchPreviewSubmittedCalculatorInput
+  extends Omit<MurphAgeSubmittedCalculatorInput, "mode" | "models"> {
+  modelCards: readonly MurphAgeLocalModelCardArtifact[];
+}
+
+export type MurphAgeResearchPreviewSubmittedCalculatorViewBundleOptions =
+  Omit<MurphAgeSubmittedCalculatorViewBundleOptions, "includeResearchPreview">;
+
 export type MurphAgeSubmittedCalculatorMetricRole =
   | "bp-body-research"
   | "function-context"
@@ -7548,6 +7556,30 @@ export function buildMurphAgeSubmittedCalculatorViewBundle(
     researchPreview,
     schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   };
+}
+
+export function buildMurphAgeModelsFromLocalModelCardArtifacts(
+  modelCards: readonly MurphAgeLocalModelCardArtifact[],
+): Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>> {
+  const models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>> = {};
+  for (const modelCard of modelCards) {
+    models[modelCard.cardId] = modelCard.model;
+  }
+  return models;
+}
+
+export function buildMurphAgeResearchPreviewSubmittedCalculatorViewBundle(
+  input: MurphAgeResearchPreviewSubmittedCalculatorInput,
+  options: MurphAgeResearchPreviewSubmittedCalculatorViewBundleOptions = {},
+): MurphAgeSubmittedCalculatorViewBundle {
+  const { modelCards, ...calculatorInput } = input;
+  return buildMurphAgeSubmittedCalculatorViewBundle({
+    ...calculatorInput,
+    models: buildMurphAgeModelsFromLocalModelCardArtifacts(modelCards),
+  }, {
+    ...options,
+    includeResearchPreview: true,
+  });
 }
 
 function buildMurphAgeResearchPreviewFromSubmittedInputs(
