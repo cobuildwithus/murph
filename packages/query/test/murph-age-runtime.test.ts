@@ -22,6 +22,7 @@ import {
   type MurphAgeFunctionResidualParameterPack,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
+  type MurphAgeSubmittedMetricInput,
   type MurphAgeWearableResidualParameterPack,
 } from "@murphai/health-metrics";
 import { test } from "vitest";
@@ -986,6 +987,7 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
 test("getMurphAgeSubmittedCalculatorViewBundle loads local wearable packs into the research preview", async () => {
   const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
   const wearablePackRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-wearable-pack-root-"));
+  const emptyWearablePackRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-empty-wearable-pack-root-"));
   try {
     await writeModelCardArtifact(modelCardArtifactRoot, "lab5.json", {
       cardId: "lab5_bp_bmi_transport_research",
@@ -1033,6 +1035,32 @@ test("getMurphAgeSubmittedCalculatorViewBundle loads local wearable packs into t
         scale: 20,
       }),
     );
+    const submittedMetrics: MurphAgeSubmittedMetricInput[] = [
+      { metricKey: "HbA1c", unit: "%", value: 5.3 },
+      { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+      { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+      { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+      { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+      { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+      { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+      { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
+      { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+      { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.91 },
+      { metricKey: "total-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 450 },
+      { metricKey: "wearable_valid_night_count_28d", sourceKind: "sleep-summary", unit: "count", value: 22 },
+      { metricKey: "resting-heart-rate", sourceKind: "wearable-summary", unit: "bpm", value: 54 },
+      { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 70 },
+    ];
+
+    const labOnlyBundle = await getMurphAgeSubmittedCalculatorViewBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      includeResearchPreview: true,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics,
+      wearableResidualParameterPackRoot: emptyWearablePackRoot,
+    });
 
     const bundle = await getMurphAgeSubmittedCalculatorViewBundle({
       asOf: "2026-05-10T00:00:00.000Z",
@@ -1040,49 +1068,56 @@ test("getMurphAgeSubmittedCalculatorViewBundle loads local wearable packs into t
       includeResearchPreview: true,
       modelCardArtifactRoot,
       sex: "female",
-      submittedMetrics: [
-        { metricKey: "HbA1c", unit: "%", value: 5.3 },
-        { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
-        { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
-        { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
-        { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
-        { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
-        { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
-        { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
-        { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
-        { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.91 },
-        { metricKey: "total-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 450 },
-        { metricKey: "wearable_valid_night_count_28d", sourceKind: "sleep-summary", unit: "count", value: 22 },
-        { metricKey: "resting-heart-rate", sourceKind: "wearable-summary", unit: "bpm", value: 54 },
-        { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 70 },
-      ],
+      submittedMetrics,
       wearableResidualParameterPackRoot: wearablePackRoot,
     });
 
     const researchView = bundle.researchPreview?.view;
+    const labOnlyResearchView = labOnlyBundle.researchPreview?.view;
+    const labOnlyReportAge = labOnlyBundle.researchPreview?.report.result?.biologicalAgeYears;
+    const residualPackReportAge = bundle.researchPreview?.report.result?.biologicalAgeYears;
     assert.equal(bundle.product.view.ageEstimate, null);
     assert.equal(bundle.product.view.scoreReadiness.status, "validation-pending");
+    assert.equal(labOnlyResearchView?.model.wearable.researchScoreBearing, false);
+    assert.equal(labOnlyResearchView?.layeredAgeEstimate?.appliedLayerIds.includes("wearable-multi-family-residual"), false);
+    assert.equal(residualPackReportAge, labOnlyReportAge);
     assert.equal(researchView?.wearableResidualLayer?.layerId, "multi-wearable-residual-v1");
     assert.equal(researchView?.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
     assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
     assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("total-sleep-minutes"), true);
     assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("resting-heart-rate"), true);
     assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("hrv-rmssd"), true);
+    assert.equal(researchView?.model.wearable.researchScoreBearing, true);
     assert.deepEqual(researchView?.layeredAgeEstimate?.appliedLayerIds, [
       "selected-lab-body-card",
       "wearable-multi-family-residual",
     ]);
+    assert.notEqual(
+      researchView?.ageEstimate?.biologicalAgeYears,
+      labOnlyResearchView?.ageEstimate?.biologicalAgeYears,
+    );
+    assert.notEqual(researchView?.ageEstimate?.biologicalAgeYears, residualPackReportAge);
+    assert.equal(
+      researchView?.ageEstimate?.biologicalAgeYears,
+      researchView?.wearableResidualLayer?.finalRiskAgeEquivalentYears,
+    );
     assert.equal(researchView?.layeredAgeEstimate?.productAuthorized, false);
     assert.equal(researchView?.layeredAgeEstimate?.residualScoreContributionAuthorized, false);
 
     const encodedBundle = JSON.stringify(bundle);
+    const encodedLabOnlyBundle = JSON.stringify(labOnlyBundle);
     assert.equal(encodedBundle.includes(modelCardArtifactRoot), false);
+    assert.equal(encodedLabOnlyBundle.includes(modelCardArtifactRoot), false);
     assert.equal(encodedBundle.includes(wearablePackRoot), false);
+    assert.equal(encodedLabOnlyBundle.includes(emptyWearablePackRoot), false);
     assert.equal(encodedBundle.includes("coefficient"), false);
+    assert.equal(encodedLabOnlyBundle.includes("coefficient"), false);
     assert.equal(encodedBundle.includes("10000"), false);
+    assert.equal(encodedLabOnlyBundle.includes("10000"), false);
   } finally {
     await rm(modelCardArtifactRoot, { force: true, recursive: true });
     await rm(wearablePackRoot, { force: true, recursive: true });
+    await rm(emptyWearablePackRoot, { force: true, recursive: true });
   }
 });
 
