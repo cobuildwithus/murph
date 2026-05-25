@@ -190,6 +190,7 @@ export class HostedDeviceSyncAgentSessionService {
         throwIfHostedTokenBundleUnsupported({
           credentialKind: storedAccount.credential.kind,
         }, connectionId);
+        throwIfHostedTokenBundleAccountInactive(storedAccount, connectionId);
 
         const storedTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
           connectionId,
@@ -235,13 +236,20 @@ export class HostedDeviceSyncAgentSessionService {
     );
 
     if (result.status === "stale_refresh_lease") {
-      const resolvedResult = await this.failClosedStaleRefreshLease({
-        baseTokenBundle: result.currentTokenBundle,
-        connectionId,
-        forceRefresh: false,
-        now,
-        session,
-      });
+      let resolvedResult: HostedTokenRefreshSuccess;
+      try {
+        resolvedResult = await this.failClosedStaleRefreshLease({
+          baseTokenBundle: result.currentTokenBundle,
+          connectionId,
+          forceRefresh: false,
+          now,
+          session,
+        });
+      } catch (error) {
+        await this.assertCurrentAgentSessionStillActive();
+        throw error;
+      }
+      await this.assertCurrentAgentSessionStillActive();
       return {
         connection: resolvedResult.connection,
         tokenBundle: resolvedResult.tokenBundle,
@@ -295,6 +303,7 @@ export class HostedDeviceSyncAgentSessionService {
       throwIfHostedTokenBundleUnsupported({
         credentialKind: currentAccount.credential.kind,
       }, connectionId);
+      throwIfHostedTokenBundleAccountInactive(currentAccount, connectionId);
 
       const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
         connectionId,
@@ -469,6 +478,7 @@ export class HostedDeviceSyncAgentSessionService {
       throwIfHostedTokenBundleUnsupported({
         credentialKind: currentAccount.credential.kind,
       }, input.connectionId);
+      throwIfHostedTokenBundleAccountInactive(currentAccount, input.connectionId);
 
       const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
         connectionId: input.connectionId,
@@ -709,6 +719,7 @@ export class HostedDeviceSyncAgentSessionService {
         throwIfHostedTokenBundleUnsupported({
           credentialKind: currentAccount.credential.kind,
         }, input.connectionId);
+        throwIfHostedTokenBundleAccountInactive(currentAccount, input.connectionId);
 
         const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
           connectionId: input.connectionId,
@@ -882,6 +893,7 @@ export class HostedDeviceSyncAgentSessionService {
         throwIfHostedTokenBundleUnsupported({
           credentialKind: currentAccount.credential.kind,
         }, input.connectionId);
+        throwIfHostedTokenBundleAccountInactive(currentAccount, input.connectionId);
         const currentConnection = toPublicHostedDeviceSyncAccount(currentAccount);
 
         const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
@@ -938,7 +950,7 @@ export class HostedDeviceSyncAgentSessionService {
         });
 
         if (input.refreshResult.status === "error") {
-          await persistProviderTokenRefreshErrorStatus({
+          const persistedError = await persistProviderTokenRefreshErrorStatus({
             store: this.store,
             tx,
             account: currentAccount,
@@ -956,7 +968,7 @@ export class HostedDeviceSyncAgentSessionService {
 
           return {
             status: "refresh_error",
-            error: input.refreshResult.error,
+            error: persistedError,
           };
         }
 
@@ -1149,6 +1161,39 @@ function throwIfHostedTokenBundleUnsupported(
     details: {
       connectionId,
       credentialKind,
+    },
+  });
+}
+
+function throwIfHostedTokenBundleAccountInactive(
+  account: Pick<PublicDeviceSyncAccount, "status">,
+  connectionId: string,
+): void {
+  if (account.status === "active") {
+    return;
+  }
+
+  if (account.status === "disconnected") {
+    throw deviceSyncError({
+      code: "CONNECTION_ALREADY_DISCONNECTED",
+      message: "Hosted device-sync connection is disconnected.",
+      retryable: false,
+      httpStatus: 409,
+      accountStatus: "disconnected",
+      details: {
+        connectionId,
+      },
+    });
+  }
+
+  throw deviceSyncError({
+    code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+    message: "Hosted device-sync connection requires reauthorization before token material can be used.",
+    retryable: false,
+    httpStatus: 409,
+    accountStatus: "reauthorization_required",
+    details: {
+      connectionId,
     },
   });
 }

@@ -142,6 +142,8 @@ export class PrismaHostedConnectionStore {
           });
         }
 
+        assertNoActiveHostedConnectionRefreshLease(existing, connectedAt);
+
         const credentialWrite = await buildHostedConnectionCredentialWrite({
           connectionId: existing.id,
           credential,
@@ -902,6 +904,30 @@ function assertHostedUpsertExistingConnectionGuard(
       httpStatus: 409,
     });
   }
+}
+
+function assertNoActiveHostedConnectionRefreshLease(
+  record: HostedConnectionRecord,
+  now: Date,
+): void {
+  const refreshLeaseOwner = normalizeNullableString(record.refreshLeaseOwner);
+
+  if (
+    !refreshLeaseOwner
+    || !record.refreshLeaseExpiresAt
+    || record.refreshLeaseTokenVersion === null
+    || record.refreshLeaseTokenVersion !== record.tokenVersion
+    || record.refreshLeaseExpiresAt.getTime() <= now.getTime()
+  ) {
+    return;
+  }
+
+  throw deviceSyncError({
+    code: "TOKEN_REFRESH_IN_PROGRESS",
+    message: "A hosted device-sync token refresh is already in progress for this connection.",
+    retryable: true,
+    httpStatus: 409,
+  });
 }
 
 function requireHostedDeviceSyncSetupPhase(
