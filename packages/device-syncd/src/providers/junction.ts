@@ -102,6 +102,20 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
+const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
+  15 * 60_000,
+  60 * 60_000,
+  6 * 60 * 60_000,
+  24 * 60 * 60_000,
+] as const);
+const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
+  status: "junctionHistoricalBackfillStatus",
+  emptyAttempts: "junctionHistoricalBackfillEmptyAttempts",
+  lastEmptyAt: "junctionHistoricalBackfillLastEmptyAt",
+  windowStart: "junctionHistoricalBackfillWindowStart",
+  windowEnd: "junctionHistoricalBackfillWindowEnd",
+} as const);
+type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
@@ -248,6 +262,15 @@ export function createJunctionDeviceSyncProvider(
       ? resolveCurrentSummaryWindow(context.now, reconcileDays)
       : window;
     const summaries = await fetchSummarySnapshots(context, summaryWindow.windowStart, summaryWindow.windowEnd);
+    const backfillFollowUp = job.kind === "backfill"
+      ? buildHistoricalBackfillFollowUp({
+          metadata: context.account.metadata,
+          now: context.now,
+          summaryHasRecords: hasJunctionSnapshotRecords(summaries),
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+        })
+      : {};
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
@@ -275,6 +298,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return {
+      ...backfillFollowUp,
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };
   }
@@ -1094,6 +1118,112 @@ function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolea
   return Object.values(snapshot).some((records) => records.length > 0);
 }
 
+function buildHistoricalBackfillFollowUp(input: {
+  metadata: Record<string, unknown>;
+  now: string;
+  summaryHasRecords: boolean;
+  windowStart: string;
+  windowEnd: string;
+}): Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs"> {
+  if (input.summaryHasRecords) {
+    return {
+      metadataPatch: buildHistoricalBackfillMetadataPatch({
+        status: "complete",
+        emptyAttempts: 0,
+        lastEmptyAt: null,
+        windowStart: input.windowStart,
+        windowEnd: input.windowEnd,
+      }),
+    };
+  }
+
+  if (
+    hasHistoricalBackfillWindowStatus(input.metadata, "complete", input.windowStart, input.windowEnd)
+    || hasHistoricalBackfillWindowStatus(input.metadata, "exhausted", input.windowStart, input.windowEnd)
+  ) {
+    return {};
+  }
+
+  const emptyAttempts = readHistoricalBackfillEmptyAttempts(
+    input.metadata,
+    input.windowStart,
+    input.windowEnd,
+  ) + 1;
+  const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  const status: JunctionHistoricalBackfillStatus = retryDelayMs === null ? "exhausted" : "retrying";
+  const metadataPatch = buildHistoricalBackfillMetadataPatch({
+    status,
+    emptyAttempts,
+    lastEmptyAt: input.now,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+  });
+
+  if (retryDelayMs === null) {
+    return { metadataPatch };
+  }
+
+  const retryJob = buildExactWindowJob({
+    kind: "backfill",
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+    priority: 30,
+  });
+
+  return {
+    metadataPatch,
+    scheduledJobs: [{
+      ...retryJob,
+      availableAt: addMilliseconds(input.now, retryDelayMs),
+    }],
+  };
+}
+
+function buildHistoricalBackfillMetadataPatch(input: {
+  status: JunctionHistoricalBackfillStatus;
+  emptyAttempts: number;
+  lastEmptyAt: string | null;
+  windowStart: string;
+  windowEnd: string;
+}): Record<string, unknown> {
+  return {
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]: input.status,
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]: input.emptyAttempts,
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]: input.lastEmptyAt,
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]: input.windowStart,
+    [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]: input.windowEnd,
+  };
+}
+
+function hasHistoricalBackfillWindowStatus(
+  metadata: Record<string, unknown>,
+  status: JunctionHistoricalBackfillStatus,
+  windowStart: string,
+  windowEnd: string,
+): boolean {
+  return normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]) === status
+    && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) === windowStart
+    && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) === windowEnd;
+}
+
+function readHistoricalBackfillEmptyAttempts(
+  metadata: Record<string, unknown>,
+  windowStart: string,
+  windowEnd: string,
+): number {
+  if (
+    normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) !== windowStart
+    || normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) !== windowEnd
+  ) {
+    return 0;
+  }
+
+  const rawAttempts = metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts];
+  return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts >= 0
+    ? rawAttempts
+    : 0;
+}
+
 function buildWindowJob(input: {
   kind: "backfill" | "reconcile";
   now: string;
@@ -1103,14 +1233,28 @@ function buildWindowJob(input: {
   const windowEnd = floorUtcDayTimestamp(input.now);
   const windowStart = floorUtcDayTimestamp(input.windowStart);
 
+  return buildExactWindowJob({
+    kind: input.kind,
+    windowStart,
+    windowEnd,
+    priority: input.priority,
+  });
+}
+
+function buildExactWindowJob(input: {
+  kind: "backfill" | "reconcile";
+  windowStart: string;
+  windowEnd: string;
+  priority: number;
+}): DeviceSyncJobInput {
   return {
     kind: input.kind,
     payload: {
-      windowStart,
-      windowEnd,
+      windowStart: input.windowStart,
+      windowEnd: input.windowEnd,
     },
     priority: input.priority,
-    dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, windowStart, windowEnd])),
+    dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, input.windowStart, input.windowEnd])),
   };
 }
 
