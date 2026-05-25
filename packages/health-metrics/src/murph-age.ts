@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v16" as const;
+  "murph.age.research-calculator-view.v17" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v4" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
@@ -1367,6 +1367,9 @@ export interface MurphAgeResearchModelStatusView {
   latestLocalRunEvidenceStatus: "mixed-research-only-no-product-promotion";
   layeredResearchPath: MurphAgeResearchLayeredPathStatus;
   productUseAuthorized: false;
+  researchAppliedFeatureKeys: string[];
+  researchAppliedMetricKeys: string[];
+  researchAppliedWearableMetricKeys: string[];
   scoreBearingFeatureKeys: string[];
   scoreBearingMetricKeys: string[];
   scoreInterpretation: "risk-age-equivalent-research-only";
@@ -8578,6 +8581,9 @@ function buildMurphAgeResearchModelStatusView(input: {
   const wearableShadowApplied = input.wearableResidualLayer?.status === "research-parameterized-shadow-delta"
     && input.wearableResidualLayer.finalRiskAgeEquivalentYears !== null
     && input.wearableResidualLayer.finalRiskProbability !== null;
+  const researchAppliedWearableMetricKeys = wearableShadowApplied
+    ? [...(input.wearableResidualLayer?.selectedMetricKeys ?? [])]
+    : [];
   return {
     blockers: [
       "biomarker-transport-not-confirmed",
@@ -8702,6 +8708,15 @@ function buildMurphAgeResearchModelStatusView(input: {
       wearableResidualLayer: input.wearableResidualLayer,
     }),
     productUseAuthorized: false,
+    researchAppliedFeatureKeys: uniqueStrings([
+      ...input.selectedScoreBearingFeatureKeys,
+      ...(wearableShadowApplied ? [MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID] : []),
+    ]),
+    researchAppliedMetricKeys: uniqueStrings([
+      ...input.selectedScoreBearingMetricKeys,
+      ...researchAppliedWearableMetricKeys,
+    ]),
+    researchAppliedWearableMetricKeys,
     scoreBearingFeatureKeys: [...input.selectedScoreBearingFeatureKeys],
     scoreBearingMetricKeys: [...input.selectedScoreBearingMetricKeys],
     scoreInterpretation: "risk-age-equivalent-research-only",
