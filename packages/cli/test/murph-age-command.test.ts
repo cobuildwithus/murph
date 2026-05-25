@@ -207,6 +207,7 @@ interface MurphAgeAggregateEvidenceStatusReport {
     }
     transformIds: string[]
   }>
+  blockedReceiptCount: number
   inputCardCount: number
   missingSourceRouteIds: string[]
   nextExecutionSourceRouteIds: string[]
@@ -223,6 +224,9 @@ interface MurphAgeAggregateEvidenceStatusReport {
   }>
   readyCardCount: number
   readySourceRouteIds: string[]
+  receiptScienceReviewReadyCount: number
+  receiptScienceReviewReadySourceRouteIds: string[]
+  receiptScienceReviewStatus: string
   receiptSummaries: Array<{
     blockers: string[]
     conclusion: string
@@ -290,6 +294,8 @@ interface MurphAgeAggregateEvidenceStatusReport {
   schemaVersion: string
   sourceRouteIdsByExecutionPriority: string[]
   status: string
+  validNoDeltaReceiptCount: number
+  validNoDeltaReceiptSourceRouteIds: string[]
 }
 
 interface MurphAgeInputReadinessReport {
@@ -476,11 +482,17 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     'true',
   ]))
 
-  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v6')
+  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v7')
   murphAgeAggregateEvidenceStatusResultSchema.parse(templateStatus)
   assert.equal(templateStatus.status, 'blocked')
   assert.equal(templateStatus.inputCardCount, 0)
   assert.equal(templateStatus.readyCardCount, 0)
+  assert.equal(templateStatus.receiptScienceReviewStatus, 'no-receipts')
+  assert.equal(templateStatus.receiptScienceReviewReadyCount, 0)
+  assert.deepEqual(templateStatus.receiptScienceReviewReadySourceRouteIds, [])
+  assert.equal(templateStatus.validNoDeltaReceiptCount, 0)
+  assert.deepEqual(templateStatus.validNoDeltaReceiptSourceRouteIds, [])
+  assert.equal(templateStatus.blockedReceiptCount, 0)
   assert.deepEqual(templateStatus.receiptSummaries, [])
   assert.deepEqual(templateStatus.nsrrDatasetRequests, [])
   assert.deepEqual(templateStatus.nextExecutionSourceRouteIds, [
@@ -583,8 +595,14 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     '--include-nsrr-requests',
     'true',
   ]))
-  assert.equal(nsrrStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v6')
+  assert.equal(nsrrStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v7')
   murphAgeAggregateEvidenceStatusResultSchema.parse(nsrrStatus)
+  assert.equal(nsrrStatus.receiptScienceReviewStatus, 'no-receipts')
+  assert.equal(nsrrStatus.receiptScienceReviewReadyCount, 0)
+  assert.deepEqual(nsrrStatus.receiptScienceReviewReadySourceRouteIds, [])
+  assert.equal(nsrrStatus.validNoDeltaReceiptCount, 0)
+  assert.deepEqual(nsrrStatus.validNoDeltaReceiptSourceRouteIds, [])
+  assert.equal(nsrrStatus.blockedReceiptCount, 0)
   assert.deepEqual(nsrrStatus.receiptSummaries, [])
   assert.deepEqual(nsrrStatus.nsrrDatasetRequests.map((request) => request.datasetId), [
     'mesa-sleep',
@@ -704,7 +722,7 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
       'true',
     ]))
 
-    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v6')
+    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v7')
     murphAgeAggregateEvidenceStatusResultSchema.parse(status)
     assert.equal(status.status, 'ready')
     assert.deepEqual(status.benchmarkCards, [])
@@ -712,6 +730,12 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     assert.equal(status.inputCardCount, 5)
     assert.equal(status.readyCardCount, 2)
     assert.deepEqual(status.readySourceRouteIds, ['cardia-biomarker-activity', 'all-of-us-fitbit-labs-ehr'])
+    assert.equal(status.receiptScienceReviewStatus, 'science-review-ready')
+    assert.equal(status.receiptScienceReviewReadyCount, 1)
+    assert.deepEqual(status.receiptScienceReviewReadySourceRouteIds, ['all-of-us-fitbit-labs-ehr'])
+    assert.equal(status.validNoDeltaReceiptCount, 0)
+    assert.deepEqual(status.validNoDeltaReceiptSourceRouteIds, [])
+    assert.equal(status.blockedReceiptCount, 1)
     assert.deepEqual(status.nextExecutionSourceRouteIds, [
       'nhanes-activity-shadow-lmf',
       'mipact-apple-watch-ehr',
@@ -813,6 +837,70 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     ]) {
       assert.equal(encodedStatus.includes(forbidden), false, forbidden)
     }
+
+    const validNoDeltaReceiptPath = path.join(payloadRoot, 'valid-no-delta-receipts.json')
+    await writeFile(validNoDeltaReceiptPath, `${JSON.stringify({
+      receipts: [
+        {
+          ...wearableLabAggregateReceipt({
+            receiptId: 'valid-no-delta-all-of-us-fitbit-lab-wearable-aggregate-v0',
+            sourceRouteId: 'all_of_us_workbench_aggregate',
+          }),
+          denominator: {
+            evaluatedRowCount: 12_400,
+            eventCount: 90,
+            minimumCellCount: 25,
+            personYears: 96_000,
+            suppressedCellCount: 0,
+          },
+        },
+      ],
+    }, null, 2)}\n`)
+    const validNoDeltaStatus = requireData(await runSliceCli<MurphAgeAggregateEvidenceStatusReport>([
+      'age',
+      'evidence',
+      '--input',
+      `@${validNoDeltaReceiptPath}`,
+    ]))
+    assert.equal(validNoDeltaStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v7')
+    murphAgeAggregateEvidenceStatusResultSchema.parse(validNoDeltaStatus)
+    assert.equal(validNoDeltaStatus.status, 'blocked')
+    assert.equal(validNoDeltaStatus.receiptScienceReviewStatus, 'valid-no-delta')
+    assert.equal(validNoDeltaStatus.receiptScienceReviewReadyCount, 0)
+    assert.deepEqual(validNoDeltaStatus.receiptScienceReviewReadySourceRouteIds, [])
+    assert.equal(validNoDeltaStatus.validNoDeltaReceiptCount, 1)
+    assert.deepEqual(validNoDeltaStatus.validNoDeltaReceiptSourceRouteIds, ['all-of-us-fitbit-labs-ehr'])
+    assert.equal(validNoDeltaStatus.blockedReceiptCount, 0)
+
+    const blockedOnlyReceiptPath = path.join(payloadRoot, 'blocked-only-receipts.json')
+    await writeFile(blockedOnlyReceiptPath, `${JSON.stringify({
+      receipts: [
+        {
+          ...wearableLabAggregateReceipt({
+            receiptId: 'blocked-only-all-of-us-fitbit-lab-wearable-aggregate-v0',
+            sourceRouteId: 'all_of_us_workbench_aggregate',
+          }),
+          productAuthorized: true,
+          rowValues: ['blocked-only-unsafe-row-value'],
+        },
+      ],
+    }, null, 2)}\n`)
+    const blockedOnlyStatus = requireData(await runSliceCli<MurphAgeAggregateEvidenceStatusReport>([
+      'age',
+      'evidence',
+      '--input',
+      `@${blockedOnlyReceiptPath}`,
+    ]))
+    assert.equal(blockedOnlyStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v7')
+    murphAgeAggregateEvidenceStatusResultSchema.parse(blockedOnlyStatus)
+    assert.equal(blockedOnlyStatus.status, 'blocked')
+    assert.equal(blockedOnlyStatus.receiptScienceReviewStatus, 'blocked')
+    assert.equal(blockedOnlyStatus.receiptScienceReviewReadyCount, 0)
+    assert.deepEqual(blockedOnlyStatus.receiptScienceReviewReadySourceRouteIds, [])
+    assert.equal(blockedOnlyStatus.validNoDeltaReceiptCount, 0)
+    assert.deepEqual(blockedOnlyStatus.validNoDeltaReceiptSourceRouteIds, [])
+    assert.equal(blockedOnlyStatus.blockedReceiptCount, 1)
+    assert.equal(JSON.stringify(blockedOnlyStatus).includes('blocked-only-unsafe-row-value'), false)
   } finally {
     await rm(payloadRoot, { force: true, recursive: true })
   }
