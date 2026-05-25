@@ -8,6 +8,7 @@ import { runRawCli } from './cli-test-helpers.js'
 import { createVaultCli } from '../src/vault-cli.js'
 
 let isolatedHome = ''
+const INBOX_INCUR_SMOKE_TIMEOUT_MS = 120_000
 
 beforeAll(async () => {
   isolatedHome = await mkdtemp(path.join(tmpdir(), 'murph-inbox-incur-home-'))
@@ -26,31 +27,35 @@ test('root help exposes the inbox command group', async () => {
   assert.match(help, /inbox\s+Inbox runtime setup, diagnostics/u)
 })
 
-test('inbox source add schema exposes the local runtime config options', async () => {
-  const schema = JSON.parse(
-    await runInboxRawCli(['inbox', 'source', 'add', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, {
-        enum?: string[]
-      }>
+test(
+  'inbox source add schema exposes the local runtime config options',
+  async () => {
+    const schema = JSON.parse(
+      await runInboxRawCli(['inbox', 'source', 'add', '--schema', '--format', 'json']),
+    ) as {
+      args: {
+        properties: Record<string, {
+          enum?: string[]
+        }>
+      }
+      options: {
+        properties: Record<string, unknown>
+        required?: string[]
+      }
     }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
 
-  assert.equal('source' in schema.args.properties, true)
-  assert.deepEqual(schema.args.properties.source?.enum, ['telegram', 'email'])
-  assert.equal('id' in schema.options.properties, true)
-  assert.equal('provision' in schema.options.properties, true)
-  assert.equal('linqWebhookHost' in schema.options.properties, false)
-  assert.equal('linqWebhookPath' in schema.options.properties, false)
-  assert.equal('linqWebhookPort' in schema.options.properties, false)
-  assert.equal('enableAutoReply' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['id', 'backfillLimit'])
-})
+    assert.equal('source' in schema.args.properties, true)
+    assert.deepEqual(schema.args.properties.source?.enum, ['telegram', 'email'])
+    assert.equal('id' in schema.options.properties, true)
+    assert.equal('provision' in schema.options.properties, true)
+    assert.equal('linqWebhookHost' in schema.options.properties, false)
+    assert.equal('linqWebhookPath' in schema.options.properties, false)
+    assert.equal('linqWebhookPort' in schema.options.properties, false)
+    assert.equal('enableAutoReply' in schema.options.properties, true)
+    assert.deepEqual(schema.options.required, ['id', 'backfillLimit'])
+  },
+  INBOX_INCUR_SMOKE_TIMEOUT_MS,
+)
 
 test('inbox bootstrap schema exposes init and setup option families together', async () => {
   const schema = JSON.parse(

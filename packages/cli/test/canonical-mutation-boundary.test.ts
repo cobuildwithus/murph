@@ -59,7 +59,7 @@ async function captureSingleCaptureId(input: {
 }
 
 test.sequential(
-  "inbox journal and experiment-note promotions only require high-level core mutation ports",
+  "inbox journal and experiment-note promotions only require high-level core mutation and lock ports",
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-inbox-high-level-ports-vault-"));
 
@@ -72,6 +72,11 @@ test.sequential(
     const journalCalls: Array<{ date: string; captureId: string }> = [];
     const experimentCalls: Array<{ relativePath: string; captureId: string }> = [];
     const fakeCoreRuntime = {
+      async acquireCanonicalWriteLock(_vaultRoot: string) {
+        return {
+          async release() {},
+        };
+      },
       async promoteInboxJournal(input: {
         vaultRoot: string;
         date: string;
@@ -112,6 +117,12 @@ test.sequential(
           experimentSlug: "focus-sprint",
           appended: true,
         };
+      },
+      async withCanonicalWriteLockScope<TResult>(
+        _vaultRoot: string,
+        run: () => Promise<TResult>,
+      ) {
+        return await run();
       },
     };
     const fakeQueryRuntime = {
