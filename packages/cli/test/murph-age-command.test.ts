@@ -1787,7 +1787,12 @@ test('age preview scores submitted labs and wearable context without a vault', a
       researchCalculatorView.layeredAgeEstimate?.biologicalAgeYears,
       calculatorResidualLayer.finalRiskAgeEquivalentYears,
     )
+    assert.equal(
+      researchCalculatorView.ageEstimate?.biologicalAgeYears,
+      researchCalculatorView.layeredAgeEstimate?.biologicalAgeYears,
+    )
     assert.equal(researchCalculatorView.layeredAgeEstimate?.riskProbability, calculatorResidualLayer.finalRiskProbability)
+    assert.equal(researchCalculatorView.risk.probability, calculatorResidualLayer.finalRiskProbability)
     assert.equal(researchCalculatorView.layeredAgeEstimate?.residualDeltaYears, calculatorResidualLayer.residualDeltaYears)
     assert.equal(researchCalculatorView.layeredAgeEstimate?.productAuthorized, false)
     assert.equal(researchCalculatorView.layeredAgeEstimate?.residualScoreContributionAuthorized, false)

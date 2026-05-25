@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v14" as const;
+  "murph.age.research-calculator-view.v15" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v4" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
@@ -7964,14 +7964,25 @@ export function buildMurphAgeResearchCalculatorView(
   const featureContributions = result
     ? result.featureAttributions.map(buildMurphAgePublicFeatureContributionView)
     : [];
+  const layeredAgeEstimate = buildMurphAgeResearchLayeredAgeEstimateView({
+    modelStatus,
+    report,
+    result,
+  });
+  const primaryResearchAgeEstimate = layeredAgeEstimate ? {
+    ageDeltaYears: layeredAgeEstimate.ageDeltaYears,
+    biologicalAgeYears: layeredAgeEstimate.biologicalAgeYears,
+    chronologicalAgeYears: layeredAgeEstimate.chronologicalAgeYears,
+    intervalYears: layeredAgeEstimate.intervalYears ? { ...layeredAgeEstimate.intervalYears } : null,
+  } : result ? {
+    ageDeltaYears: result.ageDeltaYears,
+    biologicalAgeYears: result.biologicalAgeYears,
+    chronologicalAgeYears: result.chronologicalAgeYears,
+    intervalYears: result.intervalYears ? { ...result.intervalYears } : null,
+  } : null;
 
   return {
-    ageEstimate: result ? {
-      ageDeltaYears: result.ageDeltaYears,
-      biologicalAgeYears: result.biologicalAgeYears,
-      chronologicalAgeYears: result.chronologicalAgeYears,
-      intervalYears: result.intervalYears ? { ...result.intervalYears } : null,
-    } : null,
+    ageEstimate: primaryResearchAgeEstimate,
     arbiter: buildMurphAgeResearchArbiterView(report),
     blockedFeatureKeys: [...summary.blockedFeatureKeys],
     displayBlockedReason: summary.displayBlockedReason,
@@ -7989,11 +8000,7 @@ export function buildMurphAgeResearchCalculatorView(
     missingFeatureKeys: [...summary.missingFeatureKeys],
     mode: report.mode,
     model: modelStatus,
-    layeredAgeEstimate: buildMurphAgeResearchLayeredAgeEstimateView({
-      modelStatus,
-      report,
-      result,
-    }),
+    layeredAgeEstimate,
     product: {
       ageDisplayReady: summary.productAgeDisplayReady,
       productUseAuthorized: false,
@@ -8008,7 +8015,7 @@ export function buildMurphAgeResearchCalculatorView(
     risk: {
       ageEstimateBasis: summary.outcomeContext.ageEstimateBasis,
       horizonYears: summary.outcomeContext.horizonYears,
-      probability: result?.risk?.probability ?? null,
+      probability: layeredAgeEstimate?.riskProbability ?? result?.risk?.probability ?? null,
       riskEndpoint: summary.outcomeContext.riskEndpoint,
     },
     schemaVersion: MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
