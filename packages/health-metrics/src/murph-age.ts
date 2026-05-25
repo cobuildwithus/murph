@@ -3273,7 +3273,7 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
     acceptedBundleIds: ["wearable-context"],
     cardId: "wearable_context_no_risk",
     evidenceClass: "context-only",
-    evidenceSummary: "Wearable inputs may be shown as context, but they are not score-bearing in current Murph Age cards.",
+    evidenceSummary: "Wearable inputs are context in product mode; private research previews may apply validated residual packs over a lab/body anchor.",
     outcome: {
       ageEstimateBasis: "none",
       horizonYears: null,
@@ -3298,7 +3298,7 @@ const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
 const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "Activity features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
+    evidenceSummary: "Activity features may be evaluated as a private research residual over the active lab/body anchor; product scoring remains blocked.",
     family: "activity",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -3319,7 +3319,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   },
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "Sleep features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
+    evidenceSummary: "Sleep features may be evaluated as a private research residual over the active lab/body anchor; product scoring remains blocked.",
     family: "sleep",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -3338,7 +3338,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   },
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "Resting-heart-rate features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
+    evidenceSummary: "Resting-heart-rate features may be evaluated as a private research residual over the active lab/body anchor; product scoring remains blocked.",
     family: "resting-heart-rate",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -3353,7 +3353,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   },
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "HRV features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
+    evidenceSummary: "HRV features may be evaluated as a private research residual over the active lab/body anchor; product scoring remains blocked.",
     family: "hrv",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -9530,7 +9530,7 @@ function assessMurphAgeWearableContext(
       status: "context-only",
       warnings: [{
         code: "CONTEXT_NOT_SCORE_BEARING",
-        message: "Wearable inputs are available as context, but current Murph Age research cards do not score wearables without lab/BP/body validation.",
+        message: "Wearable inputs are available as product context; private research previews can apply residual packs when a lab/BP/body anchor and validation boundary are present.",
       }],
     });
   }
@@ -11046,7 +11046,7 @@ function wearableShadowIncrementWarnings(input: {
   }
   return [{
     code: "CONTEXT_NOT_SCORE_BEARING",
-    message: `${input.family} wearable metrics are ready for shadow research assessment, but they are not authorized to affect Murph Age scoring.`,
+    message: `${input.family} wearable metrics are ready for private research residual assessment; product scoring remains blocked until validation and authorization clear.`,
   }];
 }
 
