@@ -1120,26 +1120,28 @@ export class HostedDeviceSyncAgentSessionService {
 function toPublicHostedDeviceSyncAccount(
   account: HostedStoredDeviceSyncAccount,
 ): PublicDeviceSyncAccount {
-  const {
-    accessToken: _accessToken,
-    credential: _credential,
-    disconnectGeneration: _disconnectGeneration,
-    keyVersion: _keyVersion,
-    metadata,
-    refreshToken: _refreshToken,
-    tokenVersion: _tokenVersion,
-    userId: _userId,
-    ...publicAccount
-  } = account as HostedStoredDeviceSyncAccount & {
-    accessToken?: unknown;
-    disconnectGeneration?: unknown;
-    refreshToken?: unknown;
-    userId?: unknown;
-  };
-
   return {
-    ...publicAccount,
-    metadata: sanitizeHostedDeviceSyncConnectionMetadata(metadata ?? {}),
+    accessTokenExpiresAt: account.accessTokenExpiresAt ?? null,
+    connectedAt: account.connectedAt,
+    createdAt: account.createdAt,
+    displayName: account.displayName,
+    externalAccountId: account.externalAccountId,
+    id: account.id,
+    lastErrorCode: account.lastErrorCode,
+    lastErrorMessage: account.lastErrorMessage,
+    lastSyncCompletedAt: account.lastSyncCompletedAt,
+    lastSyncErrorAt: account.lastSyncErrorAt,
+    lastSyncStartedAt: account.lastSyncStartedAt,
+    lastWebhookAt: account.lastWebhookAt,
+    metadata: sanitizeHostedDeviceSyncConnectionMetadata(account.metadata ?? {}),
+    nextReconcileAt: account.nextReconcileAt,
+    provider: account.provider,
+    scopes: account.scopes,
+    setupExpiresAt: account.setupExpiresAt ?? null,
+    setupPhase: account.setupPhase ?? null,
+    status: account.status,
+    ...(account.sources === undefined ? {} : { sources: account.sources }),
+    updatedAt: account.updatedAt,
   };
 }
 
