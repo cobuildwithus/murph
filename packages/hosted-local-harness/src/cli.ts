@@ -18,6 +18,8 @@ import {
 } from "./state.ts";
 import { hostedLocalHarnessRepoRoot } from "./repo.ts";
 
+const STRIPE_WEBHOOK_FORWARD_PATH = "/api/hosted-onboarding/stripe/webhook";
+
 interface HostedLocalCliIo {
   env?: NodeJS.ProcessEnv;
   stderr?: NodeJS.WritableStream;
@@ -67,9 +69,15 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
     printUpHelp(io.stdout ?? process.stdout);
     return;
   }
-  const { startHostedLocalDevStack } = await import(
-    "../../../scripts/dev-hosted-local/stack.ts"
-  );
+  const [
+    { startHostedLocalDevStack, terminateKnownHostedLocalProcessResidue },
+    { cleanupHostedRunnerContainers },
+    { resolveHostedLocalDevConfig },
+  ] = await Promise.all([
+    import("../../../scripts/dev-hosted-local/stack.ts"),
+    import("../../../scripts/dev-hosted-local/runtime.ts"),
+    import("../../../scripts/dev-hosted-local/config.ts"),
+  ]);
 
   const profiled = applyHostedLocalProfile({
     env: io.env ?? process.env,
@@ -82,18 +90,14 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
     status: "starting",
   });
   const runtimeEnv = applyHostedLocalStateEnv({ env: profiled.env, state });
+  const config = resolveHostedLocalDevConfig(runtimeEnv);
   state = await updateHostedLocalHarnessState(state, {
     webBaseUrl: state.webBaseUrl,
     workerBaseUrl: state.workerBaseUrl,
     status: "starting",
   });
 
-  const stack = await startHostedLocalDevStack({
-    env: runtimeEnv,
-    stderrTarget: io.stderr,
-    stdoutTarget: io.stdout,
-  });
-
+  let stack: HostedLocalDevStack | null = null;
   let terminationSignal: NodeJS.Signals | null = null;
   let stopPromise: Promise<void> | null = null;
   let resolveTerminationCleanup: (() => void) | null = null;
@@ -103,8 +107,24 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
   let terminationCleanupError: unknown = null;
 
   const stopStack = (signal: NodeJS.Signals): Promise<void> => {
-    stopPromise ??= stack.stop(signal);
+    stopPromise ??= stack === null
+      ? cleanupStartupResidue(signal)
+      : stack.stop(signal);
     return stopPromise;
+  };
+  const cleanupStartupResidue = async (signal: NodeJS.Signals): Promise<void> => {
+    terminateKnownHostedLocalProcessResidue({
+      config,
+      signal,
+      stripeForwardUrl: config.skipWeb
+        ? null
+        : `http://${config.webHost}:${config.webPort}${STRIPE_WEBHOOK_FORWARD_PATH}`,
+    });
+    await cleanupHostedRunnerContainers({
+      cwd: hostedLocalHarnessRepoRoot,
+      env: runtimeEnv,
+      ignoreErrors: true,
+    });
   };
 
   const awaitTerminationCleanup = async (): Promise<void> => {
@@ -119,7 +139,9 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
       return;
     }
     terminationSignal = signal;
-    stack.kill(signal);
+    if (stack !== null) {
+      stack.kill(signal);
+    }
     (io.stderr ?? process.stderr).write(`\nStopping hosted-local harness (${signal}).\n`);
     try {
       await stopStack(signal);
@@ -140,19 +162,51 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
   const onExit = (): void => {
+    if (stack === null) {
+      terminateKnownHostedLocalProcessResidue({
+        config,
+        signal: "SIGKILL",
+        stripeForwardUrl: config.skipWeb
+          ? null
+          : `http://${config.webHost}:${config.webPort}${STRIPE_WEBHOOK_FORWARD_PATH}`,
+      });
+      return;
+    }
     stack.kill("SIGKILL");
   };
   process.once("exit", onExit);
 
   try {
     try {
-      await stack.ready;
+      stack = await startHostedLocalDevStack({
+        env: runtimeEnv,
+        stderrTarget: io.stderr,
+        stdoutTarget: io.stdout,
+      });
     } catch (error) {
-      await updateHostedLocalHarnessState(state, { status: "failed" });
       if (terminationSignal) {
         await awaitTerminationCleanup();
         return;
       }
+      await updateHostedLocalHarnessState(state, { status: "failed" });
+      throw error;
+    }
+    if (terminationSignal) {
+      stack.kill(terminationSignal);
+      stopPromise = null;
+      await stopStack(terminationSignal);
+      await updateHostedLocalHarnessState(state, { status: "stopped" });
+      return;
+    }
+
+    try {
+      await stack.ready;
+    } catch (error) {
+      if (terminationSignal) {
+        await awaitTerminationCleanup();
+        return;
+      }
+      await updateHostedLocalHarnessState(state, { status: "failed" });
       throw error;
     }
 

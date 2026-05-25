@@ -6,6 +6,29 @@ const runForegroundCommand = vi.hoisted(() => vi.fn(async () => undefined));
 const runHostedLocalE2eSuite = vi.hoisted(() =>
   vi.fn(async () => ({ terminationSignal: null as NodeJS.Signals | null })),
 );
+const startHostedLocalDevStack = vi.hoisted(() => vi.fn());
+const terminateKnownHostedLocalProcessResidue = vi.hoisted(() => vi.fn());
+const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
+const resolveHostedLocalDevConfig = vi.hoisted(() =>
+  vi.fn(() => ({
+    linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+    linqWebhookTunnelMode: "auto",
+    linqWebhookTunnelName: "dev",
+    skipHealthCommonsWatch: false,
+    skipWeb: false,
+    temporal: {
+      host: "127.0.0.1",
+      mode: "managed",
+      namespace: "default",
+      port: 7233,
+      taskQueue: "murph-hosted-runtime",
+    },
+    webHost: "localhost",
+    webPort: 3000,
+    workerHost: "127.0.0.1",
+    workerPort: 8787,
+  })),
+);
 const createHostedLocalHarnessState = vi.hoisted(() =>
   vi.fn(async () => ({
     statePath: ".artifacts/hosted-local/test/state.json",
@@ -22,6 +45,19 @@ const updateHostedLocalHarnessState = vi.hoisted(() =>
 vi.mock("../packages/hosted-local-harness/src/process.ts", () => ({
   runDoctorCommand: vi.fn(),
   runForegroundCommand,
+}));
+
+vi.mock("../scripts/dev-hosted-local/stack.ts", () => ({
+  startHostedLocalDevStack,
+  terminateKnownHostedLocalProcessResidue,
+}));
+
+vi.mock("../scripts/dev-hosted-local/runtime.ts", () => ({
+  cleanupHostedRunnerContainers,
+}));
+
+vi.mock("../scripts/dev-hosted-local/config.ts", () => ({
+  resolveHostedLocalDevConfig,
 }));
 
 vi.mock("../packages/hosted-local-harness/src/e2e.ts", async (importActual) => {
@@ -62,6 +98,7 @@ describe("hosted-local run CLI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
+    startHostedLocalDevStack.mockResolvedValue(createHostedLocalStack());
   });
 
   test("passes child command flags after the separator through unchanged", async () => {
@@ -119,4 +156,85 @@ describe("hosted-local run CLI", () => {
     );
     expect(output.text()).not.toContain("Hosted-local E2E complete");
   });
+
+  test("cleans startup residue when hosted-local up is interrupted before the stack returns", async () => {
+    let resolveStart!: (stack: ReturnType<typeof createHostedLocalStack>) => void;
+    startHostedLocalDevStack.mockImplementationOnce(async () =>
+      await new Promise<ReturnType<typeof createHostedLocalStack>>((resolve) => {
+        resolveStart = resolve;
+      })
+    );
+    const signalHandlers = new Map<string, () => void>();
+    const originalProcessOnce = process.once.bind(process);
+    const onceSpy = vi.spyOn(process, "once").mockImplementation((
+      (event: string | symbol, listener: (...args: unknown[]) => void) => {
+        if (event === "SIGINT" || event === "SIGTERM") {
+          signalHandlers.set(event, () => listener(event));
+          return process;
+        }
+
+        return originalProcessOnce(event, listener);
+      }
+    ) as typeof process.once);
+    const offSpy = vi.spyOn(process, "off").mockImplementation((
+      (_event: string | symbol, _listener: (...args: unknown[]) => void) => process
+    ) as typeof process.off);
+    const output = createBufferedStdout();
+    const stack = createHostedLocalStack();
+
+    try {
+      const runPromise = runHostedLocalCli(["up"], {
+        env: {},
+        stderr: output.stdout,
+        stdout: output.stdout,
+      });
+      await vi.waitFor(() => {
+        expect(startHostedLocalDevStack).toHaveBeenCalledTimes(1);
+      });
+
+      signalHandlers.get("SIGINT")?.();
+      await Promise.resolve();
+
+      expect(terminateKnownHostedLocalProcessResidue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          signal: "SIGINT",
+          stripeForwardUrl: "http://localhost:3000/api/hosted-onboarding/stripe/webhook",
+        }),
+      );
+      expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
+        ignoreErrors: true,
+      }));
+
+      resolveStart(stack);
+      await runPromise;
+
+      expect(stack.kill).toHaveBeenCalledWith("SIGINT");
+      expect(stack.stop).toHaveBeenCalledWith("SIGINT");
+      expect(updateHostedLocalHarnessState).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "starting" }),
+        { status: "stopped" },
+      );
+      expect(offSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
+      expect(output.text()).toContain("Stopping hosted-local harness (SIGINT).");
+    } finally {
+      onceSpy.mockRestore();
+      offSpy.mockRestore();
+    }
+  });
 });
+
+function createHostedLocalStack() {
+  return {
+    kill: vi.fn(),
+    ready: Promise.resolve(),
+    stop: vi.fn(async () => {}),
+    waitForExit: vi.fn(async () => ({
+      child: {
+        exitCode: 0,
+      },
+      name: "cloudflare" as const,
+    })),
+    webBaseUrl: "http://localhost:3000",
+    workerBaseUrl: "http://127.0.0.1:8787",
+  };
+}

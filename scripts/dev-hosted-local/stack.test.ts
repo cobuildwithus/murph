@@ -931,8 +931,13 @@ describe("hosted local dev stack", () => {
     await stopPromise;
   });
 
-  it("does not use global process cleanup for the Linq tunnel", async () => {
+  it("uses scoped process residue cleanup for the Linq tunnel", async () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "auto",
+    });
     resolveHostedLocalLinqWebhookSetup.mockResolvedValueOnce({
       phoneNumbers: ["+15550100001"],
       publicBaseUrl: "https://tunnel.example.test",
@@ -960,7 +965,7 @@ describe("hosted local dev stack", () => {
       expect(pkillCalls.length).toBeGreaterThan(0);
       expect(
         pkillCalls.some(([, args]) => args.some((arg) => arg.includes("cloudflared"))),
-      ).toBe(false);
+      ).toBe(true);
       expect(spawnChildProcess).toHaveBeenCalledWith(
         "linq-tunnel",
         "cloudflared",
