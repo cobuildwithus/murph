@@ -490,7 +490,7 @@ test("calculateMurphAgeFromVaultInputBundle carries a research-only wearable res
     assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
     assert.equal(output.wearableResidualLayerApplication?.status, "research-parameterized-shadow-delta");
     assert.equal(output.wearableResidualLayerApplication?.parameterizationAvailable, true);
-    assert.equal(output.wearableResidualLayerApplication?.parameterPackHash, "research-pack-activity-v1");
+    assert.equal(output.wearableResidualLayerApplication?.parameterPackHash, FIXTURE_ACTIVITY_WEARABLE_PACK_HASH);
     assert.equal(output.wearableResidualLayerApplication?.residualDeltaLogit, -0.08);
     assert.equal(output.wearableResidualLayerApplication?.scoreBearing, false);
     assert.equal(output.wearableResidualLayerApplication?.scoreContributionAuthorized, false);
@@ -512,7 +512,7 @@ test("calculateMurphAgeFromVaultInputBundle carries a research-only wearable res
     assert.equal(publicReport.result?.risk?.probability, output.result?.risk?.probability);
     assert.equal(publicReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
     assert.equal(publicReport.wearableResidualLayer?.parameterizationAvailable, true);
-    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
+    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, FIXTURE_ACTIVITY_WEARABLE_PACK_HASH);
     assert.equal(publicReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
     assert.equal(publicReport.wearableResidualLayer?.scoreBearing, false);
     assert.equal(publicReport.wearableResidualLayer?.scoreContributionAuthorized, false);
@@ -910,7 +910,7 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
     assert.equal(encodedFunctionResidualLayer.includes("anchorRiskAgeEquivalentYears"), false);
     assert.equal(publicReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
     assert.equal(publicReport.wearableResidualLayer?.parameterizationAvailable, true);
-    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
+    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, FIXTURE_ACTIVITY_WEARABLE_PACK_HASH);
     assert.equal(publicReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
     assert.equal(publicReport.wearableResidualLayer?.scoreBearing, false);
     assert.equal(publicReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
@@ -2256,6 +2256,9 @@ function fixtureActivityWearableResidualParameterPack(
   });
 }
 
+const FIXTURE_ACTIVITY_WEARABLE_PACK_HASH =
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const;
+
 function fixtureWearableResidualParameterPack(
   anchorCardId: MurphAgeScoreBearingCardId,
   input: {
@@ -2286,7 +2289,9 @@ function fixtureWearableResidualParameterPack(
     horizonYears: 10,
     intercept: 0,
     layerId: input.layerId,
-    packHash: input.family === "activity" ? "research-pack-activity-v1" : `research-pack-${input.family}-v1`,
+    packHash: input.family === "activity"
+      ? FIXTURE_ACTIVITY_WEARABLE_PACK_HASH
+      : "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
   };

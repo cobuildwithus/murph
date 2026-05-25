@@ -1032,6 +1032,7 @@ const murphAgeResearchLayerContractItemSchema = z.object({
   sourceEvidenceIds: z.array(murphAgeResearchLocalRunEvidenceItemSchema.shape.evidenceId),
   status: z.enum([
     'active-research-score',
+    'active-research-shadow-score',
     'available-as-anchor',
     'available-research-candidate',
     'parameter-pack-available-shadow-only',
@@ -1043,7 +1044,10 @@ const murphAgeResearchLayerContractItemSchema = z.object({
 const murphAgeResearchLayeredPathStatusSchema = z.object({
   activeResearchScoreLayerIds: z.array(murphAgeResearchLayerIdSchema),
   architecturePattern: z.literal('frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals'),
-  currentExecutableMode: z.literal('single-card-research-score-layer-contracts-only'),
+  currentExecutableMode: z.enum([
+    'single-card-plus-parameterized-residual-shadow-score',
+    'single-card-research-score-layer-contracts-only',
+  ]),
   layerOrder: z.array(murphAgeResearchLayerIdSchema),
   layers: z.array(murphAgeResearchLayerContractItemSchema),
   parameterPackBlockedLayerIds: z.array(murphAgeResearchLayerIdSchema),
@@ -1060,13 +1064,19 @@ const murphAgeResearchModelStatusViewSchema = z.object({
   currentModelFamily: z.literal('frozen-nhis-r399-plus-research-increments'),
   composition: z.object({
     anchorLayerStatus: z.literal('available-as-research-anchor-and-fallback-not-layered'),
-    currentScoringMode: z.literal('single-selected-research-card'),
+    currentScoringMode: z.enum([
+      'selected-card-plus-parameterized-residual-shadow',
+      'single-selected-research-card',
+    ]),
     labBodyStatus: z.literal('selected-card-score-not-additive-increment'),
     nextArchitectureStep: z.enum([
       'parameterize-function-sidecar-for-layered-scoring',
       'validate-function-sidecar-and-wearable-residuals-before-product-use',
     ]),
-    wearableStatus: z.literal('context-only-zero-product-multiplier'),
+    wearableStatus: z.enum([
+      'context-only-zero-product-multiplier',
+      'research-shadow-residual-score-product-blocked',
+    ]),
   }),
   functionDisability: z.object({
     currentUse: z.literal('hardened-research-lead-sidecar-not-product-age'),
@@ -1088,10 +1098,11 @@ const murphAgeResearchModelStatusViewSchema = z.object({
   selectedResearchCardId: murphAgePublicAuthorizationSchema.shape.cardId,
   wearable: z.object({
     consumerValidationStatus: z.literal('missing'),
-    currentUse: z.literal('context-only-shadow'),
+    currentUse: z.enum(['context-only-shadow', 'research-shadow-residual-score']),
     externalConsumerLabWearableAggregateStillMissing: z.literal(true),
     nextAction: z.literal('run_external_or_partner_lab_wearable_aggregate_delta'),
     nextExternalOrPartnerRouteIdsByPriority: z.array(z.string().min(1)),
+    researchScoreBearing: z.boolean(),
     scoreBearing: z.literal(false),
     scoreContributionAuthorized: z.literal(false),
     shadowEvidenceConclusion: z.literal('public_multi_family_wearable_shadow_signal_mixed_keep_context_only'),
