@@ -3304,6 +3304,20 @@ test("sqlite store sanitizes connection metadata writes and metadataPatch merges
     enabled: false,
     source: "browser",
   });
+  assert.equal(
+    store.markSyncSucceeded(created.id, "2026-03-20T13:00:00.000Z", null, {
+      metadataPatch: {
+        count: undefined,
+        source: null,
+      },
+    }),
+    true,
+  );
+  assert.deepEqual(store.getAccountById(created.id)?.metadata, {
+    count: 3,
+    enabled: false,
+    source: null,
+  });
 
   store.close();
 });
