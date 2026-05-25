@@ -49,6 +49,7 @@ import {
   MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   resolveMurphAgeSourceRoute,
+  summarizeMurphAgeWearableLabAggregateReceipt,
   summarizeMurphAgeWearableResidualLayerContractForFamily,
   type MurphAgeFunctionResidualParameterPack,
   type MurphAgeSourceRouteId,
@@ -64,6 +65,8 @@ import {
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const murphAgeModeSchema = z.enum(['product', 'research'])
+const MURPH_AGE_AGGREGATE_EVIDENCE_STATUS_SCHEMA_VERSION =
+  'murph.age.aggregate-evidence-status.v6' as const
 const murphAgeSexSchema = z.enum(['female', 'male'])
 const murphAgeInputBundleStatusSchema = z.enum(['abstain', 'context-only', 'ready'])
 const murphAgeStatusSchema = z.enum(['abstain', 'ready'])
@@ -1306,6 +1309,20 @@ const murphAgeWearableLabAggregateReceiptNegativeControlFieldSchema = z.enum([
   'earlyEventSensitivityPassed',
   'reverseCausationWashoutPassed',
 ])
+const murphAgeWearableLabAggregateReceiptBlockerSchema = z.enum([
+  'calibration_not_acceptable',
+  'event_support_under_100',
+  'm5_does_not_beat_coverage_control',
+  'm5_does_not_improve_over_lab_body',
+  'negative_controls_not_passed',
+  'receipt_invalid',
+])
+const murphAgeWearableLabAggregateReceiptMetricDeltasSchema = z.object({
+  aucDelta: z.number().finite().nullable(),
+  brierDelta: z.number().finite().nullable(),
+  cIndexDelta: z.number().finite().nullable(),
+  logLossDelta: z.number().finite().nullable(),
+})
 const murphAgeIncrementEvaluationOutputBoundarySchema = z.object({
   aggregateOnly: z.literal(true),
   coefficientsExportAllowed: z.literal(false),
@@ -1356,6 +1373,27 @@ const murphAgeWearableLabAggregateReceiptTemplateSchema = z.object({
   scoreContributionAuthorized: z.literal(false),
   sourceRouteAliases: z.array(z.string().min(1)),
   sourceRouteId: z.string().min(1),
+})
+const murphAgeWearableLabAggregateReceiptSummarySchema = z.object({
+  blockers: z.array(murphAgeWearableLabAggregateReceiptBlockerSchema),
+  conclusion: z.enum(['blocked', 'reviewgpt-science-delta', 'valid-no-delta']),
+  denominator: z.object({
+    evaluatedRowCount: z.number().finite().nonnegative().nullable(),
+    eventCount: z.number().finite().nonnegative().nullable(),
+    minimumCellCount: z.number().finite().nonnegative().nullable(),
+  }),
+  m1ToM5Deltas: murphAgeWearableLabAggregateReceiptMetricDeltasSchema.nullable(),
+  m2ToM5Deltas: murphAgeWearableLabAggregateReceiptMetricDeltasSchema.nullable(),
+  modelIdsPresent: z.array(murphAgeWearableLabAggregateReceiptModelIdSchema),
+  productAuthorized: z.literal(false),
+  reviewGptRequired: z.boolean(),
+  receiptSchemaVersion: z.literal(MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION),
+  scoreBearingPromotionAuthorized: z.literal(false),
+  sourceRouteId: z.string().min(1).nullable(),
+  validationStatus: z.enum(['invalid', 'valid']),
+  warningCodes: z.array(murphAgeWarningCodeSchema),
+  warningCount: z.number().int().nonnegative(),
+  wearableScoreBearingAuthorized: z.literal(false),
 })
 const murphAgeWearableActivityBenchmarkCardSchema = z.object({
   acceptedAggregateMetricDeltaFields: z.array(z.string().min(1)),
@@ -1461,10 +1499,11 @@ export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
   nsrrDatasetRequests: z.array(murphAgeNsrrDatasetRequestSchema),
   readyCardCount: z.number().int().nonnegative(),
   readySourceRouteIds: z.array(z.string().min(1)),
+  receiptSummaries: z.array(murphAgeWearableLabAggregateReceiptSummarySchema),
   receiptSlots: z.array(murphAgeWearableLabAggregateReceiptTemplateSchema),
   routeSlots: z.array(murphAgeAggregateEvidenceRouteSlotSchema),
   sourceRouteIdsByExecutionPriority: z.array(z.string().min(1)),
-  schemaVersion: z.literal('murph.age.aggregate-evidence-status.v5'),
+  schemaVersion: z.literal(MURPH_AGE_AGGREGATE_EVIDENCE_STATUS_SCHEMA_VERSION),
   status: z.enum(['blocked', 'ready']),
 })
 
@@ -1881,6 +1920,9 @@ export function registerMurphAgeCommands(
       const candidates = options.input
         ? await loadMurphAgeAggregateEvidenceCandidateCards(options.input)
         : []
+      const receiptSummaries = candidates
+        .filter(isMurphAgeWearableLabAggregateReceiptLike)
+        .map(summarizeSafeMurphAgeWearableLabAggregateReceipt)
       const assessmentCandidates = candidates.map(normalizeMurphAgeAggregateEvidenceCandidateCard)
       const ordinaryRouteIds = new Set(
         listMurphAgeOrdinaryLabWearableSourceRoutes().map((route) => route.routeId),
@@ -1947,10 +1989,11 @@ export function registerMurphAgeCommands(
         readySourceRouteIds: listMurphAgeOrdinaryLabWearableSourceRoutes()
           .map((route) => route.routeId)
           .filter((routeId) => readyRouteIds.has(routeId)),
+        receiptSummaries,
         receiptSlots,
         routeSlots,
         sourceRouteIdsByExecutionPriority,
-        schemaVersion: 'murph.age.aggregate-evidence-status.v5' as const,
+        schemaVersion: MURPH_AGE_AGGREGATE_EVIDENCE_STATUS_SCHEMA_VERSION,
         status: readyRouteIds.size > 0 ? 'ready' as const : 'blocked' as const,
       }
     },
@@ -2165,6 +2208,40 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
 
 function normalizeMurphAgeAggregateEvidenceCandidateCard(candidate: unknown): unknown {
   return buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt(candidate) ?? candidate
+}
+
+function isMurphAgeWearableLabAggregateReceiptLike(candidate: unknown): boolean {
+  return isPlainRecord(candidate) && (
+    candidate.schemaVersion === MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION
+    || typeof candidate.receiptId === 'string'
+    || Array.isArray(candidate.models)
+  )
+}
+
+function summarizeSafeMurphAgeWearableLabAggregateReceipt(
+  candidate: unknown,
+): z.infer<typeof murphAgeWearableLabAggregateReceiptSummarySchema> {
+  const summary = summarizeMurphAgeWearableLabAggregateReceipt(candidate)
+  const receiptValid = summary.validation.status === 'valid'
+  return {
+    blockers: [...summary.blockers],
+    conclusion: summary.conclusion,
+    denominator: receiptValid
+      ? { ...summary.denominator }
+      : { evaluatedRowCount: null, eventCount: null, minimumCellCount: null },
+    m1ToM5Deltas: receiptValid && summary.m1ToM5Deltas ? { ...summary.m1ToM5Deltas } : null,
+    m2ToM5Deltas: receiptValid && summary.m2ToM5Deltas ? { ...summary.m2ToM5Deltas } : null,
+    modelIdsPresent: [...summary.modelIdsPresent],
+    productAuthorized: false,
+    receiptSchemaVersion: summary.schemaVersion,
+    reviewGptRequired: summary.reviewGptRequired,
+    scoreBearingPromotionAuthorized: false,
+    sourceRouteId: summary.sourceRouteId,
+    validationStatus: summary.validation.status,
+    warningCodes: summary.validation.warnings.map((warning) => warning.code),
+    warningCount: summary.validation.warnings.length,
+    wearableScoreBearingAuthorized: false,
+  }
 }
 
 function summarizeMurphAgeAggregateEvidenceAssessment(input: {

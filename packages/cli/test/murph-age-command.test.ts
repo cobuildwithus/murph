@@ -223,6 +223,37 @@ interface MurphAgeAggregateEvidenceStatusReport {
   }>
   readyCardCount: number
   readySourceRouteIds: string[]
+  receiptSummaries: Array<{
+    blockers: string[]
+    conclusion: string
+    denominator: {
+      evaluatedRowCount: number | null
+      eventCount: number | null
+      minimumCellCount: number | null
+    }
+    m1ToM5Deltas: {
+      aucDelta: number | null
+      brierDelta: number | null
+      cIndexDelta: number | null
+      logLossDelta: number | null
+    } | null
+    m2ToM5Deltas: {
+      aucDelta: number | null
+      brierDelta: number | null
+      cIndexDelta: number | null
+      logLossDelta: number | null
+    } | null
+    modelIdsPresent: string[]
+    productAuthorized: boolean
+    receiptSchemaVersion: string
+    reviewGptRequired: boolean
+    scoreBearingPromotionAuthorized: boolean
+    sourceRouteId: string | null
+    validationStatus: string
+    warningCodes: string[]
+    warningCount: number
+    wearableScoreBearingAuthorized: boolean
+  }>
   receiptSlots: Array<{
     denominator: {
       minimumEventCountForScienceDelta: number
@@ -445,11 +476,12 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     'true',
   ]))
 
-  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v5')
+  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v6')
   murphAgeAggregateEvidenceStatusResultSchema.parse(templateStatus)
   assert.equal(templateStatus.status, 'blocked')
   assert.equal(templateStatus.inputCardCount, 0)
   assert.equal(templateStatus.readyCardCount, 0)
+  assert.deepEqual(templateStatus.receiptSummaries, [])
   assert.deepEqual(templateStatus.nsrrDatasetRequests, [])
   assert.deepEqual(templateStatus.nextExecutionSourceRouteIds, [
     'nhanes-activity-shadow-lmf',
@@ -551,8 +583,9 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     '--include-nsrr-requests',
     'true',
   ]))
-  assert.equal(nsrrStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v5')
+  assert.equal(nsrrStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v6')
   murphAgeAggregateEvidenceStatusResultSchema.parse(nsrrStatus)
+  assert.deepEqual(nsrrStatus.receiptSummaries, [])
   assert.deepEqual(nsrrStatus.nsrrDatasetRequests.map((request) => request.datasetId), [
     'mesa-sleep',
     'hchs-sol',
@@ -588,6 +621,38 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
           receiptId: 'all-of-us-fitbit-lab-wearable-aggregate-v0',
           sourceRouteId: 'all_of_us_workbench_aggregate',
         }),
+        {
+          ...wearableLabAggregateReceipt({
+            receiptId: 'unsafe-all-of-us-fitbit-lab-wearable-aggregate-v0',
+            sourceRouteId: 'all_of_us_workbench_aggregate',
+          }),
+          productAuthorized: true,
+          denominator: {
+            evaluatedRowCount: -12_400,
+            eventCount: -130,
+            minimumCellCount: -25,
+            personYears: -96_000,
+            suppressedCellCount: -1,
+          },
+          rowValues: ['unsafe-receipt-row-value'],
+          models: wearableLabAggregateReceipt({
+            receiptId: 'unsafe-all-of-us-fitbit-lab-wearable-aggregate-v0',
+            sourceRouteId: 'all_of_us_workbench_aggregate',
+          }).models.map((model) =>
+            model.modelId === 'm0-anchor-only'
+              ? {
+                ...model,
+                metrics: {
+                  ...model.metrics,
+                  coefficients: ['unsafe-receipt-coefficient'],
+                  participantIds: ['unsafe-receipt-participant'],
+                  predictions: ['unsafe-receipt-prediction'],
+                },
+              }
+              : model
+          ),
+          privateLocalPath: '/tmp/unsafe-receipt-local-path',
+        },
         {
           ...aggregateEvidenceReceipt({
             candidateId: 'hchs-sol-biomarker-activity-wearable-shadow-increment',
@@ -639,12 +704,12 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
       'true',
     ]))
 
-    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v5')
+    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v6')
     murphAgeAggregateEvidenceStatusResultSchema.parse(status)
     assert.equal(status.status, 'ready')
     assert.deepEqual(status.benchmarkCards, [])
     assert.deepEqual(status.nsrrDatasetRequests, [])
-    assert.equal(status.inputCardCount, 4)
+    assert.equal(status.inputCardCount, 5)
     assert.equal(status.readyCardCount, 2)
     assert.deepEqual(status.readySourceRouteIds, ['cardia-biomarker-activity', 'all-of-us-fitbit-labs-ehr'])
     assert.deepEqual(status.nextExecutionSourceRouteIds, [
@@ -669,6 +734,50 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     assert.equal(aggregateReceiptAssessment?.status, 'ready')
     assert.equal(aggregateReceiptAssessment?.layer, 'wearable-shadow-increment')
     assert.deepEqual(aggregateReceiptAssessment?.blockers, [])
+    assert.equal(status.receiptSummaries.length, 2)
+    const aggregateReceiptSummary = status.receiptSummaries[0]
+    assert.equal(aggregateReceiptSummary?.sourceRouteId, 'all-of-us-fitbit-labs-ehr')
+    assert.equal(aggregateReceiptSummary?.conclusion, 'reviewgpt-science-delta')
+    assert.equal(aggregateReceiptSummary?.reviewGptRequired, true)
+    assert.equal(aggregateReceiptSummary?.validationStatus, 'valid')
+    assert.deepEqual(aggregateReceiptSummary?.blockers, [])
+    assert.equal(aggregateReceiptSummary?.denominator.eventCount, 130)
+    assert.equal(
+      aggregateReceiptSummary?.m1ToM5Deltas?.logLossDelta !== null
+        && aggregateReceiptSummary?.m1ToM5Deltas?.logLossDelta !== undefined
+        && Math.abs(aggregateReceiptSummary.m1ToM5Deltas.logLossDelta + 0.008) < 1e-12,
+      true,
+    )
+    assert.equal(
+      aggregateReceiptSummary?.m2ToM5Deltas?.brierDelta !== null
+        && aggregateReceiptSummary?.m2ToM5Deltas?.brierDelta !== undefined
+        && Math.abs(aggregateReceiptSummary.m2ToM5Deltas.brierDelta + 0.0018) < 1e-12,
+      true,
+    )
+    assert.equal(aggregateReceiptSummary?.productAuthorized, false)
+    assert.equal(aggregateReceiptSummary?.scoreBearingPromotionAuthorized, false)
+    assert.equal(aggregateReceiptSummary?.wearableScoreBearingAuthorized, false)
+    const unsafeAggregateReceiptSummary = status.receiptSummaries[1]
+    assert.equal(unsafeAggregateReceiptSummary?.sourceRouteId, 'all-of-us-fitbit-labs-ehr')
+    assert.equal(unsafeAggregateReceiptSummary?.conclusion, 'blocked')
+    assert.equal(unsafeAggregateReceiptSummary?.reviewGptRequired, false)
+    assert.equal(unsafeAggregateReceiptSummary?.validationStatus, 'invalid')
+    assert.deepEqual(unsafeAggregateReceiptSummary?.blockers, ['receipt_invalid'])
+    assert.deepEqual(unsafeAggregateReceiptSummary?.denominator, {
+      evaluatedRowCount: null,
+      eventCount: null,
+      minimumCellCount: null,
+    })
+    assert.equal(unsafeAggregateReceiptSummary?.m1ToM5Deltas, null)
+    assert.equal(unsafeAggregateReceiptSummary?.m2ToM5Deltas, null)
+    assert.deepEqual(unsafeAggregateReceiptSummary?.modelIdsPresent, [])
+    assert.equal(unsafeAggregateReceiptSummary?.productAuthorized, false)
+    assert.equal(
+      unsafeAggregateReceiptSummary?.receiptSchemaVersion,
+      MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+    )
+    assert.equal(unsafeAggregateReceiptSummary?.scoreBearingPromotionAuthorized, false)
+    assert.equal(unsafeAggregateReceiptSummary?.wearableScoreBearingAuthorized, false)
 
     const blockedAssessment = status.assessments.find((assessment) =>
       assessment.routeId === 'hchs-sol-biomarker-activity'
@@ -693,6 +802,12 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
       'rowValues',
       'coefficients',
       'localPath',
+      'privateLocalPath',
+      'unsafe-receipt-coefficient',
+      'unsafe-receipt-local-path',
+      'unsafe-receipt-participant',
+      'unsafe-receipt-prediction',
+      'unsafe-receipt-row-value',
       payloadRoot,
       receiptPath,
     ]) {
