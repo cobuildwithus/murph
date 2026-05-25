@@ -6890,7 +6890,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.map((item) => item.evidenceId).join("|"),
-    "midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|mhas-function-mobility-sidecar-local-run|wearables-context-only-local-run",
+    "midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|mhas-function-mobility-sidecar-local-run|sage-physiology-shadow-local-run|wearables-context-only-local-run",
   );
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "midus-lab-lift-local-run")?.signal,
@@ -6941,6 +6941,19 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "haalsi-glucose-transport-local-run")?.supportedMetricKeys.join("|"),
     "glucose",
+  );
+  const sagePhysiologyEvidence = submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) =>
+    item.evidenceId === "sage-physiology-shadow-local-run"
+  );
+  assert.ok(sagePhysiologyEvidence);
+  assert.equal(sagePhysiologyEvidence.cohortLabel, "SAGE");
+  assert.equal(sagePhysiologyEvidence.sourceRouteId, "who-sage-south-africa-transport");
+  assert.equal(sagePhysiologyEvidence.signal, "context-only");
+  assert.equal(sagePhysiologyEvidence.scoringMathChanged, false);
+  assert.equal(sagePhysiologyEvidence.productAuthorizationChanged, false);
+  assert.equal(
+    sagePhysiologyEvidence.supportedMetricKeys.join("|"),
+    "bmi|systolic-blood-pressure|diastolic-blood-pressure|resting-heart-rate|activity-minutes|total-sleep-minutes",
   );
   assert.equal(
     submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "wearables-context-only-local-run")?.signal,
