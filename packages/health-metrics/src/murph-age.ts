@@ -7969,13 +7969,20 @@ export function buildMurphAgeResearchCalculatorView(
     selectedScoreBearingMetricKeys,
     wearableResidualLayer: report.wearableResidualLayer,
   });
-  const featureContributions = result
-    ? result.featureAttributions.map(buildMurphAgePublicFeatureContributionView)
-    : [];
   const layeredAgeEstimate = buildMurphAgeResearchLayeredAgeEstimateView({
     modelStatus,
     report,
     result,
+  });
+  const featureContributions = buildMurphAgeResearchFeatureContributionViews({
+    layeredAgeEstimate,
+    report,
+    result,
+  });
+  const domainContributions = buildMurphAgeResearchDomainContributionViews({
+    layeredAgeEstimate,
+    result,
+    wearableResidualLayer: report.wearableResidualLayer,
   });
   const primaryResearchAgeEstimate = layeredAgeEstimate ? {
     ageDeltaYears: layeredAgeEstimate.ageDeltaYears,
@@ -7995,11 +8002,7 @@ export function buildMurphAgeResearchCalculatorView(
     blockedFeatureKeys: [...summary.blockedFeatureKeys],
     displayBlockedReason: summary.displayBlockedReason,
     displayStatus: summary.displayStatus,
-    domainContributions: result ? result.moduleAttributions.map((module) => ({
-      contributionYears: module.contributionYears,
-      featureKeys: [...module.featureKeys],
-      moduleId: module.moduleId,
-    })) : [],
+    domainContributions,
     featureContributions,
     featureDrivers: buildMurphAgePublicDriverSummaryView(featureContributions),
     functionResidualLayer: report.functionResidualLayer
@@ -8036,6 +8039,67 @@ export function buildMurphAgeResearchCalculatorView(
     wearableResidualLayer: report.wearableResidualLayer
       ? cloneMurphAgePublicWearableResidualLayerView(report.wearableResidualLayer)
       : null,
+  };
+}
+
+function buildMurphAgeResearchFeatureContributionViews(input: {
+  layeredAgeEstimate: MurphAgeResearchLayeredAgeEstimateView | null;
+  report: MurphAgePublicCalculatorReport;
+  result: MurphAgePublicResult | null;
+}): MurphAgePublicFeatureContributionView[] {
+  if (!input.result) return [];
+  const contributions = input.result.featureAttributions.map(buildMurphAgePublicFeatureContributionView);
+  const wearableContribution = buildMurphAgeResearchWearableResidualFeatureContributionView({
+    layeredAgeEstimate: input.layeredAgeEstimate,
+    wearableResidualLayer: input.report.wearableResidualLayer,
+  });
+  if (wearableContribution) contributions.push(wearableContribution);
+  return contributions;
+}
+
+function buildMurphAgeResearchDomainContributionViews(input: {
+  layeredAgeEstimate: MurphAgeResearchLayeredAgeEstimateView | null;
+  result: MurphAgePublicResult | null;
+  wearableResidualLayer: MurphAgePublicWearableResidualLayerView | null;
+}): MurphAgePublicDomainContributionView[] {
+  if (!input.result) return [];
+  const contributions = input.result.moduleAttributions.map((module) => ({
+    contributionYears: module.contributionYears,
+    featureKeys: [...module.featureKeys],
+    moduleId: module.moduleId,
+  }));
+  const wearableContribution = buildMurphAgeResearchWearableResidualFeatureContributionView({
+    layeredAgeEstimate: input.layeredAgeEstimate,
+    wearableResidualLayer: input.wearableResidualLayer,
+  });
+  if (wearableContribution) {
+    contributions.push({
+      contributionYears: wearableContribution.contributionYears,
+      featureKeys: [wearableContribution.featureKey],
+      moduleId: wearableContribution.moduleId,
+    });
+  }
+  return contributions;
+}
+
+function buildMurphAgeResearchWearableResidualFeatureContributionView(input: {
+  layeredAgeEstimate: MurphAgeResearchLayeredAgeEstimateView | null;
+  wearableResidualLayer: MurphAgePublicWearableResidualLayerView | null;
+}): MurphAgePublicFeatureContributionView | null {
+  const wearableResidualLayer = input.wearableResidualLayer;
+  const wearableLayerApplied =
+    input.layeredAgeEstimate?.appliedLayerIds.includes(MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID) === true
+    && wearableResidualLayer?.status === "research-parameterized-shadow-delta"
+    && wearableResidualLayer.residualDeltaYears !== null;
+  if (!wearableLayerApplied) return null;
+
+  return {
+    contributionYears: wearableResidualLayer.residualDeltaYears,
+    featureKey: MURPH_AGE_MULTI_FAMILY_WEARABLE_RESEARCH_LAYER_ID,
+    metricKey: null,
+    moduleId: "wearable",
+    status: "ready",
+    warnings: wearableResidualLayer.warnings.map((warning) => ({ ...warning })),
   };
 }
 

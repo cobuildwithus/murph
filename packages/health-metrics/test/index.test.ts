@@ -4898,6 +4898,25 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchWithWearablePackView.model.wearable.currentUse, "research-shadow-residual-score");
   assert.equal(researchWithWearablePackView.model.wearable.researchScoreBearing, true);
   assert.equal(researchWithWearablePackView.model.wearable.scoreBearing, false);
+  const wearableResidualFeatureContribution = researchWithWearablePackView.featureContributions.find((feature) =>
+    feature.featureKey === "wearable-multi-family-residual"
+  );
+  assert.ok(wearableResidualFeatureContribution);
+  assert.equal(
+    wearableResidualFeatureContribution.contributionYears,
+    researchWithWearablePackView.wearableResidualLayer?.residualDeltaYears,
+  );
+  assert.equal(wearableResidualFeatureContribution.metricKey, null);
+  assert.equal(wearableResidualFeatureContribution.moduleId, "wearable");
+  const wearableResidualDomainContribution = researchWithWearablePackView.domainContributions.find((domain) =>
+    domain.moduleId === "wearable"
+  );
+  assert.ok(wearableResidualDomainContribution);
+  assert.deepEqual(wearableResidualDomainContribution.featureKeys, ["wearable-multi-family-residual"]);
+  assert.equal(
+    wearableResidualDomainContribution.contributionYears,
+    researchWithWearablePackView.wearableResidualLayer?.residualDeltaYears,
+  );
   assert.deepEqual(researchWithWearablePackView.model.layeredResearchPath.activeResearchScoreLayerIds, [
     "selected-lab-body-card",
     "wearable-multi-family-residual",
