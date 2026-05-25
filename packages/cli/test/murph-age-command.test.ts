@@ -1345,7 +1345,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
       view.arbiter.labConflictPolicy,
       'l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback',
     )
-    assert.equal(view.arbiter.wearableScorePolicy, 'context-only-not-score-bearing')
+    assert.equal(view.arbiter.wearableScorePolicy, 'research-residual-shadow-product-blocked')
     assert.equal(view.arbiter.selectedCardRole, 'transport-fallback-and-discordance-guard')
     assert.equal(view.arbiter.selectionReason, 'transport-fallback-selected')
     const viewResidualLayer = view.wearableResidualLayer
@@ -1403,6 +1403,16 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.wearable.currentUse, 'research-shadow-residual-score')
     assert.equal(view.model.wearable.researchScoreBearing, true)
     assert.equal(view.model.wearable.scoreBearing, false)
+    const wearableResidualFeatureContribution = view.featureContributions.find((feature) =>
+      feature.featureKey === 'wearable-multi-family-residual'
+    )
+    assert.ok(wearableResidualFeatureContribution)
+    assert.equal(
+      wearableResidualFeatureContribution.contributionYears,
+      view.wearableResidualLayer?.residualDeltaYears,
+    )
+    assert.equal(wearableResidualFeatureContribution.metricKey, null)
+    assert.equal(wearableResidualFeatureContribution.moduleId, 'wearable')
     assert.equal(
       view.model.layeredResearchPath.architecturePattern,
       'frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals',
