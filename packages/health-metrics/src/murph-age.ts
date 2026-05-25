@@ -7597,7 +7597,7 @@ function buildMurphAgeSubmittedMetricPoint(input: {
   });
   if (!sourceKind) return null;
   const normalized = normalizeMetricValue({
-    metricKey,
+    metricKey: input.submittedMetric.metricKey,
     unit: input.submittedMetric.unit ?? null,
     value: input.submittedMetric.value,
   });

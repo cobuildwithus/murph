@@ -2,7 +2,7 @@ import type { MetricDefinition } from "../types.ts";
 
 export const RECOVERY_METRICS = [
   {
-    aliases: ["rhr", "resting_heart_rate", "restingHeartRate", "resting-pulse"],
+    aliases: ["rhr", "resting-hr", "resting_hr", "resting_heart_rate", "restingHeartRate", "resting-pulse"],
     biomarkerKey: "biomarker:resting-heart-rate",
     canonicalUnit: "bpm",
     category: "recovery",
