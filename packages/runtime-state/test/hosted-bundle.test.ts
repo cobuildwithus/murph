@@ -1996,6 +1996,67 @@ test("hosted execution snapshots revalidate preserved artifact refs against the 
   }
 });
 
+test("hosted execution snapshots exclude every env-prefixed vault file", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-env-files-"));
+
+  try {
+    const artifacts = new Map<string, Uint8Array>();
+    const vaultRoot = path.join(workspaceRoot, "vault");
+
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "op_test"), { recursive: true });
+    await mkdir(path.join(vaultRoot, "nested"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(path.join(vaultRoot, ".env"), "blocked-env-value\n");
+    await writeFile(path.join(vaultRoot, ".env.local"), "blocked-env-value\n");
+    await writeFile(path.join(vaultRoot, ".envrc"), "blocked-env-value\n");
+    await writeFile(path.join(vaultRoot, ".env-prod"), "blocked-env-value\n");
+    await writeFile(path.join(vaultRoot, ".env_backup"), "blocked-env-value\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test", ".envrc"), "blocked-env-value\n");
+    await writeFile(path.join(vaultRoot, "nested", ".env-stage"), "blocked-env-value\n");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      vaultRoot,
+    });
+
+    assertHostedBundleTextEntries(snapshot.bundle, [
+      { expected: "{\"schema\":\"vault\"}\n", path: "vault.json", root: "vault" },
+      { expected: null, path: ".env", root: "vault" },
+      { expected: null, path: ".env.local", root: "vault" },
+      { expected: null, path: ".envrc", root: "vault" },
+      { expected: null, path: ".env-prod", root: "vault" },
+      { expected: null, path: ".env_backup", root: "vault" },
+      { expected: null, path: ".runtime/operations/op_test/.envrc", root: "vault" },
+      { expected: null, path: "nested/.env-stage", root: "vault" },
+    ]);
+    for (const artifactPath of [
+      ".env",
+      ".env.local",
+      ".envrc",
+      ".env-prod",
+      ".env_backup",
+      ".runtime/operations/op_test/.envrc",
+      "nested/.env-stage",
+    ]) {
+      assert.equal(
+        hasHostedBundleArtifactPath({
+          bytes: snapshot.bundle,
+          expectedKind: "vault",
+          path: artifactPath,
+          root: "vault",
+        }),
+        false,
+      );
+    }
+    assert.equal(Buffer.from(snapshot.bundle).includes("blocked-env-value"), false);
+    assert.equal(artifacts.size, 0);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted execution snapshots reject preserved artifacts for unknown roots", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-preserved-root-"));
 

@@ -541,4 +541,35 @@ describe("json route helper factory", () => {
       internalMessage: "route failed unexpectedly",
     });
   });
+
+  it("redacts complete authorization and cookie header values from log strings", () => {
+    expect(httpModule.sanitizeJsonLogString("Authorization: Bearer auth-fixture-token, status=401"))
+      .toBe("Authorization: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("Proxy-Authorization: Custom credential=auth-fixture-token, status=407"))
+      .toBe("Proxy-Authorization: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("Cookie: sid=cookie-fixture-value; theme=dark, request failed"))
+      .toBe("Cookie: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("Set-Cookie: sid=cookie-fixture-value; Path=/; HttpOnly, response failed"))
+      .toBe("Set-Cookie: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("authorization=Bearer auth-fixture-token"))
+      .toBe("authorization=<redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("cookie=sid=cookie-fixture-value; theme=dark"))
+      .toBe("cookie=<redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("set-cookie=sid=cookie-fixture-value; Path=/; HttpOnly"))
+      .toBe("set-cookie=<redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString(
+      "Authorization: Digest username=\"user\", response=\"auth-fixture-token\", status=401",
+    )).toBe("Authorization: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString(
+      "Set-Cookie: sid=cookie-fixture-value; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/, refresh=other-cookie-value",
+    )).toBe("Set-Cookie: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("Set-Cookie: [\"sid=cookie-fixture-value; Path=/; HttpOnly\"], response failed"))
+      .toBe("Set-Cookie: <redacted-secret>, response failed");
+    expect(httpModule.sanitizeJsonLogString("headers={\"set-cookie\":[\"sid=cookie-fixture-value; Path=/; HttpOnly\"]} response failed"))
+      .toBe("headers={\"set-cookie\":<redacted-secret>} response failed");
+    expect(httpModule.sanitizeJsonLogString("Cookie: sid=\"cookie-fixture-value\", request failed"))
+      .toBe("Cookie: <redacted-secret>");
+    expect(httpModule.sanitizeJsonLogString("{\"authorization\":\"Bearer auth-fixture-token\",\"status\":401}"))
+      .toBe("{\"authorization\":<redacted-secret>,\"status\":401}");
+  });
 });
