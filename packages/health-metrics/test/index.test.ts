@@ -3280,7 +3280,7 @@ test("applies research-only wearable residual parameter packs without making wea
     horizonYears: 10,
     intercept: 0,
     layerId: "activity-residual-v1",
-    packHash: "research-pack-activity-v1",
+    packHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
   } satisfies MurphAgeWearableResidualParameterPack;
@@ -3303,7 +3303,7 @@ test("applies research-only wearable residual parameter packs without making wea
   });
   assert.equal(application.status, "research-parameterized-shadow-delta");
   assert.equal(application.parameterizationAvailable, true);
-  assert.equal(application.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(application.parameterPackHash, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(application.residualDeltaLogit, -0.1);
   assert.equal(application.finalRiskProbability !== null && application.finalRiskProbability < 0.1, true);
   assert.equal(application.productAuthorized, false);
@@ -4581,7 +4581,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     horizonYears: 10,
     intercept: 0,
     layerId: "activity-residual-v1",
-    packHash: "research-pack-activity-v1",
+    packHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
   } satisfies MurphAgeWearableResidualParameterPack;
@@ -4828,7 +4828,10 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchWithWearablePack.result?.risk?.probability, research.result?.risk?.probability);
   assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.status, "research-parameterized-shadow-delta");
   assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.parameterizationAvailable, true);
-  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(
+    researchWithWearablePack.wearableResidualLayerApplication?.parameterPackHash,
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  );
   assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.residualDeltaLogit, -0.08);
   const shadowRiskProbability = researchWithWearablePack.wearableResidualLayerApplication?.finalRiskProbability;
   const baseRiskProbability = researchWithWearablePack.result?.risk?.probability;
@@ -4845,7 +4848,10 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   const researchWithWearablePackView = buildMurphAgeResearchCalculatorView(publicResearchWithWearablePackReport);
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.parameterizationAvailable, true);
-  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(
+    publicResearchWithWearablePackReport.wearableResidualLayer?.parameterPackHash,
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  );
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreBearing, false);
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreContributionAuthorized, false);

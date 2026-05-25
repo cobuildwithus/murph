@@ -10,6 +10,7 @@ import {
   assessMurphAgeWearableShadowIncrements,
   calculateMurphAgeFromInputBundle,
   summarizeMurphAgeWearableResidualLayerContracts,
+  validateMurphAgeWearableResidualParameterPack,
   type MetricPoint,
   type MurphAgeReferenceRiskPoint,
   type MurphAgeRiskModel,
@@ -35,7 +36,7 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
     calibrationSlope: 1,
     deploymentRights: "research-only",
     endpoint: "10-year all-cause mortality",
-    evidenceTier: "true-external-validation",
+    evidenceTier: "provisional-local-research",
     family: "activity",
     featureWeights: [
       {
@@ -57,7 +58,7 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
     horizonYears: 10,
     intercept: 0,
     layerId: "activity-residual-v1",
-    packHash: "research-pack-activity-v1",
+    packHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
   };
@@ -80,7 +81,7 @@ test("maps research-only wearable residual deltas onto risk-age equivalents when
   assert.equal(application.schemaVersion, MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION);
   assert.equal(application.status, "research-parameterized-shadow-delta");
   assert.equal(application.parameterizationAvailable, true);
-  assert.equal(application.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(application.parameterPackHash, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(application.residualDeltaLogit, -0.1);
   assert.equal(application.anchorRiskAgeEquivalentYears, 40);
   assert.equal(
@@ -177,7 +178,7 @@ test("accepts research-only sleep and autonomic residual packs without authorizi
       calibrationSlope: 1,
       deploymentRights: "research-only",
       endpoint: "10-year all-cause mortality",
-      evidenceTier: "true-external-validation",
+      evidenceTier: "provisional-local-research",
       family: testCase.family,
       featureWeights: [
         {
@@ -192,7 +193,7 @@ test("accepts research-only sleep and autonomic residual packs without authorizi
       horizonYears: 10,
       intercept: 0,
       layerId: testCase.layerId,
-      packHash: `research-pack-${testCase.family.replaceAll("-", "_")}-v1`,
+      packHash: `sha256:${"b".repeat(64)}`,
       schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
       sourceRouteId: "all-of-us-fitbit-labs-ehr",
     };
@@ -222,6 +223,7 @@ test("calculator applies multiple wearable residual packs together in research m
   const points = [
     metricPoint("hba1c", "%", 5.4, "test-result"),
     metricPoint("bmi", "kg/m^2", 24.2, "measurement"),
+    metricPoint("steps", "count", 10_000, "wearable-summary"),
     metricPoint("total-sleep-minutes", "minutes", 450, "sleep-summary"),
     metricPoint("wearable-valid-night-count-28d", "count", 22, "sleep-summary"),
     metricPoint("wearable-coverage-index", "score", 0.91, "wearable-summary"),
@@ -239,6 +241,14 @@ test("calculator applies multiple wearable residual packs together in research m
     points,
     sex: "female",
     wearableResidualParameterPacks: [
+      wearablePack({
+        center: 8_000,
+        coefficient: -0.04,
+        family: "activity",
+        layerId: "activity-residual-v1",
+        metricKey: "steps",
+        scale: 2_000,
+      }),
       wearablePack({
         center: 420,
         coefficient: -0.04,
@@ -270,7 +280,8 @@ test("calculator applies multiple wearable residual packs together in research m
   assert.equal(output.wearableResidualLayerApplication?.layerId, "multi-wearable-residual-v1");
   assert.equal(output.wearableResidualLayerApplication?.status, "research-parameterized-shadow-delta");
   assert.equal(output.wearableResidualLayerApplication?.parameterizationAvailable, true);
-  assert.equal(output.wearableResidualLayerApplication?.residualDeltaLogit, -0.09);
+  assert.equal(output.wearableResidualLayerApplication?.residualDeltaLogit, -0.13);
+  assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("steps"), true);
   assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("total-sleep-minutes"), true);
   assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("resting-heart-rate"), true);
   assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("hrv-rmssd"), true);
@@ -301,6 +312,79 @@ test("calculator applies multiple wearable residual packs together in research m
   assert.equal(productOutput.wearableResidualLayerApplication?.parameterizationAvailable ?? false, false);
 });
 
+test("rejects wearable residual packs whose anchor card mismatches the selected calculator anchor", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const points = [
+    metricPoint("steps", "count", 10_000, "wearable-summary"),
+    metricPoint("wearable-valid-day-count-28d", "count", 24, "wearable-summary"),
+    metricPoint("wearable-coverage-index", "score", 0.86, "wearable-summary"),
+  ];
+  const assessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
+    asOf,
+    points,
+  });
+  const parameterPack: MurphAgeWearableResidualParameterPack = {
+    ...wearablePack({
+      center: 8_000,
+      coefficient: -0.08,
+      family: "activity",
+      layerId: "activity-residual-v1",
+      metricKey: "steps",
+      scale: 2_000,
+    }),
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+  };
+
+  const application = applyMurphAgeWearableResidualLayer({
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
+    anchorRiskProbability: 0.1,
+    asOf,
+    assessments,
+    parameterPack,
+    points,
+  });
+
+  assert.equal(application.status, "mechanics-ready-zero-delta");
+  assert.equal(application.parameterizationAvailable, false);
+  assert.equal(application.parameterPackHash, null);
+  assert.equal(application.residualDeltaLogit, 0);
+  assert.equal(
+    application.warnings.some((warning) =>
+      warning.code === "MODEL_CARD_POLICY_VIOLATION"
+      && warning.message === "Wearable residual parameter pack anchor card is not compatible with the selected anchor."
+    ),
+    true,
+  );
+});
+
+test("does not treat provisional local research evidence as product-promotion evidence", () => {
+  const validation = validateMurphAgeWearableResidualParameterPack({
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
+    parameterPack: {
+      ...wearablePack({
+        center: 8_000,
+        coefficient: -0.08,
+        family: "activity",
+        layerId: "activity-residual-v1",
+        metricKey: "steps",
+        scale: 2_000,
+      }),
+      deploymentRights: "product-authorized",
+      evidenceTier: "provisional-local-research",
+    },
+  });
+
+  assert.equal(validation.status, "invalid");
+  assert.equal(
+    validation.warnings.some((warning) =>
+      warning.code === "MODEL_CARD_POLICY_VIOLATION"
+      && warning.message === "Product-authorized wearable residual parameter packs require product-promotion evidence tiers."
+    ),
+    true,
+  );
+});
+
 function wearablePack(input: {
   center: number;
   coefficient: number;
@@ -315,7 +399,7 @@ function wearablePack(input: {
     calibrationSlope: 1,
     deploymentRights: "research-only",
     endpoint: "10-year all-cause mortality",
-    evidenceTier: "true-external-validation",
+    evidenceTier: "provisional-local-research",
     family: input.family,
     featureWeights: [
       {
@@ -330,7 +414,7 @@ function wearablePack(input: {
     horizonYears: 10,
     intercept: 0,
     layerId: input.layerId,
-    packHash: `research-pack-${input.family.replaceAll("-", "_")}-v1`,
+    packHash: `sha256:${"c".repeat(64)}`,
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
   };

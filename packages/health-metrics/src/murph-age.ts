@@ -220,6 +220,7 @@ export type MurphAgeValidationEvidenceTier =
   | "internal-anchor"
   | "murph-native-prospective-validation"
   | "partner-aggregate-validation"
+  | "provisional-local-research"
   | "same-family-sanity"
   | "true-external-validation";
 export type MurphAgeProductPromotionBlocker =
@@ -661,6 +662,7 @@ const MURPH_AGE_VALIDATION_EVIDENCE_TIERS = new Set<string>([
   "internal-anchor",
   "murph-native-prospective-validation",
   "partner-aggregate-validation",
+  "provisional-local-research",
   "same-family-sanity",
   "true-external-validation",
 ]);
@@ -4067,6 +4069,7 @@ export function applyMurphAgeWearableResidualLayer(input: {
     : "ineligible-insufficient-coverage";
   const parameterized = status === "mechanics-ready-zero-delta" && input.parameterPack
     ? evaluateMurphAgeWearableResidualParameterPack({
+      anchorCardId: input.anchorCardId,
       anchorLogit,
       asOf: input.asOf,
       contract,
@@ -4227,6 +4230,7 @@ function wearableResidualParameterPacksForInput(
 }
 
 function evaluateMurphAgeWearableResidualParameterPack(input: {
+  anchorCardId: MurphAgeScoreBearingCardId;
   anchorLogit: number | null;
   asOf?: string;
   contract: MurphAgeWearableResidualLayerContract;
@@ -4238,7 +4242,7 @@ function evaluateMurphAgeWearableResidualParameterPack(input: {
   warnings: MurphAgeWarning[];
 } {
   const validation = validateMurphAgeWearableResidualParameterPackForContract({
-    anchorCardId: input.pack.anchorCardId,
+    anchorCardId: input.anchorCardId,
     contract: input.contract,
     pack: input.pack,
   });
@@ -4384,10 +4388,10 @@ function validateMurphAgeWearableResidualParameterPackForContract(input: {
       message: "Wearable residual parameter pack global cap must be finite and between 0 and 1 logit.",
     });
   }
-  if (!/^[a-z0-9][a-z0-9._-]{7,127}$/u.test(pack.packHash)) {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(pack.packHash)) {
     warnings.push({
       code: "INVALID_INPUT",
-      message: "Wearable residual parameter pack hash must be a stable non-identifying artifact hash.",
+      message: "Wearable residual parameter pack hash must be a stable sha256 artifact digest.",
     });
   }
   if (pack.featureWeights.length === 0) {
