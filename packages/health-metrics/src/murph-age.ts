@@ -2409,6 +2409,7 @@ const MURPH_AGE_L1B_GLYCEMIA_BODY_FEATURES = [
 
 const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
   { featureKey: "steps", label: "Steps", metricKeys: ["steps"], requiredFor: "wearable-context" },
+  { featureKey: "activity-counts", label: "Activity counts", metricKeys: ["activity-counts"], requiredFor: "wearable-context" },
   { featureKey: "activity-minutes", label: "Activity minutes", metricKeys: ["activity-minutes"], requiredFor: "wearable-context" },
   { featureKey: "mvpa-minutes", label: "MVPA", metricKeys: ["mvpa-minutes"], requiredFor: "wearable-context" },
   {
@@ -2603,6 +2604,7 @@ const MURPH_AGE_INPUT_FEATURE_REQUIREMENTS: readonly MurphAgeInputFeatureRequire
 
 const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
   activity: [
+    "activity-counts",
     "activity-minutes",
     "estimated-vo2-max",
     "mvpa-minutes",
@@ -2889,6 +2891,20 @@ const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS = [
     unlockPriority: "first",
   },
   {
+    evidenceSummary: "Actigraphy activity counts are source-specific objective activity features used for research transport and validation when step or minute summaries are unavailable.",
+    family: "activity",
+    featureKey: "actigraphy-activity-counts",
+    label: "Actigraphy activity counts",
+    measurementWindowDays: [28],
+    measurementMethod: "research-actigraphy",
+    methodQualifier: "required",
+    metricKeys: ["activity-counts"],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
+    role: "shadow-increment-signal",
+    sourceKinds: ["activity-summary", "wearable-summary"],
+    unlockPriority: "first",
+  },
+  {
     evidenceSummary: "Peak cadence captures movement intensity in a device-portable way and is evaluated with activity volume before richer heart-rate or sleep signals.",
     family: "activity",
     featureKey: "activity-intensity-pattern",
@@ -3018,6 +3034,7 @@ const MURPH_AGE_WEARABLE_SCORE_BEARING_FAMILY_POLICIES = [
     scoreContributionAuthorized: false,
     signalMetricKeys: [
       "steps",
+      "activity-counts",
       "activity-minutes",
       "mvpa-minutes",
       "peak-30-minute-cadence",
@@ -3292,6 +3309,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
     scoreContributionAuthorized: false,
     signalMetricKeys: [
       "steps",
+      "activity-counts",
       "activity-minutes",
       "mvpa-minutes",
       "peak-30-minute-cadence",

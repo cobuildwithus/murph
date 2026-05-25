@@ -158,6 +158,7 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("diabetes_history_proxy_yes")?.key, "diabetes-history-proxy-yes");
   assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
   assert.equal(resolveMetricDefinition("steps_per_day")?.key, "steps");
+  assert.equal(resolveMetricDefinition("activity_counts")?.key, "activity-counts");
   assert.equal(resolveMetricDefinition("active_minutes")?.key, "activity-minutes");
   assert.equal(resolveMetricDefinition("peakCadence")?.key, "peak-30-minute-cadence");
   assert.equal(resolveMetricDefinition("resting_hr")?.key, "resting-heart-rate");
@@ -169,6 +170,7 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     ["daily-steps", "steps"],
     ["step-count-per-day", "steps"],
     ["steps_per_day", "steps"],
+    ["actigraphy-counts", "activity-counts"],
     ["active-minutes", "activity-minutes"],
     ["activeMinutes", "activity-minutes"],
     ["resting-hr", "resting-heart-rate"],
@@ -3004,6 +3006,7 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   assert.deepEqual(featureKeys, [
     "wearable-coverage-quality",
     "activity-volume",
+    "actigraphy-activity-counts",
     "activity-intensity-pattern",
     "sedentary-time",
     "sleep-duration-regularity",
@@ -3032,6 +3035,7 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   assert.deepEqual(firstWave, [
     "wearable-coverage-quality",
     "activity-volume",
+    "actigraphy-activity-counts",
     "activity-intensity-pattern",
     "sedentary-time",
   ]);
@@ -3044,6 +3048,12 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   assert.equal(activityVolume?.metricKeys.includes("mvpa-minutes"), true);
   assert.equal(activityVolume?.requiredQualityMetricKeys.includes("wearable-valid-day-count-28d"), true);
   assert.equal(activityVolume?.requiredQualityMetricKeys.includes("wearable-coverage-index"), true);
+
+  const actigraphyCounts = resolveMurphAgeWearableBridgeFeatureSpec("actigraphy-activity-counts");
+  assert.equal(actigraphyCounts?.role, "shadow-increment-signal");
+  assert.equal(actigraphyCounts?.family, "activity");
+  assert.equal(actigraphyCounts?.measurementMethod, "research-actigraphy");
+  assert.deepEqual(actigraphyCounts?.metricKeys, ["activity-counts"]);
 
   const intensityPattern = resolveMurphAgeWearableBridgeFeatureSpec("activity-intensity-pattern");
   assert.equal(intensityPattern?.role, "shadow-increment-signal");
@@ -3087,6 +3097,7 @@ test("exposes one wearable bridge metric source and coverage contract", () => {
   assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("wearable_valid_day_count_28d"), "activity-summary");
   assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("wearable_valid_night_count_28d"), "sleep-summary");
   assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("wearable_coverage_index"), "wearable-summary");
+  assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("activity_counts"), "activity-summary");
   assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("sleep_efficiency"), "sleep-summary");
   assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("hrv_rmssd"), "wearable-summary");
 
@@ -5204,12 +5215,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.wearableContext.uncertaintyAction, "context-only");
   assert.equal(researchSummary.wearableContext.scoreBearing, false);
   assert.equal(researchSummary.wearableContext.scoreContributionAuthorized, false);
-  assert.equal(researchSummary.wearableBridge.candidateFeatureCount, 8);
+  assert.equal(researchSummary.wearableBridge.candidateFeatureCount, 9);
   assert.deepEqual(researchSummary.wearableBridge.firstPriorityReadyFeatureKeys, [
     "wearable-coverage-quality",
     "activity-volume",
   ]);
   assert.deepEqual(researchSummary.wearableBridge.firstPriorityIncompleteFeatureKeys, [
+    "actigraphy-activity-counts",
     "activity-intensity-pattern",
     "sedentary-time",
   ]);
@@ -6734,7 +6746,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5View.wearable.scoreBearing, false);
   assert.equal(submittedLab5View.wearable.scoreContributionAuthorized, false);
   assert.equal(submittedLab5View.wearable.quality, "usable-context");
-  assert.equal(submittedLab5View.wearable.candidateFeatureCount, 8);
+  assert.equal(submittedLab5View.wearable.candidateFeatureCount, 9);
   assert.equal(submittedLab5View.wearable.readyFeatureKeys.includes("activity-volume"), true);
   assert.equal(submittedLab5View.wearable.firstPriorityReadyFeatureKeys.includes("activity-volume"), true);
   assert.equal(submittedLab5View.wearable.firstPriorityIncompleteFeatureKeys.includes("sedentary-time"), true);
@@ -7340,6 +7352,29 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
       ?.missingQualityMetricKeys.includes("wearable-valid-day-count-28d"),
     true,
   );
+
+  const countsOnlyWearable = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "activity_counts_1",
+        metricKey: "activity-counts",
+        observedAt: "2026-05-08T00:00:00.000Z",
+        recordId: "activity_counts_record",
+        sourceKind: "activity-summary",
+        unit: "counts/day",
+        value: 123456,
+      }),
+    ],
+    sex: "female",
+  });
+  const countsOnlySummary = summarizeMurphAgeCalculatorOutput(countsOnlyWearable);
+  assert.equal(countsOnlySummary.wearableContext.availableFeatureFamilies.includes("activity"), true);
+  assert.equal(countsOnlySummary.wearableContext.readyFeatureCount, 1);
+  assert.equal(countsOnlySummary.wearableContext.readyMetricCount, 1);
 
   const policyViolation = calculateMurphAgeFromInputBundle({
     asOf,
