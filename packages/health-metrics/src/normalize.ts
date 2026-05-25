@@ -1,5 +1,14 @@
-import { createCustomMetricDefinition, resolveMetricDefinition } from "./catalog.ts";
+import { createCustomMetricDefinition, normalizeMetricKey, resolveMetricDefinition } from "./catalog.ts";
 import type { MetricSelectionWarning, MetricValueNormalization } from "./types.ts";
+
+const HOUR_INTENT_DURATION_ALIASES = new Set([
+  "sleep-duration-hours",
+  "sleep_duration_hours",
+  "sleep-hours",
+  "sleep_hours",
+  "total-sleep-hours",
+  "total_sleep_hours",
+].map(normalizeMetricKey));
 
 export function normalizeMetricValue(input: {
   metricKey: string;
@@ -7,7 +16,7 @@ export function normalizeMetricValue(input: {
   value: number | null;
 }): MetricValueNormalization {
   const definition = resolveMetricDefinition(input.metricKey) ?? createCustomMetricDefinition(input.metricKey, input.unit);
-  const unit = normalizeUnit(input.unit);
+  const unit = normalizeUnit(input.unit) ?? inferUnitFromMetricAlias(input.metricKey);
 
   if (input.value === null || !Number.isFinite(input.value)) {
     return { canonicalUnit: null, canonicalValue: null, unit, warnings: [] };
@@ -51,6 +60,12 @@ export function normalizeMetricValue(input: {
     case "ast":
     case "ggt":
       return normalizeExactUnit(input.value, unit, "U/L", definition.displayName);
+    case "deep-sleep-minutes":
+    case "rem-sleep-minutes":
+    case "sleep-duration-variability-minutes":
+    case "sleep-midpoint-variability-minutes":
+    case "total-sleep-minutes":
+      return normalizeDurationMinutes(input.value, unit, definition.displayName);
     default: {
       const canonicalUnit = definition.canonicalUnit && (!unit || unitsEquivalent(unit, definition.canonicalUnit))
         ? definition.canonicalUnit
@@ -65,6 +80,10 @@ export function normalizeMetricValue(input: {
       };
     }
   }
+}
+
+function inferUnitFromMetricAlias(metricKey: string): string | null {
+  return HOUR_INTENT_DURATION_ALIASES.has(normalizeMetricKey(metricKey)) ? "hours" : null;
 }
 
 export function normalizeUnit(value: string | null): string | null {
@@ -92,6 +111,11 @@ export function normalizeUnit(value: string | null): string | null {
     g_dl: "g/dL",
     "g/dl": "g/dL",
     kg: "kg",
+    h: "hours",
+    hr: "hours",
+    hrs: "hours",
+    hour: "hours",
+    hours: "hours",
     kilogram: "kg",
     kilograms: "kg",
     cm: "cm",
@@ -173,6 +197,16 @@ function normalizeLengthCentimeters(value: number, unit: string | null, label: s
     return { canonicalUnit: "cm", canonicalValue: Number((value * 2.54).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, "cm")] };
+}
+
+function normalizeDurationMinutes(value: number, unit: string | null, label: string): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "minutes")) {
+    return { canonicalUnit: "minutes", canonicalValue: value, unit: unit ?? "minutes", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "hours")) {
+    return { canonicalUnit: "minutes", canonicalValue: Number((value * 60).toFixed(4)), unit, warnings: [] };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, "minutes")] };
 }
 
 function normalizeAlbumin(value: number, unit: string | null): MetricValueNormalization {

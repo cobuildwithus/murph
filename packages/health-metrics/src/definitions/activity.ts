@@ -2,7 +2,19 @@ import type { MetricDefinition } from "../types.ts";
 
 export const ACTIVITY_METRICS = [
   {
-    aliases: ["daily-step-count", "daily_step_count", "step-count", "step_count", "steps"],
+    aliases: [
+      "daily-step-count",
+      "daily_step_count",
+      "daily-steps",
+      "daily_steps",
+      "step-count",
+      "step_count",
+      "step-count-per-day",
+      "step_count_per_day",
+      "steps",
+      "steps-per-day",
+      "steps_per_day",
+    ],
     biomarkerKey: null,
     canonicalUnit: "count",
     category: "activity",
@@ -13,7 +25,7 @@ export const ACTIVITY_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["sessionMinutes", "session_minutes", "activity-minutes"],
+    aliases: ["active-minutes", "active_minutes", "activeMinutes", "sessionMinutes", "session_minutes", "activity-minutes"],
     biomarkerKey: null,
     canonicalUnit: "minutes",
     category: "activity",

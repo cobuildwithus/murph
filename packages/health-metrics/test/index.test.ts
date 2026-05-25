@@ -157,9 +157,27 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("hypertension_history_proxy_yes")?.key, "hypertension-history-proxy-yes");
   assert.equal(resolveMetricDefinition("diabetes_history_proxy_yes")?.key, "diabetes-history-proxy-yes");
   assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
+  assert.equal(resolveMetricDefinition("steps_per_day")?.key, "steps");
+  assert.equal(resolveMetricDefinition("active_minutes")?.key, "activity-minutes");
   assert.equal(resolveMetricDefinition("peakCadence")?.key, "peak-30-minute-cadence");
+  assert.equal(resolveMetricDefinition("resting_hr")?.key, "resting-heart-rate");
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
+  assert.equal(resolveMetricDefinition("sleep_duration_hours")?.key, "total-sleep-minutes");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
+  assert.equal(resolveMetricDefinition("sleep_midpoint_variability")?.key, "sleep-midpoint-variability-minutes");
+  for (const [alias, expectedKey] of [
+    ["daily-steps", "steps"],
+    ["step-count-per-day", "steps"],
+    ["steps_per_day", "steps"],
+    ["active-minutes", "activity-minutes"],
+    ["activeMinutes", "activity-minutes"],
+    ["resting-hr", "resting-heart-rate"],
+    ["sleep-hours", "total-sleep-minutes"],
+    ["total_sleep_hours", "total-sleep-minutes"],
+    ["sleep_midpoint_variability_minutes", "sleep-midpoint-variability-minutes"],
+  ] as const) {
+    assert.equal(resolveMetricDefinition(alias)?.key, expectedKey);
+  }
   assert.equal(resolveMetricDefinition("respiratoryRate")?.key, "respiratory-rate");
   assert.equal(resolveMetricDefinition("temperature_deviation")?.key, "skin-temperature-deviation");
   assert.equal(resolveMetricDefinition("adl-count")?.key, "adl-limitation-count");
@@ -226,6 +244,29 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "stone",
     value: 12,
   }).warnings[0]?.code, "UNIT_NOT_NORMALIZED");
+
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "sleep_duration_hours",
+    unit: null,
+    value: 7.5,
+  }), {
+    canonicalUnit: "minutes",
+    canonicalValue: 450,
+    unit: "hours",
+    warnings: [],
+  });
+  for (const unit of ["h", "hr", "hrs", "hour", "hours"]) {
+    assert.deepEqual(normalizeMetricValue({
+      metricKey: "total-sleep-minutes",
+      unit,
+      value: 7.5,
+    }), {
+      canonicalUnit: "minutes",
+      canonicalValue: 450,
+      unit: "hours",
+      warnings: [],
+    });
+  }
 
   const glucose = normalizeMetricValue({
     metricKey: "glucose",
@@ -6084,6 +6125,108 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     submittedLab5WithWearablesReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"),
     false,
   );
+
+  const submittedAliasWearableMetrics = [
+    { metricKey: "steps_per_day", unit: "count", value: 9_800 },
+    { metricKey: "active_minutes", unit: "minutes", value: 56 },
+    { metricKey: "resting_hr", unit: "bpm", value: 58 },
+    { metricKey: "hrv_rmssd", unit: "ms", value: 62 },
+    { metricKey: "sleep_duration_hours", value: 7.5 },
+    { metricKey: "sleep_midpoint_variability", unit: "minutes", value: 39 },
+    { metricKey: "wearable_valid_day_count_28d", unit: "count", value: 24 },
+    { metricKey: "wearable_valid_night_count_28d", unit: "count", value: 22 },
+    { metricKey: "wearable_coverage_index", unit: "score", value: 0.86 },
+  ];
+  // Synthetic fixture pack only; the registered route exercises contract validation without carrying real coefficients.
+  const aliasWearableResidualPack = {
+    anchorCardId: "lab5_bp_bmi_transport_research",
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "provisional-local-research",
+    family: "activity",
+    featureWeights: [
+      {
+        center: 8_000,
+        coefficient: -0.08,
+        metricKey: "steps",
+        scale: 2_000,
+        transform: "center-scale",
+      },
+      {
+        center: 45,
+        coefficient: -0.02,
+        metricKey: "activity-minutes",
+        scale: 30,
+        transform: "center-scale",
+      },
+    ],
+    globalWearableCapLogit: 0.25,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "activity-residual-v1",
+    packHash: `sha256:${"c".repeat(64)}`,
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  } satisfies MurphAgeWearableResidualParameterPack;
+  const aliasSleepWearableResidualPack = {
+    anchorCardId: "lab5_bp_bmi_transport_research",
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "provisional-local-research",
+    family: "sleep",
+    featureWeights: [
+      {
+        center: 420,
+        coefficient: -0.04,
+        metricKey: "total-sleep-minutes",
+        scale: 30,
+        transform: "center-scale",
+      },
+    ],
+    globalWearableCapLogit: 0.25,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "sleep-residual-v1",
+    packHash: `sha256:${"d".repeat(64)}`,
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  } satisfies MurphAgeWearableResidualParameterPack;
+  const submittedAliasWearablesReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: [...submittedLab5Metrics, ...submittedAliasWearableMetrics],
+    wearableResidualParameterPacks: [aliasWearableResidualPack, aliasSleepWearableResidualPack],
+  });
+
+  assert.equal(submittedAliasWearablesReport.status, "ready");
+  assert.equal(submittedAliasWearablesReport.displaySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(submittedAliasWearablesReport.displaySummary.wearableBridge.readyFeatureKeys.includes("resting-heart-rate"), true);
+  assert.equal(submittedAliasWearablesReport.displaySummary.wearableBridge.readyFeatureKeys.includes("hrv-rmssd"), true);
+  assert.equal(submittedAliasWearablesReport.displaySummary.contextOnlyFeatureKeys.includes("total-sleep-minutes"), true);
+  assert.equal(submittedAliasWearablesReport.displaySummary.wearableBridge.readyFeatureKeys.includes("sleep-duration-regularity"), true);
+  assert.equal(
+    submittedAliasWearablesReport.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes("activity-minutes"),
+    true,
+  );
+  assert.equal(
+    submittedAliasWearablesReport.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes("total-sleep-minutes"),
+    true,
+  );
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.residualDeltaLogit, -0.119333);
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.selectedMetricKeys.includes("activity-minutes"), true);
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.selectedMetricKeys.includes("total-sleep-minutes"), true);
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.productAuthorized, false);
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.scoreBearing, false);
+  assert.equal(submittedAliasWearablesReport.wearableResidualLayer?.scoreContributionAuthorized, false);
 
   const submittedLab9Metrics = [
     { metricKey: "albumin", unit: "g/dL", value: 4.4 },
