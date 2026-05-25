@@ -39,6 +39,7 @@ export type MurphAgeSourceRouteId =
   | "midus-biomarker-mortality"
   | "mipact-apple-watch-ehr"
   | "nako-accelerometer-biobank"
+  | "nhefs-public-lab-vitals-mortality"
   | "nhanes-activity-shadow-lmf"
   | "nhanes-bench0-lab-body"
   | "nhanes-iii-lmf-sanity"
@@ -1004,6 +1005,30 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 45,
     routeId: "haalsi-transport-stress",
     sourceFamily: "HAALSI / ICPSR",
+  },
+  {
+    accessMode: "public-use",
+    activationStatus: "metadata-candidate",
+    allowedResearchUses: [
+      "lab/vitals mortality aggregate diagnostics",
+      "source-specific lab and blood-pressure transport support",
+      "aggregate-only arbitration for clinical-core candidates",
+    ],
+    blockedCurrentUses: [
+      "score-bearing product use",
+      "treating source-specific lift as cross-source validation",
+      "row, prediction, or coefficient export",
+    ],
+    displayName: "NHEFS public lab/vitals mortality route",
+    evidenceRole: "transport-stress",
+    featureFamilies: ["blood-pressure", "body-composition", "clinical-history", "labs", "survey-proxy"],
+    layers: ["biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Use aggregate support only as source-specific lab/vitals evidence until cross-source transport and wearable-outcome receipts land.",
+    outcomeSignal: "linked-mortality",
+    priorityRank: 46,
+    routeId: "nhefs-public-lab-vitals-mortality",
+    sourceFamily: "NHEFS public linked mortality",
   },
   {
     accessMode: "public-use",
