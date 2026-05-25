@@ -348,6 +348,13 @@ vi.mock("./runtime.ts", () => ({
   StripeCliMissingError,
   terminateChildProcess,
   terminateChildProcessAndWait,
+  throwIfAbortSignalAborted: vi.fn((signal?: AbortSignal) => {
+    if (signal?.aborted) {
+      const error = new Error("Hosted-local startup was interrupted.");
+      error.name = "AbortError";
+      throw error;
+    }
+  }),
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
 }));
@@ -929,6 +936,118 @@ describe("hosted local dev stack", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     releaseFirstTermination();
     await stopPromise;
+  });
+
+  it("runs stop cleanup once when stop is called repeatedly while termination is pending", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+    let releaseFirstTermination = (): void => {
+      throw new Error("first termination promise was not created");
+    };
+    terminateChildProcessAndWait
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseFirstTermination = resolve;
+      }))
+      .mockResolvedValueOnce(undefined);
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+
+    const firstStop = stack.stop("SIGTERM");
+    const secondStop = stack.stop("SIGKILL");
+    await Promise.resolve();
+
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    releaseFirstTermination();
+    await Promise.all([firstStop, secondStop]);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+  });
+
+  it("only emits process residue cleanup patterns for owned services", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+
+    try {
+      const { terminateKnownHostedLocalProcessResidue } = await import("./stack.ts");
+
+      terminateKnownHostedLocalProcessResidue({
+        config: {
+          ...defaultConfig,
+          linqWebhookTunnelMode: "auto",
+          skipHealthCommonsWatch: false,
+          temporal: {
+            ...defaultConfig.temporal,
+            mode: "external",
+            port: 7234,
+          },
+        },
+        owned: {
+          cloudflareWorker: false,
+          healthCommons: false,
+          linqTunnel: false,
+          stripe: false,
+          temporalServer: false,
+          temporalWorker: true,
+          web: false,
+        },
+        signal: "SIGTERM",
+        stripeForwardUrl: "http://localhost:3000/api/hosted-onboarding/stripe/webhook",
+      });
+
+      expect(spawnSync).not.toHaveBeenCalled();
+
+      spawnSync.mockClear();
+      terminateKnownHostedLocalProcessResidue({
+        config: {
+          ...defaultConfig,
+          linqWebhookTunnelMode: "auto",
+          skipHealthCommonsWatch: false,
+          temporal: {
+            ...defaultConfig.temporal,
+            mode: "managed",
+            port: 7234,
+          },
+        },
+        owned: {
+          cloudflareWorker: true,
+          healthCommons: true,
+          linqTunnel: true,
+          stripe: true,
+          temporalServer: true,
+          temporalWorker: true,
+          web: true,
+        },
+        signal: "SIGKILL",
+        stripeForwardUrl: "http://localhost:3000/api/hosted-onboarding/stripe/webhook",
+      });
+
+      expect(spawnSync.mock.calls.map(([, args]) => args)).toEqual([
+        ["-SIGKILL", "-f", "pnpm --dir apps/cloudflare worker:dev:prepared.*--port 8787"],
+        ["-SIGKILL", "-f", "apps/cloudflare/scripts/dev-worker\\.ts.*--port 8787"],
+        ["-SIGKILL", "-f", "wrangler dev.*--port 8787"],
+        ["-SIGKILL", "-f", "workerd.*127\\.0\\.0\\.1:8787"],
+        ["-SIGKILL", "-f", "apps/web/scripts/dev-local\\.ts.*--port 3000"],
+        ["-SIGKILL", "-f", "next/dist/telemetry/detached-flush\\.js dev .*apps/web"],
+        ["-SIGKILL", "-f", "pnpm health-commons:generate:watch"],
+        [
+          "-SIGKILL",
+          "-f",
+          "cloudflared tunnel --no-autoupdate --config.*\\.tmp/cloudflared-linq-webhook\\.yml.*run.*dev",
+        ],
+        ["-SIGKILL", "-f", "temporal server start-dev .*--port 7234"],
+        [
+          "-SIGKILL",
+          "-f",
+          "stripe listen --forward-to http://localhost:3000/api/hosted-onboarding/stripe/webhook",
+        ],
+      ]);
+    } finally {
+      platformSpy.mockRestore();
+    }
   });
 
   it("uses scoped process residue cleanup for the Linq tunnel", async () => {

@@ -157,25 +157,27 @@ describe("hosted-local run CLI", () => {
     expect(output.text()).not.toContain("Hosted-local E2E complete");
   });
 
-  test("cleans startup residue when hosted-local up is interrupted before the stack returns", async () => {
+  test("aborts startup and stops the stack when hosted-local up is interrupted before the stack returns", async () => {
     let resolveStart!: (stack: ReturnType<typeof createHostedLocalStack>) => void;
-    startHostedLocalDevStack.mockImplementationOnce(async () =>
-      await new Promise<ReturnType<typeof createHostedLocalStack>>((resolve) => {
+    let startupSignal: AbortSignal | undefined;
+    startHostedLocalDevStack.mockImplementationOnce(async (input: { abortSignal?: AbortSignal }) => {
+      startupSignal = input.abortSignal;
+      return await new Promise<ReturnType<typeof createHostedLocalStack>>((resolve) => {
         resolveStart = resolve;
-      })
-    );
+      });
+    });
     const signalHandlers = new Map<string, () => void>();
-    const originalProcessOnce = process.once.bind(process);
-    const onceSpy = vi.spyOn(process, "once").mockImplementation((
+    const originalProcessOn = process.on.bind(process);
+    const onSpy = vi.spyOn(process, "on").mockImplementation((
       (event: string | symbol, listener: (...args: unknown[]) => void) => {
         if (event === "SIGINT" || event === "SIGTERM") {
           signalHandlers.set(event, () => listener(event));
           return process;
         }
 
-        return originalProcessOnce(event, listener);
+        return originalProcessOn(event, listener);
       }
-    ) as typeof process.once);
+    ) as typeof process.on);
     const offSpy = vi.spyOn(process, "off").mockImplementation((
       (_event: string | symbol, _listener: (...args: unknown[]) => void) => process
     ) as typeof process.off);
@@ -193,40 +195,95 @@ describe("hosted-local run CLI", () => {
       });
 
       signalHandlers.get("SIGINT")?.();
+      signalHandlers.get("SIGTERM")?.();
       await Promise.resolve();
 
-      expect(terminateKnownHostedLocalProcessResidue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          signal: "SIGINT",
-          stripeForwardUrl: "http://localhost:3000/api/hosted-onboarding/stripe/webhook",
-        }),
-      );
-      expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
-        ignoreErrors: true,
-      }));
+      expect(startupSignal?.aborted).toBe(true);
+      expect(terminateKnownHostedLocalProcessResidue).not.toHaveBeenCalled();
+      expect(cleanupHostedRunnerContainers).not.toHaveBeenCalled();
 
       resolveStart(stack);
       await runPromise;
 
+      expect(output.text().match(/Stopping hosted-local harness/g)?.length).toBe(1);
       expect(stack.kill).toHaveBeenCalledWith("SIGINT");
+      expect(stack.kill).toHaveBeenCalledTimes(1);
       expect(stack.stop).toHaveBeenCalledWith("SIGINT");
+      expect(stack.stop).toHaveBeenCalledTimes(1);
       expect(updateHostedLocalHarnessState).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: "starting" }),
         { status: "stopped" },
       );
       expect(offSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith("exit", expect.any(Function));
       expect(output.text()).toContain("Stopping hosted-local harness (SIGINT).");
     } finally {
-      onceSpy.mockRestore();
+      onSpy.mockRestore();
+      offSpy.mockRestore();
+    }
+  });
+
+  test("does not publish ready state when termination arrives while readiness is pending", async () => {
+    let resolveReady!: () => void;
+    const stack = createHostedLocalStack({
+      ready: new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      }),
+    });
+    startHostedLocalDevStack.mockResolvedValueOnce(stack);
+    const signalHandlers = new Map<string, () => void>();
+    const originalProcessOn = process.on.bind(process);
+    const onSpy = vi.spyOn(process, "on").mockImplementation((
+      (event: string | symbol, listener: (...args: unknown[]) => void) => {
+        if (event === "SIGINT" || event === "SIGTERM") {
+          signalHandlers.set(event, () => listener(event));
+          return process;
+        }
+
+        return originalProcessOn(event, listener);
+      }
+    ) as typeof process.on);
+    const offSpy = vi.spyOn(process, "off").mockImplementation((
+      (_event: string | symbol, _listener: (...args: unknown[]) => void) => process
+    ) as typeof process.off);
+    const output = createBufferedStdout();
+
+    try {
+      const runPromise = runHostedLocalCli(["up"], {
+        env: {},
+        stderr: output.stdout,
+        stdout: output.stdout,
+      });
+      await vi.waitFor(() => {
+        expect(startHostedLocalDevStack).toHaveBeenCalledTimes(1);
+      });
+
+      signalHandlers.get("SIGTERM")?.();
+      resolveReady();
+      await runPromise;
+
+      expect(stack.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(stack.stop).toHaveBeenCalledWith("SIGTERM");
+      expect(updateHostedLocalHarnessState).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "starting" }),
+        { status: "stopped" },
+      );
+      expect(output.text()).not.toContain("Hosted-local harness is ready.");
+      expect(offSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith("exit", expect.any(Function));
+    } finally {
+      onSpy.mockRestore();
       offSpy.mockRestore();
     }
   });
 });
 
-function createHostedLocalStack() {
+function createHostedLocalStack(input: { ready?: Promise<void> } = {}) {
   return {
     kill: vi.fn(),
-    ready: Promise.resolve(),
+    ready: input.ready ?? Promise.resolve(),
     stop: vi.fn(async () => {}),
     waitForExit: vi.fn(async () => ({
       child: {

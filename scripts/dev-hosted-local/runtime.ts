@@ -34,6 +34,7 @@ interface SetupCommandInput {
   cwd: string;
   env: NodeJS.ProcessEnv;
   name: "setup";
+  signal?: AbortSignal;
 }
 
 interface BoundedCommandInput {
@@ -83,6 +84,12 @@ export function redactHostedLocalDiagnosticText(value: string): string {
       /(["']?)([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)(\1\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,}\]]+)/giu,
       "$1$2$3<redacted>",
     );
+}
+
+export function throwIfAbortSignalAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
 }
 
 export async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv): Promise<void> {
@@ -619,6 +626,7 @@ export async function runCommand(
   args: string[],
   input: SetupCommandInput,
 ): Promise<void> {
+  throwIfAbortSignalAborted(input.signal);
   const child = spawn(command, args, {
     cwd: input.cwd,
     env: input.env,
@@ -635,8 +643,33 @@ export async function runCommand(
   });
 
   await new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
+    let settled = false;
+    const cleanup = (): void => {
+      settled = true;
+      input.signal?.removeEventListener("abort", onAbort);
+    };
+    const rejectAbort = (): void => {
+      cleanup();
+      reject(createAbortError());
+    };
+    const onAbort = (): void => {
+      if (settled) {
+        return;
+      }
+      terminateChildProcess(child, "SIGTERM");
+    };
+
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    child.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
     child.once("exit", (code) => {
+      if (input.signal?.aborted) {
+        rejectAbort();
+        return;
+      }
+      cleanup();
       if (code === 0) {
         resolve();
         return;
@@ -644,6 +677,9 @@ export async function runCommand(
 
       reject(new Error(`${command} ${args.join(" ")} exited with code ${code ?? "unknown"}.`));
     });
+    if (input.signal?.aborted) {
+      onAbort();
+    }
   });
 }
 
@@ -1650,4 +1686,10 @@ function createLineBufferedSecretRedactor(secret: string): {
       return redactLine(last);
     },
   };
+}
+
+function createAbortError(): Error {
+  const error = new Error("Hosted-local startup was interrupted.");
+  error.name = "AbortError";
+  return error;
 }

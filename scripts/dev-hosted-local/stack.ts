@@ -65,6 +65,7 @@ import {
   StripeCliMissingError,
   terminateChildProcess,
   terminateChildProcessAndWait,
+  throwIfAbortSignalAborted,
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
   type HostedRunnerContainerCleanupScope,
@@ -136,12 +137,24 @@ const HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV = "MURPH_DEV_PRESERVE_DOCKER_CONFI
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 
+export interface HostedLocalProcessResidueOwnership {
+  cloudflareWorker: boolean;
+  healthCommons: boolean;
+  linqTunnel: boolean;
+  stripe: boolean;
+  temporalServer: boolean;
+  temporalWorker: boolean;
+  web: boolean;
+}
+
 export async function startHostedLocalDevStack(input: {
+  abortSignal?: AbortSignal;
   env: NodeJS.ProcessEnv;
   pipeOutput?: boolean;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
 }): Promise<HostedLocalDevStack> {
+  throwIfAbortSignalAborted(input.abortSignal);
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
@@ -158,6 +171,7 @@ export async function startHostedLocalDevStack(input: {
   if (!config.skipVercelPull && !providedVercelOidcToken) {
     await ensureVercelLinkExists();
   }
+  throwIfAbortSignalAborted(input.abortSignal);
   if (!config.skipWeb) {
     await assertHostedWebDevServerAvailable(initialEnv);
     await assertHostedWebPortAvailable({
@@ -170,6 +184,7 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
     });
   }
+  throwIfAbortSignalAborted(input.abortSignal);
   const workerPortMode = await resolveHostedLocalWorkerPortMode({
     allowReuseExisting: isHostedLocalWorkerReuseEnabled(initialEnv),
     host: config.workerHost,
@@ -180,6 +195,7 @@ export async function startHostedLocalDevStack(input: {
     port: config.workerPort,
     protocol: config.workerProtocol,
   });
+  throwIfAbortSignalAborted(input.abortSignal);
   const tempDir = tempDirOverride
     ? resolveHostedLocalTempDir(repoRoot, tempDirOverride)
     : await mkdtemp(path.join(os.tmpdir(), "murph-dev-env-"));
@@ -188,6 +204,7 @@ export async function startHostedLocalDevStack(input: {
     await mkdir(tempDir, { mode: 0o700, recursive: true });
   }
   await chmod(tempDir, 0o700);
+  throwIfAbortSignalAborted(input.abortSignal);
   const workerPersistDir = resolveHostedLocalWorkerPersistDir({
     configuredPersistDir: config.workerPersistDir,
     env: initialEnv,
@@ -228,6 +245,7 @@ export async function startHostedLocalDevStack(input: {
         cwd: webDir,
         env: initialProcessEnv,
         name: "setup",
+        signal: input.abortSignal,
       });
     }
 
@@ -240,6 +258,7 @@ export async function startHostedLocalDevStack(input: {
     const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
       ? {}
       : await readSimpleEnvFile(pulledEnvPath);
+    throwIfAbortSignalAborted(input.abortSignal);
     const localStripeAuthorityEnv = pickHostedLocalStripeAuthorityEnv({
       inheritedEnv: initialEnv,
       localEnvFiles: [
@@ -286,6 +305,7 @@ export async function startHostedLocalDevStack(input: {
       env: vercelEnv,
     });
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
+    throwIfAbortSignalAborted(input.abortSignal);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
     if (isolatedDockerConfigDir !== null) {
       await prepareIsolatedDockerConfig({
@@ -293,6 +313,7 @@ export async function startHostedLocalDevStack(input: {
         sourceEnv: initialEnv,
       });
     }
+    throwIfAbortSignalAborted(input.abortSignal);
     const containerReachableHost = new URL(resolveContainerReachableWorkerOrigin(
       config,
       initialEnv,
@@ -313,6 +334,7 @@ export async function startHostedLocalDevStack(input: {
       minioProcess = minioServer.process;
       children.push(minioProcess);
     }
+    throwIfAbortSignalAborted(input.abortSignal);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
       config,
       oidcIdentity,
@@ -323,6 +345,7 @@ export async function startHostedLocalDevStack(input: {
         ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
       },
     });
+    throwIfAbortSignalAborted(input.abortSignal);
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
@@ -426,6 +449,7 @@ export async function startHostedLocalDevStack(input: {
         await symlink(workerDevVarsPath, cloudflareDevVarsPath);
       }
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     requireEnvValue(
       "DATABASE_URL",
@@ -446,11 +470,13 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
       stripeListenerWillCaptureSecret,
     });
+    throwIfAbortSignalAborted(input.abortSignal);
 
     await runCommand("pnpm", ["--dir", "apps/web", "prisma:generate"], {
       cwd: repoRoot,
       env: runtimeEnv,
       name: "setup",
+      signal: input.abortSignal,
     });
 
     if (!config.skipPrismaMigrate) {
@@ -467,12 +493,14 @@ export async function startHostedLocalDevStack(input: {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",
+          signal: input.abortSignal,
         });
       } else {
         await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",
+          signal: input.abortSignal,
         });
       }
     }
@@ -482,6 +510,7 @@ export async function startHostedLocalDevStack(input: {
         cwd: repoRoot,
         env: runtimeEnv,
         name: "setup",
+        signal: input.abortSignal,
       });
       await invalidateHostedWebHealthCommonsDevCache(runtimeEnv, input.stderrTarget);
     }
@@ -501,6 +530,7 @@ export async function startHostedLocalDevStack(input: {
           cwd: repoRoot,
           env: runnerBundleEnv,
           name: "setup",
+          signal: input.abortSignal,
         });
         if (workerProcessEnv !== null) {
           workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
@@ -523,6 +553,7 @@ export async function startHostedLocalDevStack(input: {
         persistDir: workerPersistDir,
       });
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     const cloudflareProcess = workerRuntimeEnv === null
       ? null
@@ -561,6 +592,7 @@ export async function startHostedLocalDevStack(input: {
         keepAliveTimer = setInterval(() => {}, 2_147_483_647);
       }
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     if (linqWebhookSetup?.shouldStartTunnel) {
       linqTunnelProcess = spawnChildProcess("linq-tunnel", "cloudflared", [
@@ -577,6 +609,7 @@ export async function startHostedLocalDevStack(input: {
       });
       children.push(linqTunnelProcess);
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     stripeListener = await maybeStartStripeWebhookListener({
       config,
@@ -603,6 +636,7 @@ export async function startHostedLocalDevStack(input: {
         );
       });
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     healthCommonsWatcher = config.skipWeb || config.skipHealthCommonsWatch
       ? null
@@ -619,6 +653,7 @@ export async function startHostedLocalDevStack(input: {
     if (healthCommonsWatcher) {
       children.push(healthCommonsWatcher);
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     const webProcess = config.skipWeb
       ? null
@@ -644,6 +679,7 @@ export async function startHostedLocalDevStack(input: {
     if (webProcess) {
       children.push(webProcess);
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
     const temporalRuntimeEnv = buildHostedLocalTemporalProcessEnv({
@@ -651,6 +687,7 @@ export async function startHostedLocalDevStack(input: {
       runtimeEnv,
     });
     temporalRuntime = await startHostedLocalTemporalRuntime({
+      abortSignal: input.abortSignal,
       cloudflareHostedControlBaseUrl: workerBaseUrl,
       config,
       env: temporalRuntimeEnv,
@@ -665,6 +702,7 @@ export async function startHostedLocalDevStack(input: {
     if (temporalRuntime?.workerProcess) {
       children.push(temporalRuntime.workerProcess);
     }
+    throwIfAbortSignalAborted(input.abortSignal);
 
     const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
       for (const { child } of children) {
@@ -675,6 +713,15 @@ export async function startHostedLocalDevStack(input: {
       }
       terminateKnownHostedLocalProcessResidue({
         config,
+        owned: {
+          cloudflareWorker: cloudflareProcess !== null,
+          healthCommons: healthCommonsWatcher !== null,
+          linqTunnel: linqTunnelProcess !== null,
+          stripe: stripeListener !== null,
+          temporalServer: temporalRuntime?.serverProcess !== null,
+          temporalWorker: temporalRuntime?.workerProcess !== null,
+          web: webProcess !== null,
+        },
         signal,
         stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
       });
@@ -1696,6 +1743,7 @@ function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>
 
 export function terminateKnownHostedLocalProcessResidue(input: {
   config: HostedLocalDevConfig;
+  owned: HostedLocalProcessResidueOwnership;
   signal: NodeJS.Signals;
   stripeForwardUrl: string | null;
 }): void {
@@ -1709,20 +1757,24 @@ export function terminateKnownHostedLocalProcessResidue(input: {
     input.config.linqWebhookTunnelConfigPath,
   );
   const patterns = [
-    `pnpm --dir apps/cloudflare worker:dev:prepared.*--port ${input.config.workerPort}`,
-    `apps/cloudflare/scripts/dev-worker\\.ts.*--port ${input.config.workerPort}`,
-    `wrangler dev.*--port ${input.config.workerPort}`,
-    `workerd.*${escapeRegExp(workerHostPort)}`,
-    ...(input.config.skipWeb
+    ...(input.owned.cloudflareWorker
+      ? [
+        `pnpm --dir apps/cloudflare worker:dev:prepared.*--port ${input.config.workerPort}`,
+        `apps/cloudflare/scripts/dev-worker\\.ts.*--port ${input.config.workerPort}`,
+        `wrangler dev.*--port ${input.config.workerPort}`,
+        `workerd.*${escapeRegExp(workerHostPort)}`,
+      ]
+      : []),
+    ...(!input.owned.web
       ? []
       : [
         `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
         "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
       ]),
-    ...(input.config.skipWeb || input.config.skipHealthCommonsWatch
+    ...(!input.owned.healthCommons
       ? []
       : ["pnpm health-commons:generate:watch"]),
-    ...(input.config.linqWebhookTunnelMode === "disabled"
+    ...(!input.owned.linqTunnel
       ? []
       : [
         [
@@ -1732,13 +1784,10 @@ export function terminateKnownHostedLocalProcessResidue(input: {
           escapeRegExp(input.config.linqWebhookTunnelName),
         ].join(".*"),
       ]),
-    ...(temporal.mode === "disabled"
+    ...(!input.owned.temporalServer
       ? []
-      : [
-        "packages/hosted-orchestrator-temporal temporal:worker",
-        `temporal server start-dev .*--port ${temporal.port}`,
-      ]),
-    ...(input.stripeForwardUrl === null
+      : [`temporal server start-dev .*--port ${temporal.port}`]),
+    ...(input.stripeForwardUrl === null || !input.owned.stripe
       ? []
       : [`stripe listen --forward-to ${escapeRegExp(input.stripeForwardUrl)}`]),
   ];
