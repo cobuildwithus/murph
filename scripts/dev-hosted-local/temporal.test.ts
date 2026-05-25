@@ -55,6 +55,13 @@ vi.mock("node:child_process", () => ({
 vi.mock("./runtime.ts", () => ({
   spawnChildProcess: spawnChildProcessMock,
   terminateChildProcessAndWait: terminateChildProcessAndWaitMock,
+  throwIfAbortSignalAborted: vi.fn((signal?: AbortSignal) => {
+    if (signal?.aborted) {
+      const error = new Error("Hosted-local startup was interrupted.");
+      error.name = "AbortError";
+      throw error;
+    }
+  }),
 }));
 
 const baseConfig: HostedLocalDevConfig = {

@@ -4,6 +4,7 @@ import net from "node:net";
 import {
   spawnChildProcess,
   terminateChildProcessAndWait,
+  throwIfAbortSignalAborted,
 } from "./runtime.ts";
 import type {
   BufferedNamedChildProcess,
@@ -77,6 +78,7 @@ export function buildHostedLocalTemporalRuntimeEnv(input: {
 }
 
 export async function startHostedLocalTemporalRuntime(input: {
+  abortSignal?: AbortSignal;
   cloudflareHostedControlBaseUrl: string;
   config: HostedLocalDevConfig;
   env: NodeJS.ProcessEnv;
@@ -86,6 +88,7 @@ export async function startHostedLocalTemporalRuntime(input: {
   stdoutTarget?: NodeJS.WritableStream;
 }): Promise<HostedLocalTemporalRuntime | null> {
   const temporal = input.config.temporal;
+  throwIfAbortSignalAborted(input.abortSignal);
   if (temporal.mode === "disabled") {
     return null;
   }
@@ -147,12 +150,15 @@ export async function startHostedLocalTemporalRuntime(input: {
         },
       );
       await waitForTcpPort({
+        signal: input.abortSignal,
         host: temporal.host,
         port: temporal.port,
         timeoutMs: MANAGED_TEMPORAL_STARTUP_TIMEOUT_MS,
       });
+      throwIfAbortSignalAborted(input.abortSignal);
     }
 
+    throwIfAbortSignalAborted(input.abortSignal);
     workerProcess = spawnChildProcess(
       "temporal-worker",
       "pnpm",
@@ -173,6 +179,7 @@ export async function startHostedLocalTemporalRuntime(input: {
       },
     );
     const startedWorkerProcess = workerProcess;
+    throwIfAbortSignalAborted(input.abortSignal);
 
     return {
       address,
@@ -313,11 +320,13 @@ function buildLocalTemporalCliEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.
 async function waitForTcpPort(input: {
   host: string;
   port: number;
+  signal?: AbortSignal;
   timeoutMs: number;
 }): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < input.timeoutMs) {
+    throwIfAbortSignalAborted(input.signal);
     if (await canConnect(input.host, input.port)) {
       return;
     }
