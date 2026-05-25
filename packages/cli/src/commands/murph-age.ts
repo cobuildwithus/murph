@@ -66,7 +66,7 @@ import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const murphAgeModeSchema = z.enum(['product', 'research'])
 const MURPH_AGE_AGGREGATE_EVIDENCE_STATUS_SCHEMA_VERSION =
-  'murph.age.aggregate-evidence-status.v6' as const
+  'murph.age.aggregate-evidence-status.v7' as const
 const murphAgeSexSchema = z.enum(['female', 'male'])
 const murphAgeInputBundleStatusSchema = z.enum(['abstain', 'context-only', 'ready'])
 const murphAgeStatusSchema = z.enum(['abstain', 'ready'])
@@ -1395,6 +1395,12 @@ const murphAgeWearableLabAggregateReceiptSummarySchema = z.object({
   warningCount: z.number().int().nonnegative(),
   wearableScoreBearingAuthorized: z.literal(false),
 })
+const murphAgeWearableLabAggregateReceiptReviewStatusSchema = z.enum([
+  'blocked',
+  'no-receipts',
+  'science-review-ready',
+  'valid-no-delta',
+])
 const murphAgeWearableActivityBenchmarkCardSchema = z.object({
   acceptedAggregateMetricDeltaFields: z.array(z.string().min(1)),
   accelerometryProtocol: z.enum([
@@ -1492,6 +1498,7 @@ const murphAgeNsrrDatasetRequestSchema = z.object({
 export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
   assessments: z.array(murphAgeAggregateEvidenceAssessmentSchema),
   benchmarkCards: z.array(murphAgeWearableActivityBenchmarkCardSchema),
+  blockedReceiptCount: z.number().int().nonnegative(),
   inputCardCount: z.number().int().nonnegative(),
   missingSourceRouteIds: z.array(z.string().min(1)),
   nextExecutionSourceRouteIds: z.array(z.string().min(1)),
@@ -1499,12 +1506,17 @@ export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
   nsrrDatasetRequests: z.array(murphAgeNsrrDatasetRequestSchema),
   readyCardCount: z.number().int().nonnegative(),
   readySourceRouteIds: z.array(z.string().min(1)),
+  receiptScienceReviewReadyCount: z.number().int().nonnegative(),
+  receiptScienceReviewReadySourceRouteIds: z.array(z.string().min(1)),
+  receiptScienceReviewStatus: murphAgeWearableLabAggregateReceiptReviewStatusSchema,
   receiptSummaries: z.array(murphAgeWearableLabAggregateReceiptSummarySchema),
   receiptSlots: z.array(murphAgeWearableLabAggregateReceiptTemplateSchema),
   routeSlots: z.array(murphAgeAggregateEvidenceRouteSlotSchema),
   sourceRouteIdsByExecutionPriority: z.array(z.string().min(1)),
   schemaVersion: z.literal(MURPH_AGE_AGGREGATE_EVIDENCE_STATUS_SCHEMA_VERSION),
   status: z.enum(['blocked', 'ready']),
+  validNoDeltaReceiptCount: z.number().int().nonnegative(),
+  validNoDeltaReceiptSourceRouteIds: z.array(z.string().min(1)),
 })
 
 const strictUtcTimestampSchema = isoTimestampSchema
@@ -1923,6 +1935,29 @@ export function registerMurphAgeCommands(
       const receiptSummaries = candidates
         .filter(isMurphAgeWearableLabAggregateReceiptLike)
         .map(summarizeSafeMurphAgeWearableLabAggregateReceipt)
+      const receiptScienceReviewReadyCount = receiptSummaries
+        .filter((summary) => summary.conclusion === 'reviewgpt-science-delta')
+        .length
+      const validNoDeltaReceiptCount = receiptSummaries
+        .filter((summary) => summary.conclusion === 'valid-no-delta')
+        .length
+      const blockedReceiptCount = receiptSummaries
+        .filter((summary) => summary.conclusion === 'blocked')
+        .length
+      const receiptScienceReviewStatus = summarizeMurphAgeReceiptScienceReviewStatus({
+        blockedReceiptCount,
+        receiptScienceReviewReadyCount,
+        receiptSummaryCount: receiptSummaries.length,
+      })
+      const receiptScienceReviewReadySourceRouteIds =
+        listMurphAgeReceiptSourceRouteIdsByConclusion(
+          receiptSummaries,
+          'reviewgpt-science-delta',
+        )
+      const validNoDeltaReceiptSourceRouteIds = listMurphAgeReceiptSourceRouteIdsByConclusion(
+        receiptSummaries,
+        'valid-no-delta',
+      )
       const assessmentCandidates = candidates.map(normalizeMurphAgeAggregateEvidenceCandidateCard)
       const ordinaryRouteIds = new Set(
         listMurphAgeOrdinaryLabWearableSourceRoutes().map((route) => route.routeId),
@@ -1980,6 +2015,7 @@ export function registerMurphAgeCommands(
       return {
         assessments,
         benchmarkCards,
+        blockedReceiptCount,
         inputCardCount: candidates.length,
         missingSourceRouteIds,
         nextExecutionSourceRouteIds,
@@ -1989,12 +2025,17 @@ export function registerMurphAgeCommands(
         readySourceRouteIds: listMurphAgeOrdinaryLabWearableSourceRoutes()
           .map((route) => route.routeId)
           .filter((routeId) => readyRouteIds.has(routeId)),
+        receiptScienceReviewReadyCount,
+        receiptScienceReviewReadySourceRouteIds,
+        receiptScienceReviewStatus,
         receiptSummaries,
         receiptSlots,
         routeSlots,
         sourceRouteIdsByExecutionPriority,
         schemaVersion: MURPH_AGE_AGGREGATE_EVIDENCE_STATUS_SCHEMA_VERSION,
         status: readyRouteIds.size > 0 ? 'ready' as const : 'blocked' as const,
+        validNoDeltaReceiptCount,
+        validNoDeltaReceiptSourceRouteIds,
       }
     },
   })
@@ -2242,6 +2283,30 @@ function summarizeSafeMurphAgeWearableLabAggregateReceipt(
     warningCount: summary.validation.warnings.length,
     wearableScoreBearingAuthorized: false,
   }
+}
+
+function summarizeMurphAgeReceiptScienceReviewStatus(input: {
+  blockedReceiptCount: number
+  receiptScienceReviewReadyCount: number
+  receiptSummaryCount: number
+}): z.infer<typeof murphAgeWearableLabAggregateReceiptReviewStatusSchema> {
+  if (input.receiptSummaryCount === 0) return 'no-receipts'
+  if (input.receiptScienceReviewReadyCount > 0) return 'science-review-ready'
+  if (input.blockedReceiptCount > 0) return 'blocked'
+  return 'valid-no-delta'
+}
+
+function listMurphAgeReceiptSourceRouteIdsByConclusion(
+  receiptSummaries: Array<z.infer<typeof murphAgeWearableLabAggregateReceiptSummarySchema>>,
+  conclusion: z.infer<typeof murphAgeWearableLabAggregateReceiptSummarySchema>['conclusion'],
+): string[] {
+  const routeIds = new Set<string>()
+  for (const summary of receiptSummaries) {
+    if (summary.conclusion === conclusion && summary.sourceRouteId !== null) {
+      routeIds.add(summary.sourceRouteId)
+    }
+  }
+  return [...routeIds]
 }
 
 function summarizeMurphAgeAggregateEvidenceAssessment(input: {
