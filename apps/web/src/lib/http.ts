@@ -62,6 +62,9 @@ export type JsonLogStringSanitizer = (
 const JSON_LOG_STRING_MAX_LENGTH = 240;
 const DEFAULT_JSON_BODY_LIMIT_BYTES = 128 * 1024;
 const DEFAULT_RAW_BODY_LIMIT_BYTES = 1024 * 1024;
+// Header values may contain commas, so unquoted auth/cookie forms redact through the next object boundary.
+const JSON_LOG_HEADER_SECRET_VALUE_PATTERN =
+  /(^|[\s,{])(["']?(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|\[[^\]]*\]|[^}]*)/giu;
 const JSON_ERROR_RESPONSE_DETAIL_SAFE_KEYS = new Set([
   "code",
   "operationName",
@@ -561,6 +564,10 @@ export function sanitizeJsonLogString(
   const normalized = value
     .trim()
     .replace(/\s+/gu, " ")
+    .replace(
+      JSON_LOG_HEADER_SECRET_VALUE_PATTERN,
+      "$1$2<redacted-secret>",
+    )
     .replace(
       /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/giu,
       "$1<redacted-secret>",

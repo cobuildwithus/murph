@@ -3138,10 +3138,7 @@ function isDotGitRelativePath(relativePath: string): boolean {
 }
 
 function isEnvironmentRelativePath(relativePath: string): boolean {
-  return (
-    path.posix.basename(relativePath) === ".env"
-    || path.posix.basename(relativePath).startsWith(".env.")
-  );
+  return path.posix.basename(relativePath).startsWith(".env");
 }
 
 function isExportPackRelativePath(relativePath: string): boolean {
