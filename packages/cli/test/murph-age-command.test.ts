@@ -896,6 +896,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
   const multiWearablePayloadPath = path.join(payloadRoot, 'multi-wearable-payload.json')
   const productPayloadPath = path.join(payloadRoot, 'product-payload.json')
   const functionPackHash = 'sha256:3333333333333333333333333333333333333333333333333333333333333333'
+  const wearablePackHash = 'sha256:2222222222222222222222222222222222222222222222222222222222222222'
   try {
     await writeLocalModelCardArtifact(payloadRoot, 'lab5.json', {
       cardId: 'lab5_bp_bmi_transport_research',
@@ -945,7 +946,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
         horizonYears: 10,
         intercept: 0,
         layerId: 'activity-residual-v1',
-        packHash: 'research-pack-activity-v1',
+        packHash: wearablePackHash,
         schemaVersion: 'murph.age.wearable-residual-parameter-pack.v1',
         sourceRouteId: 'nhanes-activity-shadow-lmf',
       },
@@ -1078,7 +1079,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     const reportResidualLayer = report.wearableResidualLayer
     assert.ok(reportResidualLayer)
     assert.equal(reportResidualLayer.status, 'research-parameterized-shadow-delta')
-    assert.equal(reportResidualLayer.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(reportResidualLayer.parameterPackHash, wearablePackHash)
     assert.equal(reportResidualLayer.residualDeltaLogit, -0.08)
     assert.equal(typeof reportResidualLayer.anchorRiskAgeEquivalentYears, 'number')
     assert.equal(typeof reportResidualLayer.finalRiskAgeEquivalentYears, 'number')
@@ -1148,7 +1149,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.ok(viewResidualLayer)
     assert.equal(viewResidualLayer.status, 'research-parameterized-shadow-delta')
     assert.equal(viewResidualLayer.parameterizationAvailable, true)
-    assert.equal(viewResidualLayer.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(viewResidualLayer.parameterPackHash, wearablePackHash)
     assert.equal(viewResidualLayer.residualDeltaLogit, -0.08)
     assert.equal(viewResidualLayer.anchorRiskAgeEquivalentYears, reportResidualLayer.anchorRiskAgeEquivalentYears)
     assert.equal(viewResidualLayer.finalRiskAgeEquivalentYears, reportResidualLayer.finalRiskAgeEquivalentYears)
@@ -1711,7 +1712,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     )
     assert.equal(
       calculatorBundle.researchPreview.view.wearableResidualLayer?.parameterPackHash,
-      'research-pack-activity-v1',
+      wearablePackHash,
     )
 
     const encodedCalculatorBundle = JSON.stringify(calculatorBundle)
@@ -1775,7 +1776,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     const calculatorResidualLayer = researchCalculatorView.wearableResidualLayer
     assert.ok(calculatorResidualLayer)
     assert.equal(calculatorResidualLayer.status, 'research-parameterized-shadow-delta')
-    assert.equal(calculatorResidualLayer.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(calculatorResidualLayer.parameterPackHash, wearablePackHash)
     assert.equal(typeof calculatorResidualLayer.anchorRiskAgeEquivalentYears, 'number')
     assert.equal(typeof calculatorResidualLayer.finalRiskAgeEquivalentYears, 'number')
     assert.equal(typeof calculatorResidualLayer.residualDeltaYears, 'number')
@@ -3871,10 +3872,21 @@ function testWearableResidualParameterPack(input: {
     horizonYears: 10,
     intercept: 0,
     layerId: input.layerId,
-    packHash: `research-pack-${input.family.replaceAll('-', '_')}-v1`,
+    packHash: testWearablePackHash(input.family),
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: 'all-of-us-fitbit-labs-ehr',
   }
+}
+
+function testWearablePackHash(family: MurphAgeWearableResidualParameterPack['family']): string {
+  const hashSeedByFamily = {
+    activity: 'a',
+    hrv: 'b',
+    'resting-heart-rate': 'c',
+    sleep: 'd',
+  } satisfies Record<MurphAgeWearableResidualParameterPack['family'], string>
+
+  return `sha256:${hashSeedByFamily[family].repeat(64)}`
 }
 
 function hasOwnKey(value: object, key: string): boolean {

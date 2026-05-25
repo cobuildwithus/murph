@@ -125,6 +125,7 @@ const murphAgeValidationEvidenceTierSchema = z.enum([
   'internal-anchor',
   'murph-native-prospective-validation',
   'partner-aggregate-validation',
+  'provisional-local-research',
   'same-family-sanity',
   'true-external-validation',
 ])
@@ -592,7 +593,7 @@ const murphAgeWearableResidualParameterPackSchema: z.ZodType<MurphAgeWearableRes
   horizonYears: z.literal(10),
   intercept: z.number().finite(),
   layerId: murphAgeWearableSingleFamilyResidualLayerIdSchema,
-  packHash: z.string().min(8).max(128).regex(/^[a-z0-9][a-z0-9._-]+$/u),
+  packHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION),
   sourceRouteId: murphAgeSourceRouteIdSchema,
 }).superRefine((pack, context) => {
