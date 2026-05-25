@@ -674,10 +674,9 @@ export async function startHostedLocalDevStack(input: {
         terminateChildProcess(stripeListener.child, signal);
       }
       terminateKnownHostedLocalProcessResidue({
+        config,
         signal,
         stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
-        workerHost: config.workerHost,
-        workerPort: config.workerPort,
       });
     };
     const cleanupTemporaryInputs = async (): Promise<void> => {
@@ -1695,19 +1694,50 @@ function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>
   return value === "1" || value === "true" || value === "yes";
 }
 
-function terminateKnownHostedLocalProcessResidue(input: {
+export function terminateKnownHostedLocalProcessResidue(input: {
+  config: HostedLocalDevConfig;
   signal: NodeJS.Signals;
   stripeForwardUrl: string | null;
-  workerHost: string;
-  workerPort: number;
 }): void {
   if (process.platform === "win32") {
     return;
   }
 
+  const workerHostPort = `${input.config.workerHost}:${input.config.workerPort}`;
+  const temporal = input.config.temporal;
+  const linqTunnelConfigPath = resolveRepoRelativeChildArg(
+    input.config.linqWebhookTunnelConfigPath,
+  );
   const patterns = [
-    `wrangler dev.*--port ${input.workerPort}`,
-    `workerd.*${escapeRegExp(`${input.workerHost}:${input.workerPort}`)}`,
+    `pnpm --dir apps/cloudflare worker:dev:prepared.*--port ${input.config.workerPort}`,
+    `apps/cloudflare/scripts/dev-worker\\.ts.*--port ${input.config.workerPort}`,
+    `wrangler dev.*--port ${input.config.workerPort}`,
+    `workerd.*${escapeRegExp(workerHostPort)}`,
+    ...(input.config.skipWeb
+      ? []
+      : [
+        `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
+        "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
+      ]),
+    ...(input.config.skipWeb || input.config.skipHealthCommonsWatch
+      ? []
+      : ["pnpm health-commons:generate:watch"]),
+    ...(input.config.linqWebhookTunnelMode === "disabled"
+      ? []
+      : [
+        [
+          "cloudflared tunnel --no-autoupdate --config",
+          escapeRegExp(linqTunnelConfigPath),
+          "run",
+          escapeRegExp(input.config.linqWebhookTunnelName),
+        ].join(".*"),
+      ]),
+    ...(temporal.mode === "disabled"
+      ? []
+      : [
+        "packages/hosted-orchestrator-temporal temporal:worker",
+        `temporal server start-dev .*--port ${temporal.port}`,
+      ]),
     ...(input.stripeForwardUrl === null
       ? []
       : [`stripe listen --forward-to ${escapeRegExp(input.stripeForwardUrl)}`]),
