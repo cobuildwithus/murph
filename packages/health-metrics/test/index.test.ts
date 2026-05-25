@@ -4960,6 +4960,18 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     researchWithWearablePackView.model.composition.wearableStatus,
     "research-shadow-residual-score-product-blocked",
   );
+  assert.equal(researchWithWearablePackView.model.researchAppliedFeatureKeys.includes("wearable-multi-family-residual"), true);
+  assert.equal(researchWithWearablePackView.model.researchAppliedMetricKeys.includes("steps"), true);
+  assert.equal(researchWithWearablePackView.model.researchAppliedWearableMetricKeys.includes("steps"), true);
+  assert.equal(
+    researchWithWearablePackView.model.researchAppliedWearableMetricKeys.includes("wearable-valid-day-count-28d"),
+    true,
+  );
+  assert.equal(
+    researchWithWearablePackView.model.researchAppliedWearableMetricKeys.includes("wearable-coverage-index"),
+    true,
+  );
+  assert.equal(researchWithWearablePackView.model.scoreBearingMetricKeys.includes("steps"), false);
   assert.equal(researchWithWearablePackView.model.wearable.currentUse, "research-shadow-residual-score");
   assert.equal(researchWithWearablePackView.model.wearable.researchScoreBearing, true);
   assert.equal(researchWithWearablePackView.model.wearable.scoreBearing, false);
@@ -6959,6 +6971,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "wearables-context-only-local-run")?.signal,
     "context-only",
   );
+  assert.equal(submittedLab5ResearchView.model.researchAppliedFeatureKeys.join("|"), "glucose|egfr|bmi");
+  assert.equal(submittedLab5ResearchView.model.researchAppliedMetricKeys.join("|"), "glucose|egfr|bmi");
+  assert.deepEqual(submittedLab5ResearchView.model.researchAppliedWearableMetricKeys, []);
   assert.equal(submittedLab5ResearchView.model.scoreBearingFeatureKeys.join("|"), "glucose|egfr|bmi");
   assert.equal(
     submittedLab5ResearchView.model.scoreBearingMetricKeys.join("|"),
