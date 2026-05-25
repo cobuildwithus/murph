@@ -436,6 +436,32 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
+  it("rejects token export when stored tokens remain on a reauthorization-required connection", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+
+      harness.setConnectionStatus("reauthorization_required");
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.exportTokenBundle(session, "conn-1")).rejects.toMatchObject({
+        accountStatus: "reauthorization_required",
+        code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+      });
+      expect(harness.audits).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed instead of exporting when a refresh lease expired on the same token version", async () => {
     vi.useFakeTimers();
     try {
@@ -470,6 +496,56 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         nextReconcileAt: null,
         status: "reauthorization_required",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks agent-session validity when stale export resolution observes a newer token", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+      const originalWithConnectionMutationLock = harness.store.withConnectionMutationLock.bind(harness.store);
+      let lockCount = 0;
+
+      harness.setRefreshLease({
+        leaseExpiresAt: "2026-04-01T00:09:00.000Z",
+        leaseOwner: "agent-refresh:old",
+        tokenVersion: 2,
+      });
+      harness.store.withConnectionMutationLock = async (connectionId, callback) => {
+        lockCount += 1;
+        if (lockCount === 2) {
+          harness.setStoredTokenBundle({
+            accessToken: "access-token-newer",
+            accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+            keyVersion: "v1",
+            refreshToken: "refresh-token-newer",
+            tokenVersion: 3,
+          });
+          harness.setRefreshLease(null);
+          harness.sessionState.revokedAt = "2026-04-01T00:10:01.000Z";
+          harness.sessionState.revokeReason = "agent_request";
+          harness.sessionState.updatedAt = "2026-04-01T00:10:01.000Z";
+        }
+
+        return originalWithConnectionMutationLock(connectionId, callback);
+      };
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.exportTokenBundle(session, "conn-1")).rejects.toMatchObject({
+        code: "AGENT_AUTH_INVALID",
+      });
+      expect(harness.audits).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -888,6 +964,90 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
+  it("rejects token refresh when stored tokens remain on a reauthorization-required connection", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "access-token-refreshed",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "refresh-token-refreshed",
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      harness.setConnectionStatus("reauthorization_required");
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        accountStatus: "reauthorization_required",
+        code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+      });
+      expect(refreshTokens).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when provider refresh returns an unclassified error after lease claim", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => {
+        throw new Error("provider request timed out");
+      });
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        accountStatus: "reauthorization_required",
+        code: "TOKEN_REFRESH_STATE_UNKNOWN",
+        retryable: false,
+      });
+
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      expect(harness.signals).toHaveLength(1);
+      expect(harness.signals[0]).toMatchObject({
+        kind: "reauthorization_required",
+        reason: "token_refresh_state_unknown",
+        revokeWarning: {
+          code: "TOKEN_REFRESH_STATE_UNKNOWN",
+        },
+      });
+      expect(harness.getPublicConnection()).toMatchObject({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        status: "reauthorization_required",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("persists the provider-returned refresh token bundle without stale-token fallback", async () => {
     vi.useFakeTimers();
     try {
@@ -1058,6 +1218,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   audits: Array<Record<string, unknown>>;
   getPublicConnection: () => Record<string, unknown>;
   sessionState: MutableSessionState;
+  setConnectionStatus: (status: DeviceSyncAccount["status"]) => void;
   setRefreshLease: (lease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null) => void;
   setStoredTokenBundle: (tokenBundle: {
     accessToken: string;
@@ -1303,6 +1464,16 @@ function createRetrySafeStoreHarness(bearerToken: string): {
     audits,
     getPublicConnection: () => ({ ...publicConnection }),
     sessionState,
+    setConnectionStatus: (status: typeof publicConnection.status) => {
+      publicConnection = {
+        ...publicConnection,
+        status,
+      };
+      storedConnection = {
+        ...storedConnection,
+        status,
+      };
+    },
     setRefreshLease: (lease) => {
       refreshLease = lease;
     },

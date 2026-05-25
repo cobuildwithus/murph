@@ -489,10 +489,16 @@ function buildHostedRuntimeConnectionSnapshot(
           externalAccountId: fallbackExternalAccountId,
         },
       });
+  const storedTokenBundle = buildStoredTokenBundle(storedAccount);
+  const withholdRuntimeTokenMaterial = shouldWithholdHostedRuntimeTokenMaterial({
+    record,
+    tokenVersion: storedTokenBundle?.tokenVersion ?? null,
+  });
   const credential = buildHostedRuntimeCredentialSnapshot({
-    includeCredentialMaterial: options.includeCredentialMaterial,
+    includeCredentialMaterial: options.includeCredentialMaterial && !withholdRuntimeTokenMaterial,
     record: mappedRecord,
     storedAccount,
+    withholdTokenMaterial: options.includeCredentialMaterial && withholdRuntimeTokenMaterial,
   });
   return {
     connection: {
@@ -602,8 +608,16 @@ function buildHostedRuntimeCredentialSnapshot(input: {
   includeCredentialMaterial: boolean;
   record: HostedStaticDeviceSyncConnectionRecord;
   storedAccount: HostedStoredDeviceSyncAccount | null;
+  withholdTokenMaterial?: boolean;
 }): HostedExecutionDeviceSyncRuntimeCredentialSnapshot {
   const storedTokenBundle = buildStoredTokenBundle(input.storedAccount);
+
+  if (storedTokenBundle && input.withholdTokenMaterial === true) {
+    return {
+      credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(input.record.credentialMetadata),
+      kind: "none",
+    };
+  }
 
   if (storedTokenBundle && input.includeCredentialMaterial) {
     return {
@@ -640,6 +654,22 @@ function buildHostedRuntimeCredentialSnapshot(input: {
     credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(input.record.credentialMetadata),
     kind: "none",
   };
+}
+
+function shouldWithholdHostedRuntimeTokenMaterial(input: {
+  record: HostedConnectionRecord;
+  tokenVersion: number | null;
+}): boolean {
+  if (input.tokenVersion === null || input.record.status !== "active") {
+    return true;
+  }
+
+  const refreshLeaseOwner = normalizeNullableString(input.record.refreshLeaseOwner);
+  return Boolean(
+    refreshLeaseOwner
+    && input.record.refreshLeaseExpiresAt !== null
+    && input.record.refreshLeaseTokenVersion === input.tokenVersion,
+  );
 }
 
 function getHostedRuntimeOAuthTokenBundle(

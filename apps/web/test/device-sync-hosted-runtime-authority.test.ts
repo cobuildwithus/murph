@@ -1119,6 +1119,73 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("withholds runtime OAuth material while a refresh lease covers the current token", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        refreshLeaseExpiresAt: "2026-04-06T10:15:00.000Z",
+        refreshLeaseOwner: "agent-refresh:active",
+        refreshLeaseTokenVersion: 3,
+      }),
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]?.credential).toEqual({
+      credentialMetadata: {},
+      kind: "none",
+    });
+    expect(JSON.stringify(response)).not.toContain("stored-access-token");
+    expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
+  });
+
+  it("withholds runtime OAuth material for terminal hosted connection statuses", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        status: "reauthorization_required",
+      }),
+      storedAccount: buildStoredAccount(buildHostedRecord({
+        status: "reauthorization_required",
+      })),
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]?.credential).toEqual({
+      credentialMetadata: {},
+      kind: "none",
+    });
+    expect(JSON.stringify(response)).not.toContain("stored-access-token");
+    expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
+  });
+
   it("reads provider-config hosted snapshots without token material", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({

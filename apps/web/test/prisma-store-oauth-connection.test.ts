@@ -815,6 +815,61 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(stored.refreshLeaseOwner).toBeNull();
   });
 
+  it("rejects OAuth reconnect while a current refresh lease is active", async () => {
+    const existing = createConnection({
+      accessTokenEncrypted: "enc:old-access-token",
+      accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+      id: "dsc_123",
+      keyVersion: "v1",
+      provider: "whoop",
+      refreshLeaseExpiresAt: new Date("2026-03-26T03:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:active",
+      refreshLeaseTokenVersion: 2,
+      refreshTokenEncrypted: "enc:old-refresh-token",
+      status: "active",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn(async () => {
+      throw new Error("active refresh lease should block reconnect writes");
+    });
+
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: updateConnection,
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery", "read:sleep"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: "2026-03-26T09:00:00.000Z",
+    })).rejects.toMatchObject({
+      code: "TOKEN_REFRESH_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(updateConnection).not.toHaveBeenCalled();
+  });
+
   it("rejects guarded hosted callback upserts when the seeded connection was disconnected", async () => {
     const existing = createConnection({
       accessTokenEncrypted: null,
@@ -1389,6 +1444,55 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("allows explicit token clearing to clear an active refresh lease", async () => {
+    let connection = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+      externalAccountIdEncrypted: "enc:acct_456",
+      keyVersion: "v1",
+      provider: "oura",
+      refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:active",
+      refreshLeaseTokenVersion: 2,
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findUnique: async ({ where }: { where: { id?: string } }) =>
+            where.id === connection.id ? cloneConnection(connection) : null,
+          update: async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+            connection = {
+              ...connection,
+              ...data,
+            };
+            return cloneConnection(connection);
+          },
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await store.persistStoredConnectionTokenBundle({
+      clearRefreshLease: true,
+      connectionId: "dsc_123",
+      externalAccountId: null,
+      provider: "oura",
+      tokenBundle: null,
+    });
+
+    expect(connection.accessTokenEncrypted).toBeNull();
+    expect(connection.refreshTokenEncrypted).toBeNull();
+    expect(connection.tokenVersion).toBeNull();
+    expect(connection.refreshLeaseOwner).toBeNull();
+    expect(connection.refreshLeaseExpiresAt).toBeNull();
+    expect(connection.refreshLeaseTokenVersion).toBeNull();
+  });
+
   it("allows the refresh lease owner to persist the next rotating token bundle", async () => {
     let connection = createConnection({
       accessTokenEncrypted: "enc:access-token",
@@ -1438,6 +1542,150 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     expect(connection.tokenVersion).toBe(3);
     expect(connection.refreshLeaseOwner).toBe("agent-refresh:active");
+  });
+
+  it("claims, classifies, and clears refresh leases by owner", async () => {
+    let connection = createConnection({
+      provider: "oura",
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: null,
+      refreshLeaseTokenVersion: null,
+      status: "active",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+
+    const updateMany = vi.fn(async (input: {
+      data: Partial<MutableConnectionRecord>;
+      where: Record<string, unknown>;
+    }) => {
+      if (input.where.id !== connection.id) {
+        return { count: 0 };
+      }
+
+      if (typeof input.data.refreshLeaseOwner === "string") {
+        if (
+          input.where.userId === connection.userId
+          && input.where.tokenVersion === connection.tokenVersion
+          && input.where.refreshLeaseExpiresAt === null
+          && input.where.refreshLeaseOwner === null
+          && input.where.refreshLeaseTokenVersion === null
+          && connection.refreshLeaseExpiresAt === null
+          && connection.refreshLeaseOwner === null
+          && connection.refreshLeaseTokenVersion === null
+        ) {
+          connection = {
+            ...connection,
+            refreshLeaseExpiresAt: input.data.refreshLeaseExpiresAt ?? null,
+            refreshLeaseOwner: input.data.refreshLeaseOwner,
+            refreshLeaseTokenVersion: input.data.refreshLeaseTokenVersion ?? null,
+          };
+          return { count: 1 };
+        }
+
+        return { count: 0 };
+      }
+
+      if (input.data.refreshLeaseOwner === null) {
+        if (input.where.refreshLeaseOwner === connection.refreshLeaseOwner) {
+          connection = {
+            ...connection,
+            refreshLeaseExpiresAt: null,
+            refreshLeaseOwner: null,
+            refreshLeaseTokenVersion: null,
+          };
+          return { count: 1 };
+        }
+
+        return { count: 0 };
+      }
+
+      return { count: 0 };
+    });
+    const findFirst = vi.fn(async ({ where }: { where: { id: string; userId: string } }) =>
+      where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null
+    );
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst,
+          updateMany,
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.claimConnectionRefreshLease({
+      connectionId: "dsc_123",
+      userId: "user-123",
+      tokenVersion: 2,
+      leaseOwner: "agent-refresh:owner-1",
+      leaseExpiresAt: "2026-03-26T03:05:00.000Z",
+      now: "2026-03-26T03:00:00.000Z",
+    })).resolves.toEqual({ status: "claimed" });
+    expect(connection.refreshLeaseOwner).toBe("agent-refresh:owner-1");
+
+    await expect(store.claimConnectionRefreshLease({
+      connectionId: "dsc_123",
+      userId: "user-123",
+      tokenVersion: 2,
+      leaseOwner: "agent-refresh:owner-2",
+      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
+      now: "2026-03-26T03:01:00.000Z",
+    })).resolves.toEqual({
+      status: "in_progress",
+      leaseExpiresAt: "2026-03-26T03:05:00.000Z",
+    });
+
+    connection = {
+      ...connection,
+      refreshLeaseExpiresAt: new Date("2026-03-26T02:59:00.000Z"),
+    };
+    await expect(store.claimConnectionRefreshLease({
+      connectionId: "dsc_123",
+      userId: "user-123",
+      tokenVersion: 2,
+      leaseOwner: "agent-refresh:owner-3",
+      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
+      now: "2026-03-26T03:00:00.000Z",
+    })).resolves.toEqual({ status: "stale" });
+
+    connection = {
+      ...connection,
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: null,
+      refreshLeaseTokenVersion: null,
+      tokenVersion: 3,
+    };
+    await expect(store.claimConnectionRefreshLease({
+      connectionId: "dsc_123",
+      userId: "user-123",
+      tokenVersion: 2,
+      leaseOwner: "agent-refresh:owner-4",
+      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
+      now: "2026-03-26T03:00:00.000Z",
+    })).resolves.toEqual({ status: "version_changed" });
+
+    connection = {
+      ...connection,
+      refreshLeaseExpiresAt: new Date("2026-03-26T03:06:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:clear",
+      refreshLeaseTokenVersion: 3,
+    };
+    await expect(store.clearConnectionRefreshLease({
+      connectionId: "dsc_123",
+      leaseOwner: "agent-refresh:wrong",
+    })).resolves.toBe(false);
+    expect(connection.refreshLeaseOwner).toBe("agent-refresh:clear");
+    await expect(store.clearConnectionRefreshLease({
+      connectionId: "dsc_123",
+      leaseOwner: "agent-refresh:clear",
+    })).resolves.toBe(true);
+    expect(connection.refreshLeaseOwner).toBeNull();
+    expect(connection.refreshLeaseExpiresAt).toBeNull();
+    expect(connection.refreshLeaseTokenVersion).toBeNull();
   });
 
   it("fails closed when OAuth token rows store invalid token versions", async () => {
