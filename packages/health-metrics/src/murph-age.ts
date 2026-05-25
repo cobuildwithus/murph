@@ -5146,6 +5146,7 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
       sourceRouteIds: [
         "midus-biomarker-mortality",
         "creles-transport-stress",
+        "nhefs-public-lab-vitals-mortality",
         "nhanes-activity-shadow-lmf",
         "cardia-biomarker-activity",
         "hchs-sol-biomarker-activity",

@@ -523,6 +523,20 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
     true,
   );
 
+  const nhefs = resolveMurphAgeSourceRoute("nhefs-public-lab-vitals-mortality");
+  assert.equal(nhefs?.accessMode, "public-use");
+  assert.equal(nhefs?.activationStatus, "metadata-candidate");
+  assert.equal(nhefs?.layers.includes("biomarker-increment"), true);
+  assert.equal(nhefs?.layers.includes("transport-validation"), true);
+  assert.equal(nhefs?.featureFamilies.includes("labs"), true);
+  assert.equal(nhefs?.featureFamilies.includes("blood-pressure"), true);
+  assert.equal(nhefs?.outcomeSignal, "linked-mortality");
+  assert.equal(nhefs?.productAuthorized, false);
+  assert.equal(
+    nhefs?.blockedCurrentUses.some((blockedUse) => blockedUse.includes("score-bearing product use")),
+    true,
+  );
+
   const wearableRoutes = listMurphAgeSourceRoutesByLayer("wearable-shadow-increment");
   assert.equal(wearableRoutes.some((route) => route.routeId === "nhanes-activity-shadow-lmf"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "cardia-biomarker-activity"), true);
@@ -591,6 +605,14 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.ok(
     priorityRoutes.findIndex((route) => route.routeId === "mhas-harmonized-aging")
       < priorityRoutes.findIndex((route) => route.routeId === "midus-biomarker-mortality"),
+  );
+  assert.ok(
+    priorityRoutes.findIndex((route) => route.routeId === "nhefs-public-lab-vitals-mortality")
+      > priorityRoutes.findIndex((route) => route.routeId === "haalsi-transport-stress"),
+  );
+  assert.ok(
+    priorityRoutes.findIndex((route) => route.routeId === "nhefs-public-lab-vitals-mortality")
+      < priorityRoutes.findIndex((route) => route.routeId === "who-sage-south-africa-transport"),
   );
   assert.equal(priorityRoutes.some((route) => route.routeId === "partner-aggregate-evaluator"), true);
 
@@ -874,6 +896,7 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(clinical?.modelCardIds.includes("lab5_bp_bmi_transport_research"), true);
   assert.equal(clinical?.sourceRouteIds.includes("midus-biomarker-mortality"), true);
   assert.equal(clinical?.sourceRouteIds.includes("creles-transport-stress"), true);
+  assert.equal(clinical?.sourceRouteIds.includes("nhefs-public-lab-vitals-mortality"), true);
   assert.equal(clinical?.sourceRouteIds.includes("cardia-biomarker-activity"), true);
   assert.equal(clinical?.sourceRouteIds.includes("hchs-sol-biomarker-activity"), true);
   assert.equal(clinical?.candidateMetricKeys.includes("hba1c"), true);
@@ -919,6 +942,7 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(validation?.sourceRouteIds.includes("nsrr-wsc-sleep-longitudinal"), true);
   assert.equal(validation?.sourceRouteIds.includes("nsrr-haassa-sleep-aging"), true);
   assert.equal(validation?.sourceRouteIds.includes("haalsi-transport-stress"), true);
+  assert.equal(validation?.sourceRouteIds.includes("nhefs-public-lab-vitals-mortality"), true);
   assert.equal(validation?.sourceRouteIds.includes("who-sage-south-africa-transport"), true);
 
   const product = layersById.get("product-display");
