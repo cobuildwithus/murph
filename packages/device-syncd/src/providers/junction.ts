@@ -262,15 +262,7 @@ export function createJunctionDeviceSyncProvider(
       ? resolveCurrentSummaryWindow(context.now, reconcileDays)
       : window;
     const summaries = await fetchSummarySnapshots(context, summaryWindow.windowStart, summaryWindow.windowEnd);
-    const backfillFollowUp = job.kind === "backfill"
-      ? buildHistoricalBackfillFollowUp({
-          metadata: context.account.metadata,
-          now: context.now,
-          summaryHasRecords: hasJunctionSnapshotRecords(summaries),
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-        })
-      : {};
+    const summaryHasRecords = hasJunctionSnapshotRecords(summaries);
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
@@ -285,17 +277,28 @@ export function createJunctionDeviceSyncProvider(
       summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
       timeseries: {},
     });
+    let timeseriesHasRecords = false;
     if (
       job.kind === "backfill"
       || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
     ) {
-      await importTimeseriesDailySnapshots(
+      timeseriesHasRecords = await importTimeseriesDailySnapshots(
         context,
         sourceProviders,
         timeseriesWindowStart,
         window.windowEnd,
       );
     }
+
+    const backfillFollowUp = job.kind === "backfill"
+      ? buildHistoricalBackfillFollowUp({
+          hasRecords: summaryHasRecords || timeseriesHasRecords,
+          metadata: context.account.metadata,
+          now: context.now,
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+        })
+      : {};
 
     return {
       ...backfillFollowUp,
@@ -519,7 +522,9 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string,
     windowEnd: string,
     resources?: readonly string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let importedRecords = false;
+
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
       const timeseries = await fetchTimeseriesSnapshots(
         context,
@@ -530,6 +535,7 @@ export function createJunctionDeviceSyncProvider(
       if (!hasJunctionSnapshotRecords(timeseries)) {
         continue;
       }
+      importedRecords = true;
 
       await context.importSnapshot({
         provider: "junction",
@@ -543,6 +549,8 @@ export function createJunctionDeviceSyncProvider(
         timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
       });
     }
+
+    return importedRecords;
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -1119,13 +1127,13 @@ function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolea
 }
 
 function buildHistoricalBackfillFollowUp(input: {
+  hasRecords: boolean;
   metadata: Record<string, unknown>;
   now: string;
-  summaryHasRecords: boolean;
   windowStart: string;
   windowEnd: string;
 }): Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs"> {
-  if (input.summaryHasRecords) {
+  if (input.hasRecords) {
     return {
       metadataPatch: buildHistoricalBackfillMetadataPatch({
         status: "complete",

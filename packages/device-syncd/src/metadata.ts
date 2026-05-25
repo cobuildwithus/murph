@@ -78,3 +78,31 @@ export function sanitizeStoredDeviceSyncMetadata(
 
   return sanitized;
 }
+
+export function mergeStoredDeviceSyncMetadataPatch(
+  existing: Record<string, unknown> | null | undefined,
+  patch: Record<string, unknown> | null | undefined,
+): Record<string, DeviceSyncMetadataScalar> {
+  if (!patch) {
+    return sanitizeStoredDeviceSyncMetadata(existing);
+  }
+
+  const sanitizedPatch = sanitizeStoredDeviceSyncMetadata(patch);
+  const sanitizedExisting = sanitizeStoredDeviceSyncMetadata(existing);
+  const merged: Record<string, DeviceSyncMetadataScalar> = {};
+
+  for (const [key, value] of Object.entries(sanitizedPatch)) {
+    merged[key] = value;
+  }
+
+  for (const [key, value] of Object.entries(sanitizedExisting)) {
+    if (Object.keys(merged).length >= DEVICE_SYNC_METADATA_MAX_ENTRIES) {
+      break;
+    }
+    if (!Object.prototype.hasOwnProperty.call(merged, key)) {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
+}
