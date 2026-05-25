@@ -1191,17 +1191,27 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(lab5ArbiterCandidate.readyForResearchRun, true)
     assert.equal(lab5ArbiterCandidate.selected, true)
     assert.equal(view.model.currentModelFamily, 'frozen-nhis-r399-plus-research-increments')
-    assert.equal(view.model.composition.currentScoringMode, 'single-selected-research-card')
+    assert.equal(view.model.composition.currentScoringMode, 'selected-card-plus-parameterized-residual-shadow')
     assert.equal(view.model.composition.anchorLayerStatus, 'available-as-research-anchor-and-fallback-not-layered')
+    assert.equal(
+      view.model.composition.wearableStatus,
+      'research-shadow-residual-score-product-blocked',
+    )
+    assert.equal(view.model.wearable.currentUse, 'research-shadow-residual-score')
+    assert.equal(view.model.wearable.researchScoreBearing, true)
+    assert.equal(view.model.wearable.scoreBearing, false)
     assert.equal(
       view.model.layeredResearchPath.architecturePattern,
       'frozen-r399-anchor-plus-selected-lab-card-plus-function-and-wearable-residuals',
     )
     assert.equal(
       view.model.layeredResearchPath.currentExecutableMode,
-      'single-card-research-score-layer-contracts-only',
+      'single-card-plus-parameterized-residual-shadow-score',
     )
-    assert.deepEqual(view.model.layeredResearchPath.activeResearchScoreLayerIds, ['selected-lab-body-card'])
+    assert.deepEqual(view.model.layeredResearchPath.activeResearchScoreLayerIds, [
+      'selected-lab-body-card',
+      'wearable-multi-family-residual',
+    ])
     assert.deepEqual(view.model.layeredResearchPath.parameterPackBlockedLayerIds, [
       'function-disability-sidecar',
     ])
@@ -1273,14 +1283,37 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(multiWearableView.wearableResidualLayer?.selectedMetricKeys.includes('hrv-rmssd'), true)
     assert.equal(multiWearableView.wearableResidualLayer?.scoreBearing, false)
     assert.equal(multiWearableView.wearableResidualLayer?.scoreContributionAuthorized, false)
-    const wearableResidualLayer = view.model.layeredResearchPath.layers.find((layer) =>
+    assert.equal(
+      multiWearableView.model.composition.currentScoringMode,
+      'selected-card-plus-parameterized-residual-shadow',
+    )
+    assert.equal(
+      multiWearableView.model.composition.wearableStatus,
+      'research-shadow-residual-score-product-blocked',
+    )
+    assert.equal(multiWearableView.model.wearable.currentUse, 'research-shadow-residual-score')
+    assert.equal(multiWearableView.model.wearable.researchScoreBearing, true)
+    assert.equal(multiWearableView.model.wearable.scoreBearing, false)
+    assert.deepEqual(multiWearableView.model.layeredResearchPath.activeResearchScoreLayerIds, [
+      'selected-lab-body-card',
+      'wearable-multi-family-residual',
+    ])
+    assert.equal(
+      multiWearableView.model.layeredResearchPath.currentExecutableMode,
+      'single-card-plus-parameterized-residual-shadow-score',
+    )
+    const wearableResidualLayer = multiWearableView.model.layeredResearchPath.layers.find((layer) =>
       layer.layerId === 'wearable-multi-family-residual'
     )
     assert.ok(wearableResidualLayer)
-    assert.equal(wearableResidualLayer.status, 'parameter-pack-available-shadow-only')
+    assert.equal(wearableResidualLayer.status, 'active-research-shadow-score')
     assert.equal(wearableResidualLayer.parameterPackRequired, true)
     assert.equal(wearableResidualLayer.parameterPackAvailable, true)
-    assert.equal(wearableResidualLayer.metricKeys.includes('steps'), true)
+    assert.equal(wearableResidualLayer.scoreBearingNow, true)
+    assert.equal(wearableResidualLayer.scoreContributionAuthorized, false)
+    assert.equal(wearableResidualLayer.metricKeys.includes('total-sleep-minutes'), true)
+    assert.equal(wearableResidualLayer.metricKeys.includes('resting-heart-rate'), true)
+    assert.equal(wearableResidualLayer.metricKeys.includes('hrv-rmssd'), true)
     assert.equal(view.model.scoreInterpretation, 'risk-age-equivalent-research-only')
     assert.equal(view.model.selectedResearchCardId, 'lab5_bp_bmi_transport_research')
     assert.equal(view.model.productUseAuthorized, false)
@@ -1361,7 +1394,8 @@ test('age preview scores submitted labs and wearable context without a vault', a
       view.model.scoreBearingMetricKeys.join('|'),
       'creatinine|hba1c|hdl-c|triglycerides|systolic-blood-pressure|diastolic-blood-pressure|bmi',
     )
-    assert.equal(view.model.wearable.currentUse, 'context-only-shadow')
+    assert.equal(view.model.wearable.currentUse, 'research-shadow-residual-score')
+    assert.equal(view.model.wearable.researchScoreBearing, true)
     assert.equal(view.model.wearable.scoreBearing, false)
     assert.equal(view.model.wearable.scoreContributionAuthorized, false)
     assert.equal(view.model.wearable.consumerValidationStatus, 'missing')
@@ -1804,10 +1838,14 @@ test('age preview scores submitted labs and wearable context without a vault', a
       layer.layerId === 'wearable-multi-family-residual'
     )
     assert.ok(parameterizedWearableLayer)
-    assert.equal(parameterizedWearableLayer.status, 'parameter-pack-available-shadow-only')
+    assert.equal(parameterizedWearableLayer.status, 'active-research-shadow-score')
     assert.equal(parameterizedWearableLayer.parameterPackAvailable, true)
-    assert.equal(parameterizedWearableLayer.scoreBearingNow, false)
+    assert.equal(parameterizedWearableLayer.scoreBearingNow, true)
     assert.equal(parameterizedWearableLayer.scoreContributionAuthorized, false)
+    assert.deepEqual(researchCalculatorView.model.layeredResearchPath.activeResearchScoreLayerIds, [
+      'selected-lab-body-card',
+      'wearable-multi-family-residual',
+    ])
     assert.deepEqual(researchCalculatorView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
       'function-disability-sidecar',
     ])

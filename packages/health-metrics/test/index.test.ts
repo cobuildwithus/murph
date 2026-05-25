@@ -4885,10 +4885,26 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     layer.layerId === "wearable-multi-family-residual"
   );
   assert.ok(parameterizedWearableLayer);
-  assert.equal(parameterizedWearableLayer.status, "parameter-pack-available-shadow-only");
+  assert.equal(parameterizedWearableLayer.status, "active-research-shadow-score");
   assert.equal(parameterizedWearableLayer.parameterPackAvailable, true);
-  assert.equal(parameterizedWearableLayer.scoreBearingNow, false);
+  assert.equal(parameterizedWearableLayer.scoreBearingNow, true);
   assert.equal(parameterizedWearableLayer.scoreContributionAuthorized, false);
+  assert.equal(researchWithWearablePackView.model.composition.currentScoringMode, "selected-card-plus-parameterized-residual-shadow");
+  assert.equal(
+    researchWithWearablePackView.model.composition.wearableStatus,
+    "research-shadow-residual-score-product-blocked",
+  );
+  assert.equal(researchWithWearablePackView.model.wearable.currentUse, "research-shadow-residual-score");
+  assert.equal(researchWithWearablePackView.model.wearable.researchScoreBearing, true);
+  assert.equal(researchWithWearablePackView.model.wearable.scoreBearing, false);
+  assert.deepEqual(researchWithWearablePackView.model.layeredResearchPath.activeResearchScoreLayerIds, [
+    "selected-lab-body-card",
+    "wearable-multi-family-residual",
+  ]);
+  assert.equal(
+    researchWithWearablePackView.model.layeredResearchPath.currentExecutableMode,
+    "single-card-plus-parameterized-residual-shadow-score",
+  );
   assert.deepEqual(researchWithWearablePackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
     "function-disability-sidecar",
   ]);
@@ -4937,6 +4953,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     researchWithBothResidualPacksView.wearableResidualLayer?.finalRiskProbability,
     expectedResidualRiskProbability(functionShadowRiskProbability, -0.08),
   );
+  assert.deepEqual(researchWithBothResidualPacksView.model.layeredResearchPath.activeResearchScoreLayerIds, [
+    "selected-lab-body-card",
+    "function-disability-sidecar",
+    "wearable-multi-family-residual",
+  ]);
   assert.deepEqual(researchWithBothResidualPacksView.model.layeredResearchPath.parameterPackBlockedLayerIds, []);
   assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("metric-point:"), false);
   assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("10000"), false);
