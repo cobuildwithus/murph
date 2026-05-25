@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
-import { sanitizeStoredDeviceSyncMetadata, stringifyJson } from "../shared.ts";
+import { mergeStoredDeviceSyncMetadataPatch, stringifyJson } from "../shared.ts";
 import type { DeviceSyncAccountStatus } from "../types.ts";
 import {
   decodeNextReconcileRow,
@@ -38,9 +38,7 @@ export function markSyncSucceeded(
     return false;
   }
 
-  const metadata = sanitizeStoredDeviceSyncMetadata(
-    options.metadataPatch ? { ...existing.metadata, ...options.metadataPatch } : existing.metadata,
-  );
+  const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
   const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
     ? options.nextReconcileAt ?? null
     : existing.nextReconcileAt;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { test } from "vitest";
 
 import { DeviceSyncError } from "../src/errors.ts";
@@ -189,6 +189,16 @@ function createEmptyJunctionBackfillProvider() {
   });
 }
 
+function buildExpectedJunctionDedupeKey(
+  kind: "backfill" | "reconcile",
+  windowStart: string,
+  windowEnd: string,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify(["junction", kind, windowStart, windowEnd]))
+    .digest("hex");
+}
+
 function requireJunctionConnectionHandler(provider: ReturnType<typeof createJunctionProvider>) {
   return requireValue(provider.connectionHandler, "Junction provider should expose a connection handler.");
 }
@@ -325,7 +335,51 @@ test("Junction empty historical backfill schedules a bounded same-window retry",
   });
   assert.deepEqual(Object.keys(retryJob?.payload ?? {}).sort(), ["windowEnd", "windowStart"]);
   assert.equal(retryJob?.availableAt, "2026-04-04T00:15:00.000Z");
-  assert.equal(typeof retryJob?.dedupeKey, "string");
+  assert.equal(
+    retryJob?.dedupeKey,
+    buildExpectedJunctionDedupeKey(
+      "backfill",
+      "2026-04-01T12:34:56.000Z",
+      "2026-04-03T08:09:10.000Z",
+    ),
+  );
+});
+
+test("Junction empty historical backfill retries the resolved clamped window", async () => {
+  const provider = createEmptyJunctionBackfillProvider();
+  const context = createJunctionJobContext({
+    now: "2026-04-04T00:00:00.000Z",
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2025-01-01T12:34:56.000Z",
+      windowEnd: "2026-04-05T08:09:10.000Z",
+    }),
+  );
+
+  assert.deepEqual(result.metadataPatch, {
+    junctionHistoricalBackfillStatus: "retrying",
+    junctionHistoricalBackfillEmptyAttempts: 1,
+    junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-01-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+  });
+  const retryJob = result.scheduledJobs?.[0];
+  assert.deepEqual(retryJob?.payload, {
+    windowStart: "2026-01-04T00:00:00.000Z",
+    windowEnd: "2026-04-04T00:00:00.000Z",
+  });
+  assert.equal(
+    retryJob?.dedupeKey,
+    buildExpectedJunctionDedupeKey(
+      "backfill",
+      "2026-01-04T00:00:00.000Z",
+      "2026-04-04T00:00:00.000Z",
+    ),
+  );
 });
 
 test("Junction non-empty historical backfill marks the historical window complete", async () => {
@@ -376,6 +430,76 @@ test("Junction non-empty historical backfill marks the historical window complet
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
+});
+
+test("Junction timeseries-only historical backfill marks the historical window complete", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              heartrate: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/heartrate/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              start: "2026-04-02T12:00:00.000Z",
+              value: 72,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result.metadataPatch, {
+    junctionHistoricalBackfillStatus: "complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+  });
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(importedSnapshots.length, 2);
+  const timeseriesSnapshot = importedSnapshots[1] as { timeseries?: Record<string, unknown[]> };
+  assert.equal(timeseriesSnapshot.timeseries?.heartrate?.length, 1);
 });
 
 test("Junction empty historical backfill stops retrying after the bounded budget", async () => {

@@ -82,7 +82,10 @@ export function splitScopeList(value: unknown): string[] {
     .filter(Boolean);
 }
 
-export { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+export {
+  mergeStoredDeviceSyncMetadataPatch,
+  sanitizeStoredDeviceSyncMetadata,
+} from "./metadata.ts";
 
 export function parseJsonObject(value: string, label: string): Record<string, unknown> {
   let parsed: unknown;

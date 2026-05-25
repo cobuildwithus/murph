@@ -3308,6 +3308,78 @@ test("sqlite store sanitizes connection metadata writes and metadataPatch merges
   store.close();
 });
 
+test("sqlite store prioritizes metadataPatch entries when capped metadata is full", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-metadata-patch-priority");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+  const crowdedMetadata = Object.fromEntries(
+    Array.from({ length: 16 }, (_, index) => [`existing${index}`, `value-${index}`]),
+  );
+  const created = store.upsertAccount({
+    connectedAt: "2026-03-20T10:00:00.000Z",
+    displayName: "Crowded Metadata Account",
+    externalAccountId: "demo-crowded-metadata",
+    metadata: crowdedMetadata,
+    nextReconcileAt: null,
+    provider: "demo",
+    scopes: ["offline"],
+    status: "active",
+    tokens: {
+      accessToken: "seed-access",
+      accessTokenEncrypted: "enc:seed-access",
+      refreshToken: "seed-refresh",
+      refreshTokenEncrypted: "enc:seed-refresh",
+    },
+  });
+
+  assert.equal(Object.keys(created.metadata).length, 16);
+  assert.equal(
+    store.markSyncSucceeded(created.id, "2026-03-20T12:00:00.000Z", null, {
+      metadataPatch: {
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      },
+    }),
+    true,
+  );
+
+  const metadata = store.getAccountById(created.id)?.metadata ?? {};
+  assert.deepEqual(
+    {
+      junctionHistoricalBackfillEmptyAttempts: metadata.junctionHistoricalBackfillEmptyAttempts,
+      junctionHistoricalBackfillLastEmptyAt: metadata.junctionHistoricalBackfillLastEmptyAt,
+      junctionHistoricalBackfillStatus: metadata.junctionHistoricalBackfillStatus,
+      junctionHistoricalBackfillWindowEnd: metadata.junctionHistoricalBackfillWindowEnd,
+      junctionHistoricalBackfillWindowStart: metadata.junctionHistoricalBackfillWindowStart,
+    },
+    {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+    },
+  );
+  assert.equal(Object.keys(metadata).length, 16);
+
+  assert.equal(
+    store.markSyncSucceeded(created.id, "2026-03-20T12:05:00.000Z", null, {
+      metadataPatch: {
+        "99": "numeric-like-patch-key",
+      },
+    }),
+    true,
+  );
+
+  const numericKeyMetadata = store.getAccountById(created.id)?.metadata ?? {};
+  assert.equal(numericKeyMetadata["99"], "numeric-like-patch-key");
+  assert.equal(Object.keys(numericKeyMetadata).length, 16);
+
+  store.close();
+});
+
 test("sqlite store splits connection, credential, and observation state into explicit tables", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-authority-split");
   const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
