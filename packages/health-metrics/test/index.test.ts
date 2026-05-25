@@ -4863,7 +4863,12 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     researchWithWearablePackView.layeredAgeEstimate?.biologicalAgeYears,
     researchWithWearablePackView.wearableResidualLayer?.finalRiskAgeEquivalentYears,
   );
+  assert.equal(
+    researchWithWearablePackView.ageEstimate?.biologicalAgeYears,
+    researchWithWearablePackView.layeredAgeEstimate?.biologicalAgeYears,
+  );
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.riskProbability, shadowRiskProbability);
+  assert.equal(researchWithWearablePackView.risk.probability, shadowRiskProbability);
   assert.equal(
     researchWithWearablePackView.layeredAgeEstimate?.residualDeltaYears,
     researchWithWearablePackView.wearableResidualLayer?.residualDeltaYears,
@@ -4919,6 +4924,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(
     researchWithBothResidualPacksView.layeredAgeEstimate?.riskProbability,
     researchWithBothResidualPacksView.wearableResidualLayer?.finalRiskProbability,
+  );
+  assert.equal(
+    researchWithBothResidualPacksView.ageEstimate?.biologicalAgeYears,
+    researchWithBothResidualPacksView.layeredAgeEstimate?.biologicalAgeYears,
+  );
+  assert.equal(
+    researchWithBothResidualPacksView.risk.probability,
+    researchWithBothResidualPacksView.layeredAgeEstimate?.riskProbability,
   );
   assert.equal(
     researchWithBothResidualPacksView.wearableResidualLayer?.finalRiskProbability,
