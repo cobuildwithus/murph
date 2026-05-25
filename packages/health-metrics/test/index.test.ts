@@ -4856,6 +4856,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreBearing, false);
   assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreContributionAuthorized, false);
   assert.equal(researchWithWearablePackView.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+  assert.equal(researchWithWearablePackView.arbiter.wearableScorePolicy, "research-residual-shadow-product-blocked");
   assert.equal(researchWithWearablePackView.wearableResidualLayer?.finalRiskProbability, shadowRiskProbability);
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.status, "wearable-shadow-applied");
   assert.equal(researchWithWearablePackView.layeredAgeEstimate?.basis, "wearable-shadow-risk-age");

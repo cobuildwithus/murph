@@ -1411,7 +1411,7 @@ export interface MurphAgeResearchArbiterView {
   selectedCardRole: MurphAgeResearchCardRole | null;
   selectionReason: MurphAgeResearchArbiterSelectionReason;
   strategy: "r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context";
-  wearableScorePolicy: "context-only-not-score-bearing";
+  wearableScorePolicy: "context-only-not-score-bearing" | "research-residual-shadow-product-blocked";
 }
 
 export type MurphAgeResearchLayeredAgeEstimateStatus =
@@ -8305,7 +8305,10 @@ function buildMurphAgeResearchArbiterView(
       : null,
     selectionReason: resolveMurphAgeResearchArbiterSelectionReason(selectedCandidateCardId),
     strategy: "r399-anchor-l1b-current-alpha-lab9-secondary-lab5-transport-l1-glycemia-function-sidecar-wearables-context",
-    wearableScorePolicy: "context-only-not-score-bearing",
+    wearableScorePolicy:
+      report.wearableResidualLayer?.status === "research-parameterized-shadow-delta"
+        ? "research-residual-shadow-product-blocked"
+        : "context-only-not-score-bearing",
   };
 }
 
