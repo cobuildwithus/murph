@@ -2608,7 +2608,7 @@ test("assesses Murph Age research input bundles for current alpha, Lab5 fallback
   assert.equal(wearable.availableFeatureKeys.includes("wearable-valid-day-count-28d"), true);
   assert.equal(wearable.availableFeatureKeys.includes("wearable-valid-night-count-28d"), true);
   assert.equal(wearable.availableFeatureKeys.includes("wearable-coverage-index"), true);
-  assert.equal(wearable.warnings.some((warning) => warning.message.includes("do not score wearables")), true);
+  assert.equal(wearable.warnings.some((warning) => warning.message.includes("private research previews can apply residual packs")), true);
 
   const insufficient = assessMurphAgeInputBundle({ asOf, points: [] });
   assert.equal(insufficient.status, "abstain");
