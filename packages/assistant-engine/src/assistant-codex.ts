@@ -91,7 +91,7 @@ const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const HOSTED_RUNTIME_PROCESS_ENV_MARKER = HOSTED_RUNTIME_PROCESS_ENV
-const HOSTED_CODEX_APP_SERVER_COMMAND = '/app/node_modules/.bin/codex'
+const HOSTED_CODEX_APP_SERVER_COMMAND = 'codex'
 const HOSTED_RUNNER_EXECUTABLE_PATH = [
   '/app/node_modules/.bin',
   '/usr/local/sbin',

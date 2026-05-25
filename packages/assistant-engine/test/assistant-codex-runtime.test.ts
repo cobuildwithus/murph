@@ -569,11 +569,11 @@ describe('assistant codex runtime', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_NOT_FOUND',
       message:
-        'Codex app-server executable "/app/node_modules/.bin/codex" was not found. Install @openai/codex or pass --codexCommand.',
+        'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
-      '/app/node_modules/.bin/codex',
+      'codex',
       ['-a', 'never', 'app-server'],
       expect.objectContaining({
         cwd: path.resolve(workingDirectory),
@@ -661,7 +661,7 @@ describe('assistant codex runtime', () => {
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
-      '/app/node_modules/.bin/codex',
+      'codex',
       ['-a', 'never', 'app-server'],
       expect.any(Object),
     )
@@ -687,7 +687,7 @@ describe('assistant codex runtime', () => {
         queueMicrotask(() => {
           void (async () => {
             await waitForRpcMethod(child, 'initialize')
-            const error = new Error('spawn /app/node_modules/.bin/codex ENOENT') as NodeJS.ErrnoException
+            const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
             error.code = 'ENOENT'
             child.emit('error', error)
           })()
@@ -710,7 +710,7 @@ describe('assistant codex runtime', () => {
       })
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
-        '/app/node_modules/.bin/codex',
+        'codex',
         ['-a', 'never', 'app-server'],
         expect.any(Object),
       )
@@ -730,7 +730,7 @@ describe('assistant codex runtime', () => {
         nodeEnv: 'test',
       },
       {
-        command: '/app/node_modules/.bin/codex',
+        command: 'codex',
         nodeEnv: 'production',
       },
     ]) {
