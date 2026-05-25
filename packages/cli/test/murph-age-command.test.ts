@@ -1548,7 +1548,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.latestLocalRunEvidenceStatus, 'mixed-research-only-no-product-promotion')
     assert.equal(
       view.model.latestLocalRunEvidence.map((item) => item.evidenceId).join('|'),
-      'midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|mhas-function-mobility-sidecar-local-run|wearables-context-only-local-run',
+      'midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|mhas-function-mobility-sidecar-local-run|sage-physiology-shadow-local-run|wearables-context-only-local-run',
     )
     assert.equal(
       view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'midus-lab-lift-local-run')?.signal,
@@ -1587,6 +1587,19 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(
       mhasFunctionSidecarEvidence.supportedMetricKeys.join('|'),
       'adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count',
+    )
+    const sagePhysiologyEvidence = view.model.latestLocalRunEvidence.find((item) =>
+      item.evidenceId === 'sage-physiology-shadow-local-run'
+    )
+    assert.ok(sagePhysiologyEvidence)
+    assert.equal(sagePhysiologyEvidence.cohortLabel, 'SAGE')
+    assert.equal(sagePhysiologyEvidence.sourceRouteId, 'who-sage-south-africa-transport')
+    assert.equal(sagePhysiologyEvidence.signal, 'context-only')
+    assert.equal(sagePhysiologyEvidence.scoringMathChanged, false)
+    assert.equal(sagePhysiologyEvidence.productAuthorizationChanged, false)
+    assert.equal(
+      sagePhysiologyEvidence.supportedMetricKeys.join('|'),
+      'bmi|systolic-blood-pressure|diastolic-blood-pressure|resting-heart-rate|activity-minutes|total-sleep-minutes',
     )
     assert.equal(view.model.latestLocalRunEvidence.every((item) => item.scoringMathChanged === false), true)
     assert.equal(view.model.latestLocalRunEvidence.every((item) => item.productAuthorizationChanged === false), true)

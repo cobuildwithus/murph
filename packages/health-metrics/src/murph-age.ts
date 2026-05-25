@@ -1263,13 +1263,14 @@ export type MurphAgeResearchLocalRunEvidenceSignal =
 
 export interface MurphAgeResearchLocalRunEvidenceItem {
   bundleId?: MurphAgeInputBundleId;
-  cohortLabel: "CRELES" | "HAALSI" | "MHAS" | "MIDUS" | "NSHAP" | "wearables";
+  cohortLabel: "CRELES" | "HAALSI" | "MHAS" | "MIDUS" | "NSHAP" | "SAGE" | "wearables";
   evidenceId:
     | "creles-glycemia-transport-local-run"
     | "haalsi-glucose-transport-local-run"
     | "mhas-function-mobility-sidecar-local-run"
     | "midus-lab-lift-local-run"
     | "nshap-hba1c-transport-local-run"
+    | "sage-physiology-shadow-local-run"
     | "wearables-context-only-local-run";
   productAuthorizationChanged: false;
   scoringMathChanged: false;
@@ -8663,6 +8664,23 @@ function buildMurphAgeResearchModelStatusView(input: {
           "iadl-limitation-count",
           "mobility-limitation-count",
           "frailty-symptom-count",
+        ],
+      },
+      {
+        cohortLabel: "SAGE",
+        evidenceId: "sage-physiology-shadow-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "context-only",
+        sourceRouteId: "who-sage-south-africa-transport",
+        summary: "SAGE South Africa local aggregate shadow diagnostics support vitals, body, activity, and sleep source-fit context only; the endpoint is not mortality validation and does not promote scoring.",
+        supportedMetricKeys: [
+          "bmi",
+          "systolic-blood-pressure",
+          "diastolic-blood-pressure",
+          "resting-heart-rate",
+          "activity-minutes",
+          "total-sleep-minutes",
         ],
       },
       {
