@@ -983,6 +983,229 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
   }
 });
 
+test("getMurphAgeSubmittedCalculatorViewBundle loads local wearable packs into the research preview", async () => {
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  const wearablePackRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-wearable-pack-root-"));
+  try {
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab5.json", {
+      cardId: "lab5_bp_bmi_transport_research",
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+    await writeWearableResidualParameterPack(
+      wearablePackRoot,
+      "activity.json",
+      fixtureActivityWearableResidualParameterPack("lab5_bp_bmi_transport_research"),
+    );
+    await writeWearableResidualParameterPack(
+      wearablePackRoot,
+      "sleep.json",
+      fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+        center: 420,
+        coefficient: -0.04,
+        family: "sleep",
+        layerId: "sleep-residual-v1",
+        metricKey: "total-sleep-minutes",
+        scale: 30,
+      }),
+    );
+    await writeWearableResidualParameterPack(
+      wearablePackRoot,
+      "resting-heart-rate.json",
+      fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+        center: 60,
+        coefficient: 0.05,
+        family: "resting-heart-rate",
+        layerId: "resting-heart-rate-residual-v1",
+        metricKey: "resting-heart-rate",
+        scale: 10,
+      }),
+    );
+    await writeWearableResidualParameterPack(
+      wearablePackRoot,
+      "hrv.json",
+      fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+        center: 50,
+        coefficient: -0.02,
+        family: "hrv",
+        layerId: "hrv-residual-v1",
+        metricKey: "hrv-rmssd",
+        scale: 20,
+      }),
+    );
+
+    const bundle = await getMurphAgeSubmittedCalculatorViewBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      includeResearchPreview: true,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics: [
+        { metricKey: "HbA1c", unit: "%", value: 5.3 },
+        { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+        { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+        { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+        { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+        { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+        { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+        { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
+        { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+        { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.91 },
+        { metricKey: "total-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 450 },
+        { metricKey: "wearable_valid_night_count_28d", sourceKind: "sleep-summary", unit: "count", value: 22 },
+        { metricKey: "resting-heart-rate", sourceKind: "wearable-summary", unit: "bpm", value: 54 },
+        { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 70 },
+      ],
+      wearableResidualParameterPackRoot: wearablePackRoot,
+    });
+
+    const researchView = bundle.researchPreview?.view;
+    assert.equal(bundle.product.view.ageEstimate, null);
+    assert.equal(bundle.product.view.scoreReadiness.status, "validation-pending");
+    assert.equal(researchView?.wearableResidualLayer?.layerId, "multi-wearable-residual-v1");
+    assert.equal(researchView?.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+    assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
+    assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("total-sleep-minutes"), true);
+    assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("resting-heart-rate"), true);
+    assert.equal(researchView?.wearableResidualLayer?.selectedMetricKeys.includes("hrv-rmssd"), true);
+    assert.deepEqual(researchView?.layeredAgeEstimate?.appliedLayerIds, [
+      "selected-lab-body-card",
+      "wearable-multi-family-residual",
+    ]);
+    assert.equal(researchView?.layeredAgeEstimate?.productAuthorized, false);
+    assert.equal(researchView?.layeredAgeEstimate?.residualScoreContributionAuthorized, false);
+
+    const encodedBundle = JSON.stringify(bundle);
+    assert.equal(encodedBundle.includes(modelCardArtifactRoot), false);
+    assert.equal(encodedBundle.includes(wearablePackRoot), false);
+    assert.equal(encodedBundle.includes("coefficient"), false);
+    assert.equal(encodedBundle.includes("10000"), false);
+  } finally {
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+    await rm(wearablePackRoot, { force: true, recursive: true });
+  }
+});
+
+test("explicit wearable packs win over implicit local wearable pack roots", async () => {
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  const wearablePackRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-wearable-pack-root-"));
+  const previousPackRoot = process.env.MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT;
+  try {
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab5.json", {
+      cardId: "lab5_bp_bmi_transport_research",
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+    await writeWearableResidualParameterPack(
+      wearablePackRoot,
+      "sleep.json",
+      fixtureWearableResidualParameterPack("lab5_bp_bmi_transport_research", {
+        center: 420,
+        coefficient: -0.04,
+        family: "sleep",
+        layerId: "sleep-residual-v1",
+        metricKey: "total-sleep-minutes",
+        scale: 30,
+      }),
+    );
+    process.env.MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT = wearablePackRoot;
+
+    const publicReport = await getMurphAgeResearchPreviewForSubmittedInputs({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics: [
+        { metricKey: "HbA1c", unit: "%", value: 5.3 },
+        { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+        { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+        { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+        { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+        { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+        { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+        { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
+        { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+        { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.91 },
+        { metricKey: "total-sleep-minutes", sourceKind: "sleep-summary", unit: "minutes", value: 450 },
+        { metricKey: "wearable_valid_night_count_28d", sourceKind: "sleep-summary", unit: "count", value: 22 },
+      ],
+      wearableResidualParameterPack: fixtureActivityWearableResidualParameterPack(
+        "lab5_bp_bmi_transport_research",
+      ),
+    });
+
+    assert.equal(publicReport.wearableResidualLayer?.layerId, "activity-residual-v1");
+    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, FIXTURE_ACTIVITY_WEARABLE_PACK_HASH);
+    assert.equal(publicReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
+    assert.equal(publicReport.wearableResidualLayer?.selectedMetricKeys.includes("total-sleep-minutes"), false);
+  } finally {
+    if (previousPackRoot === undefined) {
+      delete process.env.MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT;
+    } else {
+      process.env.MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT = previousPackRoot;
+    }
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+    await rm(wearablePackRoot, { force: true, recursive: true });
+  }
+});
+
+test("explicit wearable packs dedupe local packs by residual slot", async () => {
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  const wearablePackRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-wearable-pack-root-"));
+  try {
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab5.json", {
+      cardId: "lab5_bp_bmi_transport_research",
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+    await writeWearableResidualParameterPack(
+      wearablePackRoot,
+      "activity-duplicate.json",
+      {
+        ...fixtureActivityWearableResidualParameterPack("lab5_bp_bmi_transport_research"),
+        featureWeights: [{
+          center: 8_000,
+          coefficient: -0.2,
+          metricKey: "steps",
+          scale: 2_000,
+          transform: "center-scale",
+        }],
+        packHash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      },
+    );
+
+    const publicReport = await getMurphAgeResearchPreviewForSubmittedInputs({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics: [
+        { metricKey: "HbA1c", unit: "%", value: 5.3 },
+        { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+        { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+        { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+        { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+        { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+        { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+        { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
+        { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+        { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.91 },
+      ],
+      wearableResidualParameterPack: fixtureActivityWearableResidualParameterPack(
+        "lab5_bp_bmi_transport_research",
+      ),
+      wearableResidualParameterPackRoot: wearablePackRoot,
+    });
+
+    assert.equal(publicReport.wearableResidualLayer?.layerId, "activity-residual-v1");
+    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, FIXTURE_ACTIVITY_WEARABLE_PACK_HASH);
+    assert.equal(publicReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
+  } finally {
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+    await rm(wearablePackRoot, { force: true, recursive: true });
+  }
+});
+
 test("getMurphAgeSubmittedCalculatorViewBundle returns product-safe output plus research preview", async () => {
   const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
   try {
@@ -1983,6 +2206,15 @@ async function writeLocalModelCardArtifact(vaultRoot: string, fileName: string, 
 async function writeModelCardArtifact(root: string, fileName: string, artifact: unknown): Promise<void> {
   await mkdir(root, { recursive: true });
   await writeFile(path.join(root, fileName), `${JSON.stringify(artifact, null, 2)}\n`);
+}
+
+async function writeWearableResidualParameterPack(
+  root: string,
+  fileName: string,
+  parameterPack: MurphAgeWearableResidualParameterPack,
+): Promise<void> {
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, fileName), `${JSON.stringify(parameterPack, null, 2)}\n`);
 }
 
 function insertMetricPoints(vaultRoot: string, points: readonly MetricPoint[]): void {

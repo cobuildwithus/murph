@@ -39,6 +39,7 @@ import {
   toPublicMurphAgeCalculatorReport,
   validateMurphAgeRiskModel,
   validateMurphAgeLocalModelCardArtifactPolicy,
+  validateMurphAgeWearableResidualParameterPack,
   type MetricPoint,
   type MurphAgeCalculationInput,
   type MurphAgeCalculatorInput,
@@ -59,6 +60,7 @@ import {
   type MurphAgeSubmittedCalculatorInputBundleSpec,
   type MurphAgeSubmittedCalculatorViewBundle,
   type MurphAgeSubmittedCalculatorInput,
+  type MurphAgeWearableResidualParameterPack,
   type MurphAgeWearableShadowIncrementAssessment,
   type MurphAgeWearableShadowIncrementFamily,
   type MurphAgeWearableShadowIncrementStatus,
@@ -79,6 +81,7 @@ export interface CalculateMurphAgeFromVaultInputBundleInput extends Omit<MurphAg
   asOf: string;
   modelCardArtifactRoot?: string;
   vaultRoot: string;
+  wearableResidualParameterPackRoot?: string;
 }
 
 export interface GetMurphAgeResearchPreviewForVaultInput
@@ -91,6 +94,7 @@ export interface GetMurphAgeResearchPreviewForSubmittedInputsInput
   modelCardArtifactRoot?: string;
   mode?: "research";
   models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
+  wearableResidualParameterPackRoot?: string;
 }
 
 export interface GetMurphAgeSubmittedCalculatorViewBundleInput
@@ -98,6 +102,7 @@ export interface GetMurphAgeSubmittedCalculatorViewBundleInput
   includeResearchPreview?: boolean;
   modelCardArtifactRoot?: string;
   models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
+  wearableResidualParameterPackRoot?: string;
 }
 
 export { MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION, type MurphAgeLocalModelCardArtifact };
@@ -219,6 +224,16 @@ const MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT_ENV_KEYS = [
   "MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT",
   "MURPH_AGE_MODEL_CARD_OUTPUT_DIR",
 ] as const;
+const MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_RELATIVE_DIR = path.join(
+  ".runtime",
+  "cache",
+  "murph-age",
+  "private-parameter-packs",
+);
+const MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT_ENV_KEYS = [
+  "MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT",
+  "MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_DIR",
+] as const;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MURPH_AGE_RUNTIME_INPUT_READINESS = [
   {
@@ -300,6 +315,18 @@ export async function calculateMurphAgeFromVaultInputBundle(
       vaultRoot: input.vaultRoot,
     })
     : { models: {}, warnings: [] };
+  const localWearableResidualParameterPacks = mode === "research"
+    ? await loadMurphAgeLocalWearableResidualParameterPacks({
+      vaultRoot: input.vaultRoot,
+      wearableResidualParameterPack: input.wearableResidualParameterPack,
+      wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+      wearableResidualParameterPackRoot: input.wearableResidualParameterPackRoot,
+    })
+    : { parameterPacks: [], warnings: [] };
+  const wearableResidualParameterPackInput = resolveMergedMurphAgeWearableResidualParameterPackInput({
+    wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+  }, localWearableResidualParameterPacks.parameterPacks);
 
   const output = calculateMurphAgeFromInputBundle({
     asOf,
@@ -310,10 +337,12 @@ export async function calculateMurphAgeFromVaultInputBundle(
     models: { ...localModelCards.models, ...input.models },
     points,
     sex: input.sex,
-    wearableResidualParameterPack: input.wearableResidualParameterPack,
-    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+    ...wearableResidualParameterPackInput,
   });
-  return withPrependedWarnings(output, localModelCards.warnings);
+  return withPrependedWarnings(output, [
+    ...localModelCards.warnings,
+    ...localWearableResidualParameterPacks.warnings,
+  ]);
 }
 
 export async function summarizeMurphAgeFromVaultInputBundle(
@@ -345,6 +374,15 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
   const localModelCards = await loadMurphAgeLocalModelCardArtifacts({
     modelCardArtifactRoot: input.modelCardArtifactRoot,
   });
+  const localWearableResidualParameterPacks = await loadMurphAgeLocalWearableResidualParameterPacks({
+    wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+    wearableResidualParameterPackRoot: input.wearableResidualParameterPackRoot,
+  });
+  const wearableResidualParameterPackInput = resolveMergedMurphAgeWearableResidualParameterPackInput({
+    wearableResidualParameterPack: input.wearableResidualParameterPack,
+    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+  }, localWearableResidualParameterPacks.parameterPacks);
   const output = calculateMurphAgeFromSubmittedInputs({
     asOf: input.asOf,
     cardId: input.cardId,
@@ -354,10 +392,12 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
     sex: input.sex,
     submittedMetrics: input.submittedMetrics,
     functionResidualParameterPack: input.functionResidualParameterPack,
-    wearableResidualParameterPack: input.wearableResidualParameterPack,
-    wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+    ...wearableResidualParameterPackInput,
   });
-  return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, localModelCards.warnings));
+  return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, [
+    ...localModelCards.warnings,
+    ...localWearableResidualParameterPacks.warnings,
+  ]));
 }
 
 export async function getMurphAgeSubmittedCalculatorViewBundle(
@@ -384,13 +424,26 @@ export async function getMurphAgeSubmittedCalculatorViewBundle(
       const localModelCards = await loadMurphAgeLocalModelCardArtifacts({
         modelCardArtifactRoot: input.modelCardArtifactRoot,
       });
+      const localWearableResidualParameterPacks = await loadMurphAgeLocalWearableResidualParameterPacks({
+        wearableResidualParameterPack: input.wearableResidualParameterPack,
+        wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+        wearableResidualParameterPackRoot: input.wearableResidualParameterPackRoot,
+      });
+      const wearableResidualParameterPackInput = resolveMergedMurphAgeWearableResidualParameterPackInput({
+        wearableResidualParameterPack: input.wearableResidualParameterPack,
+        wearableResidualParameterPacks: input.wearableResidualParameterPacks,
+      }, localWearableResidualParameterPacks.parameterPacks);
       const researchOutput = calculateMurphAgeFromSubmittedInputs({
         ...sharedInput,
         mode: "research",
         models: { ...localModelCards.models, ...input.models },
+        ...wearableResidualParameterPackInput,
       });
       const report = toPublicMurphAgeCalculatorReport(
-        withPrependedWarnings(researchOutput, localModelCards.warnings),
+        withPrependedWarnings(researchOutput, [
+          ...localModelCards.warnings,
+          ...localWearableResidualParameterPacks.warnings,
+        ]),
       );
       return {
         report,
@@ -774,12 +827,85 @@ export async function loadMurphAgeLocalModelCardArtifacts(input: {
   return { models, warnings };
 }
 
+export function defaultMurphAgeWearableResidualParameterPackRoot(vaultRoot?: string): string {
+  return path.join(vaultRoot ?? process.cwd(), MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_RELATIVE_DIR);
+}
+
+export function resolveMurphAgeWearableResidualParameterPackRoot(input: {
+  vaultRoot?: string;
+  wearableResidualParameterPackRoot?: string;
+}): string {
+  return input.wearableResidualParameterPackRoot
+    ?? configuredMurphAgeWearableResidualParameterPackRoot()
+    ?? defaultMurphAgeWearableResidualParameterPackRoot(input.vaultRoot);
+}
+
+async function loadMurphAgeLocalWearableResidualParameterPacks(input: {
+  vaultRoot?: string;
+  wearableResidualParameterPack?: MurphAgeWearableResidualParameterPack | null;
+  wearableResidualParameterPacks?: readonly MurphAgeWearableResidualParameterPack[] | null;
+  wearableResidualParameterPackRoot?: string;
+}): Promise<{
+  parameterPacks: MurphAgeWearableResidualParameterPack[];
+  warnings: MurphAgeWarning[];
+}> {
+  const root = localWearableResidualParameterPackRootForLoad(input);
+  if (!root) return { parameterPacks: [], warnings: [] };
+  let entries: Array<{ isFile(): boolean; name: string }>;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return { parameterPacks: [], warnings: [] };
+    }
+    return {
+      parameterPacks: [],
+      warnings: [localWearableResidualParameterPackWarning(
+        "A local Murph Age wearable residual parameter-pack directory could not be read.",
+      )],
+    };
+  }
+
+  const parameterPacks: MurphAgeWearableResidualParameterPack[] = [];
+  const warnings: MurphAgeWarning[] = [];
+  const jsonEntries = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of jsonEntries) {
+    const parameterPack = await readLocalWearableResidualParameterPack(path.join(root, entry.name));
+    warnings.push(...parameterPack.warnings);
+    if (parameterPack.value) parameterPacks.push(parameterPack.value);
+  }
+
+  return { parameterPacks, warnings };
+}
+
 function configuredMurphAgeModelCardArtifactRoot(): string | undefined {
   for (const envKey of MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT_ENV_KEYS) {
     const value = process.env[envKey]?.trim();
     if (value) return value;
   }
   return undefined;
+}
+
+function configuredMurphAgeWearableResidualParameterPackRoot(): string | undefined {
+  for (const envKey of MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_ROOT_ENV_KEYS) {
+    const value = process.env[envKey]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function localWearableResidualParameterPackRootForLoad(input: {
+  vaultRoot?: string;
+  wearableResidualParameterPack?: MurphAgeWearableResidualParameterPack | null;
+  wearableResidualParameterPacks?: readonly MurphAgeWearableResidualParameterPack[] | null;
+  wearableResidualParameterPackRoot?: string;
+}): string | undefined {
+  if (input.wearableResidualParameterPackRoot) return input.wearableResidualParameterPackRoot;
+  if (hasExplicitMurphAgeWearableResidualParameterPacks(input)) return undefined;
+  return resolveMurphAgeWearableResidualParameterPackRoot(input);
 }
 
 async function readLocalModelCardArtifact(filePath: string): Promise<{
@@ -821,6 +947,162 @@ function localModelCardWarning(message: string): MurphAgeWarning {
     code: "INVALID_INPUT",
     message,
   };
+}
+
+async function readLocalWearableResidualParameterPack(filePath: string): Promise<{
+  value: MurphAgeWearableResidualParameterPack | null;
+  warnings: MurphAgeWarning[];
+}> {
+  let raw: string;
+  try {
+    raw = await readFile(filePath, "utf8");
+  } catch {
+    return {
+      value: null,
+      warnings: [localWearableResidualParameterPackWarning(
+        "A local Murph Age wearable residual parameter pack could not be read.",
+      )],
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      value: null,
+      warnings: [localWearableResidualParameterPackWarning(
+        "A local Murph Age wearable residual parameter pack is not valid JSON.",
+      )],
+    };
+  }
+
+  if (!isWearableResidualParameterPackCandidate(parsed)) {
+    return {
+      value: null,
+      warnings: [localWearableResidualParameterPackWarning(
+        "A local Murph Age wearable residual parameter pack does not match the expected schema.",
+      )],
+    };
+  }
+
+  const validation = validateMurphAgeWearableResidualParameterPack({
+    anchorCardId: parsed.anchorCardId,
+    parameterPack: parsed,
+  });
+  if (validation.status !== "valid") {
+    return {
+      value: null,
+      warnings: [localWearableResidualParameterPackWarning(
+        "A local Murph Age wearable residual parameter pack did not pass policy validation.",
+      )],
+    };
+  }
+
+  return { value: parsed, warnings: [] };
+}
+
+function localWearableResidualParameterPackWarning(message: string): MurphAgeWarning {
+  return {
+    code: "INVALID_INPUT",
+    message,
+  };
+}
+
+function isWearableResidualParameterPackCandidate(
+  value: unknown,
+): value is MurphAgeWearableResidualParameterPack {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.anchorCardId === "string"
+    && typeof record.calibrationIntercept === "number"
+    && typeof record.calibrationSlope === "number"
+    && typeof record.deploymentRights === "string"
+    && typeof record.endpoint === "string"
+    && typeof record.evidenceTier === "string"
+    && typeof record.family === "string"
+    && Array.isArray(record.featureWeights)
+    && record.featureWeights.every(isWearableResidualParameterPackFeatureCandidate)
+    && typeof record.globalWearableCapLogit === "number"
+    && typeof record.horizonYears === "number"
+    && typeof record.intercept === "number"
+    && typeof record.layerId === "string"
+    && typeof record.packHash === "string"
+    && typeof record.schemaVersion === "string"
+    && typeof record.sourceRouteId === "string";
+}
+
+function isWearableResidualParameterPackFeatureCandidate(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.center === "number"
+    && typeof record.coefficient === "number"
+    && typeof record.metricKey === "string"
+    && typeof record.scale === "number"
+    && typeof record.transform === "string";
+}
+
+function hasExplicitMurphAgeWearableResidualParameterPacks(input: Pick<
+  MurphAgeSubmittedCalculatorInput,
+  "wearableResidualParameterPack" | "wearableResidualParameterPacks"
+>): boolean {
+  return Boolean(input.wearableResidualParameterPack)
+    || Boolean(input.wearableResidualParameterPacks && input.wearableResidualParameterPacks.length > 0);
+}
+
+function resolveMergedMurphAgeWearableResidualParameterPackInput(
+  explicitPacks: Pick<
+    MurphAgeSubmittedCalculatorInput,
+    "wearableResidualParameterPack" | "wearableResidualParameterPacks"
+  >,
+  localPacks: readonly MurphAgeWearableResidualParameterPack[],
+): Pick<
+  MurphAgeSubmittedCalculatorInput,
+  "wearableResidualParameterPack" | "wearableResidualParameterPacks"
+> {
+  if (
+    localPacks.length === 0
+    && (!explicitPacks.wearableResidualParameterPacks || explicitPacks.wearableResidualParameterPacks.length === 0)
+  ) {
+    return {
+      wearableResidualParameterPack: explicitPacks.wearableResidualParameterPack,
+      wearableResidualParameterPacks: explicitPacks.wearableResidualParameterPacks,
+    };
+  }
+
+  return {
+    wearableResidualParameterPack: null,
+    wearableResidualParameterPacks: mergeMurphAgeWearableResidualParameterPacks(explicitPacks, localPacks),
+  };
+}
+
+function mergeMurphAgeWearableResidualParameterPacks(
+  explicitPacks: Pick<
+    MurphAgeSubmittedCalculatorInput,
+    "wearableResidualParameterPack" | "wearableResidualParameterPacks"
+  >,
+  localPacks: readonly MurphAgeWearableResidualParameterPack[],
+): MurphAgeWearableResidualParameterPack[] | undefined {
+  const merged: MurphAgeWearableResidualParameterPack[] = [];
+  const seenPackKeys = new Set<string>();
+  const append = (pack: MurphAgeWearableResidualParameterPack | null | undefined): void => {
+    if (!pack) return;
+    const packKey = [
+      pack.anchorCardId,
+      pack.family,
+      pack.layerId,
+      pack.sourceRouteId,
+    ].join("\0");
+    if (seenPackKeys.has(packKey)) return;
+    seenPackKeys.add(packKey);
+    merged.push(pack);
+  };
+
+  append(explicitPacks.wearableResidualParameterPack);
+  for (const pack of explicitPacks.wearableResidualParameterPacks ?? []) append(pack);
+  for (const pack of localPacks) append(pack);
+
+  return merged.length > 0 ? merged : undefined;
 }
 
 function withPrependedWarnings(

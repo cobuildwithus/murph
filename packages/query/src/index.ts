@@ -378,11 +378,13 @@ export {
   assessMurphAgeInputReadinessFromVault,
   assessMurphAgeWearableShadowReadinessFromVault,
   defaultMurphAgeModelCardArtifactRoot,
+  defaultMurphAgeWearableResidualParameterPackRoot,
   loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   resolveMurphAgeModelCardArtifactRoot,
+  resolveMurphAgeWearableResidualParameterPackRoot,
 } from "./murph-age.ts";
 
 export async function calculateMurphAgeForVault(
