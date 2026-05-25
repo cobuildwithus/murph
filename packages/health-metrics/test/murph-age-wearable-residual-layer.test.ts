@@ -218,6 +218,29 @@ test("accepts research-only sleep and autonomic residual packs without authorizi
   }
 });
 
+test("treats actigraphy activity counts as an activity residual signal", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const points = [
+    metricPoint("activity-counts", "counts/day", 123_456, "activity-summary"),
+    metricPoint("wearable-valid-day-count-28d", "count", 24, "wearable-summary"),
+    metricPoint("wearable-coverage-index", "score", 0.86, "wearable-summary"),
+  ];
+  const assessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "l1b_glycemia_body_10y_acm_research",
+    asOf,
+    points,
+  });
+  const contracts = summarizeMurphAgeWearableResidualLayerContracts();
+  const activityContract = contracts.find((contract) => contract.family === "activity");
+  const activityAssessment = assessments.find((assessment) => assessment.family === "activity");
+
+  assert.equal(activityContract?.signalMetricKeys.includes("activity-counts"), true);
+  assert.equal(activityAssessment?.status, "ready");
+  assert.equal(activityAssessment?.readySignalMetricKeys.includes("activity-counts"), true);
+  assert.equal(activityAssessment?.selectedMetricKeys.includes("activity-counts"), true);
+  assert.equal(activityAssessment?.missingMetricKeys.includes("activity-counts"), false);
+});
+
 test("calculator applies multiple wearable residual packs together in research mode only", () => {
   const asOf = "2026-05-10T00:00:00.000Z";
   const points = [
