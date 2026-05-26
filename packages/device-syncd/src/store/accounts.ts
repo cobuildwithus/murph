@@ -5,6 +5,7 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 import { deviceSyncError } from "../errors.ts";
 import {
   generatePrefixedId,
+  isBlockedStoredDeviceSyncMetadataKey,
   maybeParseJsonObject,
   sanitizeStoredDeviceSyncMetadata,
   stringifyJson,
@@ -273,7 +274,7 @@ function sanitizeCredentialMetadata(
 }
 
 function sanitizeCredentialSubject(
-  value: Record<string, string> | null | undefined,
+  value: object | null | undefined,
 ): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -287,14 +288,11 @@ function sanitizeCredentialSubject(
     }
 
     const key = rawKey.trim();
-    const normalizedKey = normalizeMetadataKey(key);
 
     if (
       !key
       || key.length > 64
-      || normalizedKey.includes("hmacsecret")
-      || normalizedKey.includes("webhooksecret")
-      || isRawDeviceSyncIdentifierMetadataKey(normalizedKey)
+      || isBlockedStoredDeviceSyncMetadataKey(key)
     ) {
       continue;
     }
@@ -307,8 +305,35 @@ function sanitizeCredentialSubject(
   return subject;
 }
 
-function parseCredentialMetadataJson(value: string | null): Record<string, unknown> {
-  return maybeParseJsonObject(value);
+function sanitizeStoredCredentialMetadata(
+  kind: DeviceAccountCredentialKind,
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (kind !== "provider_config") {
+    return sanitizeCredentialMetadata(value);
+  }
+
+  const metadata = sanitizeCredentialMetadata(value);
+  const subjectValue = value && typeof value === "object" && !Array.isArray(value)
+    ? value.subject
+    : undefined;
+  const subject = subjectValue && typeof subjectValue === "object" && !Array.isArray(subjectValue)
+    ? sanitizeCredentialSubject(subjectValue)
+    : {};
+
+  return Object.keys(subject).length > 0
+    ? {
+        ...metadata,
+        subject,
+      }
+    : metadata;
+}
+
+function parseCredentialMetadataJson(
+  value: string | null,
+  kind: DeviceAccountCredentialKind,
+): Record<string, unknown> {
+  return sanitizeStoredCredentialMetadata(kind, maybeParseJsonObject(value));
 }
 
 function buildCredentialMetadata(credential: StorageDeviceAccountCredential): Record<string, unknown> {
@@ -445,7 +470,7 @@ function validateStoredCredentialRow(row: StoredAccountRow): void {
 }
 
 function buildStoredAccountCredential(row: StoredAccountRow): StoredDeviceSyncAccountCredential {
-  const credentialMetadata = parseCredentialMetadataJson(row.credential_metadata_json);
+  const credentialMetadata = parseCredentialMetadataJson(row.credential_metadata_json, row.credential_kind);
 
   if (row.credential_kind === "oauth_tokens") {
     if (!row.access_token_encrypted) {
