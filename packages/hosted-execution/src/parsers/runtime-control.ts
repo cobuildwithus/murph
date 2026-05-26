@@ -112,6 +112,10 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "payloadValue",
   "providerHttpStatusText",
   "providerRequestBodyFieldNames",
+  "routePlanningActiveExperimentContextElapsedMs",
+  "routePlanningAnyBootstrapContextPrepared",
+  "routePlanningBootstrapContextPrepared",
+  "routePlanningSensitiveHealthContextAllowed",
   "safeErrorMessage",
   "tokenPreview",
 ]);

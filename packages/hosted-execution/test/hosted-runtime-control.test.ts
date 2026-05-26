@@ -850,6 +850,10 @@ describe("hosted runtime control contracts", () => {
         messageStatus: "failed",
         promptTokenCount: 120,
         rawPayloadBytes: 2048,
+        routePlanningActiveExperimentContextElapsedMs: 6000,
+        routePlanningAnyBootstrapContextPrepared: true,
+        routePlanningBootstrapContextPrepared: false,
+        routePlanningSensitiveHealthContextAllowed: true,
       },
     }).redactedJson).toEqual({
       authorizationHeaderPresent: false,
@@ -859,6 +863,10 @@ describe("hosted runtime control contracts", () => {
       messageStatus: "failed",
       promptTokenCount: 120,
       rawPayloadBytes: 2048,
+      routePlanningActiveExperimentContextElapsedMs: 6000,
+      routePlanningAnyBootstrapContextPrepared: true,
+      routePlanningBootstrapContextPrepared: false,
+      routePlanningSensitiveHealthContextAllowed: true,
     });
     expect(parseHostedRuntimeLogEntry({
       ...entry,
