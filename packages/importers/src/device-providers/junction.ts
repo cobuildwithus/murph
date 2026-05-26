@@ -974,10 +974,94 @@ function allowedResourceEntries(
     return [];
   }
 
-  return Object.entries(resources).flatMap(([resource, payload]) => {
+  const mergedEntries = new Map<string, unknown>();
+  for (const [resource, payload] of Object.entries(resources)) {
     const normalized = normalizeJunctionResourceName(resource);
-    return normalized && allowlist.has(normalized) ? [[normalized, payload] as const] : [];
-  });
+    if (!normalized || !allowlist.has(normalized)) {
+      continue;
+    }
+
+    mergedEntries.set(
+      normalized,
+      mergeJunctionResourcePayloads(mergedEntries.get(normalized), payload),
+    );
+  }
+
+  return [...mergedEntries.entries()];
+}
+
+function mergeJunctionResourcePayloads(existing: unknown, next: unknown): unknown {
+  if (existing === undefined) {
+    return next;
+  }
+
+  const grouped = mergeJunctionGroupedPayloads(existing, next);
+  if (grouped) {
+    return grouped;
+  }
+
+  const nested = mergeJunctionNestedEnvelopePayloads(existing, next);
+  if (nested) {
+    return nested;
+  }
+
+  return [...toMergedJunctionPayloadItems(existing), ...toMergedJunctionPayloadItems(next)];
+}
+
+function mergeJunctionGroupedPayloads(left: unknown, right: unknown): PlainObject | null {
+  const leftRecord = asPlainObject(left);
+  const rightRecord = asPlainObject(right);
+  const leftGroups = asPlainObject(leftRecord?.groups);
+  const rightGroups = asPlainObject(rightRecord?.groups);
+
+  if (!leftRecord || !rightRecord || !leftGroups || !rightGroups) {
+    return null;
+  }
+
+  const groups: Record<string, unknown[]> = {};
+  for (const [source, entries] of Object.entries(leftGroups)) {
+    groups[source] = toMergedJunctionPayloadItems(entries);
+  }
+  for (const [source, entries] of Object.entries(rightGroups)) {
+    groups[source] = [
+      ...(groups[source] ?? []),
+      ...toMergedJunctionPayloadItems(entries),
+    ];
+  }
+
+  return {
+    ...leftRecord,
+    ...rightRecord,
+    groups,
+  };
+}
+
+function mergeJunctionNestedEnvelopePayloads(left: unknown, right: unknown): PlainObject | null {
+  const leftRecord = asPlainObject(left);
+  const rightRecord = asPlainObject(right);
+
+  if (!leftRecord || !rightRecord) {
+    return null;
+  }
+
+  for (const key of ["data", "results", "items", "records"]) {
+    if (Array.isArray(leftRecord[key]) && Array.isArray(rightRecord[key])) {
+      return {
+        ...leftRecord,
+        ...rightRecord,
+        [key]: [
+          ...asArray(leftRecord[key]),
+          ...asArray(rightRecord[key]),
+        ],
+      };
+    }
+  }
+
+  return null;
+}
+
+function toMergedJunctionPayloadItems(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [value];
 }
 
 function resourceEntries(payload: unknown): JunctionResourceEntry[] {
@@ -1099,6 +1183,17 @@ function resolveTimeseriesObservationUnit(
     case "hrv":
       return ["ms", "millisecond", "milliseconds", "rmssd"].includes(normalized)
         ? "ms"
+        : fallback;
+    case "calories_active":
+      return [
+        "cal",
+        "calorie",
+        "calories",
+        "kcal",
+        "kilocalorie",
+        "kilocalories",
+      ].includes(normalized)
+        ? "kcal"
         : fallback;
     case "respiratory_rate":
       return [

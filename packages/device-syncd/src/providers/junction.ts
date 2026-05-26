@@ -752,7 +752,7 @@ export function createJunctionDeviceSyncProvider(
     const summaries: Record<string, unknown[]> = {};
 
     if (resource) {
-      const inferredCategory = inferJunctionResourceCategory(resourceCategory, resource);
+      const inferredCategory = inferJunctionResourceJobCategory(resourceCategory, resource);
       if (!isConfiguredJunctionResource(inferredCategory, resource)) {
         context.logger.warn?.("Skipping Junction resource webhook job for a resource that is not enabled.", {
           provider: "junction",
@@ -827,6 +827,21 @@ export function createJunctionDeviceSyncProvider(
     return category === "timeseries"
       ? timeseriesResources.includes(resource)
       : summaryResources.includes(resource);
+  }
+
+  function inferJunctionResourceJobCategory(
+    resourceCategory: string | null | undefined,
+    resource: string,
+  ): "summary" | "timeseries" {
+    const explicitCategory = resourceCategory?.toLowerCase();
+    if (
+      (explicitCategory === "summary" || explicitCategory === "timeseries")
+      && isConfiguredJunctionResource(explicitCategory, resource)
+    ) {
+      return explicitCategory;
+    }
+
+    return inferJunctionResourceCategory(null, resource);
   }
 
   async function verifyAndParseWebhook(
@@ -3264,6 +3279,16 @@ function hasJunctionWebhookDataJobRecords(
       "heartRate",
       "heart_rate",
       "hrv",
+      "bodyWeight",
+      "body_weight",
+      "weight",
+      "calories",
+      "calories_active",
+      "activeCalories",
+      "active_calories",
+      "distance",
+      "distanceMeters",
+      "distance_meters",
       "respiratoryRate",
       "respiratory_rate",
       "spo2",

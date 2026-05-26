@@ -1087,6 +1087,25 @@ test("Junction normalizer resolves nested source and provider slug origin fields
 });
 
 test("Junction normalizer defaults to the documented resource allowlist", () => {
+  assert.deepEqual([...JUNCTION_DEFAULT_SUMMARY_RESOURCES], [
+    "profile",
+    "activity",
+    "sleep",
+    "sleep_cycle",
+    "workouts",
+    "body",
+  ]);
+  assert.deepEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES], [
+    "steps",
+    "distance",
+    "calories_active",
+    "heartrate",
+    "hrv",
+    "respiratory_rate",
+    "blood_oxygen",
+    "weight",
+  ]);
+
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: Object.fromEntries(JUNCTION_DEFAULT_SUMMARY_RESOURCES.map((resource) => [
@@ -1168,6 +1187,56 @@ test("Junction normalizer canonicalizes documented resource aliases before allow
     event.fields.value === 123 &&
     event.externalRef?.resourceType === "junction-garmin-calories-active"
   ));
+});
+
+test("Junction normalizer merges canonical and alias resource payloads before import", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      sleep_cycle: [{
+        sourceProviderSlug: "garmin",
+        observedAt: "2026-04-22T07:00:00Z",
+        stageCount: 4,
+      }],
+      hypnogram: [{
+        sourceProviderSlug: "oura",
+        observedAt: "2026-04-22T08:00:00Z",
+        stageCount: 5,
+      }],
+    },
+    timeseries: {
+      weight: [{
+        sourceProviderSlug: "withings",
+        timestamp: "2026-04-22T07:15:00Z",
+        value: 82,
+      }],
+      body_weight: [{
+        sourceProviderSlug: "withings",
+        timestamp: "2026-04-23T07:15:00Z",
+        body_weight: 81.5,
+      }],
+      calories_active: [{
+        sourceProviderSlug: "garmin",
+        timestamp: "2026-04-22T07:20:00Z",
+        unit: "calories",
+        value: 123,
+      }],
+    },
+  });
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["weight", "calories_active"]);
+  assert.equal(
+    payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
+    1,
+  );
+  assert.equal(
+    payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-timeseries-weight").length,
+    1,
+  );
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "weight").length, 2);
+  const activeCalories = payload.events?.find((event) => event.fields?.metric === "active-calories");
+  assert.equal(activeCalories?.fields?.unit, "kcal");
 });
 
 test("Junction normalizer does not inherit device attribution from non-unique provider slug fallback", () => {

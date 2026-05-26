@@ -5,7 +5,11 @@ import { test } from "vitest";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createJsonResponse, readUrl } from "./helpers.ts";
 
-import type { DeviceSyncAccount } from "../src/types.ts";
+import type {
+  DeviceSyncAccount,
+  DeviceSyncJobRecord,
+  ProviderJobContext,
+} from "../src/types.ts";
 
 function createAccount(): DeviceSyncAccount {
   return {
@@ -47,6 +51,30 @@ function createProvider(fetchImpl: typeof fetch) {
   });
 }
 
+function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJobRecord {
+  return {
+    id: `job-${kind}`,
+    provider: "junction",
+    accountId: "acct-junction-1",
+    kind,
+    payload,
+    priority: 50,
+    availableAt: "2026-04-03T00:00:00.000Z",
+    attempts: 0,
+    maxAttempts: 5,
+    dedupeKey: null,
+    status: "queued",
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    createdAt: "2026-04-03T00:00:00.000Z",
+    updatedAt: "2026-04-03T00:00:00.000Z",
+    startedAt: null,
+    finishedAt: null,
+  };
+}
+
 function createJunctionSvixWebhook(input: {
   body: Record<string, unknown>;
   messageId: string;
@@ -72,6 +100,34 @@ function createJunctionSvixWebhook(input: {
 function requireRecord(value: unknown): Record<string, unknown> {
   assert.ok(value && typeof value === "object" && !Array.isArray(value));
   return value as Record<string, unknown>;
+}
+
+function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
+  return {
+    account: createAccount(),
+    now: "2026-04-03T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    upsertConnectionSource: () => ({
+      id: "src-1",
+      connectionId: "acct-junction-1",
+      sourceInstanceKey: "src-key",
+      sourceProviderSlug: "withings",
+      displayName: "Withings",
+      status: "connected",
+      resourceAvailabilitySummary: {},
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      createdAt: "2026-04-03T00:00:00.000Z",
+      updatedAt: "2026-04-03T00:00:00.000Z",
+    }),
+    refreshAccountTokens: async () => createAccount(),
+    logger: {},
+  };
 }
 
 test("Junction webhooks canonicalize resource aliases before category inference", async () => {
@@ -187,4 +243,64 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
     assert.ok(url);
     assert.match(url, path);
   }
+});
+
+test("Junction resource jobs re-infer category for canonicalized aliases", async () => {
+  const seenUrls: string[] = [];
+  const provider = createProvider(async (input) => {
+    const url = readUrl(input);
+    seenUrls.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          slug: "withings",
+          name: "Withings",
+          status: "connected",
+          resource_availability: {
+            body_weight: true,
+          },
+        }],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+      return createJsonResponse({
+        groups: {
+          withings: [{
+            data: [{
+              timestamp: "2026-04-02T07:15:00Z",
+              body_weight: 82.1,
+            }],
+            source: { provider: "withings", type: "scale" },
+          }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const executor = provider.jobExecutor;
+  assert.ok(executor);
+  const importedSnapshots: unknown[] = [];
+
+  await executor.executeJob(
+    createJobContext(importedSnapshots),
+    createJob("resource", {
+      eventType: "daily.data.body_weight.created",
+      objectId: "weight-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "body_weight",
+      resourceCategory: "summary",
+      sourceProviderSlug: "withings",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(seenUrls.some((url) => url.includes("/v2/summary/weight/")), false);
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+  assert.equal(snapshot.timeseries?.weight?.length, 1);
 });
