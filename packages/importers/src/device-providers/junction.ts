@@ -1352,23 +1352,33 @@ function expandResourceEntry(value: unknown): JunctionResourceEntry[] {
   }
 
   return nestedEntries.map((nestedEntry) => ({
-    entry: nestedEntry,
+    entry: mergeNestedResourceEntry(entry, nestedEntry),
     originFallback: entry,
   }));
 }
 
 function readNestedResourceEntries(envelope: PlainObject): PlainObject[] | null {
   for (const key of ["data", "results", "items", "records"]) {
-    const entries = asArray(envelope[key]).flatMap((entry) => {
-      const normalized = asPlainObject(entry);
-      return normalized ? [normalized] : [];
-    });
+    const directEntry = asPlainObject(envelope[key]);
+    const entries = directEntry
+      ? [directEntry]
+      : asArray(envelope[key]).flatMap((entry) => {
+          const normalized = asPlainObject(entry);
+          return normalized ? [normalized] : [];
+        });
     if (entries.length > 0) {
       return entries;
     }
   }
 
   return null;
+}
+
+function mergeNestedResourceEntry(envelope: PlainObject, nestedEntry: PlainObject): PlainObject {
+  return {
+    ...envelope,
+    ...nestedEntry,
+  };
 }
 
 function listAllowedResourceKeys(

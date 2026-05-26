@@ -8,6 +8,7 @@ import {
   type DeviceSyncIngressWebhook,
   type DeviceSyncJobInput,
   type DeviceSyncRegistry,
+  type DeviceSyncWebhookAcceptanceMode,
   type ProviderConnectionResult,
   type PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
@@ -44,6 +45,7 @@ import {
   sha256Hex,
   toIsoTimestamp,
 } from "./shared";
+import { tryAcquireHostedWebhookAcceptanceLockTx } from "./webhook-acceptance-lock";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -433,6 +435,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
+    acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
     dirtyResources: buildHostedWebhookDirtyResources({
       jobs: input.webhook.jobs ?? [],
@@ -723,6 +726,7 @@ async function startHostedDeviceSyncWakeWorkflow(
 
 async function persistHostedDeviceSyncWebhookAccepted(input: {
   acceptedAt: string;
+  acceptanceMode: DeviceSyncWebhookAcceptanceMode;
   connectionId: string;
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
@@ -734,9 +738,38 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  let mailboxItemId: string | null = null;
+  const result = await input.store.prisma.$transaction(async (tx) => {
+    const lockAcquired = await tryAcquireHostedWebhookAcceptanceLockTx({
+      prisma: tx,
+      connectionId: input.connectionId,
+    });
 
-  await input.store.prisma.$transaction(async (tx) => {
+    if (!lockAcquired) {
+      if (
+        input.acceptanceMode === "level_dirty_hint"
+        && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          mailboxItemId: null,
+        };
+      }
+
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCEPTANCE_BUSY",
+        message: "Webhook acceptance is already in progress for this connection. Retry later.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+
+    if (input.acceptanceMode === "level_dirty_hint" && await input.store.hasPendingDirtyConnection(input.connectionId, tx)) {
+      await completeHostedWebhookTraceTx(input, tx);
+      return {
+        mailboxItemId: null,
+      };
+    }
+
     const dirtyUpdate = await input.store.upsertDirtyConnection({
       connectionId: input.connectionId,
       dirtyAt: input.occurredAt,
@@ -761,17 +794,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       tx,
     });
 
-    if (input.traceId) {
-      const completed = await input.store.completeWebhookTrace(input.provider, input.traceId, input.claimToken, tx);
-      if (!completed) {
-        throw deviceSyncError({
-          code: "WEBHOOK_TRACE_CLAIM_LOST",
-          message: "Webhook trace claim was lost before durable acceptance completed.",
-          retryable: true,
-          httpStatus: 503,
-        });
-      }
-    }
+    await completeHostedWebhookTraceTx(input, tx);
 
     if (dirtyUpdate.shouldRequestWake) {
       const wake = buildHostedDeviceSyncWake({
@@ -795,12 +818,42 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         envelope: wake,
         tx,
       });
-      mailboxItemId = mailboxAppend.item.id;
+      return {
+        mailboxItemId: mailboxAppend.item.id,
+      };
     }
+
+    return {
+      mailboxItemId: null,
+    };
   });
 
-  if (mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(mailboxItemId);
+  if (result.mailboxItemId) {
+    await startHostedDeviceSyncWakeWorkflow(result.mailboxItemId);
+  }
+}
+
+async function completeHostedWebhookTraceTx(
+  input: {
+    claimToken: string;
+    provider: string;
+    store: PrismaDeviceSyncControlPlaneStore;
+    traceId: string | null;
+  },
+  tx: HostedPrismaTransactionClient,
+): Promise<void> {
+  if (!input.traceId) {
+    return;
+  }
+
+  const completed = await input.store.completeWebhookTrace(input.provider, input.traceId, input.claimToken, tx);
+  if (!completed) {
+    throw deviceSyncError({
+      code: "WEBHOOK_TRACE_CLAIM_LOST",
+      message: "Webhook trace claim was lost before durable acceptance completed.",
+      retryable: true,
+      httpStatus: 503,
+    });
   }
 }
 

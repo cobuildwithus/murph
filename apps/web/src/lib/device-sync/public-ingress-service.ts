@@ -58,6 +58,10 @@ export class HostedDeviceSyncPublicIngressService {
 
           await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
         },
+        onLevelDirtyWebhookAlreadySatisfied: async ({ account }) => {
+          const pending = await this.context.store.hasPendingDirtyConnection(account.id);
+          return pending ? { accepted: true } : null;
+        },
         onWebhookAccepted: async ({ account, claimToken, traceId, webhook, now }) => {
           await handleHostedDeviceSyncWebhookAccepted({
             account,

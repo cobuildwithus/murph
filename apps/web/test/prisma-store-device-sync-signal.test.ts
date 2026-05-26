@@ -98,6 +98,7 @@ function createWebhookTraceStore(seed: MutableWebhookTrace[] = []) {
     ]),
   );
   const executeRaw = vi.fn(async () => 0);
+  const queryRaw = vi.fn(async () => [{ acquired: true }]);
 
   const deviceWebhookTrace = {
     create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -157,6 +158,7 @@ function createWebhookTraceStore(seed: MutableWebhookTrace[] = []) {
 
   const prisma = {
     $executeRaw: executeRaw,
+    $queryRaw: queryRaw,
     $transaction: vi.fn(),
     deviceWebhookTrace,
   };
@@ -176,6 +178,7 @@ function createWebhookTraceStore(seed: MutableWebhookTrace[] = []) {
 
   return {
     executeRaw,
+    queryRaw,
     store,
     traces,
   };
@@ -362,7 +365,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
   });
 
   it("claims hosted webhook traces while holding the provider-account owner lock", async () => {
-    const { executeRaw, traces, store } = createWebhookTraceStore();
+    const { queryRaw, traces, store } = createWebhookTraceStore();
 
     await expect(
       store.claimWebhookTrace({
@@ -380,7 +383,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
       status: "processing",
       providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-raced"),
     });
-    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).toHaveBeenCalledOnce();
   });
 });
 

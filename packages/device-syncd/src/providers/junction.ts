@@ -976,6 +976,7 @@ export function createJunctionDeviceSyncProvider(
     });
 
     return {
+      acceptanceMode: webhookDataJsons.length > 0 ? "durable_payload" : "level_dirty_hint",
       externalAccountId: externalAccountSelection.userId,
       externalAccountDiagnostic: buildJunctionWebhookExternalAccountDiagnostic(externalAccountSelection),
       eventType,

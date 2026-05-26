@@ -45,6 +45,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
   >();
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
+  claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
   private accountCounter = 0;
@@ -195,6 +196,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
+    this.claimWebhookTraceCalls += 1;
     const key = `${input.provider}:${input.traceId}`;
     const existing = this.webhookTraces.get(key);
 
@@ -372,7 +374,11 @@ type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
   refreshTokens?: DeviceConnectionHandler["refreshTokens"];
   revokeAccess?: DeviceConnectionHandler["revokeAccess"];
   createScheduledJobs?: DeviceJobExecutor["createScheduledJobs"];
-  verifyAndParseWebhook?: DeviceWebhookHandler["verifyAndParseWebhook"];
+  verifyAndParseWebhook?: (
+    context: Parameters<NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]>>[0],
+  ) => Promise<Omit<Awaited<ReturnType<NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]>>>, "acceptanceMode"> & {
+    acceptanceMode?: "level_dirty_hint" | "durable_payload";
+  }>;
   executeJob?: DeviceJobExecutor["executeJob"];
 };
 
@@ -405,6 +411,7 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     accessToken: "<REDACTED_ACCESS_TOKEN_2>",
   });
   const defaultVerifyAndParseWebhook: DeviceWebhookHandler["verifyAndParseWebhook"] = async () => ({
+    acceptanceMode: "level_dirty_hint",
     externalAccountId: "demo-abc",
     eventType: "demo.updated",
     traceId: "trace-1",
@@ -527,7 +534,14 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     ...(hasWebhookHandlerOverride
       ? { webhookHandler: providerOverrides.webhookHandler }
       : verifyAndParseWebhook
-        ? { webhookHandler: { verifyAndParseWebhook } }
+        ? {
+            webhookHandler: {
+              verifyAndParseWebhook: async (context) => ({
+                acceptanceMode: "level_dirty_hint",
+                ...await verifyAndParseWebhook(context),
+              }),
+            },
+          }
         : {}),
     ...(hasJobExecutorOverride
       ? { jobExecutor: providerOverrides.jobExecutor }
@@ -2065,6 +2079,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
     {
       traceId: scopeWebhookTraceId("demo", "demo-abc", "trace-summary"),
       webhook: {
+        acceptanceMode: "level_dirty_hint",
         eventType: "demo.updated",
         jobs: [
           {
@@ -2117,6 +2132,7 @@ test("public ingress passes the same stripped webhook summary into accepted orph
     {
       traceId: scopeWebhookTraceId("demo", "demo-late", "trace-summary-unknown"),
       webhook: {
+        acceptanceMode: "level_dirty_hint",
         eventType: "demo.updated",
         jobs: [],
         occurredAt: "2026-04-11T12:59:00.000Z",
@@ -2210,6 +2226,115 @@ test("public ingress scopes durable webhook traces by external account while pre
     `acct_01:${scopeWebhookTraceId("demo", "demo-a", "provider-event-1")}`,
     `acct_02:${scopeWebhookTraceId("demo", "demo-b", "provider-event-1")}`,
   ]);
+});
+
+test("public ingress accepts already-satisfied dirty hints before claiming exact trace ids", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let alreadySatisfiedCalls = 0;
+  let acceptedCalls = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            acceptanceMode: "level_dirty_hint",
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-already-dirty",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onLevelDirtyWebhookAlreadySatisfied({ webhook }) {
+        alreadySatisfiedCalls += 1;
+        assert.equal(webhook.acceptanceMode, "level_dirty_hint");
+        return { accepted: true };
+      },
+      onWebhookAccepted() {
+        acceptedCalls += 1;
+        throw new Error("already-satisfied webhook should not run accepted hook");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.duplicate, false);
+  assert.equal(result.traceId, scopeWebhookTraceId("demo", "demo-abc", "trace-already-dirty"));
+  assert.equal(alreadySatisfiedCalls, 1);
+  assert.equal(acceptedCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 0);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
+});
+
+test("public ingress does not use already-satisfied coalescing for durable payload webhooks", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let alreadySatisfiedCalls = 0;
+  let acceptedCalls = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            acceptanceMode: "durable_payload",
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-payload",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  webhookDataJson: "{\"sample\":true}",
+                },
+              },
+            ],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onLevelDirtyWebhookAlreadySatisfied() {
+        alreadySatisfiedCalls += 1;
+        return { accepted: true };
+      },
+      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
+        acceptedCalls += 1;
+        assert.equal(webhook.acceptanceMode, "durable_payload");
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.duplicate, false);
+  assert.equal(alreadySatisfiedCalls, 0);
+  assert.equal(acceptedCalls, 1);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
 test("public ingress marks disconnected-account webhook traces processed so delayed duplicates stay suppressed", async () => {

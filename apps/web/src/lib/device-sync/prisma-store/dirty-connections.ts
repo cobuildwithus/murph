@@ -38,93 +38,63 @@ export class PrismaHostedDirtyConnectionStore {
   async upsertDirtyConnection(
     input: UpsertHostedDeviceSyncDirtyConnectionInput,
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
-    if (!input.tx) {
-      return this.prisma.$transaction((tx) =>
-        this.upsertDirtyConnection({
-          ...input,
-          tx,
-        }),
-      );
+    if (input.tx) {
+      return this.upsertDirtyConnectionOnce({
+        ...input,
+        tx: input.tx,
+      });
     }
 
+    for (let attempt = 0; attempt < DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.prisma.$transaction((tx) =>
+          this.upsertDirtyConnectionOnce({
+            ...input,
+            tx,
+          }),
+        );
+      } catch (error) {
+        if (
+          !isDirtyStateContentionError(error)
+          || attempt === DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS - 1
+        ) {
+          throw error;
+        }
+
+        await waitForDirtyStateRetry(attempt);
+      }
+    }
+
+    throw createDirtyStateContentionError("update");
+  }
+
+  private async upsertDirtyConnectionOnce(
+    input: UpsertHostedDeviceSyncDirtyConnectionInput & { tx: HostedPrismaTransactionClient },
+  ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
     const prisma = input.tx;
     const dirtyAt = new Date(input.dirtyAt);
 
-    for (let attempt = 0; attempt < DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS; attempt += 1) {
-      const existing = await prisma.deviceSyncDirtyConnection.findUnique({
-        where: {
-          connectionId: input.connectionId,
-        },
-      });
+    const existing = await prisma.deviceSyncDirtyConnection.findUnique({
+      where: {
+        connectionId: input.connectionId,
+      },
+    });
 
-      if (!existing) {
-        const resources = mergeDirtyResources({}, input.resources ?? []);
-        const counters = buildDirtyCounters(resources);
-        const created = await prisma.deviceSyncDirtyConnection.createMany({
-          data: {
-            connectionId: input.connectionId,
-            userId: input.userId,
-            provider: input.provider,
-            dirtyRevision: 1n,
-            processedRevision: 0n,
-            firstDirtyAt: dirtyAt,
-            latestDirtyAt: dirtyAt,
-            windowStart: resolveDirtyWindowStart(resources),
-            windowEnd: resolveDirtyWindowEnd(resources),
-            eventCount: 1n,
-            latestTraceId: normalizeNullableString(input.traceId),
-            latestEventType: normalizeNullableString(input.eventType),
-            latestResourceCategory: normalizeNullableString(input.resourceCategory),
-            sourceProviderCountsJson: toNullablePrismaJsonValue(counters.sourceProviderCounts),
-            resourceCategoryCountsJson: toNullablePrismaJsonValue(counters.resourceCategoryCounts),
-            dirtyResourcesJson: toNullablePrismaJsonValue(resources),
-          },
-          skipDuplicates: true,
-        });
-
-        if (created.count === 0) {
-          await waitForDirtyStateRetry(attempt);
-          continue;
-        }
-
-        const record = await prisma.deviceSyncDirtyConnection.findUnique({
-          where: {
-            connectionId: input.connectionId,
-          },
-        });
-        if (!record) {
-          await waitForDirtyStateRetry(attempt);
-          continue;
-        }
-
-        return {
-          dirty: mapDirtyConnectionRecord(record),
-          shouldRequestWake: true,
-        };
-      }
-
-      const becameDirty = existing.processedRevision >= existing.dirtyRevision;
-      const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
-      const resources = mergeDirtyResources(priorResources, input.resources ?? []);
+    if (!existing) {
+      const resources = mergeDirtyResources({}, input.resources ?? []);
       const counters = buildDirtyCounters(resources);
-      const dirtyWindowStart = resolveDirtyWindowStart(resources);
-      const dirtyWindowEnd = resolveDirtyWindowEnd(resources);
-      const nextDirtyRevision = existing.dirtyRevision + 1n;
-      const updated = await prisma.deviceSyncDirtyConnection.updateMany({
-        where: {
-          connectionId: input.connectionId,
-          dirtyRevision: existing.dirtyRevision,
-          processedRevision: existing.processedRevision,
-        },
+      const created = await prisma.deviceSyncDirtyConnection.createMany({
         data: {
+          connectionId: input.connectionId,
           userId: input.userId,
           provider: input.provider,
-          dirtyRevision: nextDirtyRevision,
-          firstDirtyAt: becameDirty ? dirtyAt : existing.firstDirtyAt,
+          dirtyRevision: 1n,
+          processedRevision: 0n,
+          firstDirtyAt: dirtyAt,
           latestDirtyAt: dirtyAt,
-          windowStart: becameDirty ? dirtyWindowStart : minDate(existing.windowStart, dirtyWindowStart),
-          windowEnd: becameDirty ? dirtyWindowEnd : maxDate(existing.windowEnd, dirtyWindowEnd),
-          eventCount: existing.eventCount + 1n,
+          windowStart: resolveDirtyWindowStart(resources),
+          windowEnd: resolveDirtyWindowEnd(resources),
+          eventCount: 1n,
           latestTraceId: normalizeNullableString(input.traceId),
           latestEventType: normalizeNullableString(input.eventType),
           latestResourceCategory: normalizeNullableString(input.resourceCategory),
@@ -132,11 +102,11 @@ export class PrismaHostedDirtyConnectionStore {
           resourceCategoryCountsJson: toNullablePrismaJsonValue(counters.resourceCategoryCounts),
           dirtyResourcesJson: toNullablePrismaJsonValue(resources),
         },
+        skipDuplicates: true,
       });
 
-      if (updated.count === 0) {
-        await waitForDirtyStateRetry(attempt);
-        continue;
+      if (created.count === 0) {
+        throw createDirtyStateContentionError("update");
       }
 
       const record = await prisma.deviceSyncDirtyConnection.findUnique({
@@ -145,17 +115,63 @@ export class PrismaHostedDirtyConnectionStore {
         },
       });
       if (!record) {
-        await waitForDirtyStateRetry(attempt);
-        continue;
+        throw createDirtyStateContentionError("update");
       }
 
       return {
         dirty: mapDirtyConnectionRecord(record),
-        shouldRequestWake: becameDirty,
+        shouldRequestWake: true,
       };
     }
 
-    throw createDirtyStateContentionError("update");
+    const becameDirty = existing.processedRevision >= existing.dirtyRevision;
+    const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
+    const resources = mergeDirtyResources(priorResources, input.resources ?? []);
+    const counters = buildDirtyCounters(resources);
+    const dirtyWindowStart = resolveDirtyWindowStart(resources);
+    const dirtyWindowEnd = resolveDirtyWindowEnd(resources);
+    const nextDirtyRevision = existing.dirtyRevision + 1n;
+    const updated = await prisma.deviceSyncDirtyConnection.updateMany({
+      where: {
+        connectionId: input.connectionId,
+        dirtyRevision: existing.dirtyRevision,
+        processedRevision: existing.processedRevision,
+      },
+      data: {
+        userId: input.userId,
+        provider: input.provider,
+        dirtyRevision: nextDirtyRevision,
+        firstDirtyAt: becameDirty ? dirtyAt : existing.firstDirtyAt,
+        latestDirtyAt: dirtyAt,
+        windowStart: becameDirty ? dirtyWindowStart : minDate(existing.windowStart, dirtyWindowStart),
+        windowEnd: becameDirty ? dirtyWindowEnd : maxDate(existing.windowEnd, dirtyWindowEnd),
+        eventCount: existing.eventCount + 1n,
+        latestTraceId: normalizeNullableString(input.traceId),
+        latestEventType: normalizeNullableString(input.eventType),
+        latestResourceCategory: normalizeNullableString(input.resourceCategory),
+        sourceProviderCountsJson: toNullablePrismaJsonValue(counters.sourceProviderCounts),
+        resourceCategoryCountsJson: toNullablePrismaJsonValue(counters.resourceCategoryCounts),
+        dirtyResourcesJson: toNullablePrismaJsonValue(resources),
+      },
+    });
+
+    if (updated.count === 0) {
+      throw createDirtyStateContentionError("update");
+    }
+
+    const record = await prisma.deviceSyncDirtyConnection.findUnique({
+      where: {
+        connectionId: input.connectionId,
+      },
+    });
+    if (!record) {
+      throw createDirtyStateContentionError("update");
+    }
+
+    return {
+      dirty: mapDirtyConnectionRecord(record),
+      shouldRequestWake: becameDirty,
+    };
   }
 
   async getDirtyConnection(input: {
@@ -172,6 +188,24 @@ export class PrismaHostedDirtyConnectionStore {
     });
 
     return record ? mapDirtyConnectionRecord(record) : null;
+  }
+
+  async hasPendingDirtyConnection(
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<boolean> {
+    const prisma = tx ?? this.prisma;
+    const record = await prisma.deviceSyncDirtyConnection.findUnique({
+      where: {
+        connectionId,
+      },
+      select: {
+        dirtyRevision: true,
+        processedRevision: true,
+      },
+    });
+
+    return Boolean(record && record.dirtyRevision > record.processedRevision);
   }
 
   async listPendingDirtyConnectionsForUser(input: {
@@ -326,76 +360,97 @@ export class PrismaHostedDirtyConnectionStore {
     userId: string;
     tx?: HostedPrismaTransactionClient;
   }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
-    if (!input.tx) {
-      return this.prisma.$transaction((tx) =>
-        this.markDirtyConnectionProcessed({
-          ...input,
-          tx,
-        }),
-      );
+    if (input.tx) {
+      return this.markDirtyConnectionProcessedOnce({
+        ...input,
+        tx: input.tx,
+      });
     }
 
-    const prisma = input.tx;
-
     for (let attempt = 0; attempt < DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS; attempt += 1) {
-      const existing = await prisma.deviceSyncDirtyConnection.findFirst({
-        where: {
-          connectionId: input.connectionId,
-          userId: input.userId,
-        },
-      });
+      try {
+        return await this.prisma.$transaction((tx) =>
+          this.markDirtyConnectionProcessedOnce({
+            ...input,
+            tx,
+          }),
+        );
+      } catch (error) {
+        if (
+          !isDirtyStateContentionError(error)
+          || attempt === DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS - 1
+        ) {
+          throw error;
+        }
 
-      if (!existing) {
-        return null;
-      }
-
-      const requestedProcessedRevision =
-        input.processedRevision > existing.processedRevision
-          ? input.processedRevision
-          : existing.processedRevision;
-      const nextProcessedRevision =
-        requestedProcessedRevision > existing.dirtyRevision
-          ? existing.dirtyRevision
-          : requestedProcessedRevision;
-      const fullyProcessed = nextProcessedRevision >= existing.dirtyRevision;
-      const updated = await prisma.deviceSyncDirtyConnection.updateMany({
-        where: {
-          connectionId: input.connectionId,
-          dirtyRevision: existing.dirtyRevision,
-          processedRevision: existing.processedRevision,
-          userId: input.userId,
-        },
-        data: {
-          processedRevision: nextProcessedRevision,
-          ...(fullyProcessed
-            ? {
-                dirtyResourcesJson: toNullablePrismaJsonValue({}),
-                firstDirtyAt: existing.latestDirtyAt,
-                resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
-                sourceProviderCountsJson: toNullablePrismaJsonValue({}),
-                windowEnd: null,
-                windowStart: null,
-              }
-            : {}),
-        },
-      });
-
-      if (updated.count === 0) {
         await waitForDirtyStateRetry(attempt);
-        continue;
       }
-
-      const record = await prisma.deviceSyncDirtyConnection.findFirst({
-        where: {
-          connectionId: input.connectionId,
-          userId: input.userId,
-        },
-      });
-
-      return record ? mapDirtyConnectionRecord(record) : null;
     }
 
     throw createDirtyStateContentionError("ack");
+  }
+
+  private async markDirtyConnectionProcessedOnce(input: {
+    connectionId: string;
+    processedRevision: bigint;
+    userId: string;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+    const prisma = input.tx;
+    const existing = await prisma.deviceSyncDirtyConnection.findFirst({
+      where: {
+        connectionId: input.connectionId,
+        userId: input.userId,
+      },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    const requestedProcessedRevision =
+      input.processedRevision > existing.processedRevision
+        ? input.processedRevision
+        : existing.processedRevision;
+    const nextProcessedRevision =
+      requestedProcessedRevision > existing.dirtyRevision
+        ? existing.dirtyRevision
+        : requestedProcessedRevision;
+    const fullyProcessed = nextProcessedRevision >= existing.dirtyRevision;
+    const updated = await prisma.deviceSyncDirtyConnection.updateMany({
+      where: {
+        connectionId: input.connectionId,
+        dirtyRevision: existing.dirtyRevision,
+        processedRevision: existing.processedRevision,
+        userId: input.userId,
+      },
+      data: {
+        processedRevision: nextProcessedRevision,
+        ...(fullyProcessed
+          ? {
+              dirtyResourcesJson: toNullablePrismaJsonValue({}),
+              firstDirtyAt: existing.latestDirtyAt,
+              resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
+              sourceProviderCountsJson: toNullablePrismaJsonValue({}),
+              windowEnd: null,
+              windowStart: null,
+            }
+          : {}),
+      },
+    });
+
+    if (updated.count === 0) {
+      throw createDirtyStateContentionError("ack");
+    }
+
+    const record = await prisma.deviceSyncDirtyConnection.findFirst({
+      where: {
+        connectionId: input.connectionId,
+        userId: input.userId,
+      },
+    });
+
+    return record ? mapDirtyConnectionRecord(record) : null;
   }
 }
 
@@ -409,6 +464,15 @@ function createDirtyStateContentionError(operation: "ack" | "update"): Error {
         : "Hosted device-sync dirty state was updated concurrently. Retry the request.",
     retryable: true,
   });
+}
+
+function isDirtyStateContentionError(error: unknown): boolean {
+  return Boolean(
+    typeof error === "object"
+      && error !== null
+      && "code" in error
+      && (error as { code?: unknown }).code === HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE,
+  );
 }
 
 async function waitForDirtyStateRetry(attempt: number): Promise<void> {

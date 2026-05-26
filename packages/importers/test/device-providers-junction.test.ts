@@ -1086,6 +1086,64 @@ test("Junction normalizer resolves nested source and provider slug origin fields
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
 });
 
+test("Junction normalizer unwraps object-valued data envelopes into usable records", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      activity: {
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        observedAt: "2026-05-20T12:00:00Z",
+        data: {
+          steps: 7200,
+        },
+      },
+      sleep: {
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        observedAt: "2026-05-20T10:00:00Z",
+        data: {
+          id: "sleep-object-envelope",
+          bedtime_start: "2026-05-20T02:00:00+00:00",
+          bedtime_stop: "2026-05-20T10:00:00+00:00",
+          duration: 28800,
+          sleepScore: 82,
+        },
+      },
+    },
+    timeseries: {
+      respiratory_rate: {
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        timestamp: "2026-05-20T07:15:00Z",
+        data: {
+          value: 14.8,
+        },
+      },
+    },
+  });
+
+  const stepEvent = payload.events?.find((event) => event.fields?.metric === "daily-steps");
+  const sleepSession = payload.events?.find((event) => event.kind === "sleep_session");
+  const sleepScore = payload.events?.find((event) => event.fields?.metric === "sleep-score");
+  const respiratoryRate = payload.events?.find((event) => event.fields?.metric === "respiratory-rate");
+
+  assert.equal(stepEvent?.fields?.value, 7200);
+  assert.equal(stepEvent?.occurredAt, "2026-05-20T12:00:00.000Z");
+  assert.equal(stepEvent?.dataOrigin?.sourceProviderSlug, "garmin");
+  assert.equal(stepEvent?.dataOrigin?.sourceType, "watch");
+  assert.equal(sleepSession?.fields?.durationMinutes, 480);
+  assert.equal(sleepSession?.occurredAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(sleepScore?.fields?.value, 82);
+  assert.equal(respiratoryRate?.fields?.value, 14.8);
+  assert.equal(respiratoryRate?.occurredAt, "2026-05-20T07:15:00.000Z");
+  assert.deepEqual(payload.provenance?.summaryResources, ["activity", "sleep"]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-respiratory-rate"));
+});
+
 test("Junction normalizer defaults to the documented resource allowlist", () => {
   assert.deepEqual([...JUNCTION_DEFAULT_SUMMARY_RESOURCES], [
     "profile",

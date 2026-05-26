@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelope: vi.fn(),
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
+    hasPendingDirtyConnection: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
     listConnectionSources: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => {
     withConnectionMutationLock: vi.fn(),
     prismaTx: {
       __tx: true,
+      $queryRaw: vi.fn(),
       deviceSyncSignal: {
         create: vi.fn(),
       },
@@ -254,6 +256,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     createSignal = mocks.createSignal;
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
+    hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
     getDirtyConnection = mocks.getDirtyConnection;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
     clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
@@ -312,9 +315,11 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
       callback(mocks.prismaTx),
     );
+    mocks.prismaTx.$queryRaw.mockResolvedValue([{ acquired: true }]);
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+        onLevelDirtyWebhookAlreadySatisfied?: (value: unknown) => Promise<{ accepted: true } | null> | { accepted: true } | null;
         onUnknownWebhook?: (value: unknown) => Promise<void> | void;
         onWebhookAccepted?: (value: unknown) => Promise<void> | void;
       };
@@ -377,6 +382,7 @@ describe("appendHostedDeviceSyncWake", () => {
           claimToken: "claim-token",
           traceId: "trace_123",
           webhook: {
+            acceptanceMode: "level_dirty_hint",
             eventType: "sleep.updated",
             jobs: [
               {
@@ -416,6 +422,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.appendHostedMailboxEnvelope.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
+    mocks.hasPendingDirtyConnection.mockResolvedValue(false);
     mocks.upsertDirtyConnection.mockResolvedValue({
       dirty: buildDirtyConnectionRecord(),
       shouldRequestWake: true,
@@ -1533,7 +1540,12 @@ describe("appendHostedDeviceSyncWake", () => {
           now: string;
           provider: { provider: string };
           traceId: string;
-          webhook: { eventType: string; jobs: []; resourceCategory: string | null };
+          webhook: {
+            acceptanceMode: "level_dirty_hint" | "durable_payload";
+            eventType: string;
+            jobs: [];
+            resourceCategory: string | null;
+          };
         }) => Promise<void> | void;
       };
     } | undefined;
@@ -1544,6 +1556,7 @@ describe("appendHostedDeviceSyncWake", () => {
       provider: { provider: "junction" },
       traceId: "trace_old",
       webhook: {
+        acceptanceMode: "level_dirty_hint",
         eventType: "daily.data.steps.updated",
         jobs: [],
         resourceCategory: "timeseries",
@@ -1672,6 +1685,84 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
   });
 
+  it("does not rewrite dirty state when a level-triggered hint is already pending inside acceptance", async () => {
+    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("accepts a level-triggered lock loser only after committed dirty state exists", async () => {
+    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([{ acquired: false }]);
+    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("returns retryable busy for a level-triggered lock loser before dirty state commits", async () => {
+    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([{ acquired: false }]);
+    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(false);
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "WEBHOOK_ACCEPTANCE_BUSY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
   it("keeps hosted webhook traces completed when post-commit dirty wake Temporal signal fails", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
@@ -1716,6 +1807,7 @@ describe("appendHostedDeviceSyncWake", () => {
     let traceIndex = 0;
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
+        onLevelDirtyWebhookAlreadySatisfied?: (value: unknown) => Promise<{ accepted: true } | null> | { accepted: true } | null;
         onWebhookAccepted?: (value: unknown) => Promise<void> | void;
       };
     }) => ({
@@ -1723,7 +1815,7 @@ describe("appendHostedDeviceSyncWake", () => {
       handleOAuthCallback: vi.fn(),
       handleWebhook: vi.fn(async () => {
         traceIndex += 1;
-        await input.hooks?.onWebhookAccepted?.({
+        const acceptedInput = {
           account: {
             id: "dsc_123",
             provider: "oura",
@@ -1733,6 +1825,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: `trace_burst_${traceIndex}`,
           webhook: {
+            acceptanceMode: "level_dirty_hint",
             eventType: traceIndex % 2 === 0 ? "sleep.updated" : "activity.updated",
             jobs: [
               {
@@ -1745,7 +1838,15 @@ describe("appendHostedDeviceSyncWake", () => {
             occurredAt: "2026-03-26T11:59:00.000Z",
             resourceCategory: traceIndex % 2 === 0 ? "sleep" : "activity",
           },
-        });
+        };
+        const alreadySatisfied = await input.hooks?.onLevelDirtyWebhookAlreadySatisfied?.(acceptedInput);
+        if (alreadySatisfied?.accepted === true) {
+          return {
+            accepted: true,
+          };
+        }
+
+        await input.hooks?.onWebhookAccepted?.(acceptedInput);
         return {
           accepted: true,
         };
@@ -1762,6 +1863,7 @@ describe("appendHostedDeviceSyncWake", () => {
         shouldRequestWake: dirtyRevision === 1n,
       };
     });
+    mocks.hasPendingDirtyConnection.mockImplementation(async () => dirtyRevision > 0n);
 
     for (let index = 0; index < 2_500; index += 1) {
       const controlPlane = new HostedDeviceSyncControlPlane(
@@ -1780,9 +1882,9 @@ describe("appendHostedDeviceSyncWake", () => {
       });
     }
 
-    expect(mocks.createSignal).toHaveBeenCalledTimes(2_500);
-    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(2_500);
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2_500);
+    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -1808,6 +1910,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: `trace_same_minute_${traceIndex}`,
           webhook: {
+            acceptanceMode: "level_dirty_hint",
             eventType: "sleep.updated",
             jobs: [
               {
@@ -1965,6 +2068,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_case_123",
           webhook: {
+            acceptanceMode: "level_dirty_hint",
             eventType: "sleep.updated",
             jobs: [
               {
@@ -2099,6 +2203,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_junction_123",
           webhook: {
+            acceptanceMode: "durable_payload",
             eventType: "daily.data.steps.created",
             jobs: [
               {
@@ -2179,6 +2284,94 @@ describe("appendHostedDeviceSyncWake", () => {
     });
   });
 
+  it("returns retryable busy instead of accepting an unpersisted Junction payload webhook", async () => {
+    const webhookDataJson = JSON.stringify({
+      data: [
+        {
+          end: "2026-05-26T00:30:00.000Z",
+          start: "2026-05-26T00:00:00.000Z",
+          unit: "count",
+          value: 123,
+        },
+      ],
+      sourceProviderSlug: "garmin",
+    });
+    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([{ acquired: false }]);
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onWebhookAccepted?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(),
+      handleWebhook: vi.fn(async () => {
+        await input.hooks?.onWebhookAccepted?.({
+          account: {
+            id: "dsc_123",
+            provider: "junction",
+            scopes: [],
+          },
+          now: "2026-05-26T12:00:00.000Z",
+          provider: {},
+          traceId: "trace_junction_payload_busy",
+          webhook: {
+            acceptanceMode: "durable_payload",
+            eventType: "daily.data.steps.created",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  eventType: "daily.data.steps.created",
+                  objectId: "steps-2026-05-26",
+                  occurredAt: "2026-05-26T11:59:00.000Z",
+                  resource: "steps",
+                  resourceCategory: "timeseries",
+                  sourceProviderSlug: "garmin",
+                  webhookDataJson,
+                  windowEnd: "2026-05-27T00:00:00.000Z",
+                  windowStart: "2026-05-26T00:00:00.000Z",
+                },
+              },
+            ],
+            occurredAt: "2026-05-26T11:59:00.000Z",
+            resourceCategory: "timeseries",
+          },
+        });
+        return {
+          accepted: true,
+        };
+      }),
+      startConnection: vi.fn(),
+    }));
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      provider: "junction",
+    }));
+    mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
+        body: JSON.stringify({
+          event_type: "daily.data.steps.created",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("junction")).rejects.toMatchObject({
+      code: "WEBHOOK_ACCEPTANCE_BUSY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("preserves split Junction daily data webhook payload chunks across the hosted dirty handoff", async () => {
     const webhookDataJsons = [0, 1].map((chunkIndex) =>
       JSON.stringify({
@@ -2213,6 +2406,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_junction_chunks_123",
           webhook: {
+            acceptanceMode: "durable_payload",
             eventType: "daily.data.steps.created",
             jobs: webhookDataJsons.map((webhookDataJson, index) => ({
               kind: "resource",
@@ -2292,6 +2486,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_whoop_123",
           webhook: {
+            acceptanceMode: "level_dirty_hint",
             eventType: "workout.updated",
             jobs: [
               {

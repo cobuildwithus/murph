@@ -1386,6 +1386,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         );
 
       return {
+        acceptanceMode: "level_dirty_hint",
         externalAccountId,
         eventType,
         traceId,
