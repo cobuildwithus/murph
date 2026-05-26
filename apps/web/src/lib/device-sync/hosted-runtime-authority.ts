@@ -615,7 +615,8 @@ function buildHostedRuntimeCredentialSnapshot(input: {
   if (storedTokenBundle && input.withholdTokenMaterial === true) {
     return {
       credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(input.record.credentialMetadata),
-      kind: "none",
+      kind: "oauth_tokens_redacted",
+      tokenVersion: storedTokenBundle.tokenVersion,
     };
   }
 

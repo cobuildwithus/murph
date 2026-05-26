@@ -120,9 +120,16 @@ export async function handleRunnerWebControlRequest(input: {
   const isBrowserVaultReplicaPublishRequest =
     input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
     && input.request.method === "POST";
+  const isDeviceSyncRuntimeSnapshotRequest =
+    input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
-  if (isCheckpointRequest || isBrowserVaultReplicaPublishRequest) {
+  if (
+    isCheckpointRequest
+    || isBrowserVaultReplicaPublishRequest
+    || isDeviceSyncRuntimeSnapshotRequest
+  ) {
     try {
       writeAuthority = await (
         isBrowserVaultReplicaPublishRequest
@@ -153,6 +160,8 @@ export async function handleRunnerWebControlRequest(input: {
     body = augmentHostedRunnerWebControlBody({
       body,
       env: input.env,
+      includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest
+        && writeAuthority !== null,
       path: input.url.pathname,
       userId: input.userId,
     });
@@ -286,14 +295,16 @@ function readHostedWebBaseUrlLogDetails(value: string): {
 function augmentHostedRunnerWebControlBody(input: {
   body: string | undefined;
   env: RunnerOutboundEnvironmentSource;
+  includeDeviceSyncCredentialMaterial: boolean;
   path: string;
   userId: string;
 }): string | undefined {
   if (
     input.body !== undefined
+    && input.includeDeviceSyncCredentialMaterial
     && input.path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
   ) {
-    return forceHostedRunnerRuntimeSnapshotTokenless(input.body);
+    return forceHostedRunnerRuntimeSnapshotCredentialMaterial(input.body);
   }
 
   if (
@@ -327,7 +338,7 @@ function augmentHostedRunnerWebControlBody(input: {
   });
 }
 
-function forceHostedRunnerRuntimeSnapshotTokenless(body: string): string {
+function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): string {
   let payload: unknown;
   try {
     payload = JSON.parse(body);
@@ -340,7 +351,7 @@ function forceHostedRunnerRuntimeSnapshotTokenless(body: string): string {
 
   return JSON.stringify({
     ...payload,
-    includeCredentialMaterial: false,
+    includeCredentialMaterial: true,
   });
 }
 

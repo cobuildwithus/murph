@@ -69,6 +69,7 @@ import {
   resetRunnerOutboundSharedCachesForTest,
 } from "../src/runner-outbound/shared.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
@@ -130,7 +131,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       connectionId: "conn_123",
-      includeCredentialMaterial: true,
+      includeCredentialMaterial: false,
       userId: "member_123",
     },
     name: "device-sync runtime snapshot",
@@ -478,9 +479,14 @@ describe("handleRunnerOutboundRequest", () => {
                   "x-hosted-execution-user-id": "member_spoofed",
                   "x-hosted-runner-bound-user-id": "member_spoofed",
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
+                    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
                         "x-hosted-runtime-lease-generation": "9",
+                      }
+                    : {}),
+                  ...(path === "/api/internal/hosted-workspace/checkpoint"
+                    ? {
                         "x-hosted-runtime-workspace-version": "4",
                       }
                     : {}),
@@ -516,7 +522,7 @@ describe("handleRunnerOutboundRequest", () => {
       const expectedForwardedBody = path === "/api/internal/device-sync/runtime/snapshot"
         ? JSON.stringify({
             ...body,
-            includeCredentialMaterial: false,
+            includeCredentialMaterial: true,
           })
         : body === undefined ? undefined : JSON.stringify(body);
       expect(init?.body).toBe(expectedForwardedBody);
@@ -531,6 +537,143 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("rejects device-sync runtime snapshots without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH}`, {
+        body: JSON.stringify({
+          connectionId: "conn_123",
+          includeCredentialMaterial: true,
+          userId: "member_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("upgrades device-sync runtime snapshots after active runtime fence validation", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH}`, {
+        body: JSON.stringify({
+          connectionId: "conn_123",
+          includeCredentialMaterial: false,
+          userId: "member_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1];
+    expect(requestInit?.body).toBe(JSON.stringify({
+      connectionId: "conn_123",
+      includeCredentialMaterial: true,
+      userId: "member_123",
+    }));
+    const headers = new Headers(requestInit?.headers);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-api-key")).toBeNull();
+  });
+
+  it("rejects device-sync runtime snapshots when the runtime fence is stale", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH}`, {
+        body: JSON.stringify({
+          connectionId: "conn_123",
+          includeCredentialMaterial: false,
+          userId: "member_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("adds hosted usage reporting attribution inside the Worker web-control proxy", async () => {
     const fetchMock = vi.fn(async (
