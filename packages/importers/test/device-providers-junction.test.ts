@@ -1189,6 +1189,35 @@ test("Junction normalizer canonicalizes documented resource aliases before allow
   ));
 });
 
+test("Junction sleep-cycle summaries are raw-only", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      sleep_cycle: [{
+        sourceProviderSlug: "garmin",
+        observedAt: "2026-04-22T07:00:00Z",
+        stages: [
+          { stage: "light", startAt: "2026-04-22T01:00:00Z", endAt: "2026-04-22T02:00:00Z" },
+          { stage: "deep", startAt: "2026-04-22T02:00:00Z", endAt: "2026-04-22T03:00:00Z" },
+        ],
+      }],
+      hypnogram: [{
+        sourceProviderSlug: "oura",
+        observedAt: "2026-04-22T08:00:00Z",
+        stageCount: 5,
+      }],
+    },
+  });
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
+  assert.equal(
+    payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
+    1,
+  );
+  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
 test("Junction normalizer merges canonical and alias resource payloads before import", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
