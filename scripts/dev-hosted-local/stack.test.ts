@@ -403,6 +403,7 @@ function tailForTest(value: string, maxChars: number = 2_000): string {
 describe("hosted local dev stack", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    runCommand.mockImplementation(async () => {});
     vi.unstubAllEnvs();
   });
 
@@ -1340,6 +1341,71 @@ describe("hosted local dev stack", () => {
       ["--dir", "apps/cloudflare", "deploy:smoke"],
       expect.any(Object),
     );
+  });
+
+  it("keeps interactive dev running when the runner container smoke proof fails", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const stderrTarget = new CapturingWritable();
+    const smokeError = new Error("fetch failed");
+    runCommand.mockImplementation(async (_command, args) => {
+      if (args.join(" ") === "--dir apps/cloudflare deploy:smoke") {
+        throw smokeError;
+      }
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 133 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 134 }));
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+      stderrTarget,
+    });
+    await stack.ready;
+
+    expect(terminateChildProcessAndWait).not.toHaveBeenCalled();
+    expect(stderrTarget.text()).toContain(
+      "Runner container deploy-smoke failed after local web/worker health checks passed; keeping hosted-local dev running.",
+    );
+    expect(stderrTarget.text()).toContain("deploy-smoke failure: fetch failed");
+
+    await stack.stop();
+  });
+
+  it("keeps the runner container smoke proof fatal for E2E profiles", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipLinqWebhookRegister: true,
+      skipWeb: true,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    runCommand.mockImplementation(async (_command, args) => {
+      if (args.join(" ") === "--dir apps/cloudflare deploy:smoke") {
+        throw new Error("fetch failed");
+      }
+    });
+    spawnChildProcess.mockReturnValueOnce(
+      createBufferedChild({ exitCode: null, name: "cloudflare", pid: 135 }),
+    );
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+      },
+    });
+
+    await expect(stack.ready).rejects.toThrow("fetch failed");
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {

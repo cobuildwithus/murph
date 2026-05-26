@@ -856,6 +856,7 @@ export async function startHostedLocalDevStack(input: {
           await maybeRunRunnerContainerSmoke({
             config,
             env: workerProcessEnv ?? workerRuntimeEnv,
+            stderrTarget: input.stderrTarget,
             workerBaseUrl,
           });
         }
@@ -1412,25 +1413,48 @@ function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undef
 async function maybeRunRunnerContainerSmoke(input: {
   config: HostedLocalDevConfig;
   env: NodeJS.ProcessEnv | null;
+  stderrTarget?: NodeJS.WritableStream;
   workerBaseUrl: string;
 }): Promise<void> {
   if (input.config.skipRunnerSmoke || input.env === null) {
     return;
   }
 
-  await runCommand("pnpm", ["--dir", "apps/cloudflare", "deploy:smoke"], {
-    cwd: repoRoot,
-    env: {
-      ...input.env,
-      HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: input.workerBaseUrl,
-      HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-      HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS:
-        input.env.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS?.trim() || "30",
-      HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS:
-        input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
-    },
-    name: "setup",
-  });
+  try {
+    await runCommand("pnpm", ["--dir", "apps/cloudflare", "deploy:smoke"], {
+      cwd: repoRoot,
+      env: {
+        ...input.env,
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: input.workerBaseUrl,
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS:
+          input.env.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS?.trim() || "30",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS:
+          input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
+      },
+      name: "setup",
+    });
+  } catch (error) {
+    if (requiresHostedLocalE2eIsolation(input.env)) {
+      throw error;
+    }
+    writeRunnerContainerSmokeWarning(input.stderrTarget, error);
+  }
+}
+
+function writeRunnerContainerSmokeWarning(
+  stderrTarget: NodeJS.WritableStream | undefined,
+  error: unknown,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  (stderrTarget ?? process.stderr).write(
+    [
+      "[setup] Runner container deploy-smoke failed after local web/worker health checks passed; keeping hosted-local dev running.\n",
+      "[setup] Hosted runner/container paths may fail until this smoke issue is fixed. ",
+      "Set MURPH_DEV_SKIP_RUNNER_SMOKE=1 to skip this proof during focused local debugging.\n",
+      `[setup] deploy-smoke failure: ${redactHostedLocalDiagnosticText(detail)}\n`,
+    ].join(""),
+  );
 }
 
 async function maybeStartStripeWebhookListener(input: {
