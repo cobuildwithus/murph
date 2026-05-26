@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
+    clearStoredProviderConfigCredential: vi.fn(),
     listConnectionSources: vi.fn(),
     listConnectionsForUser: vi.fn(),
     markConnectionSourcesDisconnected: vi.fn(),
@@ -255,6 +256,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     getDirtyConnection = mocks.getDirtyConnection;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
+    clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
     listConnectionSources = mocks.listConnectionSources;
     listConnectionsForUser = mocks.listConnectionsForUser;
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
@@ -424,6 +426,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.markConnectionSourcesDisconnected.mockResolvedValue(0);
+    mocks.clearStoredProviderConfigCredential.mockResolvedValue(true);
     mocks.persistStoredConnectionTokenBundle.mockResolvedValue(undefined);
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
@@ -950,14 +953,57 @@ describe("appendHostedDeviceSyncWake", () => {
       externalAccountId: "junction-user-123",
       provider: "junction",
     }));
-    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
-      clearRefreshLease: true,
+    expect(mocks.clearStoredProviderConfigCredential).toHaveBeenCalledWith({
       connectionId: "dsc_123",
       externalAccountId: "junction-user-123",
       provider: "junction",
-      tokenBundle: null,
       tx: mocks.prismaTx,
+      providerConfigKey: "hosted-provider-config",
+      userId: "user-123",
     });
+  });
+
+  it("fails closed when revoked provider-config credential cleanup loses its fence", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+    });
+    const revokeAccess = vi.fn(async () => {});
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.clearStoredProviderConfigCredential.mockResolvedValueOnce(false);
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(activeConnection);
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).rejects.toMatchObject({
+      code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("does not append duplicate disconnect wakes for disconnected tokenless provider-config connections", async () => {
@@ -1029,13 +1075,13 @@ describe("appendHostedDeviceSyncWake", () => {
       externalAccountId: "junction-user-123",
       provider: "junction",
     }));
-    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
-      clearRefreshLease: true,
+    expect(mocks.clearStoredProviderConfigCredential).toHaveBeenCalledWith({
       connectionId: "dsc_123",
       externalAccountId: "junction-user-123",
       provider: "junction",
-      tokenBundle: null,
       tx: mocks.prismaTx,
+      providerConfigKey: "hosted-provider-config",
+      userId: "user-123",
     });
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();

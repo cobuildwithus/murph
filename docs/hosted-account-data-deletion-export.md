@@ -85,7 +85,7 @@ The account metadata export explicitly omits:
 `deleteHostedAccountData` performs deletion in this order:
 
 1. Load the hosted member and device connection identities.
-2. Best-effort revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook, currently covering configured Oura, WHOOP, and Strava connectors. Garmin connections routed through Junction are deleted locally; provider-side retention remains controlled by Junction/Garmin until Junction revocation is implemented.
+2. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
 3. Delete Prisma-hosted account rows in a transaction.
 4. Best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted`.
 5. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
@@ -159,7 +159,7 @@ The hosted runtime demand endpoint also fails closed for stale workflow wakeups:
 
 Deletion cannot guarantee immediate erasure in systems Murph does not control. The deletion/export result therefore always carries retention notes for:
 
-- Oura, WHOOP, Strava, and other provider-side data after revocation, plus Garmin data routed through Junction without provider-side revocation;
+- Oura, WHOOP, Strava, Junction-routed wearable sources, and other provider-side data after revocation or provider-side deregistration;
 - Linq, Telegram, carrier, and email-provider copies of messages or routing events;
 - Stripe billing/accounting records;
 - Privy identity/session records;

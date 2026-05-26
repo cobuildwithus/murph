@@ -631,6 +631,9 @@ describe("deleteHostedAccountData", () => {
       registry: {
         get: vi.fn(() => null),
       },
+      store: {
+        getStoredConnectionAccountForUser: vi.fn(async () => null),
+      },
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
@@ -681,6 +684,9 @@ describe("deleteHostedAccountData", () => {
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
       registry: {
         get: vi.fn(() => null),
+      },
+      store: {
+        getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -877,6 +883,82 @@ describe("deleteHostedAccountData", () => {
         warningCode: null,
       },
     ]);
+  });
+
+  it("blocks hosted account deletion when provider-config revocation fails", async () => {
+    const order: string[] = [];
+    const revokeAccess = vi.fn(async () => {
+      throw Object.assign(new Error("provider secret should not leak"), {
+        name: "ProviderRevokeFailed",
+      });
+    });
+    const getStoredConnectionAccountForUser = vi.fn(async () => ({
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "provider_config" as const,
+        credentialMetadata: {},
+        providerConfigKey: "junction",
+      },
+      disconnectGeneration: 0,
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      id: "dsc_junction",
+      keyVersion: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "junction",
+      scopes: [],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: null,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    }));
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      registry: {
+        get: vi.fn(() => ({
+          connectionHandler: {
+            revokeAccess,
+          },
+        })),
+      },
+      store: {
+        getStoredConnectionAccountForUser,
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [
+        {
+          id: "dsc_junction",
+          provider: "junction",
+          providerAccountBlindIndex: "blind-index",
+          sources: [{ sourceProviderSlug: "garmin", status: "connected" }],
+        },
+      ],
+      onTransaction: () => order.push("prisma"),
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(order).toEqual([]);
   });
 });
 

@@ -124,19 +124,26 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       tx,
     );
 
+    if (storedAccount && !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)) {
+      connectionChangedDuringDisconnectError();
+    }
+
     if (
       freshExisting.status === "disconnected"
       && freshStoredAccount?.credential.kind === "provider_config"
       && providerConfigRevokeSucceeded
     ) {
-      await input.store.persistStoredConnectionTokenBundle({
+      const credentialCleared = await input.store.clearStoredProviderConfigCredential({
         connectionId: freshExisting.id,
-        clearRefreshLease: true,
         externalAccountId: freshStoredAccount.externalAccountId,
         provider: freshExisting.provider,
-        tokenBundle: null,
+        providerConfigKey: freshStoredAccount.credential.providerConfigKey,
         tx,
+        userId: input.userId,
       });
+      if (!credentialCleared) {
+        throw connectionChangedDuringDisconnectError();
+      }
 
       return {
         connection: freshExisting,
@@ -184,14 +191,28 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       now,
       tx,
     });
-    await input.store.persistStoredConnectionTokenBundle({
-      connectionId: input.connectionId,
-      clearRefreshLease: true,
-      externalAccountId: freshStoredAccount?.externalAccountId ?? null,
-      provider: freshExisting.provider,
-      tokenBundle: null,
-      tx,
-    });
+    if (freshStoredAccount?.credential.kind === "provider_config" && providerConfigRevokeSucceeded) {
+      const credentialCleared = await input.store.clearStoredProviderConfigCredential({
+        connectionId: input.connectionId,
+        externalAccountId: freshStoredAccount.externalAccountId,
+        provider: freshExisting.provider,
+        providerConfigKey: freshStoredAccount.credential.providerConfigKey,
+        tx,
+        userId: input.userId,
+      });
+      if (!credentialCleared) {
+        throw connectionChangedDuringDisconnectError();
+      }
+    } else {
+      await input.store.persistStoredConnectionTokenBundle({
+        connectionId: input.connectionId,
+        clearRefreshLease: true,
+        externalAccountId: freshStoredAccount?.externalAccountId ?? null,
+        provider: freshExisting.provider,
+        tokenBundle: null,
+        tx,
+      });
+    }
     await input.store.createSignal({
       userId: input.userId,
       connectionId: input.connectionId,
@@ -242,6 +263,40 @@ export function handleHostedDeviceSyncUnknownWebhook({
     eventType: webhook.eventType,
     resourceCategory: normalizeNullableString(webhook.resourceCategory),
     traceId: normalizeNullableString(traceId),
+  });
+}
+
+function storedAccountMatchesDisconnectTarget(
+  expected: Awaited<ReturnType<PrismaDeviceSyncControlPlaneStore["getStoredConnectionAccountForUser"]>>,
+  current: Awaited<ReturnType<PrismaDeviceSyncControlPlaneStore["getStoredConnectionAccountForUser"]>>,
+): boolean {
+  if (!expected || !current) {
+    return expected === current;
+  }
+
+  if (
+    expected.provider !== current.provider
+    || expected.externalAccountId !== current.externalAccountId
+    || expected.credential.kind !== current.credential.kind
+  ) {
+    return false;
+  }
+
+  if (expected.credential.kind === "provider_config" || current.credential.kind === "provider_config") {
+    return expected.credential.kind === "provider_config"
+      && current.credential.kind === "provider_config"
+      && expected.credential.providerConfigKey === current.credential.providerConfigKey;
+  }
+
+  return true;
+}
+
+function connectionChangedDuringDisconnectError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_CHANGED_DURING_DISCONNECT",
+    message: "Hosted device-sync connection changed while disconnect was in progress. Retry disconnect.",
+    retryable: true,
+    httpStatus: 409,
   });
 }
 

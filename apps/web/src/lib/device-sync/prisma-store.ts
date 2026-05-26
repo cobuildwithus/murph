@@ -229,6 +229,17 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.persistStoredConnectionTokenBundle(input);
   }
 
+  async clearStoredProviderConfigCredential(input: {
+    connectionId: string;
+    externalAccountId: string;
+    provider: string;
+    providerConfigKey: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.connections.clearStoredProviderConfigCredential(input);
+  }
+
   async claimConnectionRefreshLease(input: {
     connectionId: string;
     userId: string;
