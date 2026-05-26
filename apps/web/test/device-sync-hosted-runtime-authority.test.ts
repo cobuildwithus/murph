@@ -1,3 +1,4 @@
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -209,6 +210,7 @@ function createAuthorityHarness(input: {
     lastErrorMessage: string | null;
     lastSeenAt: string | null;
     resourceAvailabilitySummary: Record<string, unknown>;
+    sourceInstanceKey?: string;
     sourceProviderSlug: string;
     status: "connected" | "disconnected" | "error" | "unavailable";
   }>;
@@ -272,6 +274,7 @@ function createAuthorityHarness(input: {
   });
 
   const findFirst = vi.fn(async () => currentRecord);
+  const upsertConnectionSource = vi.fn(async () => undefined);
   const update = vi.fn(async ({ data }: { data: Partial<ReturnType<typeof buildHostedRecord>> }) => {
     currentRecord = {
       ...currentRecord,
@@ -295,7 +298,12 @@ function createAuthorityHarness(input: {
         externalAccountId: currentRecord.externalAccountId ?? "acct_123",
       })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
-    listConnectionSources: vi.fn(async () => input.connectionSources ?? []),
+    listConnectionSources: vi.fn(async () =>
+      (input.connectionSources ?? []).map((source) => ({
+        ...source,
+        sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
+      }))
+    ),
     persistStoredConnectionTokenBundle,
     prisma: {
       deviceConnection: {
@@ -303,6 +311,7 @@ function createAuthorityHarness(input: {
       },
     },
     syncDurableConnectionState,
+    upsertConnectionSource,
     withConnectionMutationLock: vi.fn(async (
       _connectionId: string,
       callback: (tx: { deviceConnection: { findFirst: typeof findFirst; update: typeof update } }) => Promise<unknown>,
@@ -324,6 +333,7 @@ function createAuthorityHarness(input: {
     persistStoredConnectionTokenBundle,
     store,
     syncDurableConnectionState,
+    upsertConnectionSource,
     updateConnectionRecord: update,
   };
 }
@@ -516,6 +526,233 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       },
     });
     expect(harness.storedAccount?.tokenVersion).toBe(3);
+  });
+
+  it("persists runtime source availability updates without rewriting connection state", async () => {
+    const harness = createAuthorityHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-06T09:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-06T10:05:00.000Z",
+                  observedLastSeenAt: null,
+                  resourceAvailabilitySummary: {
+                    activity: true,
+                    heartrate: true,
+                  },
+                  sourceInstanceKey: "junction_garmin",
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "unchanged",
+      writeUpdate: "applied",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith({
+      connectionId: "conn_123",
+      displayName: null,
+      firstSeenAt: "2026-04-06T09:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-04-06T10:05:00.000Z",
+      resourceAvailabilitySummary: {
+        activity: true,
+        heartrate: true,
+      },
+      sourceInstanceKey: "junction_garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      tx: expect.any(Object),
+    });
+  });
+
+  it("applies Junction runtime source resources to the connect-link source row", async () => {
+    const hostedConnectionId = "conn_junction";
+    const runtimeLocalAccountId = "dsa_runtime";
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    const runtimeSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: runtimeLocalAccountId,
+      sourceProviderSlug: "garmin",
+    });
+
+    expect(canonicalSourceInstanceKey).toMatch(/^jxn_src_/u);
+    expect(runtimeSourceInstanceKey).toMatch(/^jxn_src_/u);
+    expect(runtimeSourceInstanceKey).not.toBe(canonicalSourceInstanceKey);
+    if (!canonicalSourceInstanceKey || !runtimeSourceInstanceKey) {
+      throw new Error("Expected Junction source keys to be generated for test ids.");
+    }
+
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: hostedConnectionId,
+          displayName: null,
+          firstSeenAt: "2026-05-26T17:35:33.451Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-05-26T17:35:33.451Z",
+          resourceAvailabilitySummary: {},
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        provider: "junction",
+        updatedAt: "2026-05-26T17:35:33.451Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: hostedConnectionId,
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-05-26T17:34:31.976Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-05-26T17:37:45.454Z",
+                  observedLastSeenAt: null,
+                  resourceAvailabilitySummary: {
+                    sleep: true,
+                    steps: true,
+                    workouts: true,
+                  },
+                  sourceInstanceKey: runtimeSourceInstanceKey,
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: hostedConnectionId,
+      tokenUpdate: "unchanged",
+      writeUpdate: "applied",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).toHaveBeenCalledTimes(1);
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: hostedConnectionId,
+      lastSeenAt: "2026-05-26T17:37:45.454Z",
+      resourceAvailabilitySummary: {
+        sleep: true,
+        steps: true,
+        workouts: true,
+      },
+      sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }));
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalledWith(expect.objectContaining({
+      sourceInstanceKey: runtimeSourceInstanceKey,
+    }));
+  });
+
+  it("skips stale runtime source availability updates", async () => {
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: "conn_123",
+          displayName: null,
+          firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:10:00.000Z",
+          resourceAvailabilitySummary: {
+            activity: true,
+            heartrate: true,
+          },
+          sourceInstanceKey: "junction_garmin",
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-06T09:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-06T10:05:00.000Z",
+                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+                  resourceAvailabilitySummary: {
+                    activity: true,
+                  },
+                  sourceInstanceKey: "junction_garmin",
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "unchanged",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
   });
 
   it("skips runtime token writes while an agent refresh lease owns the observed token version", async () => {

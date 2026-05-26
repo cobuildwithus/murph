@@ -149,7 +149,10 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
   };
 }
 
-function createDeviceSyncServiceForVault(vaultRoot: string) {
+function createDeviceSyncServiceForVault(
+  vaultRoot: string,
+  providers: readonly DeviceSyncProvider[] = [createFakeProvider()],
+) {
   return createHostedRuntimeDeviceSyncService({
     secret: DEVICE_SYNC_SECRET,
     config: {
@@ -157,7 +160,7 @@ function createDeviceSyncServiceForVault(vaultRoot: string) {
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
       vaultRoot,
     },
-    providers: [createFakeProvider()],
+    providers,
   });
 }
 
@@ -187,6 +190,7 @@ function buildDeviceSyncWake(input: {
     reason?: string | null;
   };
   occurredAt: string;
+  provider?: string;
   reason: "disconnected" | "reauthorization_required" | "webhook_hint";
 }) {
   return {
@@ -195,13 +199,14 @@ function buildDeviceSyncWake(input: {
     ...(input.hint ? { hint: input.hint } : {}),
     kind: "device-sync.wake" as const,
     occurredAt: input.occurredAt,
-    provider: "demo" as const,
+    provider: input.provider ?? "demo",
     reason: input.reason,
     userId: "member_123",
   };
 }
 
 function buildRuntimeSnapshot(input: {
+  capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["capabilities"];
   connectedAt?: string;
   connectionId: string;
   displayName?: string | null;
@@ -222,6 +227,7 @@ function buildRuntimeSnapshot(input: {
   setupExpiresAt?: string | null;
   setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
+  sources?: NonNullable<HostedExecutionDeviceSyncRuntimeSnapshotResponse["connections"][number]["sources"]>;
   credential?: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
   tokenBundle?: {
     accessToken: string;
@@ -256,6 +262,7 @@ function buildRuntimeSnapshot(input: {
         }
   );
   return {
+    ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
     connections: [
       {
         connection: {
@@ -284,6 +291,7 @@ function buildRuntimeSnapshot(input: {
           lastWebhookAt: input.localState?.lastWebhookAt ?? null,
           nextReconcileAt: input.localState?.nextReconcileAt ?? null,
         },
+        ...(input.sources === undefined ? {} : { sources: input.sources }),
         credential,
       },
     ],
@@ -514,6 +522,101 @@ describe("hosted device-sync runtime", () => {
       assert.equal(state.hostedToLocalAccountIds.size, 0);
       assert.equal(state.localToHostedAccountIds.size, 0);
       assert.equal(state.observedTokenVersions.size, 0);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("reconciliation projects local connection sources only when hosted supports source apply", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "source-projection",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        capabilities: {
+          connectionSourceApply: true,
+        },
+        connectionId: "hosted_conn_sources",
+        externalAccountId: connected.account.externalAccountId,
+        sources: [],
+      });
+      const appliedRequests: ApplyUpdatesRequest[] = [];
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequests.push(input);
+          return {
+            appliedAt: "2026-04-06T09:21:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync or reconciliation");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      getStore(service).upsertConnectionSource({
+        connectionId: connected.account.id,
+        displayName: null,
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T10:05:00.000Z",
+        resourceAvailabilitySummary: {
+          activity: true,
+          heartrate: true,
+        },
+        sourceInstanceKey: "junction_garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      });
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:20:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(appliedRequests[0]?.updates[0]?.sources, [
+        {
+          displayName: null,
+          firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:05:00.000Z",
+          observedLastSeenAt: null,
+          resourceAvailabilitySummary: {
+            activity: true,
+            heartrate: true,
+          },
+          sourceInstanceKey: "junction_garmin",
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -802,6 +905,156 @@ describe("hosted device-sync runtime", () => {
           },
         ],
       });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("sync hydrates a fresh WHOOP OAuth runtime snapshot before running device jobs", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const observedAccessTokens: string[] = [];
+    const whoopProvider = createFakeProvider({
+      provider: "whoop",
+      descriptor: {
+        provider: "whoop",
+        displayName: "WHOOP",
+        transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+        oauth: {
+          callbackPath: "/oauth/whoop/callback",
+          defaultScopes: ["offline", "read:recovery"],
+        },
+        webhook: {
+          path: "/webhooks/whoop",
+          deliveryMode: "notification",
+          supportsAdmin: false,
+        },
+        normalization: {
+          metricFamilies: ["recovery"],
+          snapshotParser: "schema",
+        },
+        sourcePriorityHints: {
+          defaultPriority: 50,
+          metricFamilies: {
+            recovery: 50,
+          },
+        },
+      },
+      jobExecutor: {
+        async executeJob(context) {
+          assert.equal(context.account.provider, "whoop");
+          assert.equal(context.account.credential.kind, "oauth_tokens");
+          observedAccessTokens.push(context.account.credential.tokens.accessToken);
+          return {
+            nextReconcileAt: "2026-04-06T12:00:00.000Z",
+          };
+        },
+      },
+    });
+    const service = createDeviceSyncServiceForVault(vaultRoot, [whoopProvider]);
+
+    try {
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_whoop_token_snapshot",
+        displayName: "Hosted WHOOP",
+        externalAccountId: "whoop-account-token-snapshot",
+        hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+        provider: "whoop",
+        tokenBundle: {
+          accessToken: "hosted-whoop-access",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          refreshToken: "hosted-whoop-refresh",
+          tokenVersion: 6,
+        },
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T09:21:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during WHOOP sync");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_whoop_token_snapshot",
+          eventId: "evt_whoop_token_snapshot",
+          hint: {
+            jobs: [
+              {
+                dedupeKey: "hosted-whoop-token-snapshot",
+                kind: "reconcile",
+                priority: 80,
+              },
+            ],
+            reason: "scheduled-reconcile",
+          },
+          occurredAt: "2026-04-06T09:20:00.000Z",
+          provider: "whoop",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(state.observedTokenVersions.get("hosted_conn_whoop_token_snapshot"), 6);
+      const stored = getStore(service).getAccountByExternalAccount(
+        "whoop",
+        "whoop-account-token-snapshot",
+      );
+      assert.ok(stored);
+      assert.equal(stored.status, "active");
+      const storedCredential = requireStoredOAuthCredential(stored);
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      assert.equal(
+        codec.decrypt(
+          storedCredential.accessTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        "hosted-whoop-access",
+      );
+
+      assert.equal(await service.drainWorker(), 1);
+      assert.deepEqual(observedAccessTokens, ["hosted-whoop-access"]);
+
+      const afterJob = getStore(service).getAccountById(stored.id);
+      assert.ok(afterJob);
+      assert.equal(afterJob.status, "active");
+      assert.equal(afterJob.lastErrorCode, null);
+      assert.equal(afterJob.lastErrorMessage, null);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:22:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      const apply = requireApplyUpdatesRequest(appliedRequest);
+      assert.equal(apply.updates[0]?.connection?.status, undefined);
+      assert.equal(apply.updates[0]?.localState?.lastErrorCode, undefined);
+      assert.equal(apply.updates[0]?.credential, undefined);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

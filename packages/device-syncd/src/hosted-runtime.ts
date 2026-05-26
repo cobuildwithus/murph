@@ -1,5 +1,8 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
-import type { DeviceConnectionSourceStatus } from "./client.ts";
+import type {
+  DeviceConnectionSourceResourceAvailabilitySummary,
+  DeviceConnectionSourceStatus,
+} from "./client.ts";
 
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
@@ -146,10 +149,12 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
+  sourceInstanceKey?: string;
   sourceProviderSlug: string;
   displayName: string | null;
   status: DeviceConnectionSourceStatus;
   resourceCount: number;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   firstSeenAt: string;
@@ -161,6 +166,10 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
   credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
   localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
   sources?: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[];
+}
+
+export interface HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
+  connectionSourceApply?: boolean;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
@@ -178,6 +187,7 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
 }
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotCapabilities;
   connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
   generatedAt: string;
   userId: string;
@@ -201,6 +211,19 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
   lastSyncStartedAt?: string | null;
   lastWebhookAt?: string | null;
   nextReconcileAt?: string | null;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  observedLastSeenAt: string | null;
+  displayName?: string | null;
+  status: DeviceConnectionSourceStatus;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  firstSeenAt?: string | null;
+  lastSeenAt: string;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
@@ -267,6 +290,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
   seed?: HostedExecutionDeviceSyncRuntimeConnectionSeed;
+  sources?: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
 }
 
 export interface HostedExecutionDeviceSyncRuntimeApplyRequest {
@@ -465,6 +489,13 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
   const record = requireObject(value, "Hosted device-sync runtime snapshot response");
 
   return {
+    ...(record.capabilities === undefined
+      ? {}
+      : {
+          capabilities: parseHostedExecutionDeviceSyncRuntimeSnapshotCapabilities(
+            record.capabilities,
+          ),
+        }),
     connections: requireArray(
       record.connections,
       "Hosted device-sync runtime snapshot response connections",
@@ -474,6 +505,23 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       "Hosted device-sync runtime snapshot response generatedAt",
     ),
     userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeSnapshotCapabilities(
+  value: unknown,
+): HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
+  const record = requireObject(value, "Hosted device-sync runtime snapshot response capabilities");
+
+  return {
+    ...(record.connectionSourceApply === undefined
+      ? {}
+      : {
+          connectionSourceApply: requireBoolean(
+            record.connectionSourceApply,
+            "Hosted device-sync runtime snapshot response capabilities.connectionSourceApply",
+          ),
+        }),
   };
 }
 
@@ -1155,6 +1203,18 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     ),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
     resourceCount,
+    ...(record.resourceAvailabilitySummary === undefined
+      ? {}
+      : {
+          resourceAvailabilitySummary:
+            parseHostedExecutionDeviceSyncRuntimeSourceAvailabilitySummary(
+              record.resourceAvailabilitySummary,
+              `${label}.resourceAvailabilitySummary`,
+            ),
+        }),
+    ...(record.sourceInstanceKey === undefined
+      ? {}
+      : { sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`) }),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     status,
   };
@@ -1175,6 +1235,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     "observedTokenVersion",
     "observedUpdatedAt",
     "seed",
+    "sources",
   ]);
   const connection = record.connection === undefined
     ? undefined
@@ -1209,6 +1270,17 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
         record.credential,
         `Hosted device-sync runtime apply request updates[${index}].credential`,
       );
+  const sources = record.sources === undefined
+    ? undefined
+    : requireArray(
+        record.sources,
+        `Hosted device-sync runtime apply request updates[${index}].sources`,
+      ).map((entry, sourceIndex) =>
+        parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
+          entry,
+          `Hosted device-sync runtime apply request updates[${index}].sources[${sourceIndex}]`,
+        )
+      );
 
   assertHostedExecutionDeviceSyncRuntimeMutationFences({
     connection: connection !== undefined || seed !== undefined,
@@ -1232,7 +1304,107 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     ...(observedUpdatedAt === undefined ? {} : { observedUpdatedAt }),
     ...(observedTokenVersion === undefined ? {} : { observedTokenVersion }),
     ...(seed === undefined ? {} : { seed }),
+    ...(sources === undefined ? {} : { sources }),
   };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
+  const record = requireObject(value, label);
+  assertHostedExecutionCredentialFields(record, label, [
+    "displayName",
+    "firstSeenAt",
+    "lastErrorCode",
+    "lastErrorMessage",
+    "lastSeenAt",
+    "observedLastSeenAt",
+    "resourceAvailabilitySummary",
+    "sourceInstanceKey",
+    "sourceProviderSlug",
+    "status",
+  ]);
+  const status = requireString(record.status, `${label}.status`);
+
+  if (
+    status !== "connected"
+    && status !== "unavailable"
+    && status !== "error"
+    && status !== "disconnected"
+  ) {
+    throw new TypeError(`${label}.status is invalid.`);
+  }
+
+  const resourceAvailabilitySummary = record.resourceAvailabilitySummary === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeSourceAvailabilitySummary(
+        record.resourceAvailabilitySummary,
+        `${label}.resourceAvailabilitySummary`,
+      );
+
+  return {
+    observedLastSeenAt: readNullableIsoTimestamp(
+      record.observedLastSeenAt,
+      `${label}.observedLastSeenAt`,
+    ),
+    sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
+    sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
+    ...(record.displayName === undefined
+      ? {}
+      : { displayName: readNullableStringValue(record.displayName, `${label}.displayName`) }),
+    status,
+    ...(resourceAvailabilitySummary === undefined ? {} : { resourceAvailabilitySummary }),
+    ...(record.lastErrorCode === undefined
+      ? {}
+      : {
+          lastErrorCode: sanitizeHostedRuntimeErrorCode(
+            readNullableStringValue(record.lastErrorCode, `${label}.lastErrorCode`),
+          ),
+        }),
+    ...(record.lastErrorMessage === undefined
+      ? {}
+      : {
+          lastErrorMessage: sanitizeHostedRuntimeErrorText(
+            readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+          ),
+        }),
+    ...(record.firstSeenAt === undefined
+      ? {}
+      : { firstSeenAt: readNullableIsoTimestamp(record.firstSeenAt, `${label}.firstSeenAt`) }),
+    lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeSourceAvailabilitySummary(
+  value: unknown,
+  label: string,
+): DeviceConnectionSourceResourceAvailabilitySummary {
+  const record = requireObject(value, label);
+  const summary: DeviceConnectionSourceResourceAvailabilitySummary = {};
+
+  for (const [key, rawValue] of Object.entries(record)) {
+    if (!isHostedExecutionDeviceSyncRuntimeSourceSummaryKey(key)) {
+      throw new TypeError(`${label} contains an invalid resource key.`);
+    }
+
+    if (
+      typeof rawValue !== "string"
+      && typeof rawValue !== "number"
+      && typeof rawValue !== "boolean"
+      && rawValue !== null
+    ) {
+      throw new TypeError(`${label}.${key} must be a primitive resource availability value.`);
+    }
+
+    if (typeof rawValue === "string" && rawValue.length > 256) {
+      throw new TypeError(`${label}.${key} is too long.`);
+    }
+
+    summary[key] = rawValue;
+  }
+
+  return summary;
 }
 
 function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
@@ -1846,6 +2018,10 @@ function requireArray(value: unknown, label: string): unknown[] {
   }
 
   return value;
+}
+
+function isHostedExecutionDeviceSyncRuntimeSourceSummaryKey(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_-]{0,127}$/u.test(value);
 }
 
 function requireStringArray(value: unknown, label: string): string[] {

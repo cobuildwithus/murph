@@ -1060,6 +1060,23 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             },
             observedTokenVersion: null,
             observedUpdatedAt: null,
+            sources: [
+              {
+                displayName: null,
+                firstSeenAt: "2026-04-06T23:00:00+00:00",
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSeenAt: "2026-04-07T00:00:00+00:00",
+                observedLastSeenAt: null,
+                resourceAvailabilitySummary: {
+                  activity: true,
+                  heartrate: true,
+                },
+                sourceInstanceKey: "junction_garmin",
+                sourceProviderSlug: "garmin",
+                status: "connected",
+              },
+            ],
             seed: {
               connection: {
                 accessTokenExpiresAt: null,
@@ -1129,6 +1146,23 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           },
           observedTokenVersion: null,
           observedUpdatedAt: null,
+          sources: [
+            {
+              displayName: null,
+              firstSeenAt: "2026-04-06T23:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-07T00:00:00.000Z",
+              observedLastSeenAt: null,
+              resourceAvailabilitySummary: {
+                activity: true,
+                heartrate: true,
+              },
+              sourceInstanceKey: "junction_garmin",
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+          ],
           seed: {
             connection: {
               accessTokenExpiresAt: null,
