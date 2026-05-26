@@ -1659,9 +1659,10 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.domainContributions.some((module) => module.moduleId === 'clinical'), true)
     assert.equal(view.domainContributions.some((module) => module.moduleId === 'unknown'), false)
     assert.equal(view.wearable.scoreBearing, false)
-    assert.equal(view.wearable.candidateFeatureCount, 8)
+    assert.equal(view.wearable.candidateFeatureCount, 9)
     assert.equal(view.wearable.readyFeatureKeys.includes('activity-volume'), true)
     assert.equal(view.wearable.firstPriorityReadyFeatureKeys.includes('activity-volume'), true)
+    assert.equal(view.wearable.firstPriorityIncompleteFeatureKeys.includes('actigraphy-activity-counts'), true)
     assert.equal(view.wearable.firstPriorityIncompleteFeatureKeys.includes('sedentary-time'), true)
     assert.equal(view.wearable.secondPriorityIncompleteFeatureKeys.includes('resting-heart-rate'), true)
     assert.equal(view.wearable.deferredFeatureKeys.includes('hrv-rmssd'), true)
@@ -1730,8 +1731,9 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(productCalculatorView.wearable.scoreBearing, false)
     assert.equal(productCalculatorView.wearable.scorePolicy.productStatus, 'context-only')
     assert.equal(productCalculatorView.wearable.scorePolicy.productWearableMultiplier, 0)
-    assert.equal(productCalculatorView.wearable.candidateFeatureCount, 8)
+    assert.equal(productCalculatorView.wearable.candidateFeatureCount, 9)
     assert.equal(productCalculatorView.wearable.readyFeatureKeys.includes('activity-volume'), true)
+    assert.equal(productCalculatorView.wearable.missingFeatureKeys.includes('actigraphy-activity-counts'), true)
     assert.equal(productCalculatorView.wearable.features.some((feature) => feature.featureKey === 'resting-heart-rate'), true)
 
     const productCalculatorViewWithPayloadRoot = requireData(await runSliceCli<MurphAgePublicCalculatorView>([
@@ -2033,8 +2035,9 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(researchCalculatorView.featureDrivers.younger.some((driver) => driver.metricKey === 'hba1c'), true)
     assert.equal(researchCalculatorView.featureDrivers.older.every((driver) => driver.direction === 'older'), true)
     assert.equal(researchCalculatorView.featureDrivers.younger.every((driver) => driver.direction === 'younger'), true)
-    assert.equal(researchCalculatorView.wearable.candidateFeatureCount, 8)
+    assert.equal(researchCalculatorView.wearable.candidateFeatureCount, 9)
     assert.equal(researchCalculatorView.wearable.readyFeatureKeys.includes('activity-volume'), true)
+    assert.equal(researchCalculatorView.wearable.missingFeatureKeys.includes('actigraphy-activity-counts'), true)
     assert.equal(
       researchCalculatorView.wearable.scorePolicy.requiredPromotionSignals.includes(
         'deployable-parameterization-authorized',
