@@ -1711,8 +1711,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("accepts a level-triggered lock loser only after committed dirty state exists", async () => {
-    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([{ acquired: false }]);
+  it("coalesces level-triggered webhooks after committed dirty state exists", async () => {
     mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -1736,8 +1735,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
-  it("returns retryable busy for a level-triggered lock loser before dirty state commits", async () => {
-    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([{ acquired: false }]);
+  it("accepts level-triggered webhooks before dirty state commits", async () => {
     mocks.hasPendingDirtyConnection.mockResolvedValueOnce(false);
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -1751,16 +1749,13 @@ describe("appendHostedDeviceSyncWake", () => {
       }),
     );
 
-    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
-      code: "WEBHOOK_ACCEPTANCE_BUSY",
-      httpStatus: 503,
-      retryable: true,
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
     });
 
-    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
-    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
-    expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
   });
 
   it("keeps hosted webhook traces completed when post-commit dirty wake Temporal signal fails", async () => {
@@ -2286,7 +2281,7 @@ describe("appendHostedDeviceSyncWake", () => {
     });
   });
 
-  it("returns retryable busy instead of accepting an unpersisted Junction payload webhook", async () => {
+  it("accepts durable Junction payload webhooks without a connection acceptance lock", async () => {
     const webhookDataJson = JSON.stringify({
       data: [
         {
@@ -2298,7 +2293,6 @@ describe("appendHostedDeviceSyncWake", () => {
       ],
       sourceProviderSlug: "garmin",
     });
-    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([{ acquired: false }]);
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
         onWebhookAccepted?: (value: unknown) => Promise<void> | void;
@@ -2315,6 +2309,7 @@ describe("appendHostedDeviceSyncWake", () => {
           },
           now: "2026-05-26T12:00:00.000Z",
           provider: {},
+          claimToken: "claim-token",
           traceId: "trace_junction_payload_busy",
           webhook: {
             acceptanceMode: "durable_webhook_work",
@@ -2361,17 +2356,18 @@ describe("appendHostedDeviceSyncWake", () => {
       }),
     );
 
-    await expect(controlPlane.handleWebhook("junction")).rejects.toMatchObject({
-      code: "WEBHOOK_ACCEPTANCE_BUSY",
-      httpStatus: 503,
-      retryable: true,
+    await expect(controlPlane.handleWebhook("junction")).resolves.toMatchObject({
+      accepted: true,
     });
 
-    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
-    expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "junction",
+      "trace_junction_payload_busy",
+      "claim-token",
+      mocks.prismaTx,
+    );
   });
 
   it("preserves split Junction daily data webhook payload chunks across the hosted dirty handoff", async () => {

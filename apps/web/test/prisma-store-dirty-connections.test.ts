@@ -89,6 +89,7 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     const resourceEncrypted = createdPayloadData?.[0]?.resourceEncrypted;
 
     expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
+    expect(dirtyResource?.dirtyPayloadId).toBe(createdPayloadData?.[0]?.id);
     expect(dirtyResource?.payload?.ordinary).toHaveLength(512);
     expect(compactDirtyJson).not.toContain("webhookDataJson");
     expect(compactDirtyJson.length).toBeLessThan(128);
@@ -173,13 +174,102 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
     expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        dirtyRevision: {
-          gt: 1n,
-          lte: 3n,
-        },
         userId: "member_123",
       }),
     }));
+  });
+
+  it("deletes only explicitly acknowledged durable payload ids", async () => {
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const remainingPayloadResource = {
+      count: 1,
+      dirtyPayloadId: "dsp_payload_remaining",
+      jobKind: "resource",
+      payload: {
+        webhookDataJson: JSON.stringify({ source: "garmin", window: "remaining" }),
+      },
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-05-26T12:10:00.000Z",
+      windowStart: "2026-05-26T12:00:00.000Z",
+    };
+    const remainingResourceEncrypted = await sealHostedDeviceSyncDirtyPayloadJson({
+      connectionId: "dsc_junction_123",
+      dirtyRevision: 3n,
+      payloadId: "dsp_payload_remaining",
+      provider: "junction",
+      userId: "member_123",
+      value: remainingPayloadResource,
+    });
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        findFirst: vi.fn()
+          .mockResolvedValueOnce({
+            connectionId: "dsc_junction_123",
+            dirtyRevision: 3n,
+            latestDirtyAt: dirtyAt,
+            processedRevision: 1n,
+            userId: "member_123",
+          })
+          .mockResolvedValueOnce({
+            connectionId: "dsc_junction_123",
+            createdAt: dirtyAt,
+            dirtyResourcesJson: {},
+            dirtyRevision: 3n,
+            eventCount: 5n,
+            firstDirtyAt: dirtyAt,
+            latestDirtyAt: dirtyAt,
+            latestEventType: "daily.data.steps.created",
+            latestResourceCategory: "timeseries",
+            latestTraceId: "trace_junction_123",
+            processedRevision: 3n,
+            provider: "junction",
+            resourceCategoryCountsJson: {},
+            sourceProviderCountsJson: {},
+            updatedAt: dirtyAt,
+            userId: "member_123",
+            windowEnd: null,
+            windowStart: null,
+          }),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deviceSyncDirtyPayload: {
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+        findMany: vi.fn(async () => [
+          {
+            connectionId: "dsc_junction_123",
+            dirtyRevision: 3n,
+            id: "dsp_payload_remaining",
+            provider: "junction",
+            resourceEncrypted: remainingResourceEncrypted,
+          },
+        ]),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+    const result = await store.markDirtyConnectionProcessed({
+      connectionId: "dsc_junction_123",
+      processedDirtyPayloadIds: ["dsp_payload_done"],
+      processedRevision: 3n,
+      userId: "member_123",
+    });
+
+    expect(prisma.deviceSyncDirtyPayload.deleteMany).toHaveBeenCalledWith({
+      where: {
+        connectionId: "dsc_junction_123",
+        id: {
+          in: ["dsp_payload_done"],
+        },
+        userId: "member_123",
+      },
+    });
+    const dirtyResource = Object.values(result?.dirtyResources ?? {})[0];
+    expect(dirtyResource?.dirtyPayloadId).toBe("dsp_payload_remaining");
+    expect(dirtyResource?.payload?.webhookDataJson)
+      .toBe(remainingPayloadResource.payload.webhookDataJson);
   });
 
   it("removes durable payload rows after their dirty revision is acknowledged", async () => {

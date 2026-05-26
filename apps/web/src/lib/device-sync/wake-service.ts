@@ -45,7 +45,6 @@ import {
   sha256Hex,
   toIsoTimestamp,
 } from "./shared";
-import { tryAcquireHostedWebhookAcceptanceLockTx } from "./webhook-acceptance-lock";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -738,15 +737,10 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  const result = await input.store.prisma.$transaction(async (tx) => {
-    const lockAcquired = await tryAcquireHostedWebhookAcceptanceLockTx({
-      prisma: tx,
-      connectionId: input.connectionId,
-    });
-
-    // Level webhooks may be coalesced only after committed dirty state exists.
-    // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
-    if (!lockAcquired) {
+  const result = await retryHostedWebhookAcceptanceOnDirtyContention(async () =>
+    input.store.prisma.$transaction(async (tx) => {
+      // Level webhooks may be coalesced only after committed dirty state exists.
+      // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
       if (
         input.acceptanceMode === "level_dirty_hint"
         && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
@@ -757,85 +751,106 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         };
       }
 
-      throw deviceSyncError({
-        code: "WEBHOOK_ACCEPTANCE_BUSY",
-        message: "Webhook acceptance is already in progress for this connection. Retry later.",
-        retryable: true,
-        httpStatus: 503,
+      const dirtyUpdate = await input.store.upsertDirtyConnection({
+        connectionId: input.connectionId,
+        dirtyAt: input.occurredAt,
+        eventType: input.eventType,
+        provider: input.provider,
+        resourceCategory: input.resourceCategory ?? null,
+        resources: input.dirtyResources,
+        traceId: input.traceId,
+        tx,
+        userId: input.userId,
       });
-    }
+      await input.store.createSignal({
+        userId: input.userId,
+        connectionId: input.connectionId,
+        provider: input.provider,
+        kind: "webhook_hint",
+        occurredAt: input.occurredAt,
+        traceId: input.traceId,
+        eventType: input.eventType,
+        resourceCategory: input.resourceCategory ?? null,
+        createdAt: input.acceptedAt,
+        tx,
+      });
 
-    if (
-      input.acceptanceMode === "level_dirty_hint"
-      && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
-    ) {
       await completeHostedWebhookTraceTx(input, tx);
+
+      if (dirtyUpdate.shouldRequestWake) {
+        const wake = buildHostedDeviceSyncWake({
+          connectionId: input.connectionId,
+          eventId: buildHostedDeviceSyncDirtyWakeEventId({
+            connectionId: input.connectionId,
+            dedupeKey: `dirty-revision:${dirtyUpdate.dirty.dirtyRevision.toString()}`,
+            occurredAt: input.occurredAt,
+            provider: input.provider,
+            traceId: input.traceId,
+            userId: input.userId,
+          }),
+          hint: buildHostedDeviceSyncDirtyWakeHint(input),
+          occurredAt: input.occurredAt,
+          provider: input.provider,
+          source: "webhook-hint",
+          traceId: input.traceId,
+          userId: input.userId,
+        });
+        const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+          envelope: wake,
+          tx,
+        });
+        return {
+          mailboxItemId: mailboxAppend.item.id,
+        };
+      }
+
       return {
         mailboxItemId: null,
       };
-    }
-
-    const dirtyUpdate = await input.store.upsertDirtyConnection({
-      connectionId: input.connectionId,
-      dirtyAt: input.occurredAt,
-      eventType: input.eventType,
-      provider: input.provider,
-      resourceCategory: input.resourceCategory ?? null,
-      resources: input.dirtyResources,
-      traceId: input.traceId,
-      tx,
-      userId: input.userId,
-    });
-    await input.store.createSignal({
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: input.provider,
-      kind: "webhook_hint",
-      occurredAt: input.occurredAt,
-      traceId: input.traceId,
-      eventType: input.eventType,
-      resourceCategory: input.resourceCategory ?? null,
-      createdAt: input.acceptedAt,
-      tx,
-    });
-
-    await completeHostedWebhookTraceTx(input, tx);
-
-    if (dirtyUpdate.shouldRequestWake) {
-      const wake = buildHostedDeviceSyncWake({
-        connectionId: input.connectionId,
-        eventId: buildHostedDeviceSyncDirtyWakeEventId({
-          connectionId: input.connectionId,
-          dedupeKey: `dirty-revision:${dirtyUpdate.dirty.dirtyRevision.toString()}`,
-          occurredAt: input.occurredAt,
-          provider: input.provider,
-          traceId: input.traceId,
-          userId: input.userId,
-        }),
-        hint: buildHostedDeviceSyncDirtyWakeHint(input),
-        occurredAt: input.occurredAt,
-        provider: input.provider,
-        source: "webhook-hint",
-        traceId: input.traceId,
-        userId: input.userId,
-      });
-      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      });
-      return {
-        mailboxItemId: mailboxAppend.item.id,
-      };
-    }
-
-    return {
-      mailboxItemId: null,
-    };
-  });
+    }));
 
   if (result.mailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.mailboxItemId);
   }
+}
+
+const HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS = 12;
+const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
+
+async function retryHostedWebhookAcceptanceOnDirtyContention<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; attempt < HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (
+        !isHostedDirtyStateContentionError(error)
+        || attempt === HOSTED_WEBHOOK_ACCEPTANCE_DIRTY_RETRY_ATTEMPTS - 1
+      ) {
+        throw error;
+      }
+      await waitForHostedWebhookAcceptanceRetry(attempt);
+    }
+  }
+
+  throw new Error("Hosted device-sync webhook acceptance retry loop exhausted unexpectedly.");
+}
+
+function isHostedDirtyStateContentionError(error: unknown): boolean {
+  return Boolean(
+    typeof error === "object"
+      && error !== null
+      && "code" in error
+      && (error as { code?: unknown }).code === HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE,
+  );
+}
+
+async function waitForHostedWebhookAcceptanceRetry(attempt: number): Promise<void> {
+  const delayMs = Math.min(25, 2 + attempt * 2 + Math.floor(Math.random() * 3));
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 async function completeHostedWebhookTraceTx(

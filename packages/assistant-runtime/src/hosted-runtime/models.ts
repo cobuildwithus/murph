@@ -135,6 +135,7 @@ export type HostedSystemMailboxPostCheckpointRecord =
       connectionId: string;
       kind: "device-sync.dirty-processed";
       nextWakeAt?: string | null;
+      processedDirtyPayloadIds?: string[];
       processedRevision: string;
     };
 

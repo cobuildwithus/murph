@@ -1321,11 +1321,15 @@ function createHostedWebDeviceSyncPort(input: {
     },
     async ackDirtyStateProcessed(runtimeInput: {
       connectionId: string;
+      processedDirtyPayloadIds?: string[];
       processedRevision: string;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           connectionId: runtimeInput.connectionId,
+          ...(runtimeInput.processedDirtyPayloadIds
+            ? { processedDirtyPayloadIds: runtimeInput.processedDirtyPayloadIds }
+            : {}),
           processedRevision: runtimeInput.processedRevision,
           userId: input.boundUserId,
         },

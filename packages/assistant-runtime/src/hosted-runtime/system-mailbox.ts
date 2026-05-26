@@ -549,6 +549,16 @@ function readRequiredString(value: unknown, label: string): string {
   return value;
 }
 
+function readOptionalStringArray(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array when present.`);
+  }
+  return value.map((entry, index) => readRequiredString(entry, `${label}[${index}]`));
+}
+
 function readNonNegativeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     throw new TypeError(`${label} must be a non-negative safe integer.`);
@@ -586,6 +596,14 @@ function parseHostedSystemMailboxRecordRequest(
               "hosted system mailbox postCheckpointRecord nextWakeAt",
             ),
           }),
+      ...(record.processedDirtyPayloadIds === undefined
+        ? {}
+        : {
+            processedDirtyPayloadIds: readOptionalStringArray(
+              record.processedDirtyPayloadIds,
+              "hosted system mailbox postCheckpointRecord processedDirtyPayloadIds",
+            ),
+          }),
       processedRevision: readRequiredString(
         record.processedRevision,
         "hosted system mailbox postCheckpointRecord processedRevision",
@@ -614,6 +632,9 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       }
       const response = await input.runtime.platform.deviceSyncPort.ackDirtyStateProcessed({
         connectionId: input.record.connectionId,
+        ...(input.record.processedDirtyPayloadIds
+          ? { processedDirtyPayloadIds: input.record.processedDirtyPayloadIds }
+          : {}),
         processedRevision: input.record.processedRevision,
       });
       return {

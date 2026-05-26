@@ -473,10 +473,17 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const dirty = await controlPlane.store.markDirtyConnectionProcessed({
     connectionId: parsed.connectionId,
+    ...(parsed.processedDirtyPayloadIds
+      ? { processedDirtyPayloadIds: parsed.processedDirtyPayloadIds }
+      : {}),
     processedRevision: BigInt(parsed.processedRevision),
     userId: input.trustedUserId,
   });
-  const stillDirty = dirty ? dirty.dirtyRevision > dirty.processedRevision : false;
+  const stillDirty = dirty
+    ? dirty.dirtyRevision > dirty.processedRevision || Object.values(dirty.dirtyResources).some((resource) =>
+      Boolean(resource.dirtyPayloadId)
+    )
+    : false;
   const hasPendingDirty = stillDirty
     || (await controlPlane.store.listPendingDirtyConnectionsForUser({
       limit: 1,

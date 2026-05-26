@@ -317,6 +317,7 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async markDirtyConnectionProcessed(input: {
     connectionId: string;
+    processedDirtyPayloadIds?: readonly string[];
     processedRevision: bigint;
     userId: string;
     tx?: HostedPrismaTransactionClient;
