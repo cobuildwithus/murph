@@ -35,6 +35,7 @@ import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
+  DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
@@ -79,6 +80,7 @@ interface NormalizationContext {
   connectionsByKey: ReadonlyMap<string, PlainObject>;
   rawArtifacts: DeviceRawArtifactPayload[];
   events: DeviceEventPayload[];
+  samples: DeviceSamplePayload[];
 }
 
 interface JunctionResourceEntry {
@@ -224,6 +226,69 @@ const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>>
   weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "bodyWeight", "body_weight", "weightKg", "weight_kg", "weight"] },
 });
 
+type JunctionSleepStage = "awake" | "light" | "deep" | "rem";
+
+const SLEEP_STAGE_VALUE_PATHS = Object.freeze([
+  "stage",
+  "sleepStage",
+  "sleep_stage",
+  "sleepStageType",
+  "sleep_stage_type",
+  "stageType",
+  "stage_type",
+  "level",
+  "state",
+  "name",
+  "type",
+  "value",
+] as const);
+const SLEEP_STAGE_START_PATHS = Object.freeze([
+  "start",
+  "startAt",
+  "start_at",
+  "startTime",
+  "start_time",
+  "startTimestamp",
+  "start_timestamp",
+  "timeStart",
+  "time_start",
+  "bedtimeStart",
+  "bedtime_start",
+] as const);
+const SLEEP_STAGE_END_PATHS = Object.freeze([
+  "end",
+  "endAt",
+  "end_at",
+  "endTime",
+  "end_time",
+  "endTimestamp",
+  "end_timestamp",
+  "timeEnd",
+  "time_end",
+  "bedtimeEnd",
+  "bedtime_end",
+  "bedtimeStop",
+  "bedtime_stop",
+] as const);
+const SLEEP_STAGE_INTERVAL_CONTAINER_PATHS = Object.freeze([
+  "stages",
+  "sleepStages",
+  "sleep_stages",
+  "sleepLevels",
+  "sleep_levels",
+  "sleepCycle",
+  "sleep_cycle",
+  "hypnogram",
+  "intervals",
+  "segments",
+  "stageIntervals",
+  "stage_intervals",
+  "levels",
+  "records",
+  "items",
+  "data",
+] as const);
+
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return junctionSnapshotSchema.parse(snapshot);
 }
@@ -234,6 +299,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
   const rawArtifacts: DeviceRawArtifactPayload[] = [];
   const events: DeviceEventPayload[] = [];
+  const samples: DeviceSamplePayload[] = [];
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -245,6 +311,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     connectionsByKey: buildConnectionsByKey(connections),
     rawArtifacts,
     events,
+    samples,
   };
 
   normalizeSummaries(snapshot.summaries, context);
@@ -255,6 +322,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     accountId: stringId(snapshot.accountId),
     importedAt,
     events,
+    samples: samples.length > 0 ? samples : undefined,
     rawArtifacts,
     provenance: stripUndefined({
       schema: "junction.snapshot.v1",
@@ -311,7 +379,7 @@ function normalizeSummaries(
           pushSleepSummary(entry, resourceContext, context);
           break;
         case "sleep_cycle":
-          // Sleep-stage cycles are preserved as raw artifacts until the event model has a structured stage family.
+          pushSleepCycle(entry, resourceContext, context);
           break;
         case "workouts":
           pushWorkoutSummary(entry, resourceContext, context);
@@ -575,6 +643,78 @@ function pushSleepSummary(
   pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS);
 }
 
+function pushSleepCycle(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+): void {
+  const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+
+  for (const [index, intervalEntry] of sleepStageIntervalEntries(entry).entries()) {
+    const stage = firstSleepStageFromPaths(intervalEntry, SLEEP_STAGE_VALUE_PATHS);
+    if (!stage) {
+      continue;
+    }
+
+    const startAtRaw = firstValueFromPaths(intervalEntry, SLEEP_STAGE_START_PATHS);
+    const endAtRaw = firstValueFromPaths(intervalEntry, SLEEP_STAGE_END_PATHS);
+    const startAt = resolveSafeTimestamp(startAtRaw, resourceContext.sourceProviderSlug);
+    const endAt = resolveSafeTimestamp(endAtRaw, resourceContext.sourceProviderSlug);
+    const durationMinutes =
+      normalizePositiveIntegerMinutes(
+        firstNumberFromPaths(intervalEntry, ["durationMinutes", "duration_minutes", "durationInMinutes", "duration_in_minutes", "minutes"]),
+      ) ??
+      normalizePositiveIntegerMinutes(
+        secondsToMinutes(
+          firstNumberFromPaths(intervalEntry, ["durationSeconds", "duration_seconds", "durationInSeconds", "duration_in_seconds", "duration"]),
+        ),
+      ) ??
+      normalizePositiveIntegerMinutes(
+        millisecondsToMinutes(
+          firstNumberFromPaths(intervalEntry, ["durationMillis", "duration_millis", "durationInMilliseconds", "duration_in_milliseconds"]),
+        ),
+      ) ??
+      normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+    const resolvedStartAt = startAt ?? subtractMinutes(endAt, durationMinutes);
+    const resolvedEndAt = endAt ?? addMinutes(startAt, durationMinutes);
+
+    if (!resolvedStartAt || !resolvedEndAt || durationMinutes === undefined) {
+      continue;
+    }
+
+    const intervalTimestamp = resolveRecordTimestamp(intervalEntry, context, resourceContext.sourceProviderSlug);
+    const stageTimestamp = withTimestampOverride(intervalTimestamp, {
+      occurredAt: resolvedStartAt,
+      recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
+      dayKey: extractIsoDatePrefix(resolvedStartAt) ?? intervalTimestamp.dayKey ?? parentTimestamp.dayKey,
+      observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
+      timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
+    });
+    const originEntry: PlainObject = { ...entry, ...intervalEntry };
+
+    context.samples.push(stripUndefined({
+      stream: "sleep_stage",
+      unit: "stage",
+      recordedAt: stageTimestamp.recordedAt,
+      dayKey: stageTimestamp.dayKey,
+      timeZone: firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
+        ?? firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      source: "device",
+      quality: "normalized",
+      externalRef: makeJunctionSleepStageExternalRef(resourceContext, originEntry, stageTimestamp, stage, index),
+      dataOrigin: buildDataOrigin(originEntry, resourceContext, stageTimestamp),
+      sample: {
+        recordedAt: stageTimestamp.recordedAt,
+        occurredAt: stageTimestamp.occurredAt,
+        stage,
+        startAt: resolvedStartAt,
+        endAt: resolvedEndAt,
+        durationMinutes,
+      },
+    }));
+  }
+}
+
 function pushWorkoutSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,
@@ -810,6 +950,22 @@ function makeJunctionExternalRef(
   );
 }
 
+function makeJunctionSleepStageExternalRef(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  stage: JunctionSleepStage,
+  index: number,
+): DeviceExternalRefPayload {
+  return makeProviderExternalRef(
+    "junction",
+    resourceContext.externalRefResourceType,
+    buildStableSleepStageResourceId(resourceContext, entry, timestamp, stage, index),
+    undefined,
+    `sleep-stage-${stage}`,
+  );
+}
+
 function buildJunctionResourceType(sourceProviderSlug: string, resourceSlug: string): string {
   return `junction-${slugify(sourceProviderSlug, "source")}-${slugify(resourceSlug, "resource")}`;
 }
@@ -871,6 +1027,35 @@ function buildStableTimeseriesResourceId(
     resourceContext.origin.sourceType,
     resourceContext.origin.sourceInstanceId,
     timestamp.observedAtRaw ?? timestamp.occurredAt,
+  ])}`;
+}
+
+function buildStableSleepStageResourceId(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  stage: JunctionSleepStage,
+  index: number,
+): string {
+  const explicitId = firstStringFromPaths(entry, [
+    "id",
+    "stageId",
+    "stage_id",
+    "resourceId",
+    "resource_id",
+    "externalId",
+    "external_id",
+  ]);
+
+  return `${resourceContext.resourceSlug}-stage-${shortHash([
+    resourceContext.resourceSlug,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    explicitId,
+    timestamp.observedAtRaw ?? timestamp.occurredAt,
+    stage,
+    index,
   ])}`;
 }
 
@@ -1090,6 +1275,34 @@ function timeseriesResourceEntries(resource: string, payload: unknown): Junction
   return grouped ?? resourceEntries(payload);
 }
 
+function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+  return collectSleepStageIntervalEntries(entry);
+}
+
+function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry));
+  }
+
+  const entry = asPlainObject(value);
+  if (!entry) {
+    return [];
+  }
+
+  if (firstSleepStageFromPaths(entry, SLEEP_STAGE_VALUE_PATHS)) {
+    return [entry];
+  }
+
+  return SLEEP_STAGE_INTERVAL_CONTAINER_PATHS.flatMap((path) => {
+    const nested = readPath(entry, path);
+    if (nested === value) {
+      return [];
+    }
+
+    return collectSleepStageIntervalEntries(nested);
+  });
+}
+
 function flattenGroupedTimeseriesEntries(resource: string, payload: unknown): JunctionResourceEntry[] | null {
   const envelope = asPlainObject(payload);
   const groups = asPlainObject(envelope?.groups);
@@ -1225,6 +1438,58 @@ function resolveTimeseriesObservationUnit(
   }
 }
 
+function firstSleepStageFromPaths(source: PlainObject | undefined, paths: readonly string[]): JunctionSleepStage | undefined {
+  for (const path of paths) {
+    const stage = normalizeJunctionSleepStage(readPath(source, path));
+    if (stage) {
+      return stage;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeJunctionSleepStage(value: unknown): JunctionSleepStage | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+
+  switch (normalized) {
+    case "awake":
+    case "wake":
+    case "waking":
+    case "wakefulness":
+      return "awake";
+    case "light":
+    case "light_sleep":
+    case "core":
+    case "core_sleep":
+    case "n1":
+    case "n2":
+      return "light";
+    case "deep":
+    case "deep_sleep":
+    case "slow_wave":
+    case "slow_wave_sleep":
+    case "sws":
+    case "n3":
+      return "deep";
+    case "rem":
+    case "rem_sleep":
+    case "rapid_eye_movement":
+    case "rapid_eye_movement_sleep":
+      return "rem";
+    default:
+      return undefined;
+  }
+}
+
 function normalizeTimestamp(value: unknown): string | undefined {
   if (value instanceof Date && Number.isFinite(value.getTime())) {
     return value.toISOString();
@@ -1344,6 +1609,32 @@ function millisecondsToMinutes(value: unknown): number | undefined {
   }
 
   return numeric / 60000;
+}
+
+function addMinutes(timestamp: string | undefined, minutes: number | undefined): string | undefined {
+  if (!timestamp || minutes === undefined) {
+    return undefined;
+  }
+
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) {
+    return undefined;
+  }
+
+  return new Date(time + minutes * 60000).toISOString();
+}
+
+function subtractMinutes(timestamp: string | undefined, minutes: number | undefined): string | undefined {
+  if (!timestamp || minutes === undefined) {
+    return undefined;
+  }
+
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) {
+    return undefined;
+  }
+
+  return new Date(time - minutes * 60000).toISOString();
 }
 
 function metersToKilometers(value: unknown): number | undefined {
