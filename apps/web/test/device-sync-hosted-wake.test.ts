@@ -2484,7 +2484,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_whoop_123",
           webhook: {
-            acceptanceMode: "level_dirty_hint",
+            acceptanceMode: "durable_webhook_work",
             eventType: "workout.updated",
             jobs: [
               {

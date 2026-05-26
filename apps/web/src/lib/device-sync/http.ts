@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import {
   createJsonRouteHelpers,
   mergeJsonHeaders,
+  type JsonErrorMapping,
 } from "../http";
 
 const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
@@ -88,13 +89,14 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function matchDeviceSyncError(error: unknown) {
+function matchDeviceSyncError(error: unknown): JsonErrorMapping | null {
   if (!isDeviceSyncError(error)) {
     return null;
   }
 
   return {
     error: buildPublicDeviceSyncErrorPayload(error).error,
+    ...(error.retryable ? { log: { level: "warn" } } : {}),
     status: error.httpStatus,
   };
 }

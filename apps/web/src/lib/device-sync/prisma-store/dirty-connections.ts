@@ -62,6 +62,7 @@ const DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_LENGTH = 64_000;
 const DIRTY_RESOURCE_PAYLOAD_BLOCKED_KEY_PATTERN =
   /(?:authorization|authheader|bearer|clientsecret|cookie|credential|password|secret|token|apikey)/iu;
 const DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS = 12;
+const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 250;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 
 export class PrismaHostedDirtyConnectionStore {
@@ -860,47 +861,42 @@ async function hydrateDirtyConnectionRecords(input: {
     return [];
   }
 
-  const connectionIds = input.records.map((record) => record.connectionId);
-  const dirtyByConnectionId = new Map(input.records.map((record) => [record.connectionId, record]));
-  const payloadRows = await input.prisma.deviceSyncDirtyPayload.findMany({
-    orderBy: [
-      { createdAt: "asc" },
-      { id: "asc" },
-    ],
-    select: {
-      connectionId: true,
-      dirtyRevision: true,
-      id: true,
-      provider: true,
-      resourceEncrypted: true,
-    },
-    where: {
-      connectionId: {
-        in: connectionIds,
-      },
-      userId: input.userId,
-    },
-  });
   const payloadsByConnectionId = new Map<string, HostedDeviceSyncDirtyResource[]>();
 
-  for (const row of payloadRows) {
-    const dirty = dirtyByConnectionId.get(row.connectionId);
-    if (!dirty) {
-      continue;
-    }
-
-    const resource = await readDirtyPayloadResourceJson({
-      row,
-      tx: input.prisma,
-      userId: input.userId,
+  for (const dirty of input.records) {
+    const payloadRows = await input.prisma.deviceSyncDirtyPayload.findMany({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      select: {
+        connectionId: true,
+        dirtyRevision: true,
+        id: true,
+        provider: true,
+        resourceEncrypted: true,
+      },
+      take: DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION,
+      where: {
+        connectionId: dirty.connectionId,
+        userId: input.userId,
+      },
     });
-    if (!resource) {
-      continue;
-    }
 
-    const payloads = payloadsByConnectionId.get(row.connectionId) ?? [];
-    payloads.push(resource);
-    payloadsByConnectionId.set(row.connectionId, payloads);
+    for (const row of payloadRows) {
+      const resource = await readDirtyPayloadResourceJson({
+        row,
+        tx: input.prisma,
+        userId: input.userId,
+      });
+      if (!resource) {
+        continue;
+      }
+
+      const payloads = payloadsByConnectionId.get(dirty.connectionId) ?? [];
+      payloads.push(resource);
+      payloadsByConnectionId.set(dirty.connectionId, payloads);
+    }
   }
 
   return input.records.map((record) =>
