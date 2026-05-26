@@ -1146,13 +1146,14 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(response.connections[0]?.credential).toEqual({
       credentialMetadata: {},
-      kind: "none",
+      kind: "oauth_tokens_redacted",
+      tokenVersion: 3,
     });
     expect(JSON.stringify(response)).not.toContain("stored-access-token");
     expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
   });
 
-  it("withholds runtime OAuth material for terminal hosted connection statuses", async () => {
+  it("redacts runtime OAuth material for terminal hosted connection statuses", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         status: "reauthorization_required",
@@ -1180,7 +1181,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(response.connections[0]?.credential).toEqual({
       credentialMetadata: {},
-      kind: "none",
+      kind: "oauth_tokens_redacted",
+      tokenVersion: 3,
     });
     expect(JSON.stringify(response)).not.toContain("stored-access-token");
     expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
