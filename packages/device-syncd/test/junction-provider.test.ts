@@ -2344,6 +2344,87 @@ test("Junction timeseries resource jobs import only closed daily windows", async
   );
 });
 
+test("Junction timeseries resource jobs yield with a follow-up job between daily imports", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/heartrate/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              start: new URL(url).searchParams.get("start_date"),
+              value: 72,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const importedSnapshots: unknown[] = [];
+  const job = createJob("resource", {
+    resource: "heartrate",
+    resourceCategory: "timeseries",
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      shouldYield: () => importedSnapshots.length > 0,
+    }),
+    job,
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(
+    importedSnapshots.map((snapshot) => {
+      const entry = snapshot as { windowEnd?: string; windowStart?: string };
+      return [entry.windowStart, entry.windowEnd];
+    }),
+    [["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"]],
+  );
+  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/")).length, 1);
+  assert.deepEqual(result.scheduledJobs, [
+    {
+      kind: "resource",
+      payload: {
+        resource: "heartrate",
+        resourceCategory: "timeseries",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+      priority: job.priority,
+      dedupeKey: sha256ForTest(JSON.stringify([
+        "junction",
+        "yield-follow-up",
+        "2026-04-02T00:00:00.000Z",
+        "2026-04-03T00:00:00.000Z",
+        null,
+        null,
+        null,
+        "heartrate",
+        "timeseries",
+        null,
+      ])),
+    },
+  ]);
+});
+
 test("Junction completeConnection falls back to the callback user_id when no seed is present", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

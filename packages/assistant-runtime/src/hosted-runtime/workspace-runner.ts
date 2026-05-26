@@ -142,6 +142,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
 
@@ -360,16 +361,21 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
+  let foregroundConversationInputImported = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
+      onForegroundConversationInputImported: () => {
+        foregroundConversationInputImported = true;
+      },
     });
   const assistantPhaseInput = {
     initialMailboxImport,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
+    shouldYieldBackgroundMaintenance: () => foregroundConversationInputImported,
     workspace: input.workspace,
   };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
@@ -481,6 +487,7 @@ function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): voi
 function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   input: HostedWorkspaceRunnerInput;
+  onForegroundConversationInputImported?: (() => void) | null;
 }): {
   stop(): Promise<void>;
 } {
@@ -540,6 +547,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           phase: "active_turn_input",
           signal: controller.signal,
         });
+        if (hasHostedMailboxImportAssistantInput(result)) {
+          input.onForegroundConversationInputImported?.();
+        }
         await notifyHostedActiveTurnInputForMailboxImport({
           input: input.input,
           result,
@@ -566,6 +576,12 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       await loop.catch(() => undefined);
     },
   };
+}
+
+function hasHostedMailboxImportAssistantInput(
+  result: HostedMailboxImportCheckpointResult,
+): boolean {
+  return (result.importResult.assistantInputIds?.length ?? 0) > 0;
 }
 
 async function notifyHostedActiveTurnInputForMailboxImport(input: {

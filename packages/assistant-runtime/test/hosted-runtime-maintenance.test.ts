@@ -1229,6 +1229,52 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("yields device-sync worker draining between jobs when requested", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValue(0);
+    const shouldYield = vi.fn(() => drainWorker.mock.calls.length > 0);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      runSchedulerOnce,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_yield_device_sync",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        shouldYield,
+      },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T02:00:00.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 1,
+      skipped: false,
+    });
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(shouldYield).toHaveBeenCalledTimes(2);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("writes sanitized durable logs for newly failed device-sync jobs", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 1);
@@ -1968,12 +2014,16 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
 
 describe("runHostedDeviceSyncWakeLane", () => {
   it("runs only the hosted device-sync lane", async () => {
+    const drainWorker = vi.fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValue(0);
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close: vi.fn(),
-      drainWorker: vi.fn(async () => 1),
+      drainWorker,
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
       runSchedulerOnce: vi.fn(async () => undefined),
     });
+    const shouldYieldDeviceSync = vi.fn(() => false);
 
     const result = await runHostedDeviceSyncWakeLane({
       deviceSyncPort: {
@@ -1998,6 +2048,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       resolvedConfig: {
         deviceSync: DEVICE_SYNC_CONFIG,
       },
+      shouldYieldDeviceSync,
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
     });
@@ -2010,6 +2061,8 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
+    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(shouldYieldDeviceSync).toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
   });
 });

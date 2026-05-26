@@ -49,6 +49,7 @@ export interface DeviceSyncServiceConfig {
   workerBatchSize?: number;
   schedulerPollMs?: number;
   log?: DeviceSyncLogger;
+  shouldYieldJobExecution?: (() => boolean) | null;
 }
 
 export interface DeviceSyncJobFailureDiagnosticDetails {
@@ -580,6 +581,7 @@ export interface ProviderScheduleResult {
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
+  shouldYield?(): boolean;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(snapshot: unknown): Promise<unknown>;

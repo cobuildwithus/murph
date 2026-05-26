@@ -1,6 +1,6 @@
 # Hosted device-sync dirty payload preseal
 
-Status: active
+Status: completed
 Created: 2026-05-26
 Updated: 2026-05-26
 
@@ -70,11 +70,16 @@ Updated: 2026-05-26
 
 ## Verification
 
-- Commands to run:
-- `pnpm --dir apps/web test -- test/prisma-store-dirty-connections.test.ts`
-- `pnpm test:diff apps/web/src/lib/device-sync/prisma-store/dirty-connections.ts apps/web/test/prisma-store-dirty-connections.test.ts`
-- `pnpm typecheck`
-- `git diff --check`
-- Expected outcomes:
-- Focused tests and diff-aware verification pass without printing payloads or
-  secrets.
+- Passed:
+  - `pnpm --dir apps/web test -- test/prisma-store-dirty-connections.test.ts`
+  - `pnpm typecheck`
+  - `pnpm test:diff apps/web/src/lib/device-sync/prisma-store/dirty-connections.ts apps/web/test/prisma-store-dirty-connections.test.ts`
+  - `git diff --check`
+- Audit outcomes:
+  - `security-privacy-review`: no findings.
+  - `coverage-write`: added stale preseal revision retry proof.
+  - `task-finish-review`: no findings.
+- Note: scoped `scripts/finish-task` commit is blocked by overlapping active
+  hydration-cap edits in the same dirty-connection files, so the plan is being
+  closed without a final scoped commit per workflow policy.
+Completed: 2026-05-26
