@@ -22,6 +22,7 @@ import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
   type HostedDeviceConnectionSource,
+  type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
 } from "./prisma-store/sources";
 import type {
@@ -55,6 +56,7 @@ export {
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
   type HostedDeviceConnectionSource,
+  type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
 } from "./prisma-store/sources";
 export type {
@@ -312,6 +314,12 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertHostedDeviceConnectionSourceInput,
   ): Promise<HostedDeviceConnectionSource> {
     return this.sources.upsertConnectionSource(input);
+  }
+
+  async markConnectionSourcesDisconnected(
+    input: MarkHostedDeviceConnectionSourcesDisconnectedInput,
+  ): Promise<number> {
+    return this.sources.markConnectionSourcesDisconnected(input);
   }
 
   async listConnectionSources(

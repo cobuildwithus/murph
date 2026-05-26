@@ -52,9 +52,21 @@ export interface JunctionProviderConnection {
 
 export interface JunctionWindowInput {
   resource: string;
+  sourceProviderSlug?: string | null;
   userId: string;
   windowStart: string;
   windowEnd: string;
+}
+
+export interface JunctionIntrospectionInput {
+  sourceProviderSlug?: string | null;
+  userId: string;
+  userLimit?: number;
+}
+
+export interface JunctionRefreshUserDataInput {
+  timeoutSeconds?: number | null;
+  userId: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -226,13 +238,48 @@ export class JunctionClient {
   }
 
   async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {
+    const apiResource = resolveJunctionTimeseriesApiResource(input.resource);
     return this.fetchWindowedCollection(
-      `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(input.resource)}/grouped`,
+      `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(apiResource)}/grouped`,
       input,
       {
         endpointKind: "junction_timeseries_collection",
         extractRecords: extractTimeseriesRecords,
       },
+    );
+  }
+
+  async introspectResources(input: JunctionIntrospectionInput): Promise<unknown> {
+    return this.requestJson<unknown>(
+      "GET",
+      `/v2/introspect/resources?${buildJunctionIntrospectionSearch(input).toString()}`,
+      undefined,
+      { endpointKind: "junction_introspect_resources" },
+    );
+  }
+
+  async introspectHistoricalPull(input: JunctionIntrospectionInput): Promise<unknown> {
+    return this.requestJson<unknown>(
+      "GET",
+      `/v2/introspect/historical_pull?${buildJunctionIntrospectionSearch(input).toString()}`,
+      undefined,
+      { endpointKind: "junction_introspect_historical_pull" },
+    );
+  }
+
+  async refreshUserData(input: JunctionRefreshUserDataInput): Promise<unknown> {
+    const search = new URLSearchParams();
+    const timeoutSeconds = normalizeJunctionRefreshTimeoutSeconds(input.timeoutSeconds);
+    if (timeoutSeconds !== null) {
+      search.set("timeout", String(timeoutSeconds));
+    }
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+
+    return this.requestJson<unknown>(
+      "POST",
+      `/v2/user/refresh/${encodeURIComponent(input.userId)}${suffix}`,
+      undefined,
+      { endpointKind: "junction_user_refresh" },
     );
   }
 
@@ -263,9 +310,13 @@ export class JunctionClient {
         start_date: toDateParameter(input.windowStart),
         end_date: toDateParameter(input.windowEnd),
       });
+      const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
+      if (sourceProviderSlug) {
+        search.set("provider", sourceProviderSlug);
+      }
 
       if (cursor) {
-        search.set("cursor", cursor);
+        search.set("next_cursor", cursor);
       }
 
       const payload = await this.requestJson<unknown>(
@@ -417,6 +468,10 @@ function resolveJunctionEndpointKind(path: string): string {
     return "junction_link_token_create";
   }
 
+  if (pathname.startsWith("/v2/user/refresh/")) {
+    return "junction_user_refresh";
+  }
+
   if (pathname.startsWith("/v2/user/providers/")) {
     return "junction_user_providers";
   }
@@ -429,7 +484,39 @@ function resolveJunctionEndpointKind(path: string): string {
     return "junction_timeseries_collection";
   }
 
+  if (pathname === "/v2/introspect/resources") {
+    return "junction_introspect_resources";
+  }
+
+  if (pathname === "/v2/introspect/historical_pull") {
+    return "junction_introspect_historical_pull";
+  }
+
   return "junction_api";
+}
+
+function buildJunctionIntrospectionSearch(input: JunctionIntrospectionInput): URLSearchParams {
+  const search = new URLSearchParams({
+    user_id: input.userId,
+    user_limit: String(input.userLimit ?? 1),
+  });
+  const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
+  if (sourceProviderSlug) {
+    search.set("provider", sourceProviderSlug);
+  }
+  return search;
+}
+
+function resolveJunctionTimeseriesApiResource(resource: string): string {
+  return resource === "weight" ? "body_weight" : resource;
+}
+
+function normalizeJunctionRefreshTimeoutSeconds(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(5, Math.min(60, Math.trunc(value)));
 }
 
 function safeProviderPathname(path: string): string {

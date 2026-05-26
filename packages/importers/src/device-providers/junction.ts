@@ -185,6 +185,36 @@ const WORKOUT_METRICS: readonly MetricDescriptor[] = [
 ];
 
 const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>> = Object.freeze({
+  steps: {
+    metric: "daily-steps",
+    unit: "count",
+    title: "Junction steps",
+    paths: ["value", "steps", "step_count", "daily_steps"],
+  },
+  heartrate: {
+    metric: "average-heart-rate",
+    unit: "bpm",
+    title: "Junction heart rate",
+    paths: ["value", "heartRate", "heart_rate", "heartrate", "averageHeartRate", "average_heart_rate"],
+  },
+  hrv: {
+    metric: "hrv",
+    unit: "ms",
+    title: "Junction HRV",
+    paths: ["value", "hrv", "hrvRmssd", "hrv_rmssd", "rmssd"],
+  },
+  respiratory_rate: {
+    metric: "respiratory-rate",
+    unit: "breaths_per_minute",
+    title: "Junction respiratory rate",
+    paths: ["value", "respiratoryRate", "respiratory_rate", "breathingRate", "breathing_rate"],
+  },
+  blood_oxygen: {
+    metric: "spo2",
+    unit: "%",
+    title: "Junction blood oxygen",
+    paths: ["value", "spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"],
+  },
   distance: { metric: "distance", unit: "m", title: "Junction distance", paths: ["value", "distance", "distanceMeters", "distance_meters"] },
   weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "weightKg", "weight_kg", "weight"] },
 });
@@ -342,7 +372,11 @@ function normalizeTimeseries(
         dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
         fields: {
           metric: observationDescriptor.metric,
-          unit: firstStringFromPaths(entry, ["unit"]) ?? observationDescriptor.unit,
+          unit: resolveTimeseriesObservationUnit(
+            resource,
+            firstStringFromPaths(entry, ["unit"]),
+            observationDescriptor.unit,
+          ),
           value,
         },
       }));
@@ -1047,6 +1081,55 @@ function normalizeResourceKey(value: string): string | undefined {
     return "blood_oxygen";
   }
   return key.length > 0 ? key : undefined;
+}
+
+function resolveTimeseriesObservationUnit(
+  resource: string,
+  unit: string | undefined,
+  fallback: string,
+): string {
+  const normalized = unit?.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  switch (resource) {
+    case "blood_oxygen":
+      return [
+        "%",
+        "percent",
+        "percentage",
+        "spo2",
+        "sp_o2",
+        "sp-o2",
+        "blood_oxygen",
+        "oxygen_saturation",
+        "spo2_percent",
+      ].includes(normalized)
+        ? "%"
+        : fallback;
+    case "heartrate":
+      return normalized === "bpm" ? "bpm" : fallback;
+    case "hrv":
+      return ["ms", "millisecond", "milliseconds", "rmssd"].includes(normalized)
+        ? "ms"
+        : fallback;
+    case "respiratory_rate":
+      return [
+        "bpm",
+        "rpm",
+        "breaths/min",
+        "breaths/minute",
+        "breaths per minute",
+        "breaths_per_minute",
+      ].includes(normalized)
+        ? "breaths_per_minute"
+        : fallback;
+    case "steps":
+      return normalized === "count" ? "count" : fallback;
+    default:
+      return unit ?? fallback;
+  }
 }
 
 function normalizeTimestamp(value: unknown): string | undefined {

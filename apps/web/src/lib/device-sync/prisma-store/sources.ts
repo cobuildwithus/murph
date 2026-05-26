@@ -66,6 +66,12 @@ export interface UpsertHostedDeviceConnectionSourceInput {
   tx?: HostedPrismaTransactionClient;
 }
 
+export interface MarkHostedDeviceConnectionSourcesDisconnectedInput {
+  connectionId: string;
+  now?: string;
+  tx?: HostedPrismaTransactionClient;
+}
+
 const SAFE_SOURCE_INSTANCE_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_SOURCE_PROVIDER_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_ERROR_CODE_PATTERN = /^[A-Z0-9_][A-Z0-9_-]*$/u;
@@ -154,6 +160,29 @@ export class PrismaHostedConnectionSourceStore {
     });
 
     return mapHostedConnectionSourceRecord(record);
+  }
+
+  async markConnectionSourcesDisconnected(
+    input: MarkHostedDeviceConnectionSourcesDisconnectedInput,
+  ): Promise<number> {
+    const prisma = input.tx ?? this.prisma;
+    const updatedAt = resolveSourceTimestamp(input.now, new Date());
+    const result = await prisma.deviceConnectionSource.updateMany({
+      where: {
+        connectionId: requireConnectionId(input.connectionId),
+        status: {
+          not: "disconnected",
+        },
+      },
+      data: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        status: "disconnected",
+        updatedAt,
+      },
+    });
+
+    return result.count;
   }
 
   async listConnectionSources(

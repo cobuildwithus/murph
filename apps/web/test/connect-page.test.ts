@@ -650,6 +650,52 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
+test("ConnectPage ignores disconnected Junction upstream projections on active connections", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin,oura");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_123",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "disconnected",
+          },
+          {
+            providerLabel: "Oura",
+            resourceCount: 3,
+            sourceProviderSlug: "oura",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Oura connected/u);
+  assert.match(markup, /Garmin not connected/u);
+  assert.match(markup, /aria-label="Disconnect Oura"/u);
+  assert.match(markup, /aria-label="Connect Garmin"/u);
+  assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 1);
+  assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Garmin"));
+  assert.doesNotMatch(markup, /Garmin connected/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
+});
+
 test("ConnectPage surfaces reauthorization-required sources as reconnectable", async () => {
   vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
   vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
