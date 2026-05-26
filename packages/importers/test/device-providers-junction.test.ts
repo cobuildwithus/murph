@@ -1214,6 +1214,22 @@ test("Junction sleep-cycle summaries are raw-only", () => {
     payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
     1,
   );
+  const sleepCycleArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-sleep-cycle");
+  assert.deepEqual(sleepCycleArtifact?.content, [
+    {
+      sourceProviderSlug: "garmin",
+      observedAt: "2026-04-22T07:00:00Z",
+      stages: [
+        { stage: "light", startAt: "2026-04-22T01:00:00Z", endAt: "2026-04-22T02:00:00Z" },
+        { stage: "deep", startAt: "2026-04-22T02:00:00Z", endAt: "2026-04-22T03:00:00Z" },
+      ],
+    },
+    {
+      sourceProviderSlug: "oura",
+      observedAt: "2026-04-22T08:00:00Z",
+      stageCount: 5,
+    },
+  ]);
   assert.equal(payload.events?.length ?? 0, 0);
   assert.equal(payload.samples?.length ?? 0, 0);
 });
