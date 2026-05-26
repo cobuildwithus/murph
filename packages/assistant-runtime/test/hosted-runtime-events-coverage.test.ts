@@ -164,6 +164,32 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
+  it("passes foreground-yield hooks to device-sync wake handling", async () => {
+    const runtime = createRuntime();
+    const shouldYieldDeviceSync = vi.fn(() => true);
+    const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "evt_wake_yield",
+      occurredAt: "2026-04-08T00:10:00.000Z",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    await executeHostedMailboxEvent({
+      wake: deviceSyncWake,
+      executionContext,
+      runtime,
+      runtimeEnv: {},
+      shouldYieldDeviceSync,
+      vaultRoot: "/tmp/assistant-runtime-events-coverage-yield",
+    });
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYieldDeviceSync,
+      }),
+    );
+  });
+
   it("fails closed on unexpected wake kinds", async () => {
     await expect(
       executeHostedMailboxEvent({

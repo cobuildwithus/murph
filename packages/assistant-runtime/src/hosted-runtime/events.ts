@@ -269,6 +269,7 @@ export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification?: boolean;
+  shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -298,6 +299,9 @@ export async function executeHostedMailboxEvent(input: {
     executionContext: bootstrappedExecutionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     runtime: input.runtime,
+    ...(input.shouldYieldDeviceSync
+      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+      : {}),
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
   });
@@ -323,6 +327,7 @@ async function handleHostedMailboxEvent(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -335,6 +340,9 @@ async function handleHostedMailboxEvent(input: {
     executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     runtime: input.runtime,
+    ...(input.shouldYieldDeviceSync
+      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+      : {}),
     sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
   });
@@ -348,6 +356,7 @@ async function executeHostedSystemWake(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
   >;
+  shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -376,6 +385,9 @@ async function executeHostedSystemWake(input: {
         platformEnv: input.runtime.platformEnv,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
+        ...(input.shouldYieldDeviceSync
+          ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+          : {}),
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.vaultRoot,
         wake: input.wake,

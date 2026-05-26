@@ -499,6 +499,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes the foreground-input yield hook to system mailbox maintenance", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false);
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYieldBackgroundMaintenance,
+      }),
+    );
+  });
+
   it("checkpoints a consumed alarm wake when foreground input was ingested", async () => {
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,

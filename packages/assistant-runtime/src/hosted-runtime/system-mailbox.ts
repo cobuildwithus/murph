@@ -156,6 +156,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   now?: () => string;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
@@ -196,6 +197,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       pendingItem: prepared,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
+      shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
     const processedItem: HostedSystemMailboxPendingItem = {
@@ -341,6 +343,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
   const executionContext =
@@ -355,6 +358,9 @@ async function executePendingHostedSystemMailboxItem(input: {
     forceQueueOnlyAssistantNotification: true,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    ...(input.shouldYieldBackgroundMaintenance
+      ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
+      : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
     vaultRoot: input.vaultRoot,
     wake: input.pendingItem.wake,
