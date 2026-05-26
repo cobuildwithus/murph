@@ -990,6 +990,59 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("retries remote revoke for disconnected provider-config connections without appending duplicate wakes", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const disconnectedConnection = buildHostedConnection({
+      provider: "junction",
+      status: "disconnected",
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      status: "disconnected",
+    });
+    const revokeAccess = vi.fn(async () => {});
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+      connection: {
+        id: publicConnectionId,
+        status: "disconnected",
+      },
+    });
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(revokeAccess).toHaveBeenCalledWith(expect.objectContaining({
+      credential: expect.objectContaining({
+        kind: "provider_config",
+      }),
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+    }));
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
+      connectionId: "dsc_123",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
@@ -2158,12 +2211,19 @@ describe("appendHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("junction");
 
-    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
+    const dirtyResources = (mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources ?? []) as Array<{
+      payload?: {
+        webhookDataJson?: unknown;
+      };
+      resource: string;
+      resourceCategory: string;
+      sourceProviderSlug: string | null;
+    }>;
 
-    expect(dirtyResources?.map((resource) => resource.payload?.webhookDataJson)).toEqual(webhookDataJsons);
-    expect(dirtyResources?.map((resource) => resource.resource)).toEqual(["steps", "steps"]);
-    expect(dirtyResources?.map((resource) => resource.resourceCategory)).toEqual(["timeseries", "timeseries"]);
-    expect(dirtyResources?.map((resource) => resource.sourceProviderSlug)).toEqual(["garmin", "garmin"]);
+    expect(dirtyResources.map((resource) => resource.payload?.webhookDataJson)).toEqual(webhookDataJsons);
+    expect(dirtyResources.map((resource) => resource.resource)).toEqual(["steps", "steps"]);
+    expect(dirtyResources.map((resource) => resource.resourceCategory)).toEqual(["timeseries", "timeseries"]);
+    expect(dirtyResources.map((resource) => resource.sourceProviderSlug)).toEqual(["garmin", "garmin"]);
   });
 
   it("shapes Whoop hosted dirty resources through the provider-owned allowlists", async () => {

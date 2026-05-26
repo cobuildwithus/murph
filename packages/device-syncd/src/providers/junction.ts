@@ -89,6 +89,7 @@ export {
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",
+  "sleep_cycle",
   "workouts",
   "body",
 ] as const);
@@ -97,6 +98,33 @@ type JunctionHistoricalBackfillCompletionSummaryResource =
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
 );
+const JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS = Object.freeze([
+  "sleepScore",
+  "sleep_score",
+  "score",
+  "totalSleepMinutes",
+  "total_sleep_minutes",
+  "asleep_minutes",
+  "deepMinutes",
+  "deep_minutes",
+  "remMinutes",
+  "rem_minutes",
+  "lightMinutes",
+  "light_minutes",
+  "awakeMinutes",
+  "awake_minutes",
+  "hrv",
+  "hrvRmssd",
+  "hrv_rmssd",
+  "restingHeartRate",
+  "resting_heart_rate",
+  "respiratoryRate",
+  "respiratory_rate",
+  "spo2",
+  "bloodOxygen",
+  "blood_oxygen",
+  "oxygen_saturation",
+] as const);
 const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   activity: [
     "steps",
@@ -123,32 +151,13 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "body_fat_percentage",
     "body_fat_percent",
   ],
-  sleep: [
-    "sleepScore",
-    "sleep_score",
-    "score",
-    "totalSleepMinutes",
-    "total_sleep_minutes",
-    "asleep_minutes",
-    "deepMinutes",
-    "deep_minutes",
-    "remMinutes",
-    "rem_minutes",
-    "lightMinutes",
-    "light_minutes",
-    "awakeMinutes",
-    "awake_minutes",
-    "hrv",
-    "hrvRmssd",
-    "hrv_rmssd",
-    "restingHeartRate",
-    "resting_heart_rate",
-    "respiratoryRate",
-    "respiratory_rate",
-    "spo2",
-    "bloodOxygen",
-    "blood_oxygen",
-    "oxygen_saturation",
+  sleep: JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
+  sleep_cycle: [
+    ...JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
+    "stageCount",
+    "stage_count",
+    "sleepStageCount",
+    "sleep_stage_count",
   ],
   workouts: [
     "calories",
@@ -176,6 +185,25 @@ const JUNCTION_SLEEP_END_TIMESTAMP_PATHS = Object.freeze([
   "bedtime_end",
   "bedtimeStop",
   "bedtime_stop",
+] as const);
+const JUNCTION_SLEEP_CYCLE_STAGE_ARRAY_PATHS = Object.freeze([
+  "stages",
+  "sleepStages",
+  "sleep_stages",
+  "sleepLevels",
+  "sleep_levels",
+  "segments",
+] as const);
+const JUNCTION_SLEEP_CYCLE_STAGE_DURATION_PATHS = Object.freeze([
+  "duration",
+  "durationMinutes",
+  "duration_minutes",
+  "durationSeconds",
+  "duration_seconds",
+  "durationMillis",
+  "duration_millis",
+  "durationMs",
+  "duration_ms",
 ] as const);
 const JUNCTION_WORKOUT_START_TIMESTAMP_PATHS = Object.freeze([
   "startAt",
@@ -746,8 +774,17 @@ export function createJunctionDeviceSyncProvider(
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const webhookDataRecord = parseJunctionWebhookDataJobRecord(job.payload.webhookDataJson);
-    const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
-    await projectJunctionSources(context, sourceProviders);
+    let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
+    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (projectedSourceProviders) {
+        return projectedSourceProviders;
+      }
+
+      const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
+      await projectJunctionSources(context, sourceProviders);
+      projectedSourceProviders = sourceProviders;
+      return sourceProviders;
+    };
 
     const summaries: Record<string, unknown[]> = {};
 
@@ -762,20 +799,26 @@ export function createJunctionDeviceSyncProvider(
       } else if (
         webhookDataRecord
         && hasJunctionWebhookDataJobRecords(webhookDataRecord, inferredCategory)
+        && canImportJunctionWebhookDataJobRecord({
+          record: webhookDataRecord,
+          sourceProviderSlug,
+        })
       ) {
         await importJunctionDirectResourceSnapshot(
           context,
-          sourceProviders,
+          [],
           window.windowStart,
           window.windowEnd,
           resource,
           inferredCategory,
           webhookDataRecord,
         );
+        await tryProjectJunctionSourcesBestEffort(context);
         return {
           nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
         };
       } else if (inferredCategory === "timeseries") {
+        const sourceProviders = await loadAndProjectSourceProviders();
         await importTimeseriesDailySnapshots(
           context,
           sourceProviders,
@@ -803,6 +846,7 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
+    const sourceProviders = await loadAndProjectSourceProviders();
     await context.importSnapshot({
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.id),
@@ -818,6 +862,24 @@ export function createJunctionDeviceSyncProvider(
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };
+  }
+
+  async function tryProjectJunctionSourcesBestEffort(
+    context: ProviderJobContext,
+  ): Promise<void> {
+    if (!context.upsertConnectionSource) {
+      return;
+    }
+
+    try {
+      const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
+      await projectJunctionSources(context, sourceProviders);
+    } catch (error) {
+      context.logger.warn?.(
+        "Junction source projection skipped after direct webhook import.",
+        describeJunctionSourceProjectionFailure(error),
+      );
+    }
   }
 
   function isConfiguredJunctionResource(
@@ -875,6 +937,7 @@ export function createJunctionDeviceSyncProvider(
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
       eventType,
+      externalAccountId: externalAccountSelection.userId,
       resource,
       sourceProviderSlug,
     });
@@ -1037,7 +1100,12 @@ export function createJunctionDeviceSyncProvider(
     resourceCategory: "summary" | "timeseries",
     record: Record<string, unknown>,
   ): Promise<void> {
-    const snapshots = { [resource]: [record] };
+    const redactedRecord = readPlainObject(sanitizeJunctionImportSnapshotValue(
+      record,
+      new Map(),
+      { blockedStringValues: [context.account.externalAccountId] },
+    )) ?? record;
+    const snapshots = { [resource]: [redactedRecord] };
 
     await context.importSnapshot({
       provider: "junction",
@@ -1225,6 +1293,23 @@ function readJunctionDiagnosticResponseStatus(error: unknown): number | null {
 
   const status = error.details?.status;
   return typeof status === "number" && Number.isInteger(status) ? status : null;
+}
+
+function describeJunctionSourceProjectionFailure(error: unknown): Record<string, unknown> {
+  if (isDeviceSyncError(error)) {
+    return stripUndefined({
+      errorCode: error.code,
+      provider: "junction",
+      responseStatus: readJunctionDiagnosticResponseStatus(error),
+      retryable: error.retryable,
+    });
+  }
+
+  return {
+    errorCode: "JUNCTION_SOURCE_PROJECTION_FAILED",
+    provider: "junction",
+    retryable: false,
+  };
 }
 
 function describeJunctionDiagnosticRecords(
@@ -2258,9 +2343,14 @@ function buildJunctionSourceReferenceMap(
 function sanitizeJunctionImportSnapshotValue(
   value: unknown,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+  options: { blockedStringValues?: readonly string[] } = {},
 ): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeJunctionImportSnapshotValue(entry, sourceReferences));
+    return value.map((entry) => sanitizeJunctionImportSnapshotValue(entry, sourceReferences, options));
+  }
+
+  if (typeof value === "string") {
+    return redactJunctionBlockedStringValue(value, options.blockedStringValues ?? []);
   }
 
   const record = readPlainObject(value);
@@ -2270,7 +2360,7 @@ function sanitizeJunctionImportSnapshotValue(
 
   const fallback = readJunctionSourceReference(record, sourceReferences);
   const origin = resolveJunctionOrigin(record, fallback);
-  const sanitized = stripJunctionRawSourceIdentityFields(record, sourceReferences);
+  const sanitized = stripJunctionRawSourceIdentityFields(record, sourceReferences, options);
 
   return stripUndefined({
     ...sanitized,
@@ -2306,6 +2396,7 @@ function readJunctionSourceReference(
 function stripJunctionRawSourceIdentityFields(
   record: Record<string, unknown>,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
+  options: { blockedStringValues?: readonly string[] },
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
 
@@ -2317,10 +2408,27 @@ function stripJunctionRawSourceIdentityFields(
       continue;
     }
 
-    sanitized[key] = sanitizeJunctionImportSnapshotValue(value, sourceReferences);
+    sanitized[key] = sanitizeJunctionImportSnapshotValue(value, sourceReferences, options);
   }
 
   return sanitized;
+}
+
+function redactJunctionBlockedStringValue(
+  value: string,
+  blockedValues: readonly string[],
+): string {
+  let redacted = value;
+
+  for (const rawBlockedValue of blockedValues) {
+    const blockedValue = normalizeString(rawBlockedValue);
+    if (!blockedValue || blockedValue.length < 4) {
+      continue;
+    }
+    redacted = redacted.split(blockedValue).join("[redacted]");
+  }
+
+  return redacted;
 }
 
 function normalizeJunctionImportSourceIdentityKey(key: string): string {
@@ -2677,13 +2785,19 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
     return true;
   }
 
-  if (resource === "sleep") {
-    return hasPositiveJunctionTimestampRange(
+  if (resource === "sleep" || resource === "sleep_cycle") {
+    const hasSleepRange = hasPositiveJunctionTimestampRange(
       entry,
       JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
       JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
       sourceProviderSlug,
     );
+    if (hasSleepRange) {
+      return true;
+    }
+
+    return resource === "sleep_cycle"
+      && hasUsefulJunctionSleepCycleStageRecord(entry, sourceProviderSlug);
   }
 
   if (resource === "workouts") {
@@ -2691,6 +2805,26 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
   }
 
   return false;
+}
+
+function hasUsefulJunctionSleepCycleStageRecord(
+  entry: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  return JUNCTION_SLEEP_CYCLE_STAGE_ARRAY_PATHS.some((path) =>
+    readJunctionRecordArray(readJunctionRecordPath(entry, path)).some((stage) => {
+      const stageRecord = readPlainObject(stage);
+      return stageRecord
+        ? hasPositiveFiniteNumberFromJunctionRecordPaths(stageRecord, JUNCTION_SLEEP_CYCLE_STAGE_DURATION_PATHS)
+          || hasPositiveJunctionTimestampRange(
+            stageRecord,
+            JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+            JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+            sourceProviderSlug,
+          )
+        : false;
+    })
+  );
 }
 
 function expandJunctionHistoricalBackfillSummaryRecord(
@@ -3148,6 +3282,7 @@ function isJunctionDataEvent(eventType: string): boolean {
 function buildJunctionWebhookDataJobJsons(input: {
   data: Record<string, unknown> | null;
   eventType: string;
+  externalAccountId: string;
   resource: { name: string; category: "summary" | "timeseries" } | null;
   sourceProviderSlug: string | null;
 }): string[] {
@@ -3155,7 +3290,11 @@ function buildJunctionWebhookDataJobJsons(input: {
     return [];
   }
 
-  const sanitized = sanitizeJunctionImportSnapshotValue(input.data, new Map());
+  const sanitized = sanitizeJunctionImportSnapshotValue(
+    input.data,
+    new Map(),
+    { blockedStringValues: [input.externalAccountId] },
+  );
   const record = readPlainObject(sanitized);
   if (!record) {
     return [];
@@ -3252,12 +3391,52 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
   if (!json) {
     return null;
   }
+  if (Buffer.byteLength(json, "utf8") > JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES) {
+    return null;
+  }
 
   try {
     return readPlainObject(JSON.parse(json));
   } catch {
     return null;
   }
+}
+
+function canImportJunctionWebhookDataJobRecord(input: {
+  record: Record<string, unknown>;
+  sourceProviderSlug: string | null;
+}): boolean {
+  const recordSourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(input.record);
+  if (!recordSourceProviderSlug) {
+    return false;
+  }
+  if (input.sourceProviderSlug && input.sourceProviderSlug !== recordSourceProviderSlug) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveJunctionWebhookDataRecordSourceProviderSlug(
+  record: Record<string, unknown>,
+): string | null {
+  const slugs = new Set<string>();
+  const addSlug = (value: unknown) => {
+    const slug = normalizeProviderSlug(value);
+    if (slug) {
+      slugs.add(slug);
+    }
+  };
+
+  addSlug(resolveJunctionOrigin(record).sourceProviderSlug);
+  for (const entry of readJunctionRecordArray(record.data)) {
+    const entryRecord = readPlainObject(entry);
+    if (entryRecord) {
+      addSlug(resolveJunctionOrigin(entryRecord).sourceProviderSlug);
+    }
+  }
+
+  return slugs.size === 1 ? [...slugs][0] ?? null : null;
 }
 
 function hasJunctionWebhookDataJobRecords(
@@ -3423,7 +3602,7 @@ function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null):
     }
   }
 
-  return null;
+  return readJunctionWebhookDataTimestampRange(data)?.firstTimestamp ?? null;
 }
 
 function buildJunctionWebhookWindow(
@@ -3449,12 +3628,44 @@ function buildJunctionWebhookWindow(
     };
   }
 
+  const dataTimestampRange = readJunctionWebhookDataTimestampRange(data);
+  if (dataTimestampRange) {
+    const windowStart = floorUtcDayTimestamp(dataTimestampRange.firstTimestamp);
+    const windowEnd = minIsoTimestamp(
+      addMilliseconds(floorUtcDayTimestamp(dataTimestampRange.lastTimestamp), TIMESERIES_CHUNK_MS),
+      now,
+    );
+    if (Date.parse(windowStart) < Date.parse(windowEnd)) {
+      return { windowStart, windowEnd };
+    }
+  }
+
   const occurredAtMs = Date.parse(occurredAt);
   const boundedOccurredAt = Number.isFinite(occurredAtMs) ? occurredAt : now;
 
   return {
     windowStart: subtractDays(boundedOccurredAt, 1),
     windowEnd: minIsoTimestamp(addMilliseconds(boundedOccurredAt, 24 * 60 * 60_000), now),
+  };
+}
+
+function readJunctionWebhookDataTimestampRange(
+  data: Record<string, unknown> | null,
+): { firstTimestamp: string; lastTimestamp: string } | null {
+  const timestamps = readJunctionRecordArray(data?.data)
+    .flatMap((entry) => {
+      const record = readPlainObject(entry);
+      const timestamp = record ? toIsoTimestampIfValid(resolveJunctionTimeseriesRecordTimestamp(record)) : null;
+      return timestamp ? [timestamp] : [];
+    });
+
+  if (timestamps.length === 0) {
+    return null;
+  }
+
+  return {
+    firstTimestamp: timestamps.reduce(minIsoTimestamp),
+    lastTimestamp: timestamps.reduce(maxIsoTimestamp),
   };
 }
 

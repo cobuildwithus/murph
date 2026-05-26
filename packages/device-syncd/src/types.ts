@@ -494,6 +494,7 @@ export interface DeviceSyncPublicIngressHooks {
   onWebhookAccepted?(
     input: DeviceSyncPublicIngressWebhookAcceptedInput,
   ): DeviceSyncPublicIngressWebhookAcceptedResult | Promise<DeviceSyncPublicIngressWebhookAcceptedResult>;
+  // Optional side-effect hook for provider-requested orphan webhook acceptance.
   onUnknownWebhook?(input: DeviceSyncPublicIngressUnknownWebhookInput): void | Promise<void>;
 }
 

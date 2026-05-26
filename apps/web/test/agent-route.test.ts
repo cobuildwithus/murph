@@ -274,7 +274,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
   });
 
-  it("returns accepted for verified orphan webhook deliveries without forcing provider retries", async () => {
+  it("returns 202 for hosted Junction orphan webhook deliveries instead of 503", async () => {
     mocks.webhookRegistry.get.mockImplementation((provider: string) =>
       provider === "junction"
         ? createOuraDeviceSyncProvider({
@@ -301,6 +301,11 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     expect(response.status).toBe(202);
+    expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
+    expect(mocks.handleWebhook).toHaveBeenCalledWith(
+      "junction",
+      Buffer.from('{"event":"sleep.updated"}', "utf8"),
+    );
     await expect(response.json()).resolves.toMatchObject({
       accepted: true,
       orphaned: true,

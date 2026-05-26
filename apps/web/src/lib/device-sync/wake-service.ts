@@ -73,15 +73,22 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     };
   }
 
+  let providerConfigRevokeSucceeded = false;
   let warning: { code: string; message: string } | undefined;
 
   if (storedAccount) {
     const provider = input.registry.get(existing.provider);
     const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
-    if (revokeAccess && existing.status !== "disconnected") {
+    const shouldRevoke = revokeAccess && (
+      existing.status !== "disconnected"
+      || storedAccount.credential.kind === "provider_config"
+    );
+
+    if (shouldRevoke) {
       try {
         await revokeAccess(storedAccount);
+        providerConfigRevokeSucceeded = storedAccount.credential.kind === "provider_config";
       } catch (error) {
         const code = sanitizeHostedRuntimeErrorCode(
           isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
@@ -116,6 +123,26 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
+
+    if (
+      freshExisting.status === "disconnected"
+      && freshStoredAccount?.credential.kind === "provider_config"
+      && providerConfigRevokeSucceeded
+    ) {
+      await input.store.persistStoredConnectionTokenBundle({
+        connectionId: freshExisting.id,
+        clearRefreshLease: true,
+        externalAccountId: freshStoredAccount.externalAccountId,
+        provider: freshExisting.provider,
+        tokenBundle: null,
+        tx,
+      });
+
+      return {
+        connection: freshExisting,
+        mailboxItemId: null,
+      };
+    }
 
     if (
       freshExisting.status === "disconnected"

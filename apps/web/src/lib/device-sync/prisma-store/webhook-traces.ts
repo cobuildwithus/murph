@@ -6,7 +6,7 @@ import type {
 } from "@murphai/device-syncd/public-ingress";
 
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
-import { acquireHostedWebhookTraceOwnerLockTx } from "../webhook-trace-owner-lock";
+import { tryAcquireHostedWebhookTraceOwnerLockTx } from "../webhook-trace-owner-lock";
 import type { HostedPrismaTransactionClient } from "./types";
 
 const HOSTED_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
@@ -34,11 +34,14 @@ export class PrismaHostedWebhookTraceStore {
     await this.pruneProcessedWebhookTraces(this.prisma, new Date());
 
     return this.prisma.$transaction(async (tx) => {
-      await acquireHostedWebhookTraceOwnerLockTx({
+      const lockAcquired = await tryAcquireHostedWebhookTraceOwnerLockTx({
         prisma: tx,
         provider: input.provider,
         providerAccountBlindIndex,
       });
+      if (!lockAcquired) {
+        return "processing";
+      }
 
       const existing = await tx.deviceWebhookTrace.findUnique({
         where: {

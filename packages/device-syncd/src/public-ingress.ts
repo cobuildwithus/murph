@@ -839,32 +839,40 @@ export class DeviceSyncPublicIngress {
         externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
         eventType: webhook.eventType,
         traceId,
+        unknownAccountAction: parsed.unknownAccountAction ?? "retry",
+        unknownWebhookHookConfigured: Boolean(this.hooks.onUnknownWebhook),
       };
       if (parsed.externalAccountDiagnostic) {
         unknownWebhookLogContext.externalAccountDiagnostic = parsed.externalAccountDiagnostic;
       }
 
+      const shouldAcceptUnknownWebhook = parsed.unknownAccountAction === "accept";
+
       this.logger.warn?.(
-        parsed.unknownAccountAction === "accept" && this.hooks.onUnknownWebhook
+        shouldAcceptUnknownWebhook
           ? "Accepting orphan webhook for unknown device sync account."
           : "Delaying webhook for unknown device sync account.",
         unknownWebhookLogContext,
       );
 
-      try {
-        await this.hooks.onUnknownWebhook?.({
-          provider,
-          traceId,
-          webhook,
-          externalAccountId: parsed.externalAccountId,
-          now,
-        });
-      } catch (error) {
-        await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
-        throw error;
-      }
+      if (shouldAcceptUnknownWebhook) {
+        try {
+          await this.hooks.onUnknownWebhook?.({
+            provider,
+            traceId,
+            webhook,
+            externalAccountId: parsed.externalAccountId,
+            now,
+          });
+        } catch (error) {
+          this.logger.warn?.(
+            "Failed to run unknown device sync webhook hook; releasing orphan trace for retry.",
+            unknownWebhookLogContext,
+          );
+          await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+          throw error;
+        }
 
-      if (parsed.unknownAccountAction === "accept" && this.hooks.onUnknownWebhook) {
         await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
 
         return {

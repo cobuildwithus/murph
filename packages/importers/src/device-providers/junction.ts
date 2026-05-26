@@ -91,6 +91,7 @@ interface MetricDescriptor {
   unit: string;
   title: string;
   paths: readonly string[];
+  secondsPaths?: readonly string[];
 }
 
 const junctionSnapshotSchema = z.object({
@@ -158,13 +159,20 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
 
 const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-score", unit: "%", title: "Junction sleep score", paths: ["sleepScore", "sleep_score", "score"] },
-  { metric: "sleep-total-minutes", unit: "minutes", title: "Junction total sleep", paths: ["totalSleepMinutes", "total_sleep_minutes", "asleep_minutes"] },
-  { metric: "sleep-deep-minutes", unit: "minutes", title: "Junction deep sleep", paths: ["deepMinutes", "deep_minutes"] },
-  { metric: "sleep-rem-minutes", unit: "minutes", title: "Junction REM sleep", paths: ["remMinutes", "rem_minutes"] },
-  { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: ["lightMinutes", "light_minutes"] },
-  { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: ["awakeMinutes", "awake_minutes"] },
-  { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: ["hrv", "hrvRmssd", "hrv_rmssd"] },
-  { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: ["restingHeartRate", "resting_heart_rate"] },
+  {
+    metric: "sleep-total-minutes",
+    unit: "minutes",
+    title: "Junction total sleep",
+    paths: ["totalSleepMinutes", "total_sleep_minutes", "asleep_minutes"],
+    secondsPaths: ["total"],
+  },
+  { metric: "sleep-deep-minutes", unit: "minutes", title: "Junction deep sleep", paths: ["deepMinutes", "deep_minutes"], secondsPaths: ["deep"] },
+  { metric: "sleep-rem-minutes", unit: "minutes", title: "Junction REM sleep", paths: ["remMinutes", "rem_minutes"], secondsPaths: ["rem"] },
+  { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: ["lightMinutes", "light_minutes"], secondsPaths: ["light"] },
+  { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: ["awakeMinutes", "awake_minutes"], secondsPaths: ["awake"] },
+  { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: ["hrv", "hrvRmssd", "hrv_rmssd", "average_hrv"] },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction sleep average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr", "hr_average"] },
+  { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr"] },
   { metric: "respiratory-rate", unit: "breaths_per_minute", title: "Junction respiratory rate", paths: ["respiratoryRate", "respiratory_rate"] },
   { metric: "spo2", unit: "%", title: "Junction blood oxygen", paths: ["spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
 ];
@@ -665,7 +673,8 @@ function pushObservationMetrics(
   }
 
   for (const metric of metrics) {
-    const value = firstNumberFromPaths(entry, metric.paths);
+    const value = firstNumberFromPaths(entry, metric.paths)
+      ?? secondsToMinutes(firstNumberFromPaths(entry, metric.secondsPaths ?? []));
     if (value === undefined) {
       continue;
     }

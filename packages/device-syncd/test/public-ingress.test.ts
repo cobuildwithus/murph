@@ -1814,7 +1814,7 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
   );
 });
 
-test("public ingress leaves unknown-account webhook traces retryable and reruns unknown hooks", async () => {
+test("public ingress leaves retryable unknown-account webhook traces retryable without running orphan hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const unknownWebhooks: string[] = [];
   const warnContexts: Record<string, unknown>[] = [];
@@ -1883,12 +1883,11 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
       && error.httpStatus === 503
       && error.retryable === true,
   );
-  assert.deepEqual(unknownWebhooks, [
-    `demo:demo-late:${expectedScopedTraceId}`,
-    `demo:demo-late:${expectedScopedTraceId}`,
-  ]);
+  assert.deepEqual(unknownWebhooks, []);
   assert.equal(warnContexts.length, 2);
   assert.equal(warnContexts[0]?.externalAccountIdHash, expectedExternalAccountHash);
+  assert.equal(warnContexts[0]?.unknownAccountAction, "retry");
+  assert.equal(warnContexts[0]?.unknownWebhookHookConfigured, true);
   assert.deepEqual(warnContexts[0]?.externalAccountDiagnostic, {
     selectedPath: "$.user_id",
     selectedExternalAccountIdHash: expectedExternalAccountHash,
@@ -1916,6 +1915,7 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
 test("public ingress can complete verified unknown-account webhook traces without provider retries", async () => {
   const store = new InMemoryPublicIngressStore();
   const unknownCalls: string[] = [];
+  const warnContexts: Record<string, unknown>[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -1937,6 +1937,11 @@ test("public ingress can complete verified unknown-account webhook traces withou
         unknownCalls.push(`${provider.provider}:${externalAccountId}:${traceId}`);
       },
     },
+    log: {
+      warn(_message, context) {
+        warnContexts.push(context ?? {});
+      },
+    },
   });
 
   const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-race", "trace-orphan");
@@ -1954,12 +1959,17 @@ test("public ingress can complete verified unknown-account webhook traces withou
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.orphaned, undefined);
   assert.deepEqual(unknownCalls, [`demo:demo-race:${expectedScopedTraceId}`]);
+  assert.equal(warnContexts[0]?.unknownAccountAction, "accept");
+  assert.equal(warnContexts[0]?.unknownWebhookHookConfigured, true);
+  assert.equal(warnContexts[0]?.externalAccountIdHash, sha256Text("demo-race"));
+  assert.equal(JSON.stringify(warnContexts).includes("demo-race"), false);
   assert.equal(store.completedWebhookTraceCalls, 1);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 });
 
-test("public ingress keeps accept-requested unknown-account webhooks retryable without an orphan hook", async () => {
+test("public ingress accepts provider-requested unknown-account webhooks without an orphan hook", async () => {
   const store = new InMemoryPublicIngressStore();
+  const warnContexts: Record<string, unknown>[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -1976,18 +1986,32 @@ test("public ingress keeps accept-requested unknown-account webhooks retryable w
       }),
     ]),
     store,
+    log: {
+      warn(_message, context) {
+        warnContexts.push(context ?? {});
+      },
+    },
   });
 
-  await assert.rejects(
-    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
-      && error.httpStatus === 503
-      && error.retryable === true,
-  );
-  assert.equal(store.completedWebhookTraceCalls, 0);
-  assert.equal(store.lastRecordedWebhookTrace, null);
+  const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-race", "trace-orphan");
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.deepEqual(result, {
+    accepted: true,
+    duplicate: false,
+    orphaned: true,
+    provider: "demo",
+    eventType: "demo.updated",
+    traceId: expectedScopedTraceId,
+  });
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(warnContexts[0]?.unknownAccountAction, "accept");
+  assert.equal(warnContexts[0]?.unknownWebhookHookConfigured, false);
+  assert.equal(warnContexts[0]?.externalAccountIdHash, sha256Text("demo-race"));
+  assert.equal(JSON.stringify(warnContexts).includes("demo-race"), false);
+  assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 });
 
 test("public ingress passes only a stripped webhook summary into accepted hooks", async () => {
@@ -2058,7 +2082,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
   assert.equal(Object.prototype.hasOwnProperty.call(acceptedCalls[0]?.webhook ?? {}, "payload"), false);
 });
 
-test("public ingress passes the same stripped webhook summary into unknown hooks", async () => {
+test("public ingress passes the same stripped webhook summary into accepted orphan hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const unknownCalls: Array<{ traceId: string; webhook: DeviceSyncIngressWebhook }> = [];
   const ingress = createDeviceSyncPublicIngress({
@@ -2073,6 +2097,7 @@ test("public ingress passes the same stripped webhook summary into unknown hooks
             occurredAt: "2026-04-11T12:59:00.000Z",
             resourceCategory: "  sleep  ",
             jobs: [],
+            unknownAccountAction: "accept",
           };
         },
       }),
@@ -2085,15 +2110,9 @@ test("public ingress passes the same stripped webhook summary into unknown hooks
     },
   });
 
-  await assert.rejects(
-    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
-      && error.httpStatus === 503
-      && error.retryable === true,
-  );
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
 
+  assert.equal(result.orphaned, true);
   assert.deepEqual(unknownCalls, [
     {
       traceId: scopeWebhookTraceId("demo", "demo-late", "trace-summary-unknown"),
@@ -2510,6 +2529,8 @@ test("public ingress hashes unknown external account ids before logging them", a
     externalAccountIdHash: sha256Text("demo-unknown"),
     eventType: "demo.updated",
     traceId: scopeWebhookTraceId("demo", "demo-unknown", "trace-unknown-account"),
+    unknownAccountAction: "retry",
+    unknownWebhookHookConfigured: false,
   });
 });
 
@@ -3065,6 +3086,8 @@ test("public ingress rejects unknown providers before creating OAuth state", asy
 test("public ingress releases unknown-account webhook traces when the unknown hook fails", async () => {
   const store = new InMemoryPublicIngressStore();
   let unknownAttempts = 0;
+  const warnMessages: string[] = [];
+  const warnContexts: Record<string, unknown>[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -3075,6 +3098,7 @@ test("public ingress releases unknown-account webhook traces when the unknown ho
             eventType: "demo.updated",
             traceId: "trace-release-on-error",
             jobs: [],
+            unknownAccountAction: "accept",
           };
         },
       }),
@@ -3084,6 +3108,12 @@ test("public ingress releases unknown-account webhook traces when the unknown ho
       async onUnknownWebhook() {
         unknownAttempts += 1;
         throw new Error("transient unknown-account hook failure");
+      },
+    },
+    log: {
+      warn(message, context) {
+        warnMessages.push(message);
+        warnContexts.push(context ?? {});
       },
     },
   });
@@ -3098,6 +3128,16 @@ test("public ingress releases unknown-account webhook traces when the unknown ho
   );
 
   assert.equal(unknownAttempts, 2);
+  assert.equal(
+    warnMessages.filter((message) =>
+      message === "Failed to run unknown device sync webhook hook; releasing orphan trace for retry."
+    ).length,
+    2,
+  );
+  assert.equal(warnContexts[0]?.unknownAccountAction, "accept");
+  assert.equal(warnContexts[0]?.unknownWebhookHookConfigured, true);
+  assert.equal(warnContexts[0]?.externalAccountIdHash, sha256Text("demo-late"));
+  assert.equal(JSON.stringify(warnContexts).includes("demo-late"), false);
   assert.equal(store.completedWebhookTraceCalls, 0);
   assert.equal(store.lastRecordedWebhookTrace, null);
 });
