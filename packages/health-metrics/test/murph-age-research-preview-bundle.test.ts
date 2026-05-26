@@ -44,14 +44,31 @@ test("builds a product-blocked labs plus wearable research preview from model ca
 
   assert.equal(bundle.product.view.ageEstimate?.biologicalAgeYears ?? null, null);
   assert.equal(bundle.product.view.product.ageDisplayReady, false);
+  assert.equal(bundle.product.view.product.riskDisplayReady, false);
+  assert.deepEqual(bundle.product.view.selectedScoreBearingMetricKeys, []);
   assert.equal(bundle.researchPreview?.view.status, "ready");
   assert.equal(bundle.researchPreview.view.selectedCardId, "l1b_glycemia_body_10y_acm_research");
+  assert.deepEqual(bundle.researchPreview.view.selectedScoreBearingMetricKeys, ["hba1c", "bmi"]);
   assert.equal(bundle.researchPreview.view.arbiter.wearableScorePolicy, "research-residual-shadow-product-blocked");
   assert.equal(bundle.researchPreview.view.layeredAgeEstimate?.status, "wearable-shadow-applied");
+  assert.equal(
+    bundle.researchPreview.view.layeredAgeEstimate?.appliedLayerIds.includes("wearable-multi-family-residual"),
+    true,
+  );
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.residualDeltaLogit, -0.13);
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.selectedMetricKeys.includes("total-sleep-minutes"), true);
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.selectedMetricKeys.includes("resting-heart-rate"), true);
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.selectedMetricKeys.includes("hrv-rmssd"), true);
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.productAuthorized, false);
+  assert.equal(bundle.researchPreview.view.wearableResidualLayer?.scoreContributionAuthorized, false);
   assert.equal(
     bundle.researchPreview.view.model.layeredResearchPath.activeResearchScoreLayerIds.includes("wearable-multi-family-residual"),
     true,
   );
+  for (const metricKey of ["hba1c", "bmi", "steps", "total-sleep-minutes", "resting-heart-rate", "hrv-rmssd"]) {
+    assert.equal(bundle.researchPreview.view.model.researchAppliedMetricKeys.includes(metricKey), true);
+  }
   assert.equal(bundle.researchPreview.view.product.productUseAuthorized, false);
   assert.equal(bundle.researchPreview.view.wearable.scoreBearing, false);
 });
