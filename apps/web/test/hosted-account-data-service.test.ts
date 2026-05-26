@@ -794,7 +794,7 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
   });
 
-  it("does not report provider-config device connections as provider-revoked without OAuth tokens", async () => {
+  it("revokes provider-config device connections during hosted account deletion", async () => {
     const order: string[] = [];
     const revokeAccess = vi.fn();
     const getStoredConnectionAccountForUser = vi.fn(async () => ({
@@ -858,15 +858,23 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
-    expect(revokeAccess).not.toHaveBeenCalled();
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(revokeAccess).toHaveBeenCalledWith(expect.objectContaining({
+      credential: expect.objectContaining({
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      }),
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+    }));
     expect(order).toEqual(["prisma"]);
     expect(result.providerRevocations).toEqual([
       {
         connectionId: "dsc_junction",
         errorCode: null,
         providerLabel: "Garmin",
-        status: "warning",
-        warningCode: "CONNECTION_SECRET_MISSING",
+        status: "revoked",
+        warningCode: null,
       },
     ]);
   });

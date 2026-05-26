@@ -313,6 +313,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+        onUnknownWebhook?: (value: unknown) => Promise<void> | void;
         onWebhookAccepted?: (value: unknown) => Promise<void> | void;
       };
     }) => ({
@@ -901,6 +902,64 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
+  it("revokes active provider-config connections during hosted disconnect", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      scopes: [],
+    });
+    const revokeAccess = vi.fn(async () => {});
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(activeConnection);
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+      connection: {
+        id: publicConnectionId,
+        provider: "junction",
+        status: "disconnected",
+      },
+    });
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(revokeAccess).toHaveBeenCalledWith(expect.objectContaining({
+      credential: expect.objectContaining({
+        kind: "provider_config",
+        providerConfigKey: "hosted-provider-config",
+      }),
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+    }));
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
+      connectionId: "dsc_123",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+  });
+
   it("does not append duplicate disconnect wakes for disconnected tokenless provider-config connections", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
@@ -1360,6 +1419,48 @@ describe("appendHostedDeviceSyncWake", () => {
     );
   });
 
+  it("wires an unknown webhook hook so verified orphan deliveries can be accepted", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    const ingressInput = mocks.createDeviceSyncPublicIngress.mock.calls.at(-1)?.[0] as {
+      hooks?: {
+        onUnknownWebhook?: (value: {
+          externalAccountId: string;
+          now: string;
+          provider: { provider: string };
+          traceId: string;
+          webhook: { eventType: string; jobs: []; resourceCategory: string | null };
+        }) => Promise<void> | void;
+      };
+    } | undefined;
+
+    await ingressInput?.hooks?.onUnknownWebhook?.({
+      externalAccountId: "junction-user-old",
+      now: "2026-03-26T12:00:00.000Z",
+      provider: { provider: "junction" },
+      traceId: "trace_old",
+      webhook: {
+        eventType: "daily.data.steps.updated",
+        jobs: [],
+        resourceCategory: "timeseries",
+      },
+    });
+
+    expect(consoleWarn).toHaveBeenCalledWith("Accepted orphan hosted device-sync webhook.", {
+      externalAccountIdHash: "a".repeat(64),
+      eventType: "daily.data.steps.updated",
+      provider: "junction",
+      resourceCategory: "timeseries",
+      traceId: "trace_old",
+    });
+    consoleWarn.mockRestore();
+  });
+
   it("persists dirty state before sparse webhook audit and nudges the runner only for dirty transitions", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -1816,7 +1917,12 @@ describe("appendHostedDeviceSyncWake", () => {
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
-    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
+    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources as Array<{
+      payload?: { webhookDataJson?: unknown };
+      resource: string;
+      resourceCategory: string;
+      sourceProviderSlug: string | null;
+    }> | undefined;
 
     expect(signalJson).not.toContain("provider-secret-token");
     expect(signalJson).not.toContain("job-auth-secret");
@@ -1972,6 +2078,92 @@ describe("appendHostedDeviceSyncWake", () => {
       }),
       tx: mocks.prismaTx,
     });
+  });
+
+  it("preserves split Junction daily data webhook payload chunks across the hosted dirty handoff", async () => {
+    const webhookDataJsons = [0, 1].map((chunkIndex) =>
+      JSON.stringify({
+        chunkIndex,
+        data: Array.from({ length: 12 }, (_, index) => ({
+          end: `2026-05-26T${String(index % 12).padStart(2, "0")}:30:00.000Z`,
+          sampleMemo: "x".repeat(80),
+          start: `2026-05-26T${String(index % 12).padStart(2, "0")}:00:00.000Z`,
+          unit: "count",
+          value: chunkIndex * 100 + index,
+        })),
+        sourceProviderSlug: "garmin",
+      })
+    );
+    expect(webhookDataJsons.every((payload) => payload.length > 512)).toBe(true);
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+        onWebhookAccepted?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(),
+      handleWebhook: vi.fn(async () => {
+        await input.hooks?.onWebhookAccepted?.({
+          account: {
+            id: "dsc_123",
+            provider: "junction",
+            scopes: [],
+          },
+          now: "2026-05-26T12:00:00.000Z",
+          provider: {},
+          traceId: "trace_junction_chunks_123",
+          webhook: {
+            eventType: "daily.data.steps.created",
+            jobs: webhookDataJsons.map((webhookDataJson, index) => ({
+              kind: "resource",
+              payload: {
+                eventType: "daily.data.steps.created",
+                objectId: "steps-2026-05-26",
+                occurredAt: "2026-05-26T11:59:00.000Z",
+                resource: "steps",
+                resourceCategory: "timeseries",
+                sourceProviderSlug: "garmin",
+                webhookDataJson,
+                windowEnd: "2026-05-27T00:00:00.000Z",
+                windowStart: "2026-05-26T00:00:00.000Z",
+              },
+              dedupeKey: `chunk-${index}`,
+            })),
+            occurredAt: "2026-05-26T11:59:00.000Z",
+            resourceCategory: "timeseries",
+          },
+        });
+        return {
+          accepted: true,
+        };
+      }),
+      startConnection: vi.fn(),
+    }));
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      provider: "junction",
+    }));
+    mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
+        body: JSON.stringify({
+          event_type: "daily.data.steps.created",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await controlPlane.handleWebhook("junction");
+
+    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
+
+    expect(dirtyResources?.map((resource) => resource.payload?.webhookDataJson)).toEqual(webhookDataJsons);
+    expect(dirtyResources?.map((resource) => resource.resource)).toEqual(["steps", "steps"]);
+    expect(dirtyResources?.map((resource) => resource.resourceCategory)).toEqual(["timeseries", "timeseries"]);
+    expect(dirtyResources?.map((resource) => resource.sourceProviderSlug)).toEqual(["garmin", "garmin"]);
   });
 
   it("shapes Whoop hosted dirty resources through the provider-owned allowlists", async () => {

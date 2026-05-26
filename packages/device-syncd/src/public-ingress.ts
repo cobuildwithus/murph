@@ -844,7 +844,12 @@ export class DeviceSyncPublicIngress {
         unknownWebhookLogContext.externalAccountDiagnostic = parsed.externalAccountDiagnostic;
       }
 
-      this.logger.warn?.("Delaying webhook for unknown device sync account.", unknownWebhookLogContext);
+      this.logger.warn?.(
+        parsed.unknownAccountAction === "accept" && this.hooks.onUnknownWebhook
+          ? "Accepting orphan webhook for unknown device sync account."
+          : "Delaying webhook for unknown device sync account.",
+        unknownWebhookLogContext,
+      );
 
       try {
         await this.hooks.onUnknownWebhook?.({

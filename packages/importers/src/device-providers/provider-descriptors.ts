@@ -580,7 +580,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
       reconcileIntervalMs: 6 * 60 * 60_000,
     },
     jobKinds: ["backfill", "reconcile", "resource"],
-    supportsRemoteDisconnect: false,
+    supportsRemoteDisconnect: true,
     supportsTokenRefresh: false,
   },
   normalization: {

@@ -541,8 +541,10 @@ export interface DeviceSyncBackfillDiagnosticResult {
 
 export type DeviceSyncRestDiagnosticEndpoint =
   | "auto"
+  | "devices"
   | "historical_pull"
   | "introspect_resources"
+  | "matrix"
   | "providers"
   | "refresh"
   | "summary"

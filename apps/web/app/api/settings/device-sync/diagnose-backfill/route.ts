@@ -261,9 +261,11 @@ function readRestProbe(
 
   if (
     endpoint !== "auto"
+    && endpoint !== "devices"
     && endpoint !== "providers"
     && endpoint !== "introspect_resources"
     && endpoint !== "historical_pull"
+    && endpoint !== "matrix"
     && endpoint !== "refresh"
     && !resource
   ) {
@@ -291,11 +293,14 @@ function normalizeRestProbeEndpoint(value: string): DeviceSyncRestDiagnosticEndp
 
   if (
     normalized === "auto"
+    || normalized === "device"
+    || normalized === "devices"
     || normalized === "historical_pull"
     || normalized === "historical-pull"
     || normalized === "history"
     || normalized === "introspect_resources"
     || normalized === "introspect-resources"
+    || normalized === "matrix"
     || normalized === "providers"
     || normalized === "refresh"
     || normalized === "refresh_user_data"
@@ -312,6 +317,9 @@ function normalizeRestProbeEndpoint(value: string): DeviceSyncRestDiagnosticEndp
     if (normalized === "introspect-resources" || normalized === "resources") {
       return "introspect_resources";
     }
+    if (normalized === "device") {
+      return "devices";
+    }
     if (
       normalized === "refresh_user_data"
       || normalized === "refresh-user-data"
@@ -325,7 +333,7 @@ function normalizeRestProbeEndpoint(value: string): DeviceSyncRestDiagnosticEndp
 
   throw deviceSyncError({
     code: "DEVICE_SYNC_REST_DIAGNOSTIC_ENDPOINT_INVALID",
-    message: "REST diagnostics require restProbe to be providers, summary, timeseries, resources, historical_pull, refresh, or auto.",
+    message: "REST diagnostics require restProbe to be providers, devices, matrix, summary, timeseries, resources, historical_pull, refresh, or auto.",
     httpStatus: 400,
     retryable: false,
   });

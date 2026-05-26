@@ -31,6 +31,7 @@ import {
 
 import type {
   DeviceConnectionSourceStatus,
+  DeviceSyncAccount,
   DeviceSyncWebhookExternalAccountDiagnostic,
   DeviceSyncBackfillDiagnosticContext,
   DeviceSyncBackfillDiagnosticResult,
@@ -354,6 +355,38 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  async function revokeAccess(account: DeviceSyncAccount): Promise<void> {
+    const userId = normalizeString(account.externalAccountId);
+    if (!userId) {
+      throw deviceSyncError({
+        code: "JUNCTION_USER_ID_MISSING",
+        message: "Junction disconnect requires a stored Junction user id.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    const providers = await client.listUserProviders(userId);
+    const providerSlugs = [
+      ...new Set(
+        providers
+          .filter((provider) => mapJunctionSourceStatus(provider.status) !== "disconnected")
+          .map((provider) =>
+            normalizeProviderSlug(provider.origin.sourceProviderSlug)
+            ?? normalizeProviderSlug(provider.slug)
+          )
+          .filter((providerSlug): providerSlug is string => providerSlug !== null),
+      ),
+    ];
+
+    for (const providerSlug of providerSlugs) {
+      await client.deregisterProvider({
+        providerSlug,
+        userId,
+      });
+    }
+  }
+
   function createScheduledJobs(
     _account: StoredDeviceSyncAccount,
     now: string,
@@ -588,6 +621,24 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
+    if (endpoint === "devices") {
+      const devicesResult = await runJunctionDiagnosticCall(() =>
+        client.listUserDevices(context.account.externalAccountId)
+      );
+
+      return {
+        generatedAt: context.now,
+        provider: "junction",
+        result: {
+          request: {
+            endpoint: "devices",
+            endpointKind: "junction_user_devices",
+          },
+          response: describeJunctionDiagnosticDevices(devicesResult),
+        },
+      };
+    }
+
     if (endpoint === "providers") {
       const providerSnapshot = await runJunctionDiagnosticCall(() =>
         client.listUserProviders(context.account.externalAccountId)
@@ -607,6 +658,30 @@ export function createJunctionDeviceSyncProvider(
           },
         },
       };
+    }
+
+    if (endpoint === "matrix") {
+      return runJunctionRestDiagnosticMatrix({
+        account: context.account,
+        client,
+        now: context.now,
+        resource: normalizedResource,
+        sourceProviderSlug: context.sourceProviderSlug,
+        summaryBackfillDays,
+        summaryResources,
+        timeseriesResources,
+        windowEnd: context.windowEnd,
+        windowStart: context.windowStart,
+      });
+    }
+
+    if (endpoint !== "summary" && endpoint !== "timeseries") {
+      throw deviceSyncError({
+        code: "JUNCTION_REST_DIAGNOSTIC_ENDPOINT_UNSUPPORTED",
+        message: "Junction REST diagnostics support providers, devices, matrix, refresh, introspection, summary, and timeseries probes.",
+        httpStatus: 400,
+        retryable: false,
+      });
     }
 
     if (!normalizedResource) {
@@ -782,7 +857,7 @@ export function createJunctionDeviceSyncProvider(
     const objectId = extractJunctionWebhookObjectId(data);
     const occurredAt = extractJunctionWebhookOccurredAt(data) ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now);
-    const webhookDataJson = buildJunctionWebhookDataJobJson({
+    const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
       eventType,
       resource,
@@ -795,7 +870,7 @@ export function createJunctionDeviceSyncProvider(
       resource,
       sourceProviderSlug,
       summaryBackfillDays,
-      webhookDataJson,
+      webhookDataJsons,
       window,
     });
 
@@ -807,7 +882,7 @@ export function createJunctionDeviceSyncProvider(
       occurredAt,
       resourceCategory: resource?.category ?? null,
       jobs,
-      unknownAccountAction: "retry",
+      unknownAccountAction: "accept",
     };
   }
 
@@ -1027,6 +1102,7 @@ export function createJunctionDeviceSyncProvider(
     connectionHandler: {
       beginConnection,
       completeConnection,
+      revokeAccess,
     },
     webhookHandler: {
       verifyAndParseWebhook,
@@ -1054,6 +1130,7 @@ function readOptionalJunctionResourceFailureStatus(error: unknown): number | nul
 interface JunctionDiagnosticCallResult {
   ok: boolean;
   records?: unknown[];
+  errorDetails?: Record<string, unknown>;
   errorCode?: string;
   responseStatus?: number | null;
   retryable?: boolean;
@@ -1062,6 +1139,7 @@ interface JunctionDiagnosticCallResult {
 interface JunctionDiagnosticPayloadResult {
   ok: boolean;
   payload?: unknown;
+  errorDetails?: Record<string, unknown>;
   errorCode?: string;
   responseStatus?: number | null;
   retryable?: boolean;
@@ -1080,6 +1158,7 @@ async function runJunctionDiagnosticCall(
     if (isDeviceSyncError(error)) {
       return {
         ok: false,
+        ...(error.details ? { errorDetails: error.details } : {}),
         errorCode: error.code,
         responseStatus: readJunctionDiagnosticResponseStatus(error),
         retryable: error.retryable,
@@ -1108,6 +1187,7 @@ async function runJunctionDiagnosticPayloadCall(
     if (isDeviceSyncError(error)) {
       return {
         ok: false,
+        ...(error.details ? { errorDetails: error.details } : {}),
         errorCode: error.code,
         responseStatus: readJunctionDiagnosticResponseStatus(error),
         retryable: error.retryable,
@@ -1138,6 +1218,7 @@ function describeJunctionDiagnosticRecords(
   if (!result.ok) {
     return {
       ok: false,
+      ...(result.errorDetails ? { diagnostics: result.errorDetails } : {}),
       errorCode: result.errorCode ?? "JUNCTION_DIAGNOSTIC_REQUEST_FAILED",
       responseStatus: result.responseStatus ?? null,
       retryable: result.retryable ?? false,
@@ -1151,6 +1232,364 @@ function describeJunctionDiagnosticRecords(
     responseStatus: result.responseStatus ?? 200,
     recordCount: records.length,
     shape: describeJunctionDiagnosticShape(records),
+  };
+}
+
+function describeJunctionDiagnosticDevices(
+  result: JunctionDiagnosticCallResult,
+): Record<string, unknown> {
+  if (!result.ok) {
+    return {
+      ...describeJunctionDiagnosticRecords(result),
+      deviceCount: 0,
+      devices: [],
+    };
+  }
+
+  const records = result.records ?? [];
+  const sourceKeyMap = buildJunctionDiagnosticSourceKeyMap(
+    records.flatMap((record) => {
+      const sourceProviderSlug = readJunctionDeviceSourceProviderSlug(record);
+      return sourceProviderSlug ? [{ sourceProviderSlug }] : [];
+    }),
+  );
+  const devices = records
+    .map((record) => describeJunctionDiagnosticDevice(record, sourceKeyMap))
+    .filter((record): record is Record<string, unknown> => record !== null)
+    .sort(compareJunctionDiagnosticDeviceEntries);
+
+  return {
+    ok: true,
+    responseStatus: result.responseStatus ?? 200,
+    deviceCount: devices.length,
+    sourceCount: sourceKeyMap.size,
+    devices,
+    shape: describeJunctionDiagnosticShape(records),
+  };
+}
+
+function describeJunctionDiagnosticDevice(
+  value: unknown,
+  sourceKeyMap: Map<string, string>,
+): Record<string, unknown> | null {
+  const record = readPlainObject(value);
+  if (!record) {
+    return null;
+  }
+
+  const sourceProviderSlug = readJunctionDeviceSourceProviderSlug(record);
+  return {
+    appIdPresent: Boolean(
+      normalizeString(record.app_id)
+      ?? normalizeString(record.appId)
+    ),
+    deviceIdPresent: Boolean(
+      normalizeString(record.device_id)
+      ?? normalizeString(record.deviceId)
+    ),
+    manufacturerPresent: Boolean(
+      normalizeString(record.device_manufacturer)
+      ?? normalizeString(record.deviceManufacturer)
+    ),
+    modelPresent: Boolean(
+      normalizeString(record.device_model)
+      ?? normalizeString(record.deviceModel)
+    ),
+    shape: describeJunctionDiagnosticShape([record]),
+    sourceKey: sourceProviderSlug
+      ? readJunctionDiagnosticSourceKey(sourceKeyMap, sourceProviderSlug)
+      : null,
+    sourceType:
+      normalizeProviderSlug(record.source_type)
+      ?? normalizeProviderSlug(record.sourceType)
+      ?? null,
+    versionPresent: Boolean(
+      normalizeString(record.device_version)
+      ?? normalizeString(record.deviceVersion)
+    ),
+  };
+}
+
+function readJunctionDeviceSourceProviderSlug(value: unknown): string | null {
+  const record = readPlainObject(value);
+  if (!record) {
+    return null;
+  }
+
+  const source = readPlainObject(record.source);
+  const provider = readPlainObject(record.provider);
+  const origin = resolveJunctionOrigin(record);
+  return (
+    normalizeProviderSlug(origin.sourceProviderSlug)
+    ?? normalizeProviderSlug(record.source_provider_slug)
+    ?? normalizeProviderSlug(record.sourceProviderSlug)
+    ?? normalizeProviderSlug(record.provider_slug)
+    ?? normalizeProviderSlug(record.providerSlug)
+    ?? normalizeProviderSlug(record.provider)
+    ?? normalizeProviderSlug(source?.provider)
+    ?? normalizeProviderSlug(source?.slug)
+    ?? normalizeProviderSlug(provider?.slug)
+    ?? normalizeProviderSlug(provider?.provider)
+    ?? null
+  );
+}
+
+function compareJunctionDiagnosticDeviceEntries(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): number {
+  const leftSource = typeof left.sourceKey === "string" ? left.sourceKey : "";
+  const rightSource = typeof right.sourceKey === "string" ? right.sourceKey : "";
+  const leftType = typeof left.sourceType === "string" ? left.sourceType : "";
+  const rightType = typeof right.sourceType === "string" ? right.sourceType : "";
+
+  return leftSource.localeCompare(rightSource) || leftType.localeCompare(rightType);
+}
+
+async function runJunctionRestDiagnosticMatrix(input: {
+  account: DeviceSyncAccount;
+  client: JunctionClient;
+  now: string;
+  resource: string | null;
+  sourceProviderSlug?: string | null;
+  summaryBackfillDays: number;
+  summaryResources: readonly string[];
+  timeseriesResources: readonly string[];
+  windowEnd?: string | null;
+  windowStart?: string | null;
+}): Promise<DeviceSyncBackfillDiagnosticResult> {
+  const window = resolveDiagnosticBackfillWindow(
+    {
+      account: input.account,
+      now: input.now,
+      windowEnd: input.windowEnd,
+      windowStart: input.windowStart,
+    },
+    input.summaryBackfillDays,
+  );
+  const sourceProviderSlug = normalizeProviderSlug(input.sourceProviderSlug);
+  const resourceProbes = resolveJunctionDiagnosticMatrixResources({
+    resource: input.resource,
+    summaryResources: input.summaryResources,
+    timeseriesResources: input.timeseriesResources,
+  });
+
+  const [
+    providers,
+    devices,
+    resourcesAll,
+    historicalPullAll,
+    resourcesFiltered,
+    historicalPullFiltered,
+  ] = await Promise.all([
+    runJunctionDiagnosticCall(() => input.client.listUserProviders(input.account.externalAccountId)),
+    runJunctionDiagnosticCall(() => input.client.listUserDevices(input.account.externalAccountId)),
+    runJunctionDiagnosticPayloadCall(() =>
+      input.client.introspectResources({
+        userId: input.account.externalAccountId,
+        userLimit: 1,
+      })
+    ),
+    runJunctionDiagnosticPayloadCall(() =>
+      input.client.introspectHistoricalPull({
+        userId: input.account.externalAccountId,
+        userLimit: 1,
+      })
+    ),
+    sourceProviderSlug
+      ? runJunctionDiagnosticPayloadCall(() =>
+          input.client.introspectResources({
+            sourceProviderSlug,
+            userId: input.account.externalAccountId,
+            userLimit: 1,
+          })
+        )
+      : Promise.resolve(null),
+    sourceProviderSlug
+      ? runJunctionDiagnosticPayloadCall(() =>
+          input.client.introspectHistoricalPull({
+            sourceProviderSlug,
+            userId: input.account.externalAccountId,
+            userLimit: 1,
+          })
+        )
+      : Promise.resolve(null),
+  ]);
+  const reads = [];
+
+  for (const probe of resourceProbes) {
+    reads.push(await runJunctionDiagnosticMatrixRead({
+      account: input.account,
+      category: probe.category,
+      configuredResource: probe.configuredResource,
+      client: input.client,
+      resource: probe.resource,
+      sourceProviderSlug: null,
+      window,
+    }));
+    if (sourceProviderSlug) {
+      reads.push(await runJunctionDiagnosticMatrixRead({
+        account: input.account,
+        category: probe.category,
+        configuredResource: probe.configuredResource,
+        client: input.client,
+        resource: probe.resource,
+        sourceProviderSlug,
+        window,
+      }));
+    }
+  }
+
+  return {
+    generatedAt: input.now,
+    provider: "junction",
+    result: {
+      request: {
+        endpoint: "matrix",
+        endpointKind: "junction_rest_diagnostic_matrix",
+        resourceCount: resourceProbes.length,
+        resources: resourceProbes.map((probe) => ({
+          configuredResource: probe.configuredResource,
+          resource: probe.resource,
+          resourceCategory: probe.category,
+        })),
+        sourceFiltered: Boolean(sourceProviderSlug),
+        window,
+      },
+      providers: {
+        request: {
+          endpoint: "providers",
+          endpointKind: "junction_user_providers",
+        },
+        response: {
+          ...describeJunctionDiagnosticSourceProviders(providers),
+          shape: describeJunctionDiagnosticShape(providers.records ?? []),
+        },
+      },
+      devices: {
+        request: {
+          endpoint: "devices",
+          endpointKind: "junction_user_devices",
+        },
+        response: describeJunctionDiagnosticDevices(devices),
+      },
+      introspection: [
+        {
+          request: buildJunctionDiagnosticIntrospectionRequest("introspect_resources", false),
+          response: describeJunctionIntrospectionResources(resourcesAll, null),
+        },
+        ...(resourcesFiltered
+          ? [{
+              request: buildJunctionDiagnosticIntrospectionRequest("introspect_resources", true),
+              response: describeJunctionIntrospectionResources(resourcesFiltered, sourceProviderSlug),
+            }]
+          : []),
+      ],
+      historicalPull: [
+        {
+          request: buildJunctionDiagnosticIntrospectionRequest("historical_pull", false),
+          response: describeJunctionIntrospectionHistoricalPull(historicalPullAll, null),
+        },
+        ...(historicalPullFiltered
+          ? [{
+              request: buildJunctionDiagnosticIntrospectionRequest("historical_pull", true),
+              response: describeJunctionIntrospectionHistoricalPull(historicalPullFiltered, sourceProviderSlug),
+            }]
+          : []),
+      ],
+      reads,
+    },
+  };
+}
+
+function resolveJunctionDiagnosticMatrixResources(input: {
+  resource: string | null;
+  summaryResources: readonly string[];
+  timeseriesResources: readonly string[];
+}): Array<{ category: "summary" | "timeseries"; configuredResource: boolean; resource: string }> {
+  if (input.resource) {
+    const category = inferJunctionResourceCategory(null, input.resource);
+    return [{
+      category,
+      configuredResource: category === "timeseries"
+        ? input.timeseriesResources.includes(input.resource)
+        : input.summaryResources.includes(input.resource),
+      resource: input.resource,
+    }];
+  }
+
+  const resources = new Map<string, { category: "summary" | "timeseries"; configuredResource: boolean; resource: string }>();
+  for (const resource of input.summaryResources) {
+    resources.set(`summary:${resource}`, { category: "summary", configuredResource: true, resource });
+  }
+  for (const resource of input.timeseriesResources) {
+    resources.set(`timeseries:${resource}`, { category: "timeseries", configuredResource: true, resource });
+  }
+
+  return [...resources.values()];
+}
+
+async function runJunctionDiagnosticMatrixRead(input: {
+  account: DeviceSyncAccount;
+  category: "summary" | "timeseries";
+  configuredResource: boolean;
+  client: JunctionClient;
+  resource: string;
+  sourceProviderSlug: string | null;
+  window: { windowStart: string; windowEnd: string };
+}): Promise<Record<string, unknown>> {
+  const response = await runJunctionDiagnosticCall(() =>
+    input.category === "timeseries"
+      ? input.client.listTimeseries({
+          resource: input.resource,
+          sourceProviderSlug: input.sourceProviderSlug,
+          userId: input.account.externalAccountId,
+          windowStart: input.window.windowStart,
+          windowEnd: input.window.windowEnd,
+        })
+      : input.client.listSummary({
+          resource: input.resource,
+          sourceProviderSlug: input.sourceProviderSlug,
+          userId: input.account.externalAccountId,
+          windowStart: input.window.windowStart,
+          windowEnd: input.window.windowEnd,
+        })
+  );
+
+  return {
+    request: {
+      configuredResource: input.configuredResource,
+      endpoint: input.category,
+      endpointKind: input.category === "timeseries"
+        ? "junction_timeseries_collection"
+        : "junction_summary_collection",
+      queryParameterNames: input.sourceProviderSlug
+        ? ["end_date", "provider", "start_date"]
+        : ["end_date", "start_date"],
+      resource: input.resource,
+      resourceCategory: input.category,
+      sourceFiltered: Boolean(input.sourceProviderSlug),
+      window: input.window,
+    },
+    response: describeJunctionDiagnosticRecords(response),
+  };
+}
+
+function buildJunctionDiagnosticIntrospectionRequest(
+  endpoint: "historical_pull" | "introspect_resources",
+  sourceFiltered: boolean,
+): Record<string, unknown> {
+  return {
+    endpoint,
+    endpointKind: endpoint === "introspect_resources"
+      ? "junction_introspect_resources"
+      : "junction_introspect_historical_pull",
+    queryParameterNames: stripUndefined({
+      provider: sourceFiltered ? true : undefined,
+      user_id: true,
+      user_limit: true,
+    }),
+    sourceFiltered,
   };
 }
 
@@ -1309,6 +1748,7 @@ function describeJunctionDiagnosticPayloadFailure(
 ): Record<string, unknown> {
   return {
     ok: false,
+    ...(result.errorDetails ? { diagnostics: result.errorDetails } : {}),
     errorCode: result.errorCode ?? fallbackErrorCode,
     responseStatus: result.responseStatus ?? null,
     retryable: result.retryable ?? false,
@@ -2586,7 +3026,7 @@ function buildJunctionWebhookJobs(input: {
   resource: { name: string; category: "summary" | "timeseries" } | null;
   sourceProviderSlug: string | null;
   summaryBackfillDays: number;
-  webhookDataJson: string | null;
+  webhookDataJsons: readonly string[];
   window: { windowStart: string; windowEnd: string };
 }): DeviceSyncJobInput[] {
   if (isJunctionProviderConnectionEvent(input.eventType)) {
@@ -2625,42 +3065,43 @@ function buildJunctionWebhookJobs(input: {
   }
 
   if (input.resource) {
-    return [
-      {
-        kind: "resource",
-        payload: {
-          eventType: input.eventType,
-          objectId: input.objectId ?? "",
-          occurredAt: input.occurredAt,
-          resource: input.resource.name,
-          resourceCategory: input.resource.category,
-          sourceProviderSlug: input.sourceProviderSlug ?? "",
-          ...(input.webhookDataJson ? { webhookDataJson: input.webhookDataJson } : {}),
-          windowStart: input.window.windowStart,
-          windowEnd: input.window.windowEnd,
-        },
-        priority: 65,
-        dedupeKey: input.webhookDataJson
-          ? sha256Text(JSON.stringify([
-              "junction-webhook",
-              "resource-data",
-              input.sourceProviderSlug,
-              input.resource.category,
-              input.resource.name,
-              input.objectId ?? "",
-              input.occurredAt,
-            ]))
-          : sha256Text(JSON.stringify([
-              "junction-webhook",
-              "resource",
-              input.sourceProviderSlug,
-              input.resource.category,
-              input.resource.name,
-              input.window.windowStart,
-              input.window.windowEnd,
-            ])),
+    const directPayloads = input.webhookDataJsons.length > 0 ? input.webhookDataJsons : [null];
+    return directPayloads.map((webhookDataJson, index) => ({
+      kind: "resource",
+      payload: {
+        eventType: input.eventType,
+        objectId: input.objectId ?? "",
+        occurredAt: input.occurredAt,
+        resource: input.resource?.name ?? "",
+        resourceCategory: input.resource?.category ?? "",
+        sourceProviderSlug: input.sourceProviderSlug ?? "",
+        ...(webhookDataJson ? { webhookDataJson } : {}),
+        windowStart: input.window.windowStart,
+        windowEnd: input.window.windowEnd,
       },
-    ];
+      priority: 65,
+      dedupeKey: webhookDataJson
+        ? sha256Text(JSON.stringify([
+            "junction-webhook",
+            "resource-data",
+            input.sourceProviderSlug,
+            input.resource?.category,
+            input.resource?.name,
+            input.objectId ?? "",
+            input.occurredAt,
+            index,
+            sha256Text(webhookDataJson),
+          ]))
+        : sha256Text(JSON.stringify([
+            "junction-webhook",
+            "resource",
+            input.sourceProviderSlug,
+            input.resource?.category,
+            input.resource?.name,
+            input.window.windowStart,
+            input.window.windowEnd,
+          ])),
+    }));
   }
 
   return [
@@ -2689,20 +3130,20 @@ function isJunctionDataEvent(eventType: string): boolean {
   return eventType.startsWith("daily.data.");
 }
 
-function buildJunctionWebhookDataJobJson(input: {
+function buildJunctionWebhookDataJobJsons(input: {
   data: Record<string, unknown> | null;
   eventType: string;
   resource: { name: string; category: "summary" | "timeseries" } | null;
   sourceProviderSlug: string | null;
-}): string | null {
+}): string[] {
   if (!input.data || !input.resource || !isJunctionDataEvent(input.eventType)) {
-    return null;
+    return [];
   }
 
   const sanitized = sanitizeJunctionImportSnapshotValue(input.data, new Map());
   const record = readPlainObject(sanitized);
   if (!record) {
-    return null;
+    return [];
   }
 
   const withSource = stripUndefined({
@@ -2710,10 +3151,85 @@ function buildJunctionWebhookDataJobJson(input: {
     sourceProviderSlug:
       normalizeProviderSlug(record.sourceProviderSlug) ?? input.sourceProviderSlug ?? undefined,
   });
-  const json = JSON.stringify(withSource);
+  const directJson = serializeJunctionWebhookDataJobRecord(withSource);
+  if (directJson) {
+    return [directJson];
+  }
+
+  if (input.resource.category !== "timeseries") {
+    return [];
+  }
+
+  return chunkJunctionWebhookTimeseriesDataJobRecords(withSource);
+}
+
+function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>): string | null {
+  const json = JSON.stringify(record);
   return Buffer.byteLength(json, "utf8") <= JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES
     ? json
     : null;
+}
+
+function chunkJunctionWebhookTimeseriesDataJobRecords(
+  record: Record<string, unknown>,
+): string[] {
+  const data = readJunctionRecordArray(record.data).flatMap((entry) => {
+    const entryRecord = readPlainObject(entry);
+    return entryRecord ? [entryRecord] : [];
+  });
+  if (data.length === 0) {
+    return [];
+  }
+
+  const metadata = Object.fromEntries(
+    Object.entries(record).filter(([key]) => key !== "data"),
+  );
+  const chunks: string[] = [];
+  let pending: Record<string, unknown>[] = [];
+
+  for (const entry of data) {
+    const candidate = [...pending, entry];
+    const candidateJson = serializeJunctionWebhookDataJobRecord({
+      ...metadata,
+      data: candidate,
+    });
+    if (candidateJson) {
+      pending = candidate;
+      continue;
+    }
+
+    if (pending.length === 0) {
+      return [];
+    }
+
+    const pendingJson = serializeJunctionWebhookDataJobRecord({
+      ...metadata,
+      data: pending,
+    });
+    if (!pendingJson) {
+      return [];
+    }
+
+    chunks.push(pendingJson);
+    pending = [entry];
+
+    if (!serializeJunctionWebhookDataJobRecord({ ...metadata, data: pending })) {
+      return [];
+    }
+  }
+
+  if (pending.length > 0) {
+    const pendingJson = serializeJunctionWebhookDataJobRecord({
+      ...metadata,
+      data: pending,
+    });
+    if (!pendingJson) {
+      return [];
+    }
+    chunks.push(pendingJson);
+  }
+
+  return chunks;
 }
 
 function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unknown> | null {
