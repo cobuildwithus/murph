@@ -2,8 +2,210 @@ import { describe, expect, it, vi } from "vitest";
 
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
 import { sealHostedDeviceSyncDirtyPayloadJson } from "@/src/lib/device-sync/prisma-store/dirty-payloads";
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 
 describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
+  it("preseals dirty payload rows before opening store-owned transactions", async () => {
+    let insideTransaction = false;
+    const encryptInsideTransaction: boolean[] = [];
+    installHostedSecureBoxStringTestCodec(() => {
+      encryptInsideTransaction.push(insideTransaction);
+    });
+
+    try {
+      let createData: Record<string, unknown> | null = null;
+      let payloadCreateData: Array<Record<string, unknown>> | null = null;
+      let findCount = 0;
+      const prisma = {
+        $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
+          insideTransaction = true;
+          try {
+            return await callback(prisma);
+          } finally {
+            insideTransaction = false;
+          }
+        }),
+        deviceSyncDirtyConnection: {
+          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            createData = input.data;
+            return { count: 1 };
+          }),
+          findUnique: vi.fn(async () => {
+            findCount += 1;
+            if (findCount <= 2 || !createData) {
+              return null;
+            }
+
+            const dirtyAt = createData.latestDirtyAt as Date;
+            return {
+              connectionId: createData.connectionId,
+              userId: createData.userId,
+              provider: createData.provider,
+              dirtyRevision: createData.dirtyRevision,
+              processedRevision: createData.processedRevision,
+              firstDirtyAt: createData.firstDirtyAt,
+              latestDirtyAt: createData.latestDirtyAt,
+              windowStart: createData.windowStart,
+              windowEnd: createData.windowEnd,
+              eventCount: createData.eventCount,
+              latestTraceId: createData.latestTraceId,
+              latestEventType: createData.latestEventType,
+              latestResourceCategory: createData.latestResourceCategory,
+              sourceProviderCountsJson: createData.sourceProviderCountsJson,
+              resourceCategoryCountsJson: createData.resourceCategoryCountsJson,
+              dirtyResourcesJson: createData.dirtyResourcesJson,
+              createdAt: dirtyAt,
+              updatedAt: dirtyAt,
+            };
+          }),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
+            payloadCreateData = input.data;
+            return { count: input.data.length };
+          }),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+      const result = await store.upsertDirtyConnection({
+        connectionId: "dsc_preseal_1",
+        dirtyAt: "2026-05-26T12:00:00.000Z",
+        eventType: "daily.data.steps.created",
+        provider: "junction",
+        resourceCategory: "timeseries",
+        resources: [
+          {
+            count: 1,
+            jobKind: "resource",
+            payload: {
+              webhookDataJson: JSON.stringify({ source: "garmin", value: 123 }),
+            },
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-05-27T00:00:00.000Z",
+            windowStart: "2026-05-26T00:00:00.000Z",
+          },
+        ],
+        traceId: "trace_preseal_1",
+        userId: "member_preseal_1",
+      });
+
+      expect(encryptInsideTransaction).toEqual([false]);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(3);
+      expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+      expect(payloadCreateData?.[0]?.resourceEncrypted).toMatch(/^hsb-test:/u);
+      expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
+        .toBe(payloadCreateData?.[0]?.id);
+    } finally {
+      installHostedSecureBoxStringTestCodec();
+    }
+  });
+
+  it("seals through caller-owned dirty transactions instead of precomputing on the root client", async () => {
+    let insideCallerOwnedTransaction = false;
+    const encryptInsideCallerOwnedTransaction: boolean[] = [];
+    installHostedSecureBoxStringTestCodec(() => {
+      encryptInsideCallerOwnedTransaction.push(insideCallerOwnedTransaction);
+    });
+
+    try {
+      const rootPrisma = {
+        $transaction: vi.fn(),
+        deviceSyncDirtyConnection: {
+          findUnique: vi.fn(async () => {
+            throw new Error("Root Prisma client should not precompute caller-owned dirty payload rows.");
+          }),
+        },
+      };
+      let createData: Record<string, unknown> | null = null;
+      let payloadCreateData: Array<Record<string, unknown>> | null = null;
+      let findCount = 0;
+      const tx = {
+        deviceSyncDirtyConnection: {
+          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            createData = input.data;
+            return { count: 1 };
+          }),
+          findUnique: vi.fn(async () => {
+            findCount += 1;
+            if (findCount === 1 || !createData) {
+              return null;
+            }
+
+            const dirtyAt = createData.latestDirtyAt as Date;
+            return {
+              connectionId: createData.connectionId,
+              userId: createData.userId,
+              provider: createData.provider,
+              dirtyRevision: createData.dirtyRevision,
+              processedRevision: createData.processedRevision,
+              firstDirtyAt: createData.firstDirtyAt,
+              latestDirtyAt: createData.latestDirtyAt,
+              windowStart: createData.windowStart,
+              windowEnd: createData.windowEnd,
+              eventCount: createData.eventCount,
+              latestTraceId: createData.latestTraceId,
+              latestEventType: createData.latestEventType,
+              latestResourceCategory: createData.latestResourceCategory,
+              sourceProviderCountsJson: createData.sourceProviderCountsJson,
+              resourceCategoryCountsJson: createData.resourceCategoryCountsJson,
+              dirtyResourcesJson: createData.dirtyResourcesJson,
+              createdAt: dirtyAt,
+              updatedAt: dirtyAt,
+            };
+          }),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
+            payloadCreateData = input.data;
+            return { count: input.data.length };
+          }),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore(rootPrisma as never);
+
+      insideCallerOwnedTransaction = true;
+      const result = await store.upsertDirtyConnection({
+        connectionId: "dsc_caller_owned_1",
+        dirtyAt: "2026-05-26T12:00:00.000Z",
+        eventType: "daily.data.steps.created",
+        provider: "junction",
+        resourceCategory: "timeseries",
+        resources: [
+          {
+            count: 1,
+            jobKind: "resource",
+            payload: {
+              webhookDataJson: JSON.stringify({ source: "garmin", value: 456 }),
+            },
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-05-27T00:00:00.000Z",
+            windowStart: "2026-05-26T00:00:00.000Z",
+          },
+        ],
+        traceId: "trace_caller_owned_1",
+        tx: tx as never,
+        userId: "member_caller_owned_1",
+      });
+      insideCallerOwnedTransaction = false;
+
+      expect(encryptInsideCallerOwnedTransaction).toEqual([true]);
+      expect(rootPrisma.$transaction).not.toHaveBeenCalled();
+      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).not.toHaveBeenCalled();
+      expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+      expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
+        .toBe(payloadCreateData?.[0]?.id);
+    } finally {
+      insideCallerOwnedTransaction = false;
+      installHostedSecureBoxStringTestCodec();
+    }
+  });
+
   it("moves Junction webhook payload JSON out of the compact dirty row while preserving the runtime resource", async () => {
     let createData: Record<string, unknown> | null = null;
     let payloadCreateData: Array<Record<string, unknown>> | null = null;
@@ -601,3 +803,36 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(query.values).toEqual([staleBefore, 251]);
   });
 });
+
+function installHostedSecureBoxStringTestCodec(onEncrypt?: () => void): void {
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const decoded = JSON.parse(
+        Buffer.from(input.value.replace(/^hsb-test:/u, ""), "base64url").toString("utf8"),
+      ) as {
+        lane?: string;
+        scope?: string;
+        userId?: string;
+        value?: string;
+      };
+      if (
+        decoded.lane !== input.lane
+        || decoded.scope !== input.scope
+        || decoded.userId !== input.userId
+        || typeof decoded.value !== "string"
+      ) {
+        throw new Error("Hosted secure-box test codec metadata mismatch.");
+      }
+      return decoded.value;
+    },
+    encrypt(input) {
+      onEncrypt?.();
+      return `hsb-test:${Buffer.from(JSON.stringify({
+        lane: input.lane,
+        scope: input.scope,
+        userId: input.userId,
+        value: input.value,
+      }), "utf8").toString("base64url")}`;
+    },
+  });
+}
