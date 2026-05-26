@@ -640,6 +640,65 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("ignores empty Linq message events before member lookup or wake handoff", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [],
+        },
+        eventId: "evt_empty_linq_message",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "empty-message-parts",
+    });
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqOutboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
   it("ignores Linq group chats before active-member or signup side effects", async () => {
     const prisma = asPrismaTransactionClient({
       hostedInvite: {
