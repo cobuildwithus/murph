@@ -104,6 +104,9 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
+      'Apple Health/HealthKit is not supported yet; do not list it as available, describe it as available via supported apps, or route it through another provider',
+    )
+    expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
     expect(prompt).not.toContain('Before creating a connection link')
@@ -899,6 +902,12 @@ describe('assistant conversation onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'Name the underlying provider/source rather than bridge plumbing',
+    )
+    expect(prompt).toContain(
+      'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
+    )
+    expect(prompt).toContain(
+      'say Murph does not support it yet and suggest another supported source or texting notes for now',
     )
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',

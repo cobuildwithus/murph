@@ -558,7 +558,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. Apple Health/HealthKit is not supported yet; do not list it as available, describe it as available via supported apps, or route it through another provider. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {
@@ -804,7 +804,7 @@ function buildAssistantOnboardingHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `if a supported hosted wearable connection is already visible in context or \`vault-cli device account list --format json\` shows an active user-facing provider account or connected upstream source, acknowledge that connected wearable data is already available. Name the underlying provider/source rather than bridge plumbing. Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data unless it is missing or an experiment specifically needs a user-provided note. If no connected wearable/app source is visible and the user asks to connect a wearable without naming a provider, ask which supported provider they use (${providerList}). If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, use \`vault-cli device connect <provider> --format json\` and send the returned \`connectUrl\` on its own final line. Do not merely say they can connect later.`;
+  return `if a supported hosted wearable connection is already visible in context or \`vault-cli device account list --format json\` shows an active user-facing provider account or connected upstream source, acknowledge that connected wearable data is already available. Name the underlying provider/source rather than bridge plumbing. Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data unless it is missing or an experiment specifically needs a user-provided note. Do not present Apple Health or HealthKit as supported yet or available via supported apps; if it comes up, say Murph does not support it yet and suggest another supported source or texting notes for now. If no connected wearable/app source is visible and the user asks to connect a wearable without naming a provider, ask which supported provider they use (${providerList}). If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, use \`vault-cli device connect <provider> --format json\` and send the returned \`connectUrl\` on its own final line. Do not merely say they can connect later.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {
