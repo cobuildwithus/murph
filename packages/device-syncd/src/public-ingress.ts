@@ -834,12 +834,17 @@ export class DeviceSyncPublicIngress {
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
     if (!account) {
-      this.logger.warn?.("Delaying webhook for unknown device sync account.", {
+      const unknownWebhookLogContext: Record<string, unknown> = {
         provider: provider.provider,
         externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
         eventType: webhook.eventType,
         traceId,
-      });
+      };
+      if (parsed.externalAccountDiagnostic) {
+        unknownWebhookLogContext.externalAccountDiagnostic = parsed.externalAccountDiagnostic;
+      }
+
+      this.logger.warn?.("Delaying webhook for unknown device sync account.", unknownWebhookLogContext);
 
       try {
         await this.hooks.onUnknownWebhook?.({

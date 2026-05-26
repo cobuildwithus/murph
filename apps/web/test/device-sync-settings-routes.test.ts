@@ -449,7 +449,8 @@ describe("device sync settings routes", () => {
       }),
       timeseriesProbeDays: 0,
     }));
-    await expect(response.json()).resolves.toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       diagnostic: {
         summary: {
           hasUsefulHistoricalRecords: false,
@@ -467,6 +468,7 @@ describe("device sync settings routes", () => {
       },
       selectedConnection: {
         connectionMatchCount: 1,
+        externalAccountIdHash: "ad0b0599272ae642d955ad6b2128dc6e0068605c038942d1e1f95ea6ade9d10a",
         lastErrorCode: null,
         lastSyncCompletedAt: null,
         lastSyncErrorAt: null,
@@ -480,11 +482,13 @@ describe("device sync settings routes", () => {
       webSourceProjection: [
         {
           resourceCount: 0,
-          sourceProviderSlug: "garmin",
+          sourceKey: "source_1",
           status: "connected",
         },
       ],
     });
+    expect(JSON.stringify(body)).not.toContain("garmin");
+    expect(JSON.stringify(body)).not.toContain("junction-user-redacted");
   });
 
   it("runs a Junction REST diagnostic probe through the backfill diagnostic route", async () => {
@@ -570,6 +574,7 @@ describe("device sync settings routes", () => {
     }));
     const bodyText = await response.text();
     expect(bodyText).not.toContain("junction-user-redacted");
+    expect(bodyText).not.toContain("garmin");
     expect(JSON.parse(bodyText)).toMatchObject({
       ok: true,
       restProbe: {
@@ -588,7 +593,18 @@ describe("device sync settings routes", () => {
     });
   });
 
-  it("runs a Junction refresh REST diagnostic through the backfill diagnostic route", async () => {
+  it("rejects Junction refresh REST diagnostics from the GET backfill diagnostic route", async () => {
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction&restProbe=refresh&timeout=45",
+      ),
+    );
+
+    expect(response.status).toBe(405);
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+  });
+
+  it("runs a Junction refresh REST diagnostic through the POST backfill diagnostic route", async () => {
     mocks.probeRest.mockResolvedValueOnce({
       generatedAt: "2026-04-03T12:00:00.000Z",
       provider: "junction",
@@ -660,13 +676,15 @@ describe("device sync settings routes", () => {
       },
     ]);
 
-    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
-      new Request(
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.POST(
+      createJsonPostRequest(
         "https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction&restProbe=refresh&timeout=45",
+        {},
       ),
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "refresh",
       now: "2026-04-03T12:00:00.000Z",
@@ -678,6 +696,7 @@ describe("device sync settings routes", () => {
     }));
     const bodyText = await response.text();
     expect(bodyText).not.toContain("junction-user-redacted");
+    expect(bodyText).not.toContain("garmin");
     expect(JSON.parse(bodyText)).toMatchObject({
       ok: true,
       restProbe: {
