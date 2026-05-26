@@ -65,6 +65,10 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "failureAssistantProviderErrorStatusText",
   "providerHttpStatusText",
   "providerRequestBodyFieldNames",
+  "routePlanningActiveExperimentContextElapsedMs",
+  "routePlanningAnyBootstrapContextPrepared",
+  "routePlanningBootstrapContextPrepared",
+  "routePlanningSensitiveHealthContextAllowed",
   "safeErrorMessage",
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =

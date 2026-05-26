@@ -1499,6 +1499,10 @@ describe("hosted runtime log store", () => {
         messageStatus: "failed",
         promptTokenCount: 120,
         rawPayloadBytes: 2048,
+        routePlanningActiveExperimentContextElapsedMs: 6000,
+        routePlanningAnyBootstrapContextPrepared: true,
+        routePlanningBootstrapContextPrepared: false,
+        routePlanningSensitiveHealthContextAllowed: true,
       },
       tx,
       userId: "member_workspace_1",
@@ -1511,6 +1515,10 @@ describe("hosted runtime log store", () => {
       messageStatus: "failed",
       promptTokenCount: 120,
       rawPayloadBytes: 2048,
+      routePlanningActiveExperimentContextElapsedMs: 6000,
+      routePlanningAnyBootstrapContextPrepared: true,
+      routePlanningBootstrapContextPrepared: false,
+      routePlanningSensitiveHealthContextAllowed: true,
     });
   });
 
