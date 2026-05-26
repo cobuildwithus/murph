@@ -50,6 +50,7 @@ export interface HostedDeviceSyncRuntimeSyncState {
     connectionId: string;
     localAccountId: string;
     nextWakeAt: string | null;
+    processedDirtyPayloadIds?: string[];
     processedRevision: string;
   } | null;
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null;
@@ -425,6 +426,7 @@ function applyHostedDirtyDeviceSyncState(input: {
       connectionId: input.dirtyState.connectionId,
       localAccountId,
       nextWakeAt: input.nextWakeAt,
+      processedDirtyPayloadIds: collectHostedDirtyPayloadIds(input.dirtyState),
       processedRevision: input.dirtyState.dirtyRevision,
     };
   }
@@ -456,8 +458,19 @@ function applyHostedDirtyDeviceSyncState(input: {
     connectionId: input.dirtyState.connectionId,
     localAccountId,
     nextWakeAt: input.nextWakeAt,
+    processedDirtyPayloadIds: collectHostedDirtyPayloadIds(input.dirtyState),
     processedRevision: input.dirtyState.dirtyRevision,
   };
+}
+
+function collectHostedDirtyPayloadIds(
+  dirtyState: HostedExecutionDeviceSyncDirtyStateResponse,
+): string[] | undefined {
+  const ids = dirtyState.dirtyResources
+    .map((resource) => resource.dirtyPayloadId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+  return ids.length > 0 ? [...new Set(ids)] : undefined;
 }
 
 function reportHostedDirtyDeviceSyncStateSkipped(input: {

@@ -315,6 +315,7 @@ export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
 
 export interface HostedExecutionDeviceSyncDirtyResource {
   count: number;
+  dirtyPayloadId?: string;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;
@@ -367,6 +368,7 @@ export interface HostedExecutionDeviceSyncDirtyPendingResponse {
 
 export interface HostedExecutionDeviceSyncDirtyAckRequest {
   connectionId: string;
+  processedDirtyPayloadIds?: string[];
   processedRevision: string;
   userId: string;
 }
@@ -700,6 +702,19 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
 
   return {
     connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack request connectionId"),
+    ...(record.processedDirtyPayloadIds === undefined
+      ? {}
+      : {
+          processedDirtyPayloadIds: requireArray(
+            record.processedDirtyPayloadIds,
+            "Hosted device-sync dirty ack request processedDirtyPayloadIds",
+          ).map((entry, index) =>
+            requireString(
+              entry,
+              `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
+            )
+          ),
+        }),
     processedRevision: requireBigIntString(
       record.processedRevision,
       "Hosted device-sync dirty ack request processedRevision",
@@ -1043,6 +1058,11 @@ function parseHostedExecutionDeviceSyncDirtyResource(
 
   return {
     count: requirePositiveInteger(record.count, `${label}.count`),
+    ...(record.dirtyPayloadId === undefined
+      ? {}
+      : {
+          dirtyPayloadId: requireString(record.dirtyPayloadId, `${label}.dirtyPayloadId`),
+        }),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
     resource: readNullableStringValue(record.resource, `${label}.resource`),

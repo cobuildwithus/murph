@@ -926,6 +926,9 @@ function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
     connectionId: pendingDirtyAck.connectionId,
     kind: "device-sync.dirty-processed",
     nextWakeAt: pendingDirtyAck.nextWakeAt,
+    ...(pendingDirtyAck.processedDirtyPayloadIds
+      ? { processedDirtyPayloadIds: pendingDirtyAck.processedDirtyPayloadIds }
+      : {}),
     processedRevision: pendingDirtyAck.processedRevision,
   };
 }

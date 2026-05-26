@@ -44,6 +44,7 @@ export interface HostedSignalRecord {
 
 export interface HostedDeviceSyncDirtyResource {
   count: number;
+  dirtyPayloadId?: string;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;
