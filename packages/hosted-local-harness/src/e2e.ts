@@ -8,6 +8,9 @@ import {
 import { hostedLocalHarnessRepoRoot } from "./repo.ts";
 
 const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
+const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
+  "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
+const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
 
 export type HostedLocalE2eScenarioName =
   | "all"
@@ -203,6 +206,7 @@ export async function runHostedLocalE2eSuite(
         await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
       }
       await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
+      await prepareHostedLocalWebGeneratedArtifacts({ env: suiteEnv, scenarios });
       await runHostedLocalVitest({ env: suiteEnv, scenarios });
     } catch (error) {
       if (
@@ -263,6 +267,39 @@ async function prepareHostedLocalRunnerBaseImage(input: {
     label: "Hosted local runner base image preparation",
   });
   input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
+}
+
+async function prepareHostedLocalWebGeneratedArtifacts(input: {
+  env: NodeJS.ProcessEnv;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): Promise<void> {
+  if (input.scenarios.length <= 1) {
+    return;
+  }
+
+  if (input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] !== "1") {
+    await runForegroundCommand({
+      args: ["--dir", "apps/web", "prisma:generate"],
+      command: "pnpm",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: input.env,
+      forwardProcessSignals: ["SIGINT", "SIGTERM"],
+      label: "Hosted local web Prisma client preparation",
+    });
+    input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] = "1";
+  }
+
+  if (input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] !== "1") {
+    await runForegroundCommand({
+      args: ["health-commons:generate"],
+      command: "pnpm",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: input.env,
+      forwardProcessSignals: ["SIGINT", "SIGTERM"],
+      label: "Hosted local Health Commons generation",
+    });
+    input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] = "1";
+  }
 }
 
 async function runHostedLocalVitest(input: {

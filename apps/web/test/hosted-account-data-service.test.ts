@@ -62,6 +62,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_consent_grant",
   "prisma.device_connection",
   "prisma.device_sync_dirty_connection",
+  "prisma.device_sync_dirty_payload",
   "prisma.device_token_audit",
   "prisma.device_sync_signal",
   "prisma.device_oauth_session",
@@ -246,9 +247,13 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
   it("documents explicit dirty-state deletion before connection row cascades", () => {
     const dirtyState = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
       entry.slug === "prisma.device_sync_dirty_connection");
+    const dirtyPayload = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
+      entry.slug === "prisma.device_sync_dirty_payload");
 
     expect(dirtyState?.note).toContain("before device connection rows");
     expect(dirtyState?.note).toContain("does not rely on cascades");
+    expect(dirtyPayload?.note).toContain("before dirty-state and connection rows");
+    expect(dirtyPayload?.note).toContain("raw provider payload retention is bounded");
   });
 });
 
@@ -614,12 +619,16 @@ describe("deleteHostedAccountData", () => {
     });
 
     const deletedModels = deleteCalls.map((call) => call.model);
+    const dirtyPayloadIndex = deletedModels.indexOf("deviceSyncDirtyPayload");
     const dirtyStateIndex = deletedModels.indexOf("deviceSyncDirtyConnection");
     const signalIndex = deletedModels.indexOf("deviceSyncSignal");
     const connectionIndex = deletedModels.indexOf("deviceConnection");
 
+    expect(result.deletedCounts["prisma.device_sync_dirty_payload"]).toBe(1);
     expect(result.deletedCounts["prisma.device_sync_dirty_connection"]).toBe(1);
+    expect(dirtyPayloadIndex).toBeGreaterThanOrEqual(0);
     expect(dirtyStateIndex).toBeGreaterThanOrEqual(0);
+    expect(dirtyStateIndex).toBeGreaterThan(dirtyPayloadIndex);
     expect(signalIndex).toBeGreaterThan(dirtyStateIndex);
     expect(connectionIndex).toBeGreaterThan(signalIndex);
   });
@@ -1271,6 +1280,7 @@ async function createHostedAccountDataExportPrisma(input: {
         input.deviceConnectionRows ?? [makeDeviceConnectionExportRowForTest({ memberId })],
     },
     deviceSyncDirtyConnection: { count },
+    deviceSyncDirtyPayload: { count },
     deviceOauthSession: {
       count,
       findMany: async () => [{ state: "oauth-state" }],

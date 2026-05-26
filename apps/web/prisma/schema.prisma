@@ -43,6 +43,7 @@ model DeviceConnection {
   sources                    DeviceConnectionSource[]
   tokenAudits                DeviceTokenAudit[]
   dirtyState                 DeviceSyncDirtyConnection?
+  dirtyPayloads              DeviceSyncDirtyPayload[]
 
   @@unique([provider, providerAccountBlindIndex])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
@@ -192,6 +193,22 @@ model DeviceSyncDirtyConnection {
   @@index([userId, firstDirtyAt, connectionId])
   @@index([latestDirtyAt])
   @@map("device_sync_dirty_connection")
+}
+
+model DeviceSyncDirtyPayload {
+  id            String           @id
+  connectionId  String           @map("connection_id")
+  userId        String           @map("user_id")
+  provider      String
+  dirtyRevision BigInt           @map("dirty_revision")
+  resourceEncrypted String       @map("resource_encrypted")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, dirtyRevision])
+  @@index([userId, connectionId, dirtyRevision])
+  @@index([createdAt])
+  @@map("device_sync_dirty_payload")
 }
 
 model DeviceAgentSession {

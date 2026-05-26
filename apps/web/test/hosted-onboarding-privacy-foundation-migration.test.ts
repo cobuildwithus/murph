@@ -236,6 +236,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceSyncDirtyPayloadMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026052600_device_sync_dirty_payload/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -267,6 +274,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026051000_hosted_ai_usage_stripe_meter_skipped",
       "2026051900_device_connection_due_reconcile_sweep_idx",
       "2026052400_device_connection_refresh_lease",
+      "2026052600_device_sync_dirty_payload",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -402,6 +410,16 @@ describe("hosted Prisma baseline migration", () => {
       "device_connection_refresh_lease_expires_idx",
     );
     expect(deviceConnectionRefreshLeaseMigrationSql).not.toContain("CREATE TABLE");
+    expect(deviceSyncDirtyPayloadMigrationSql).toContain('CREATE TABLE "device_sync_dirty_payload"');
+    expect(deviceSyncDirtyPayloadMigrationSql).toContain('"resource_encrypted" TEXT NOT NULL');
+    expect(deviceSyncDirtyPayloadMigrationSql).not.toContain("resource_json");
+    expect(deviceSyncDirtyPayloadMigrationSql).toContain(
+      'REFERENCES "device_connection"("id")',
+    );
+    expect(deviceSyncDirtyPayloadMigrationSql).toContain("ON DELETE CASCADE");
+    expect(deviceSyncDirtyPayloadMigrationSql).toContain(
+      'CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revision_idx"',
+    );
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');
