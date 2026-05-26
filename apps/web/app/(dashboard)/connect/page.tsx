@@ -66,7 +66,7 @@ type ConnectSourceConnectionState = {
   connectTarget: string | null;
   requiresReconnect: boolean;
   sourceId: string;
-  state: "active" | "disconnected" | "reauthorization_required";
+  state: "active" | "reauthorization_required";
 };
 
 const CONNECT_SOURCE_UI = {
@@ -429,12 +429,12 @@ function resolveConnectSourceConnectionMatches(
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
     const sourceState = source.state === "active" || (
       options.includeReauthorizationRequired === true
-      && isReconnectableConnectSourceState(source.state)
+      && isReauthorizationRequiredConnectSourceState(source.state)
     )
       ? source.state
       : null;
     const requiresReconnect = source.primaryAction?.kind === "reconnect"
-      || isReconnectableConnectSourceState(source.state);
+      || isReauthorizationRequiredConnectSourceState(source.state);
     const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
       ? source.connectionId
       : null;
@@ -523,13 +523,13 @@ function connectSourceStatePriority(connection: ConnectSourceConnectionState): n
     return 3;
   }
 
-  return connection.state === "disconnected" ? 1 : 2;
+  return 2;
 }
 
-function isReconnectableConnectSourceState(
+function isReauthorizationRequiredConnectSourceState(
   state: HostedDeviceSyncSettingsSource["state"] | ConnectSourceConnectionState["state"],
-): state is "disconnected" | "reauthorization_required" {
-  return state === "disconnected" || state === "reauthorization_required";
+): state is "reauthorization_required" {
+  return state === "reauthorization_required";
 }
 
 function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): ConnectCallbackInput {
