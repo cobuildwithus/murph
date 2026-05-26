@@ -622,6 +622,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - Always prefer protocol-linked runs. If the user's plan is a variant of an existing public protocol or protocol family, start it with \`--from-protocol\` and store the user's changes as typed plan fields, setup answers, notes, or analysis choices.
 - Do not create an unlinked/private/custom experiment when a same-family public protocol exists, even if the user says "private"; the run data is private while the public protocol lineage stays attached.
 - Use \`vault-cli experiment start <slug> --custom --no-public-protocol ...\` only when Health Commons has no same-family protocol after same-turn search/list/explore. Do not use it just because the dose, schedule, metric, or setup differs from the public page.
+- For custom runs, include an explicit \`--primary-biomarker-key biomarker:<metric-slug>\`; custom runs have no protocol/test-plan default primary metric.
 - \`vault-cli experiment start <slug> ... --dry-run --format json\` to validate typed start fields without writing records.
 - \`vault-cli experiment edit <id> ...\` for typed repairs or enrichment of an existing experiment.
 - Preserve exact Health Commons \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\`.

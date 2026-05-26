@@ -713,9 +713,14 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
   )
 
   if (!analysisPlan.primaryBiomarkerKey) {
+    const missingPrimaryMetricMessage =
+      protocol === undefined
+        ? 'Custom experiment starts require --primary-biomarker-key biomarker:<metric-slug> because there is no protocol/test-plan default primary metric.'
+        : 'experiment start requires --primary-biomarker-key or a protocol/test-plan default primary metric.'
+
     throw new VaultCliError(
       'invalid_option',
-      'experiment start requires --primary-biomarker-key or a protocol/test-plan default primary metric.',
+      missingPrimaryMetricMessage,
     )
   }
 
@@ -1271,7 +1276,9 @@ export function registerExperimentCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Primary Health Commons biomarker key for analysis.'),
+        .describe(
+          'Primary metric/biomarker key for analysis. Required for --custom starts; use biomarker:<metric-slug>.',
+        ),
       secondaryBiomarkerKey: repeatableTextOptionSchema(
         'Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.',
       ),

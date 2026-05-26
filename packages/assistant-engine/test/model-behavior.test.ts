@@ -656,6 +656,10 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'vault-cli experiment start <slug> --custom --no-public-protocol',
     )
+    expect(prompt).toContain(
+      'For custom runs, include an explicit `--primary-biomarker-key biomarker:<metric-slug>`',
+    )
+    expect(prompt).toContain('custom runs have no protocol/test-plan default primary metric')
     expect(prompt).not.toContain('vault-cli experiment start <slug> --protocol-key')
     expect(prompt).toContain('vault-cli experiment edit <id>')
     expect(prompt).toContain('--dry-run --format json')
