@@ -159,9 +159,33 @@ export class PrismaHostedDirtyConnectionStore {
       };
     }
 
-    const becameDirty = existing.processedRevision >= existing.dirtyRevision;
-    const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
     const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
+    const becameDirty = existing.processedRevision >= existing.dirtyRevision;
+    if (
+      !becameDirty
+      && Object.keys(resourceBatch.compactResources).length === 0
+      && resourceBatch.payloadResources.length > 0
+    ) {
+      const payloadCreateResult = await createDirtyPayloadRows({
+        connectionId: input.connectionId,
+        dirtyRevision: existing.dirtyRevision,
+        provider: input.provider,
+        resources: resourceBatch.payloadResources,
+        traceId: input.traceId,
+        tx: prisma,
+        userId: input.userId,
+      });
+
+      return {
+        dirty: withDirtyPayloadResources(
+          mapDirtyConnectionRecord(existing),
+          payloadCreateResult.resources,
+        ),
+        shouldRequestWake: false,
+      };
+    }
+
+    const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
     const resources = mergeDirtyResources(
       priorResources,
       Object.values(resourceBatch.compactResources),
