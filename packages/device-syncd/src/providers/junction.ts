@@ -87,6 +87,11 @@ export {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 };
+
+interface JunctionTimeseriesImportResult {
+  yieldedAt: string | null;
+}
+
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",
@@ -493,12 +498,20 @@ export function createJunctionDeviceSyncProvider(
       job.kind === "backfill"
       || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
     ) {
-      await importTimeseriesDailySnapshots(
+      const timeseriesImport = await importTimeseriesDailySnapshots(
         context,
         sourceProviders,
         timeseriesWindowStart,
         window.windowEnd,
       );
+      if (timeseriesImport.yieldedAt) {
+        return buildYieldedJunctionJobResult({
+          context,
+          job,
+          windowEnd: window.windowEnd,
+          windowStart: timeseriesImport.yieldedAt,
+        });
+      }
     }
 
     const backfillFollowUp = job.kind === "backfill"
@@ -843,7 +856,7 @@ export function createJunctionDeviceSyncProvider(
         };
       } else if (inferredCategory === "timeseries") {
         const sourceProviders = await loadAndProjectSourceProviders();
-        await importTimeseriesDailySnapshots(
+        const timeseriesImport = await importTimeseriesDailySnapshots(
           context,
           sourceProviders,
           window.windowStart,
@@ -851,6 +864,14 @@ export function createJunctionDeviceSyncProvider(
           [resource],
           sourceProviderSlug,
         );
+        if (timeseriesImport.yieldedAt) {
+          return buildYieldedJunctionJobResult({
+            context,
+            job,
+            windowEnd: window.windowEnd,
+            windowStart: timeseriesImport.yieldedAt,
+          });
+        }
         return {
           nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
         };
@@ -1089,8 +1110,13 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
-  ): Promise<void> {
+  ): Promise<JunctionTimeseriesImportResult> {
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
+      if (context.shouldYield?.()) {
+        return {
+          yieldedAt: window.windowStart,
+        };
+      }
       const timeseries = await fetchTimeseriesSnapshots(
         context,
         window.windowStart,
@@ -1114,6 +1140,9 @@ export function createJunctionDeviceSyncProvider(
         timeseries: sanitizeJunctionImportSnapshots(timeseries, sourceProviders),
       });
     }
+    return {
+      yieldedAt: null,
+    };
   }
 
   async function importJunctionDirectResourceSnapshot(
@@ -1181,6 +1210,65 @@ export function createJunctionDeviceSyncProvider(
       resourceCategory,
       responseStatus,
     });
+  }
+
+  function buildYieldedJunctionJobResult(input: {
+    context: ProviderJobContext;
+    job: DeviceSyncJobRecord;
+    windowEnd: string;
+    windowStart: string;
+  }): ProviderJobResult {
+    const followUp = buildYieldedJunctionFollowUpJob(input);
+    return {
+      ...(followUp ? { scheduledJobs: [followUp] } : {}),
+      nextReconcileAt: addMilliseconds(input.context.now, reconcileIntervalMs),
+    };
+  }
+
+  function buildYieldedJunctionFollowUpJob(input: {
+    job: DeviceSyncJobRecord;
+    windowEnd: string;
+    windowStart: string;
+  }): DeviceSyncJobInput | null {
+    if (Date.parse(input.windowStart) >= Date.parse(input.windowEnd)) {
+      return null;
+    }
+
+    if (input.job.kind === "backfill" || input.job.kind === "reconcile") {
+      return buildExactWindowJob({
+        kind: input.job.kind,
+        priority: input.job.priority,
+        windowEnd: input.windowEnd,
+        windowStart: input.windowStart,
+      });
+    }
+
+    if (input.job.kind !== "resource") {
+      return null;
+    }
+
+    const payload: Record<string, unknown> = {
+      ...input.job.payload,
+      windowEnd: input.windowEnd,
+      windowStart: input.windowStart,
+    };
+    return {
+      kind: "resource",
+      payload,
+      priority: input.job.priority,
+      dedupeKey: sha256Text(JSON.stringify([
+        "junction",
+        "yield-follow-up",
+        input.windowStart,
+        input.windowEnd,
+        normalizeString(payload.eventType),
+        normalizeString(payload.objectId),
+        normalizeString(payload.occurredAt),
+        normalizeString(payload.resource),
+        normalizeString(payload.resourceCategory),
+        normalizeString(payload.sourceProviderSlug),
+      ])),
+    };
   }
 
   function buildInitialJobs(now: string): DeviceSyncJobInput[] {

@@ -1600,6 +1600,101 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("runtime wake marks background maintenance yield after late assistant input import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_yield_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_yield",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          if (item.item.laneSeq === "1") {
+            return { status: "imported" };
+          }
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `late same-conversation input ${item.item.laneSeq}`,
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_active_turn_yield",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_yield_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedSeqs.includes("2"));
+          await waitForCondition(() =>
+            input.shouldYieldBackgroundMaintenance?.() === true
+          );
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("runtime wake notifies staged input when a later mailbox item blocks", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [

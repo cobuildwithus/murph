@@ -208,6 +208,178 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     }
   });
 
+  it("recomputes store-owned dirty payload rows after a stale preseal revision contention", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+      .mockImplementation((callback: TimerHandler) => {
+        if (typeof callback === "function") {
+          callback();
+        }
+        return 0 as never;
+      });
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const rootFindUnique = vi.fn()
+      .mockResolvedValueOnce({
+        connectionId: "dsc_preseal_retry_1",
+        createdAt: dirtyAt,
+        dirtyResourcesJson: {},
+        dirtyRevision: 2n,
+        eventCount: 2n,
+        firstDirtyAt: dirtyAt,
+        latestDirtyAt: dirtyAt,
+        latestEventType: "daily.data.steps.created",
+        latestResourceCategory: "timeseries",
+        latestTraceId: "trace_previous",
+        processedRevision: 2n,
+        provider: "junction",
+        resourceCategoryCountsJson: {},
+        sourceProviderCountsJson: {},
+        updatedAt: dirtyAt,
+        userId: "member_preseal_retry_1",
+        windowEnd: null,
+        windowStart: null,
+      })
+      .mockResolvedValueOnce({
+        connectionId: "dsc_preseal_retry_1",
+        createdAt: dirtyAt,
+        dirtyResourcesJson: {},
+        dirtyRevision: 3n,
+        eventCount: 3n,
+        firstDirtyAt: dirtyAt,
+        latestDirtyAt: dirtyAt,
+        latestEventType: "daily.data.steps.created",
+        latestResourceCategory: "timeseries",
+        latestTraceId: "trace_concurrent",
+        processedRevision: 3n,
+        provider: "junction",
+        resourceCategoryCountsJson: {},
+        sourceProviderCountsJson: {},
+        updatedAt: dirtyAt,
+        userId: "member_preseal_retry_1",
+        windowEnd: null,
+        windowStart: null,
+      });
+    let payloadCreateData: Array<Record<string, unknown>> | null = null;
+    const tx = {
+      deviceSyncDirtyConnection: {
+        findUnique: vi.fn()
+          .mockResolvedValueOnce({
+            connectionId: "dsc_preseal_retry_1",
+            createdAt: dirtyAt,
+            dirtyResourcesJson: {},
+            dirtyRevision: 3n,
+            eventCount: 3n,
+            firstDirtyAt: dirtyAt,
+            latestDirtyAt: dirtyAt,
+            latestEventType: "daily.data.steps.created",
+            latestResourceCategory: "timeseries",
+            latestTraceId: "trace_concurrent",
+            processedRevision: 3n,
+            provider: "junction",
+            resourceCategoryCountsJson: {},
+            sourceProviderCountsJson: {},
+            updatedAt: dirtyAt,
+            userId: "member_preseal_retry_1",
+            windowEnd: null,
+            windowStart: null,
+          })
+          .mockResolvedValueOnce({
+            connectionId: "dsc_preseal_retry_1",
+            createdAt: dirtyAt,
+            dirtyResourcesJson: {},
+            dirtyRevision: 3n,
+            eventCount: 3n,
+            firstDirtyAt: dirtyAt,
+            latestDirtyAt: dirtyAt,
+            latestEventType: "daily.data.steps.created",
+            latestResourceCategory: "timeseries",
+            latestTraceId: "trace_concurrent",
+            processedRevision: 3n,
+            provider: "junction",
+            resourceCategoryCountsJson: {},
+            sourceProviderCountsJson: {},
+            updatedAt: dirtyAt,
+            userId: "member_preseal_retry_1",
+            windowEnd: null,
+            windowStart: null,
+          })
+          .mockResolvedValueOnce({
+            connectionId: "dsc_preseal_retry_1",
+            createdAt: dirtyAt,
+            dirtyResourcesJson: {},
+            dirtyRevision: 4n,
+            eventCount: 4n,
+            firstDirtyAt: dirtyAt,
+            latestDirtyAt: new Date("2026-05-26T12:01:00.000Z"),
+            latestEventType: "daily.data.steps.created",
+            latestResourceCategory: "timeseries",
+            latestTraceId: "trace_preseal_retry_1",
+            processedRevision: 3n,
+            provider: "junction",
+            resourceCategoryCountsJson: { timeseries: 1 },
+            sourceProviderCountsJson: { garmin: 1 },
+            updatedAt: new Date("2026-05-26T12:01:00.000Z"),
+            userId: "member_preseal_retry_1",
+            windowEnd: new Date("2026-05-27T00:00:00.000Z"),
+            windowStart: new Date("2026-05-26T00:00:00.000Z"),
+          }),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deviceSyncDirtyPayload: {
+        createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
+          payloadCreateData = input.data;
+          return { count: input.data.length };
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (txInput: unknown) => Promise<unknown>) =>
+        callback(tx),
+      ),
+      deviceSyncDirtyConnection: {
+        findUnique: rootFindUnique,
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+    try {
+      const result = await store.upsertDirtyConnection({
+        connectionId: "dsc_preseal_retry_1",
+        dirtyAt: "2026-05-26T12:01:00.000Z",
+        eventType: "daily.data.steps.created",
+        provider: "junction",
+        resourceCategory: "timeseries",
+        resources: [
+          {
+            count: 1,
+            jobKind: "resource",
+            payload: {
+              webhookDataJson: JSON.stringify({ source: "garmin", value: 789 }),
+            },
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-05-27T00:00:00.000Z",
+            windowStart: "2026-05-26T00:00:00.000Z",
+          },
+        ],
+        traceId: "trace_preseal_retry_1",
+        userId: "member_preseal_retry_1",
+      });
+
+      expect(rootFindUnique).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(tx.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledTimes(2);
+      expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
+      expect(payloadRow.dirtyRevision).toBe(4n);
+      expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
+        .toBe(payloadRow.id);
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it("moves Junction webhook payload JSON out of the compact dirty row while preserving the runtime resource", async () => {
     let createData: Record<string, unknown> | null = null;
     let payloadCreateData: Array<Record<string, unknown>> | null = null;

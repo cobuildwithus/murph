@@ -460,6 +460,45 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("passes the foreground-input yield hook to due device-sync timer work", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false);
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "nudge",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      shouldYieldBackgroundMaintenance,
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYieldDeviceSync: shouldYieldBackgroundMaintenance,
+        skipDeviceSync: false,
+      }),
+    );
+  });
+
   it("checkpoints a consumed alarm wake when foreground input was ingested", async () => {
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,
@@ -575,6 +614,109 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
     expect("nextWakeReason" in result).toBe(false);
+  });
+
+  it("does not run deferred legacy device-sync recovery after foreground input arrives", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => true);
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      shouldYieldBackgroundMaintenance,
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(result.progressed).toBe(true);
+  });
+
+  it("passes foreground-input yield hook to deferred legacy device-sync recovery", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false);
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [],
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      shouldYieldBackgroundMaintenance,
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYieldDeviceSync: shouldYieldBackgroundMaintenance,
+      }),
+    );
   });
 
   it("runs a due legacy null-labeled device-sync alarm instead of re-arming a synthetic retry", async () => {
@@ -3208,6 +3350,7 @@ function createPhaseInput(input: {
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
+  shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
@@ -3312,6 +3455,7 @@ function createPhaseInput(input: {
       userEnv: input.runtimeUserEnv ?? {},
     },
     runtimeEnv: {},
+    shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,
   };
 }

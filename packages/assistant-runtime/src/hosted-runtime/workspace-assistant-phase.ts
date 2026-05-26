@@ -339,6 +339,9 @@ export async function runHostedWorkspaceAssistantPhase(
         resolvedConfig: input.runtime.resolvedConfig,
       },
       signal: input.signal ?? undefined,
+      ...(input.shouldYieldBackgroundMaintenance
+        ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
+        : {}),
       skipDeviceSync,
       vaultRoot: input.restored.vaultRoot,
       wake,
@@ -349,6 +352,9 @@ export async function runHostedWorkspaceAssistantPhase(
         platformEnv: input.runtime.platformEnv,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
+        ...(input.shouldYieldBackgroundMaintenance
+          ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
+          : {}),
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.restored.vaultRoot,
         wake,
@@ -1887,6 +1893,9 @@ function shouldRunDeferredLegacyDeviceSyncRecovery(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): boolean {
   if (!isDueHostedLegacyDeviceSyncRecoveryAlarm(input.input)) {
+    return false;
+  }
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
     return false;
   }
 

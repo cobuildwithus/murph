@@ -4,6 +4,7 @@ import {
 } from "@murphai/device-syncd/config";
 import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
 import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
+import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
@@ -149,6 +150,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
+  shouldYieldDeviceSync?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const startedAt = Date.now();
@@ -182,6 +184,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         {
           platformEnv: input.runtime.platformEnv,
           runtimeLogPlatform: input.runtime.platform,
+          shouldYield: input.shouldYieldDeviceSync ?? null,
         },
       );
   const deviceSyncElapsedMs = elapsedSince(deviceSyncStartedAt);
@@ -773,6 +776,7 @@ export async function runHostedDeviceSyncPass(
   options: {
     platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+    shouldYield?: (() => boolean) | null;
   } = {},
 ): Promise<{
   nextWakeAt: string | null;
@@ -789,6 +793,7 @@ export async function runHostedDeviceSyncPass(
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     platformEnv,
+    shouldYield: options.shouldYield ?? null,
     vaultRoot,
   });
 
@@ -827,7 +832,10 @@ export async function runHostedDeviceSyncPass(
     }
 
     await service.runSchedulerOnce();
-    const processedJobs = await service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS);
+    const processedJobs = await drainHostedDeviceSyncWorker({
+      service,
+      shouldYield: options.shouldYield ?? null,
+    });
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
@@ -861,10 +869,36 @@ export async function runHostedDeviceSyncPass(
   }
 }
 
+async function drainHostedDeviceSyncWorker(input: {
+  service: DeviceSyncService;
+  shouldYield?: (() => boolean) | null;
+}): Promise<number> {
+  if (!input.shouldYield) {
+    return await input.service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS);
+  }
+
+  let processedJobs = 0;
+  for (let index = 0; index < HOSTED_MAX_DEVICE_SYNC_JOBS; index += 1) {
+    if (input.shouldYield()) {
+      break;
+    }
+    const processed = await input.service.drainWorker(1);
+    if (processed <= 0) {
+      break;
+    }
+    processedJobs += processed;
+    if (processed !== 1) {
+      break;
+    }
+  }
+  return processedJobs;
+}
+
 export async function runHostedDeviceSyncWakeLane(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   platformEnv?: Readonly<Record<string, string>>;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  shouldYieldDeviceSync?: (() => boolean) | null;
   wake: HostedRuntimeEvent;
   resolvedConfig: {
     deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
@@ -881,6 +915,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
     {
       platformEnv: input.platformEnv ?? {},
       runtimeLogPlatform: input.runtimeLogPlatform ?? null,
+      shouldYield: input.shouldYieldDeviceSync ?? null,
     },
   );
   const nextWake = selectHostedRuntimeWakeCandidate([
@@ -1279,6 +1314,7 @@ function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
 function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   platformEnv: Readonly<Record<string, string>>;
+  shouldYield?: (() => boolean) | null;
   vaultRoot: string;
 }) {
   if (!input.deviceSyncConfig) {
@@ -1302,6 +1338,7 @@ function createHostedDeviceSyncRuntime(input: {
     secret: input.deviceSyncConfig.secret,
     config: {
       publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
+      shouldYieldJobExecution: input.shouldYield ?? null,
       vaultRoot: input.vaultRoot,
     },
     registry,

@@ -138,6 +138,7 @@ class DeviceSyncServiceController {
   private readonly workerPollMs: number;
   private readonly workerBatchSize: number;
   private readonly schedulerPollMs: number;
+  private readonly shouldYieldJobExecution: (() => boolean) | null;
   private readonly workerId: string;
   private readonly ownsStore: boolean;
   private workerTimer: NodeJS.Timeout | null = null;
@@ -157,6 +158,7 @@ class DeviceSyncServiceController {
     this.workerPollMs = Math.max(1_000, input.config.workerPollMs ?? 5_000);
     this.workerBatchSize = Math.max(1, input.config.workerBatchSize ?? 4);
     this.schedulerPollMs = Math.max(5_000, input.config.schedulerPollMs ?? 60_000);
+    this.shouldYieldJobExecution = input.config.shouldYieldJobExecution ?? null;
     this.workerId = generatePrefixedId("worker");
     this.store =
       input.store ?? new SqliteDeviceSyncStore(input.config.stateDatabasePath ?? defaultStateDatabasePath(this.vaultRoot));
@@ -571,6 +573,9 @@ class DeviceSyncServiceController {
         {
           account: currentAccount,
           now,
+          ...(this.shouldYieldJobExecution
+            ? { shouldYield: this.shouldYieldJobExecution }
+            : {}),
           importSnapshot: async (snapshot: unknown) => {
             ensureExecutionActive();
             return this.importer.importDeviceProviderSnapshot({
