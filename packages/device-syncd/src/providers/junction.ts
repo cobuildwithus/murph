@@ -1,6 +1,12 @@
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
+import {
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
+} from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
@@ -75,13 +81,10 @@ export interface JunctionDeviceSyncProviderConfig {
 }
 
 export const JUNCTION_PROVIDER_CONFIG_KEY = "junction";
-export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
-  "profile",
-  "activity",
-  "sleep",
-  "workouts",
-  "body",
-] as const);
+export {
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+};
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",
@@ -208,18 +211,6 @@ const JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "abbott_libreview",
   "freestyle_libre",
 ]);
-export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  "steps",
-  "heartrate",
-  "hrv",
-  "respiratory_rate",
-  "blood_oxygen",
-  "weight",
-] as const);
-const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
-  "distance",
-  "glucose",
-] as const);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
@@ -528,7 +519,7 @@ export function createJunctionDeviceSyncProvider(
     context: DeviceSyncRestDiagnosticContext,
   ): Promise<DeviceSyncBackfillDiagnosticResult> {
     const requestedEndpoint = context.endpoint;
-    const normalizedResource = normalizeProviderSlug(context.resource);
+    const normalizedResource = normalizeJunctionResourceName(context.resource);
     const endpoint = requestedEndpoint === "auto"
       ? normalizedResource ? inferJunctionResourceCategory(null, normalizedResource) : "providers"
       : requestedEndpoint;
@@ -676,7 +667,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(job, context.now, reconcileDays);
-    const resource = normalizeProviderSlug(job.payload.resource);
+    const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const webhookDataRecord = parseJunctionWebhookDataJobRecord(job.payload.webhookDataJson);
@@ -1739,7 +1730,7 @@ function normalizeResourceList(
 ): string[] {
   const blockedResources = new Set(["cgm", "blood_glucose"]);
   const normalized = (value && value.length > 0 ? value : defaults)
-    .map(normalizeProviderSlug)
+    .map(normalizeJunctionResourceName)
     .filter((entry): entry is string => entry !== null && !blockedResources.has(entry));
 
   if (normalized.length === 0) {
@@ -2789,11 +2780,11 @@ function inferJunctionWebhookResource(
   data: Record<string, unknown> | null,
 ): { name: string; category: "summary" | "timeseries" } | null {
   const explicitResource =
-    normalizeProviderSlug(data?.resource)
-    ?? normalizeProviderSlug(data?.resource_type)
-    ?? normalizeProviderSlug(data?.type)
-    ?? normalizeProviderSlug(data?.data_type);
-  const eventResource = normalizeProviderSlug(readJunctionWebhookResourceFromEventType(eventType));
+    normalizeJunctionResourceName(data?.resource)
+    ?? normalizeJunctionResourceName(data?.resource_type)
+    ?? normalizeJunctionResourceName(data?.type)
+    ?? normalizeJunctionResourceName(data?.data_type);
+  const eventResource = normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
   const resource = explicitResource ?? eventResource;
 
   if (!resource) {

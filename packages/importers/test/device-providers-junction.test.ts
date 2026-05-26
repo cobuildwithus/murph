@@ -145,6 +145,11 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
           sleepScore: 88,
           totalSleepMinutes: 430,
         }],
+        sleep_cycle: [{
+          connectionId: "source-oura",
+          observedAt: "2026-04-22T07:00:00+00:00",
+          stage_count: 4,
+        }],
         workouts: [{
           connectionId: "source-oura",
           id: "workout-a",
@@ -1081,7 +1086,7 @@ test("Junction normalizer resolves nested source and provider slug origin fields
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
 });
 
-test("Junction normalizer defaults to the PR3 resource allowlist", () => {
+test("Junction normalizer defaults to the documented resource allowlist", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: Object.fromEntries(JUNCTION_DEFAULT_SUMMARY_RESOURCES.map((resource) => [
@@ -1107,10 +1112,62 @@ test("Junction normalizer defaults to the PR3 resource allowlist", () => {
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("glucose"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));
   assert.ok(payload.events?.some((event) => event.fields?.metric === "weight"));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "active-calories"));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "distance"));
   assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction normalizer canonicalizes documented resource aliases before allowlisting", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      hypnogram: [{
+        sourceProviderSlug: "garmin",
+        observedAt: "2026-04-22T07:00:00Z",
+        stageCount: 5,
+      }],
+    },
+    timeseries: {
+      heart_rate: [{
+        sourceProviderSlug: "garmin",
+        timestamp: "2026-04-22T07:10:00Z",
+        value: 61,
+      }],
+      body_weight: [{
+        sourceProviderSlug: "withings",
+        timestamp: "2026-04-22T07:15:00Z",
+        body_weight: 82.1,
+      }],
+      calories_active: [{
+        sourceProviderSlug: "garmin",
+        timestamp: "2026-04-22T07:20:00Z",
+        calories: 123,
+      }],
+    },
+  });
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["heartrate", "weight", "calories_active"]);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
+  assert.equal(payload.events?.some((event) => event.externalRef?.resourceType === "junction-garmin-hypnogram"), false);
+  assert.ok(payload.events?.some((event) =>
+    event.fields?.metric === "average-heart-rate" &&
+    event.fields.value === 61
+  ));
+  assert.ok(payload.events?.some((event) =>
+    event.fields?.metric === "weight" &&
+    event.fields.value === 82.1 &&
+    event.externalRef?.resourceType === "junction-withings-weight"
+  ));
+  assert.ok(payload.events?.some((event) =>
+    event.fields?.metric === "active-calories" &&
+    event.fields.value === 123 &&
+    event.externalRef?.resourceType === "junction-garmin-calories-active"
+  ));
 });
 
 test("Junction normalizer does not inherit device attribution from non-unique provider slug fallback", () => {

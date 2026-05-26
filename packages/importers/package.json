@@ -30,6 +30,11 @@
       "import": "./dist/device-providers/junction-origin.js",
       "default": "./dist/device-providers/junction-origin.js"
     },
+    "./device-providers/junction-resources": {
+      "types": "./dist/device-providers/junction-resources.d.ts",
+      "import": "./dist/device-providers/junction-resources.js",
+      "default": "./dist/device-providers/junction-resources.js"
+    },
     "./device-providers/canonical-wearable-records": {
       "types": "./dist/device-providers/canonical-wearable-records.d.ts",
       "import": "./dist/device-providers/canonical-wearable-records.js",
