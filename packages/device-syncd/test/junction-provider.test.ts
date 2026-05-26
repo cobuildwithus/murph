@@ -3756,6 +3756,31 @@ test("Junction direct resource jobs fall back when payload source is missing or 
       },
       restSteps: 3333,
     },
+    {
+      label: "records-source-mismatch",
+      directRecord: {
+        date: "2026-04-02",
+        id: "activity-inline-records-source-mismatch",
+        records: [
+          {
+            sourceProviderSlug: "fitbit",
+            steps: 9999,
+          },
+        ],
+        sourceProviderSlug: "garmin",
+      },
+      restSteps: 4444,
+    },
+    {
+      label: "identifier-only",
+      directRecord: {
+        date: "2026-04-02",
+        id: "activity-inline-identifier-only",
+        resource: "activity",
+        sourceProviderSlug: "garmin",
+      },
+      restSteps: 5555,
+    },
   ];
 
   for (const testCase of cases) {
@@ -4156,6 +4181,79 @@ test("Junction direct daily timeseries payload import survives provider-list out
     true,
   );
   assert.doesNotMatch(JSON.stringify(importedSnapshots), /junction-user-1/u);
+});
+
+test("Junction grouped direct timeseries payloads fall back when group source differs from the job source", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              steps: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/steps/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{ timestamp: "2026-04-02T14:00:00.000Z", unit: "count", value: 111 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["steps"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.steps.created",
+      objectId: "steps-group-source-mismatch",
+      occurredAt: "2026-04-02T14:00:00.000Z",
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        groups: {
+          fitbit: [{
+            data: [{ timestamp: "2026-04-02T14:00:00.000Z", unit: "count", value: 9999 }],
+            source: { provider: "fitbit", type: "watch" },
+          }],
+        },
+        sourceProviderSlug: "garmin",
+      }),
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), true);
+  assert.equal(importedSnapshots.length, 1);
+  assert.match(JSON.stringify(importedSnapshots), /111/u);
+  assert.doesNotMatch(JSON.stringify(importedSnapshots), /9999/u);
 });
 
 test("Junction splits oversized daily timeseries webhook samples into bounded direct jobs", async () => {

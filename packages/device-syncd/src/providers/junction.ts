@@ -205,6 +205,12 @@ const JUNCTION_SLEEP_CYCLE_STAGE_COUNT_PATHS = Object.freeze([
   "sleepStageCount",
   "sleep_stage_count",
 ] as const);
+const JUNCTION_WEBHOOK_NESTED_RECORD_KEYS = Object.freeze([
+  "data",
+  "results",
+  "items",
+  "records",
+] as const);
 const JUNCTION_WORKOUT_START_TIMESTAMP_PATHS = Object.freeze([
   "startAt",
   "start_at",
@@ -815,7 +821,7 @@ export function createJunctionDeviceSyncProvider(
         });
       } else if (
         webhookDataRecord
-        && hasJunctionWebhookDataJobRecords(webhookDataRecord, inferredCategory)
+        && hasJunctionWebhookDataJobRecords(webhookDataRecord, resource, inferredCategory)
         && canImportJunctionWebhookDataJobRecord({
           record: webhookDataRecord,
           sourceProviderSlug,
@@ -3441,18 +3447,36 @@ function resolveJunctionWebhookDataRecordSourceProviderSlug(
   record: Record<string, unknown>,
 ): string | null {
   const slugs = new Set<string>();
-  const addSlug = (value: unknown) => {
+  const addSlug = (value: unknown): void => {
     const slug = normalizeProviderSlug(value);
     if (slug) {
       slugs.add(slug);
     }
   };
+  const addRecordSlug = (entry: Record<string, unknown>): void => {
+    addSlug(resolveJunctionOrigin(entry).sourceProviderSlug);
+  };
 
-  addSlug(resolveJunctionOrigin(record).sourceProviderSlug);
-  for (const entry of readJunctionRecordArray(record.data)) {
-    const entryRecord = readPlainObject(entry);
-    if (entryRecord) {
-      addSlug(resolveJunctionOrigin(entryRecord).sourceProviderSlug);
+  addRecordSlug(record);
+  for (const entryRecord of readJunctionWebhookNestedRecordEntries(record)) {
+    addRecordSlug(entryRecord);
+  }
+
+  const groups = readPlainObject(record.groups);
+  if (groups) {
+    for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+      addSlug(sourceSlug);
+      for (const rawGroup of readJunctionRecordArray(rawGroups)) {
+        const group = readPlainObject(rawGroup);
+        if (!group) {
+          continue;
+        }
+
+        addRecordSlug(group);
+        for (const entryRecord of readJunctionWebhookNestedRecordEntries(group)) {
+          addRecordSlug(entryRecord);
+        }
+      }
     }
   }
 
@@ -3461,44 +3485,97 @@ function resolveJunctionWebhookDataRecordSourceProviderSlug(
 
 function hasJunctionWebhookDataJobRecords(
   record: Record<string, unknown>,
+  resource: string,
   resourceCategory: "summary" | "timeseries",
 ): boolean {
   if (resourceCategory === "summary") {
-    return Object.keys(record).some((key) => !isJunctionWebhookMetadataOnlyKey(key));
+    return hasJunctionWebhookSummaryMetricRecord(record, resource);
   }
 
-  if (readJunctionRecordArray(record.data).some((entry) => readPlainObject(entry))) {
+  if (readJunctionWebhookNestedRecordEntries(record).length > 0) {
     return true;
   }
 
-  return readPlainObject(record.groups) !== null
-    || hasFiniteNumberFromJunctionRecordPaths(record, [
-      "value",
-      "steps",
-      "heartRate",
-      "heart_rate",
-      "hrv",
-      "bodyWeight",
-      "body_weight",
-      "weight",
-      "calories",
-      "calories_active",
-      "activeCalories",
-      "active_calories",
-      "distance",
-      "distanceMeters",
-      "distance_meters",
-      "respiratoryRate",
-      "respiratory_rate",
-      "spo2",
-    ]);
+  if (readJunctionWebhookGroupedRecordEntries(record).length > 0) {
+    return true;
+  }
+
+  return hasFiniteNumberFromJunctionRecordPaths(record, [
+    "value",
+    "steps",
+    "heartRate",
+    "heart_rate",
+    "hrv",
+    "bodyWeight",
+    "body_weight",
+    "weight",
+    "calories",
+    "calories_active",
+    "activeCalories",
+    "active_calories",
+    "distance",
+    "distanceMeters",
+    "distance_meters",
+    "respiratoryRate",
+    "respiratory_rate",
+    "spo2",
+  ]);
 }
 
-function isJunctionWebhookMetadataOnlyKey(key: string): boolean {
-  const normalized = normalizeJunctionImportSourceIdentityKey(key);
-  return normalized === "sourceproviderslug"
-    || normalized === "sourcetype"
-    || normalized === "sourceinstanceid";
+function hasJunctionWebhookSummaryMetricRecord(
+  record: Record<string, unknown>,
+  resource: string,
+): boolean {
+  const metricPaths = readJunctionWebhookSummaryMetricPaths(resource);
+  if (metricPaths.length === 0) {
+    return false;
+  }
+
+  return [
+    record,
+    ...readJunctionWebhookNestedRecordEntries(record),
+    ...readJunctionWebhookGroupedRecordEntries(record),
+  ].some((entry) => hasFiniteNumberFromJunctionRecordPaths(entry, metricPaths));
+}
+
+function readJunctionWebhookSummaryMetricPaths(resource: string): readonly string[] {
+  return isJunctionHistoricalBackfillCompletionSummaryResource(resource)
+    ? JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS[resource]
+    : [];
+}
+
+function readJunctionWebhookNestedRecordEntries(
+  record: Record<string, unknown>,
+): Record<string, unknown>[] {
+  return JUNCTION_WEBHOOK_NESTED_RECORD_KEYS.flatMap((key) =>
+    readJunctionRecordArray(record[key]).flatMap((entry) => {
+      const entryRecord = readPlainObject(entry);
+      return entryRecord ? [entryRecord] : [];
+    })
+  );
+}
+
+function readJunctionWebhookGroupedRecordEntries(
+  record: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const groups = readPlainObject(record.groups);
+  if (!groups) {
+    return [];
+  }
+
+  const entries: Record<string, unknown>[] = [];
+  for (const rawGroups of Object.values(groups)) {
+    for (const rawGroup of readJunctionRecordArray(rawGroups)) {
+      const group = readPlainObject(rawGroup);
+      if (!group) {
+        continue;
+      }
+
+      entries.push(...readJunctionWebhookNestedRecordEntries(group));
+    }
+  }
+
+  return entries;
 }
 
 function inferJunctionResourceCategory(
