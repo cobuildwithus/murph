@@ -267,7 +267,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
-  it("offers reconnect for disconnected configured sources", () => {
+  it("keeps disconnected configured sources quiet", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connectTargets: [{
         connectSourceId: "oura",
@@ -284,9 +284,9 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
 
     expect(source).toMatchObject({
-      guidance: "Reconnect this source to resume syncing. Past history stays in place.",
+      guidance: "Past history stays in place.",
       headline: "Disconnected",
-      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      primaryAction: null,
       secondaryAction: null,
       state: "disconnected",
       statusLabel: "Disconnected",
