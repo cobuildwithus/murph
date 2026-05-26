@@ -185,6 +185,7 @@ describe("hosted-local harness", () => {
 
     expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
     expect(result.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL).toBe("0");
+    expect(result.env.MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_VERCEL_PULL).toBe("1");

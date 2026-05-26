@@ -134,6 +134,9 @@ const STRIPE_WEBHOOK_FORWARD_PATH = "/api/hosted-onboarding/stripe/webhook";
 const STRIPE_LISTENER_SECRET_CAPTURE_TIMEOUT_MS = 15_000;
 const HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV = "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV = "MURPH_DEV_PRESERVE_DOCKER_CONFIG";
+const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
+  "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
+const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 
@@ -472,11 +475,10 @@ export async function startHostedLocalDevStack(input: {
     });
     throwIfAbortSignalAborted(input.abortSignal);
 
-    await runCommand("pnpm", ["--dir", "apps/web", "prisma:generate"], {
-      cwd: repoRoot,
+    await maybeGenerateHostedWebPrismaClient({
+      abortSignal: input.abortSignal,
       env: runtimeEnv,
-      name: "setup",
-      signal: input.abortSignal,
+      stderrTarget: input.stderrTarget,
     });
 
     if (!config.skipPrismaMigrate) {
@@ -506,11 +508,10 @@ export async function startHostedLocalDevStack(input: {
     }
 
     if (!config.skipWeb) {
-      await runCommand("pnpm", ["health-commons:generate"], {
-        cwd: repoRoot,
+      await maybeGenerateHostedWebHealthCommons({
+        abortSignal: input.abortSignal,
         env: runtimeEnv,
-        name: "setup",
-        signal: input.abortSignal,
+        stderrTarget: input.stderrTarget,
       });
       await invalidateHostedWebHealthCommonsDevCache(runtimeEnv, input.stderrTarget);
     }
@@ -966,6 +967,57 @@ function resolveHostedLocalWorkerPersistDir(input: {
   }
 
   return path.join(input.tempDir, HOSTED_LOCAL_DEFAULT_WRANGLER_PERSIST_DIR_NAME);
+}
+
+async function maybeGenerateHostedWebPrismaClient(input: {
+  abortSignal: AbortSignal | undefined;
+  env: NodeJS.ProcessEnv;
+  stderrTarget: NodeJS.WritableStream | undefined;
+}): Promise<void> {
+  if (input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] === "1") {
+    writePreparedGeneratedArtifactSkip(
+      input.stderrTarget,
+      "hosted web Prisma client generation",
+    );
+    return;
+  }
+
+  await runCommand("pnpm", ["--dir", "apps/web", "prisma:generate"], {
+    cwd: repoRoot,
+    env: input.env,
+    name: "setup",
+    signal: input.abortSignal,
+  });
+}
+
+async function maybeGenerateHostedWebHealthCommons(input: {
+  abortSignal: AbortSignal | undefined;
+  env: NodeJS.ProcessEnv;
+  stderrTarget: NodeJS.WritableStream | undefined;
+}): Promise<void> {
+  if (input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] === "1") {
+    writePreparedGeneratedArtifactSkip(
+      input.stderrTarget,
+      "Health Commons generated catalog",
+    );
+    return;
+  }
+
+  await runCommand("pnpm", ["health-commons:generate"], {
+    cwd: repoRoot,
+    env: input.env,
+    name: "setup",
+    signal: input.abortSignal,
+  });
+}
+
+function writePreparedGeneratedArtifactSkip(
+  stderrTarget: NodeJS.WritableStream | undefined,
+  label: string,
+): void {
+  (stderrTarget ?? process.stderr).write(
+    `[setup] Skipping ${label}; already prepared for this hosted-local E2E run.\n`,
+  );
 }
 
 function pickHostedLocalStripeAuthorityEnv(input: {

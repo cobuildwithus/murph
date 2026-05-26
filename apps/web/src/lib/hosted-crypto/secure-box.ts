@@ -13,6 +13,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
   "device-sync-external-account-id",
+  "device-sync-payload",
   "device-sync-token",
   "mailbox-payload",
   "email-raw",

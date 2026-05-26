@@ -112,6 +112,17 @@ function createWebhookTraceStore(seed: MutableWebhookTrace[] = []) {
       traces.set(key, trace);
       return cloneWebhookTrace(trace);
     },
+    createMany: async ({ data }: { data: Record<string, unknown>; skipDuplicates?: boolean }) => {
+      const trace = normalizeWebhookTraceRecord(data);
+      const key = `${trace.provider}:${trace.traceId}`;
+
+      if (traces.has(key)) {
+        return { count: 0 };
+      }
+
+      traces.set(key, trace);
+      return { count: 1 };
+    },
     findUnique: async ({ where }: { where: Record<string, unknown> }) => {
       if (!isRecord(where.provider_traceId)) {
         return null;
@@ -364,7 +375,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
     });
   });
 
-  it("claims hosted webhook traces while holding the provider-account owner lock", async () => {
+  it("claims hosted webhook traces with exact trace dedupe instead of a provider-account owner lock", async () => {
     const { queryRaw, traces, store } = createWebhookTraceStore();
 
     await expect(
@@ -383,7 +394,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
       status: "processing",
       providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-raced"),
     });
-    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 });
 

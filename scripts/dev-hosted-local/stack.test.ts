@@ -1318,6 +1318,56 @@ describe("hosted local dev stack", () => {
     expect(stack.processes.healthCommons?.name).toBe("health-commons");
   });
 
+  it("skips hosted web generated artifacts when the E2E aggregate already prepared them", async () => {
+    const stderr = new CapturingWritable();
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+        MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      },
+      stderrTarget: stderr,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "prisma:generate"],
+      expect.any(Object),
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      [
+        "--dir",
+        "apps/web",
+        "exec",
+        "prisma",
+        "db",
+        "push",
+        "--accept-data-loss",
+      ],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["health-commons:generate"],
+      expect.any(Object),
+    );
+    expect(rm).toHaveBeenCalledWith(
+      expect.stringContaining("apps/web/.next-dev/dev/cache/fetch-cache"),
+      { force: true, recursive: true },
+    );
+    expect(stderr.text()).toContain(
+      "Skipping hosted web Prisma client generation; already prepared for this hosted-local E2E run.",
+    );
+    expect(stderr.text()).toContain(
+      "Skipping Health Commons generated catalog; already prepared for this hosted-local E2E run.",
+    );
+  });
+
   it("can skip the runner container smoke proof for focused debugging", async () => {
     const configModule = await import("./config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({

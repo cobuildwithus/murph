@@ -6,7 +6,6 @@ import type {
 } from "@murphai/device-syncd/public-ingress";
 
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
-import { tryAcquireHostedWebhookTraceOwnerLockTx } from "../webhook-trace-owner-lock";
 import type { HostedPrismaTransactionClient } from "./types";
 
 const HOSTED_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
@@ -34,13 +33,22 @@ export class PrismaHostedWebhookTraceStore {
     await this.pruneProcessedWebhookTraces(this.prisma, new Date());
 
     return this.prisma.$transaction(async (tx) => {
-      const lockAcquired = await tryAcquireHostedWebhookTraceOwnerLockTx({
-        prisma: tx,
-        provider: input.provider,
-        providerAccountBlindIndex,
+      const created = await tx.deviceWebhookTrace.createMany({
+        data: {
+          provider: input.provider,
+          traceId: input.traceId,
+          claimToken: input.claimToken,
+          providerAccountBlindIndex,
+          eventType: input.eventType,
+          processingExpiresAt,
+          receivedAt: claimedAt,
+          status: "processing",
+        },
+        skipDuplicates: true,
       });
-      if (!lockAcquired) {
-        return "processing";
+
+      if (created.count > 0) {
+        return "claimed";
       }
 
       const existing = await tx.deviceWebhookTrace.findUnique({
@@ -57,19 +65,7 @@ export class PrismaHostedWebhookTraceStore {
       });
 
       if (!existing) {
-        await tx.deviceWebhookTrace.create({
-          data: {
-            provider: input.provider,
-            traceId: input.traceId,
-            claimToken: input.claimToken,
-            providerAccountBlindIndex,
-            eventType: input.eventType,
-            processingExpiresAt,
-            receivedAt: claimedAt,
-            status: "processing",
-          },
-        });
-        return "claimed";
+        return "processing";
       }
 
       if (existing.status === "processed") {

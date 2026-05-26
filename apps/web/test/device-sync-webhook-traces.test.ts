@@ -11,6 +11,7 @@ function createPrismaStub() {
     $transaction: vi.fn(),
     deviceWebhookTrace: {
       create: vi.fn().mockResolvedValue(undefined),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -41,7 +42,7 @@ describe("PrismaHostedWebhookTraceStore", () => {
       }),
     ).resolves.toBe("claimed");
 
-    expect(prisma.deviceWebhookTrace.create).toHaveBeenCalledWith({
+    expect(prisma.deviceWebhookTrace.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         eventType: "sleep.updated",
         processingExpiresAt: new Date("2026-04-12T00:05:00.000Z"),
@@ -51,8 +52,9 @@ describe("PrismaHostedWebhookTraceStore", () => {
         status: "processing",
         traceId: "trace-1",
       }),
+      skipDuplicates: true,
     });
-    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
   it("claims traces with a purgeable provider-account blind index when a key is configured", async () => {
@@ -74,24 +76,26 @@ describe("PrismaHostedWebhookTraceStore", () => {
       }),
     ).resolves.toBe("claimed");
 
-    expect(prisma.deviceWebhookTrace.create).toHaveBeenCalledWith({
+    expect(prisma.deviceWebhookTrace.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         provider: "oura",
         providerAccountBlindIndex: expect.stringMatching(/^hbdi_/u),
         traceId: "trace-1",
       }),
+      skipDuplicates: true,
     });
-    expect(prisma.deviceWebhookTrace.create.mock.calls[0]?.[0].data.providerAccountBlindIndex)
+    expect(prisma.deviceWebhookTrace.createMany.mock.calls[0]?.[0].data.providerAccountBlindIndex)
       .not.toBe(MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL);
-    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
-    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      prisma.deviceWebhookTrace.create.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("returns processing without touching trace rows when the provider-account lock is busy", async () => {
+  it("returns processing for an active duplicate exact trace", async () => {
     const prisma = createPrismaStub();
-    prisma.$queryRaw.mockResolvedValue([{ acquired: false }]);
+    prisma.deviceWebhookTrace.createMany.mockResolvedValueOnce({ count: 0 });
+    prisma.deviceWebhookTrace.findUnique.mockResolvedValueOnce({
+      status: "processing",
+      processingExpiresAt: new Date("2026-04-12T00:03:00.000Z"),
+    });
     const store = new PrismaHostedWebhookTraceStore({
       prisma: prisma as never,
       providerAccountBlindIndexKey: Buffer.alloc(32, 7),
@@ -109,8 +113,9 @@ describe("PrismaHostedWebhookTraceStore", () => {
       }),
     ).resolves.toBe("processing");
 
-    expect(prisma.deviceWebhookTrace.findUnique).not.toHaveBeenCalled();
-    expect(prisma.deviceWebhookTrace.create).not.toHaveBeenCalled();
+    expect(prisma.deviceWebhookTrace.createMany).toHaveBeenCalledOnce();
+    expect(prisma.deviceWebhookTrace.findUnique).toHaveBeenCalledOnce();
     expect(prisma.deviceWebhookTrace.updateMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 });

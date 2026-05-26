@@ -199,6 +199,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes pending per-connection dirty sync metadata before device connection rows so deletion does not rely on cascades.",
   },
   {
+    slug: "prisma.device_sync_dirty_payload",
+    label: "Device sync dirty payload rows",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes pending provider payload jobs before dirty-state and connection rows so raw provider payload retention is bounded.",
+  },
+  {
     slug: "prisma.device_token_audit",
     label: "Device token audit rows",
     deletion: "live-delete",
@@ -1340,6 +1347,7 @@ async function countHostedAccountData(input: {
     hostedLinqDailyState,
     deviceConnection,
     deviceSyncDirtyConnection,
+    deviceSyncDirtyPayload,
     deviceTokenAudit,
     deviceOauthSession,
     deviceConnectIntent,
@@ -1368,6 +1376,7 @@ async function countHostedAccountData(input: {
     input.prisma.hostedLinqDailyState.count({ where: { memberId } }),
     input.prisma.deviceConnection.count({ where: { userId: memberId } }),
     input.prisma.deviceSyncDirtyConnection.count({ where: { userId: memberId } }),
+    input.prisma.deviceSyncDirtyPayload.count({ where: { userId: memberId } }),
     input.prisma.deviceTokenAudit.count({ where: { userId: memberId } }),
     input.prisma.deviceOauthSession.count({ where: { userId: memberId } }),
     input.prisma.deviceConnectIntent.count({ where: { memberId } }),
@@ -1384,6 +1393,7 @@ async function countHostedAccountData(input: {
     "prisma.device_connect_intent": deviceConnectIntent,
     "prisma.device_oauth_session": deviceOauthSession,
     "prisma.device_sync_dirty_connection": deviceSyncDirtyConnection,
+    "prisma.device_sync_dirty_payload": deviceSyncDirtyPayload,
     "prisma.device_sync_signal": deviceSyncSignal,
     "prisma.device_token_audit": deviceTokenAudit,
     "prisma.hosted_ai_usage": hostedAiUsage,
@@ -1443,6 +1453,7 @@ async function deleteHostedAccountPrismaRows(input: {
     ? (await input.prisma.deviceWebhookTrace.deleteMany({ where: webhookTraceWhere })).count
     : 0;
   record("prisma.device_token_audit", await input.prisma.deviceTokenAudit.deleteMany({ where: { userId: memberId } }));
+  record("prisma.device_sync_dirty_payload", await input.prisma.deviceSyncDirtyPayload.deleteMany({ where: { userId: memberId } }));
   record("prisma.device_sync_dirty_connection", await input.prisma.deviceSyncDirtyConnection.deleteMany({ where: { userId: memberId } }));
   record("prisma.device_sync_signal", await input.prisma.deviceSyncSignal.deleteMany({ where: { userId: memberId } }));
   record("prisma.device_oauth_session", await input.prisma.deviceOauthSession.deleteMany({ where: { userId: memberId } }));
