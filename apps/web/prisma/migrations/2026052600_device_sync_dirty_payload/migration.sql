@@ -5,7 +5,7 @@ CREATE TABLE "device_sync_dirty_payload" (
   "provider" TEXT NOT NULL,
   "dirty_revision" BIGINT NOT NULL,
   "resource_encrypted" TEXT NOT NULL,
-  "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "device_sync_dirty_payload_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "device_sync_dirty_payload_connection_id_fkey"
@@ -18,7 +18,7 @@ CREATE TABLE "device_sync_dirty_payload" (
 CREATE INDEX "device_sync_dirty_payload_connection_id_dirty_revision_idx"
   ON "device_sync_dirty_payload"("connection_id", "dirty_revision");
 
-CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revision_idx"
+CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revis_idx"
   ON "device_sync_dirty_payload"("user_id", "connection_id", "dirty_revision");
 
 CREATE INDEX "device_sync_dirty_payload_created_at_idx"
