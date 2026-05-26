@@ -35,10 +35,6 @@ import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
 } from "./wake";
-import {
-  composeHostedRuntimeOAuthDeviceSyncAccount,
-} from "./internal-runtime";
-import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
 import type {
   HostedDeviceSyncDirtyResource,
@@ -82,14 +78,10 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   if (storedAccount) {
     const provider = input.registry.get(existing.provider);
     const revokeAccess = provider?.connectionHandler?.revokeAccess;
-    const storedTokenBundle = revokeAccess ? buildStoredTokenBundle(storedAccount) : null;
 
-    if (revokeAccess && storedTokenBundle) {
+    if (revokeAccess && existing.status !== "disconnected") {
       try {
-        await revokeAccess(composeHostedRuntimeOAuthDeviceSyncAccount({
-          connection: storedAccount,
-          tokenBundle: storedTokenBundle,
-        }));
+        await revokeAccess(storedAccount);
       } catch (error) {
         const code = sanitizeHostedRuntimeErrorCode(
           isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
@@ -124,9 +116,11 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
-    const freshStoredTokenBundle = buildStoredTokenBundle(freshStoredAccount);
 
-    if (freshExisting.status === "disconnected" && !freshStoredTokenBundle) {
+    if (
+      freshExisting.status === "disconnected"
+      && freshStoredAccount?.credential.kind !== "oauth_tokens"
+    ) {
       return {
         connection: freshExisting,
         mailboxItemId: null,
@@ -202,6 +196,28 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     ...(warning ? { warning } : {}),
   };
 }
+
+export function handleHostedDeviceSyncUnknownWebhook({
+  externalAccountId,
+  provider,
+  traceId,
+  webhook,
+}: {
+  externalAccountId: string;
+  now: string;
+  provider: { provider: string };
+  traceId: string;
+  webhook: DeviceSyncIngressWebhook;
+}): void {
+  console.warn("Accepted orphan hosted device-sync webhook.", {
+    provider: provider.provider,
+    externalAccountIdHash: sha256Hex(externalAccountId),
+    eventType: webhook.eventType,
+    resourceCategory: normalizeNullableString(webhook.resourceCategory),
+    traceId: normalizeNullableString(traceId),
+  });
+}
+
 export async function handleHostedDeviceSyncConnectionEstablished(input: {
   account: {
     id: string;

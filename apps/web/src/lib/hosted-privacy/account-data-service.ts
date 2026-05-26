@@ -21,8 +21,6 @@ import {
 import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
-import { buildStoredTokenBundle } from "../device-sync/agent-session-token-bundle";
-import { composeHostedRuntimeOAuthDeviceSyncAccount } from "../device-sync/internal-runtime";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -1651,23 +1649,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const storedTokenBundle = buildStoredTokenBundle(storedAccount);
-
-      if (!storedTokenBundle) {
-        results.push({
-          connectionId: connection.id,
-          errorCode: null,
-          providerLabel: resolveDeviceConnectionProviderLabel(connection),
-          status: "warning",
-          warningCode: "CONNECTION_SECRET_MISSING",
-        });
-        continue;
-      }
-
-      await revokeAccess(composeHostedRuntimeOAuthDeviceSyncAccount({
-        connection: storedAccount,
-        tokenBundle: storedTokenBundle,
-      }));
+      await revokeAccess(storedAccount);
       results.push({
         connectionId: connection.id,
         errorCode: null,

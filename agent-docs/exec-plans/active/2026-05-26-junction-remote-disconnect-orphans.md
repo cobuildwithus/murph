@@ -1,0 +1,56 @@
+# Junction remote disconnect and orphan webhook handling
+
+Status: active
+Created: 2026-05-26
+Updated: 2026-05-26
+
+## Goal
+
+- Make hosted Junction disconnect cleanly deregister remote Junction provider connections, and make verified stale Junction webhooks stop retrying when their Junction user no longer exists in local Murph state.
+
+## Success criteria
+
+- Junction provider exposes `revokeAccess` and deregisters connected Junction provider slugs for the stored Junction user.
+- Hosted disconnect and hosted account deletion call provider `revokeAccess` for stored `provider_config` accounts instead of only OAuth token accounts.
+- Verified unknown Junction webhooks complete their trace and return an accepted orphan response instead of permanent `503` retries.
+- Provider capabilities advertise Junction remote disconnect.
+- Focused tests cover client DELETE calls, provider revoke, hosted provider-config revoke, and orphan webhook handling.
+
+## Scope
+
+- In scope: Junction API client/provider disconnect, hosted revoke call sites, hosted unknown-webhook hook wiring, focused tests, descriptor capability.
+- Out of scope: normal-flow Junction user deletion, client-user-id fallback routing, Junction webhook admin endpoint management, broad provider contract redesign.
+
+## Constraints
+
+- Technical constraints: reuse the existing `DeviceSyncAccount` and `connectionHandler.revokeAccess` primitives; keep webhook logs metadata-only and redacted; preserve provider-agnostic ingress/store contracts unless a small extension is directly justified.
+- Product/process constraints: ordinary user disconnect deregisters provider connections but does not delete the Junction user; preserve unrelated active Junction resource-alias work and dirty test diagnostics.
+
+## Risks and mitigations
+
+1. Risk: stale Junction/Svix retries keep hitting local dev after DB wipes.
+   Mitigation: verified unknown Junction webhooks are accepted as orphan traces and deduped by existing webhook trace persistence.
+2. Risk: provider-config accounts are skipped by hosted revoke paths.
+   Mitigation: use stored `DeviceSyncAccount` directly for revoke instead of deriving an OAuth-only token bundle first.
+3. Risk: normal disconnect over-deletes remote Junction state.
+   Mitigation: call provider deregistration per connected provider slug; keep whole-user delete out of product disconnect.
+
+## Tasks
+
+1. Add Junction DELETE client methods and diagnostics.
+2. Add Junction provider `revokeAccess` over current connected provider slugs.
+3. Mark Junction remote disconnect capability true.
+4. Generalize hosted disconnect/account-deletion revoke call sites to provider-config accounts.
+5. Wire hosted unknown-webhook hook and accept unknown Junction webhooks.
+6. Add focused regression tests and run required verification.
+
+## Decisions
+
+- Keep `user_id`/stored `externalAccountId` as the canonical Junction routing key.
+- Do not add `client_user_id` fallback routing for this bug.
+- Do not delete Junction users in normal disconnect; reserve user deletion for a separate explicit dev/admin cleanup.
+
+## Verification
+
+- Commands to run: focused device-syncd and apps/web tests for touched behavior, `pnpm typecheck`, and truthful diff coverage if available.
+- Expected outcomes: focused tests and typecheck pass, with any unrelated pre-existing dirty-tree failures called out explicitly.

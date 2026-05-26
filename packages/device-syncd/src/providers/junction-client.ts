@@ -229,6 +229,33 @@ export class JunctionClient {
     return parseJunctionProviders(payload);
   }
 
+  async deregisterProvider(input: {
+    providerSlug: string;
+    userId: string;
+  }): Promise<void> {
+    const providerSlug = normalizeSourceSlug(input.providerSlug);
+    if (!providerSlug) {
+      throw new TypeError("Junction provider deregistration requires a provider slug.");
+    }
+
+    await this.requestJson<unknown>(
+      "DELETE",
+      `/v2/user/${encodeURIComponent(input.userId)}/${encodeURIComponent(providerSlug)}`,
+      undefined,
+      { endpointKind: "junction_user_provider_deregister" },
+    );
+  }
+
+  async listUserDevices(userId: string): Promise<unknown[]> {
+    const payload = await this.requestJson<unknown>(
+      "GET",
+      `/v2/user/${encodeURIComponent(userId)}/device`,
+      undefined,
+      { endpointKind: "junction_user_devices" },
+    );
+    return extractCollectionRecords(payload);
+  }
+
   async listSummary(input: JunctionWindowInput): Promise<unknown[]> {
     return this.fetchWindowedCollection(
       `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
@@ -344,7 +371,7 @@ export class JunctionClient {
   }
 
   private async requestJson<T>(
-    method: "GET" | "POST",
+    method: "DELETE" | "GET" | "POST",
     path: string,
     body?: Record<string, unknown>,
     options: { endpointKind?: string; optional404?: boolean } = {},
@@ -474,6 +501,14 @@ function resolveJunctionEndpointKind(path: string): string {
 
   if (pathname.startsWith("/v2/user/providers/")) {
     return "junction_user_providers";
+  }
+
+  if (/^\/v2\/user\/[^/]+\/device$/u.test(pathname)) {
+    return "junction_user_devices";
+  }
+
+  if (/^\/v2\/user\/[^/]+\/[^/]+$/u.test(pathname)) {
+    return "junction_user_provider_deregister";
   }
 
   if (pathname.startsWith("/v2/summary/")) {

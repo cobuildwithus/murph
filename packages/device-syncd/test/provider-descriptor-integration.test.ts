@@ -86,6 +86,9 @@ describe("device-sync providers", () => {
     expect(provider.descriptor.connection).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.connection);
     expect(provider.descriptor.sync?.windows).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows);
     expect(provider.descriptor.webhook).toEqual(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.webhook);
+    expect(Boolean(provider.connectionHandler?.revokeAccess)).toBe(
+      JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
+    );
     expect(provider.credentialPolicy).toEqual({
       kind: "provider_config",
       providerConfigKey: "junction",

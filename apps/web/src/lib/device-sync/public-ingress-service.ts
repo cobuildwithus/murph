@@ -20,6 +20,7 @@ import type { HostedDeviceConnectionSource } from "./prisma-store";
 import {
   disconnectHostedDeviceSyncConnection,
   handleHostedDeviceSyncConnectionEstablished,
+  handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
@@ -68,6 +69,7 @@ export class HostedDeviceSyncPublicIngressService {
           });
           return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
         },
+        onUnknownWebhook: handleHostedDeviceSyncUnknownWebhook,
       },
     });
   }

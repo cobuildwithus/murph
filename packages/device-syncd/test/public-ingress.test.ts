@@ -1818,6 +1818,8 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
   const store = new InMemoryPublicIngressStore();
   const unknownWebhooks: string[] = [];
   const warnContexts: Record<string, unknown>[] = [];
+  const expectedExternalAccountHash = sha256Text("demo-late");
+  const expectedClientUserHash = sha256Text("demo-client");
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -1827,22 +1829,19 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
             externalAccountId: "demo-late",
             externalAccountDiagnostic: {
               selectedPath: "$.user_id",
-              selectedExternalAccountIdHash:
-                "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+              selectedExternalAccountIdHash: expectedExternalAccountHash,
               candidates: [
                 {
                   kind: "external_account_id",
                   path: "$.user_id",
                   selected: true,
-                  valueHash:
-                    "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+                  valueHash: expectedExternalAccountHash,
                 },
                 {
                   kind: "client_user_id",
                   path: "$.client_user_id",
                   selected: false,
-                  valueHash:
-                    "67be98c07e10d86381df9c14f3f9ac06e3e07123efbdf646c08bb3e21d22226e",
+                  valueHash: expectedClientUserHash,
                 },
               ],
             },
@@ -1889,26 +1888,27 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
     `demo:demo-late:${expectedScopedTraceId}`,
   ]);
   assert.equal(warnContexts.length, 2);
+  assert.equal(warnContexts[0]?.externalAccountIdHash, expectedExternalAccountHash);
   assert.deepEqual(warnContexts[0]?.externalAccountDiagnostic, {
     selectedPath: "$.user_id",
-    selectedExternalAccountIdHash:
-      "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+    selectedExternalAccountIdHash: expectedExternalAccountHash,
     candidates: [
       {
         kind: "external_account_id",
         path: "$.user_id",
         selected: true,
-        valueHash: "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+        valueHash: expectedExternalAccountHash,
       },
       {
         kind: "client_user_id",
         path: "$.client_user_id",
         selected: false,
-        valueHash: "67be98c07e10d86381df9c14f3f9ac06e3e07123efbdf646c08bb3e21d22226e",
+        valueHash: expectedClientUserHash,
       },
     ],
   });
   assert.equal(JSON.stringify(warnContexts).includes("demo-late"), false);
+  assert.equal(JSON.stringify(warnContexts).includes("demo-client"), false);
   assert.equal(store.completedWebhookTraceCalls, 0);
   assert.equal(store.lastRecordedWebhookTrace, null);
 });
