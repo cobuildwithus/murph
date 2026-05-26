@@ -426,7 +426,7 @@ function applyHostedDirtyDeviceSyncState(input: {
       connectionId: input.dirtyState.connectionId,
       localAccountId,
       nextWakeAt: input.nextWakeAt,
-      processedDirtyPayloadIds: collectHostedDirtyPayloadIds(input.dirtyState),
+      ...withHostedDirtyPayloadAckIds(input.dirtyState),
       processedRevision: input.dirtyState.dirtyRevision,
     };
   }
@@ -458,19 +458,19 @@ function applyHostedDirtyDeviceSyncState(input: {
     connectionId: input.dirtyState.connectionId,
     localAccountId,
     nextWakeAt: input.nextWakeAt,
-    processedDirtyPayloadIds: collectHostedDirtyPayloadIds(input.dirtyState),
+    ...withHostedDirtyPayloadAckIds(input.dirtyState),
     processedRevision: input.dirtyState.dirtyRevision,
   };
 }
 
-function collectHostedDirtyPayloadIds(
+function withHostedDirtyPayloadAckIds(
   dirtyState: HostedExecutionDeviceSyncDirtyStateResponse,
-): string[] | undefined {
+): Pick<NonNullable<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]>, "processedDirtyPayloadIds"> | Record<string, never> {
   const ids = dirtyState.dirtyResources
     .map((resource) => resource.dirtyPayloadId)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
 
-  return ids.length > 0 ? [...new Set(ids)] : undefined;
+  return ids.length > 0 ? { processedDirtyPayloadIds: [...new Set(ids)] } : {};
 }
 
 function reportHostedDirtyDeviceSyncStateSkipped(input: {
