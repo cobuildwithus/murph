@@ -1189,49 +1189,152 @@ test("Junction normalizer canonicalizes documented resource aliases before allow
   ));
 });
 
-test("Junction sleep-cycle summaries are raw-only", () => {
+test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () => {
   const payload = normalizeJunctionSnapshot({
-    importedAt: "2026-04-22T12:00:00.000Z",
+    importedAt: "2026-05-20T12:00:00.000Z",
     summaries: {
       sleep_cycle: [{
-        sourceProviderSlug: "garmin",
-        observedAt: "2026-04-22T07:00:00Z",
+        id: "sleep-cycle-oura-1",
+        source: {
+          provider: "oura",
+          type: "ring",
+          device_id: "raw-oura-ring-1",
+        },
+        observedAt: "2026-05-20T10:00:00Z",
         stages: [
-          { stage: "light", startAt: "2026-04-22T01:00:00Z", endAt: "2026-04-22T02:00:00Z" },
-          { stage: "deep", startAt: "2026-04-22T02:00:00Z", endAt: "2026-04-22T03:00:00Z" },
+          {
+            start: "2026-05-20T02:00:00+00:00",
+            end: "2026-05-20T02:30:00+00:00",
+            stage: "light",
+          },
+          {
+            start_time: "2026-05-20T02:30:00+00:00",
+            end_time: "2026-05-20T03:00:00+00:00",
+            level: "REM",
+          },
+          {
+            startAt: "2026-05-20T03:00:00+00:00",
+            durationSeconds: 3600,
+            sleep_stage: "slow_wave_sleep",
+          },
+          {
+            startAt: "2026-05-20T04:00:00+00:00",
+            durationMinutes: 15,
+            value: "wake",
+          },
+          {
+            endAt: "2026-05-20T04:30:00+00:00",
+            durationMillis: 900000,
+            name: "N3",
+          },
         ],
       }],
       hypnogram: [{
-        sourceProviderSlug: "oura",
-        observedAt: "2026-04-22T08:00:00Z",
-        stageCount: 5,
+        sourceProviderSlug: "garmin",
+        observedAt: "2026-05-20T11:00:00Z",
+        stages: [{
+          startAt: "2026-05-20T05:00:00+00:00",
+          endAt: "2026-05-20T05:20:00+00:00",
+          stage: "core",
+        }],
       }],
     },
   });
+  const samples = payload.samples ?? [];
+  const rawSleepCycleArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role === "junction-summary-sleep-cycle"
+  );
+  const rawSleepCycleArtifactText = JSON.stringify(rawSleepCycleArtifact?.content);
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
   assert.equal(
     payload.rawArtifacts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
     1,
   );
-  const sleepCycleArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-sleep-cycle");
-  assert.deepEqual(sleepCycleArtifact?.content, [
-    {
-      sourceProviderSlug: "garmin",
-      observedAt: "2026-04-22T07:00:00Z",
-      stages: [
-        { stage: "light", startAt: "2026-04-22T01:00:00Z", endAt: "2026-04-22T02:00:00Z" },
-        { stage: "deep", startAt: "2026-04-22T02:00:00Z", endAt: "2026-04-22T03:00:00Z" },
-      ],
-    },
-    {
-      sourceProviderSlug: "oura",
-      observedAt: "2026-04-22T08:00:00Z",
-      stageCount: 5,
-    },
-  ]);
+  assert.equal(rawSleepCycleArtifact?.role, "junction-summary-sleep-cycle");
+  assert.doesNotMatch(rawSleepCycleArtifactText, /raw-oura-ring-1/u);
   assert.equal(payload.events?.length ?? 0, 0);
-  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(samples.length, 6);
+  assert.deepEqual(samples.map((sample) => sample.stream), [
+    "sleep_stage",
+    "sleep_stage",
+    "sleep_stage",
+    "sleep_stage",
+    "sleep_stage",
+    "sleep_stage",
+  ]);
+  assert.deepEqual(samples.map((sample) => sample.unit), ["stage", "stage", "stage", "stage", "stage", "stage"]);
+  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "rem", "deep", "awake", "deep", "light"]);
+  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [30, 30, 60, 15, 15, 20]);
+  assert.equal(samples[0]?.sample.startAt, "2026-05-20T02:00:00.000Z");
+  assert.equal(samples[0]?.sample.endAt, "2026-05-20T02:30:00.000Z");
+  assert.equal(samples[2]?.sample.endAt, "2026-05-20T04:00:00.000Z");
+  assert.equal(samples[4]?.sample.startAt, "2026-05-20T04:15:00.000Z");
+  assert.equal(samples[4]?.sample.endAt, "2026-05-20T04:30:00.000Z");
+  assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
+  assert.equal(samples.some((sample) => sample.externalRef?.resourceType.includes("hypnogram")), false);
+  assert.deepEqual([...new Set(samples.map((sample) => sample.externalRef?.resourceType))].sort(), [
+    "junction-garmin-sleep-cycle",
+    "junction-oura-sleep-cycle",
+  ]);
+  assert.ok(samples.slice(0, 5).every((sample) => sample.dataOrigin?.sourceProviderSlug === "oura"));
+  assert.ok(samples.slice(0, 5).every((sample) => sample.dataOrigin?.sourceType === "ring"));
+  assert.equal(samples[5]?.dataOrigin?.sourceProviderSlug, "garmin");
+});
+
+test("Junction hypnogram alias emits canonical sleep-stage records", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-sleep-stage",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-05-20T12:00:00.000Z",
+      summaries: {
+        hypnogram: {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          data: [
+            {
+              start_time: "2026-05-20T01:00:00+00:00",
+              end_time: "2026-05-20T01:12:00+00:00",
+              value: "awake",
+            },
+            {
+              start_time: "2026-05-20T01:12:00+00:00",
+              end_time: "2026-05-20T01:42:00+00:00",
+              stage: "deep",
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  const samples = payload.samples ?? [];
+  const canonicalStageMetrics = (payload.canonicalWearableRecords ?? []).flatMap((record) =>
+    record.kind === "sample" ? [record.metric] : []
+  );
+  const canonicalStageSources = (payload.canonicalWearableRecords ?? []).flatMap((record) =>
+    record.kind === "sample" ? [record.source] : []
+  );
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
+  assert.equal(samples.length, 2);
+  assert.deepEqual(samples.map((sample) => sample.unit), ["stage", "stage"]);
+  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["awake", "deep"]);
+  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [12, 30]);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
+  assert.equal(samples.some((sample) => sample.externalRef?.resourceType.includes("hypnogram")), false);
+  assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
+  assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.ok(samples.every((sample) => sample.dataOrigin?.sourceProviderSlug === "garmin"));
+  assert.ok(samples.every((sample) => sample.dataOrigin?.sourceType === "watch"));
+  assert.deepEqual(canonicalStageMetrics.sort(), ["awakeMinutes", "deepMinutes"]);
+  assert.ok(canonicalStageSources.every((source) => source.provider === "junction"));
+  assert.ok(canonicalStageSources.every((source) => source.externalRef?.system === "junction"));
+  assert.ok(canonicalStageSources.every((source) => source.origin?.sourceProviderSlug === "garmin"));
 });
 
 test("Junction normalizer merges canonical and alias resource payloads before import", () => {
