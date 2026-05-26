@@ -9064,7 +9064,7 @@
                           }
                         },
                         "primaryBiomarkerKey": {
-                          "description": "Primary Health Commons biomarker key for analysis.",
+                          "description": "Primary metric/biomarker key for analysis. Required for --custom starts; use biomarker:<metric-slug>.",
                           "type": "string",
                           "minLength": 1
                         },
