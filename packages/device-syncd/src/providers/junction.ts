@@ -152,13 +152,7 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "body_fat_percent",
   ],
   sleep: JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
-  sleep_cycle: [
-    ...JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
-    "stageCount",
-    "stage_count",
-    "sleepStageCount",
-    "sleep_stage_count",
-  ],
+  sleep_cycle: JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
   workouts: [
     "calories",
     "totalCalories",
@@ -204,6 +198,12 @@ const JUNCTION_SLEEP_CYCLE_STAGE_DURATION_PATHS = Object.freeze([
   "duration_millis",
   "durationMs",
   "duration_ms",
+] as const);
+const JUNCTION_SLEEP_CYCLE_STAGE_COUNT_PATHS = Object.freeze([
+  "stageCount",
+  "stage_count",
+  "sleepStageCount",
+  "sleep_stage_count",
 ] as const);
 const JUNCTION_WORKOUT_START_TIMESTAMP_PATHS = Object.freeze([
   "startAt",
@@ -2797,7 +2797,10 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
     }
 
     return resource === "sleep_cycle"
-      && hasUsefulJunctionSleepCycleStageRecord(entry, sourceProviderSlug);
+      && (
+        hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_SLEEP_CYCLE_STAGE_COUNT_PATHS)
+        || hasUsefulJunctionSleepCycleStageRecord(entry, sourceProviderSlug)
+      );
   }
 
   if (resource === "workouts") {
