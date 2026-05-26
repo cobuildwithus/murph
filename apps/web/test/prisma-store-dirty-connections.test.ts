@@ -96,9 +96,10 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(3);
       expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
-      expect(payloadCreateData?.[0]?.resourceEncrypted).toMatch(/^hsb-test:/u);
+      const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
+      expect(payloadRow.resourceEncrypted).toMatch(/^hsb-test:/u);
       expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
-        .toBe(payloadCreateData?.[0]?.id);
+        .toBe(payloadRow.id);
     } finally {
       installHostedSecureBoxStringTestCodec();
     }
@@ -198,8 +199,9 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
       expect(rootPrisma.$transaction).not.toHaveBeenCalled();
       expect(rootPrisma.deviceSyncDirtyConnection.findUnique).not.toHaveBeenCalled();
       expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+      const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
       expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
-        .toBe(payloadCreateData?.[0]?.id);
+        .toBe(payloadRow.id);
     } finally {
       insideCallerOwnedTransaction = false;
       installHostedSecureBoxStringTestCodec();
@@ -589,9 +591,10 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     });
 
     expect(prisma.deviceSyncDirtyConnection.updateMany).not.toHaveBeenCalled();
-    expect(payloadCreateData?.[0]?.dirtyRevision).toBe(7n);
+    const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
+    expect(payloadRow.dirtyRevision).toBe(7n);
     expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
-      .toBe(payloadCreateData?.[0]?.id);
+      .toBe(payloadRow.id);
     expect(result.shouldRequestWake).toBe(false);
   });
 
@@ -981,4 +984,12 @@ function installHostedSecureBoxStringTestCodec(onEncrypt?: () => void): void {
       }), "utf8").toString("base64url")}`;
     },
   });
+}
+
+function expectFirstPayloadCreateRow(
+  rows: Array<Record<string, unknown>> | null,
+): Record<string, unknown> {
+  expect(rows).not.toBeNull();
+  expect(rows?.[0]).toBeTruthy();
+  return rows?.[0] ?? {};
 }
