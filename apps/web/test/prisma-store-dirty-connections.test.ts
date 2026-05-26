@@ -381,6 +381,152 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     }));
   });
 
+  it("caps durable payload hydration per pending dirty connection", async () => {
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const firstPayloadId = "dsp_payload_cap_1";
+    const secondPayloadId = "dsp_payload_cap_2";
+    const firstPayloadResource = {
+      count: 1,
+      jobKind: "resource",
+      payload: {
+        webhookDataJson: JSON.stringify({ sampleCount: 1, source: "garmin" }),
+      },
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-05-26T12:10:00.000Z",
+      windowStart: "2026-05-26T12:00:00.000Z",
+    };
+    const secondPayloadResource = {
+      count: 1,
+      jobKind: "resource",
+      payload: {
+        webhookDataJson: JSON.stringify({ sampleCount: 1, source: "garmin" }),
+      },
+      resource: "heartrate",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-05-26T12:10:00.000Z",
+      windowStart: "2026-05-26T12:00:00.000Z",
+    };
+    const firstResourceEncrypted = await sealHostedDeviceSyncDirtyPayloadJson({
+      connectionId: "dsc_junction_cap_1",
+      dirtyRevision: 2n,
+      payloadId: firstPayloadId,
+      provider: "junction",
+      userId: "member_123",
+      value: firstPayloadResource,
+    });
+    const secondResourceEncrypted = await sealHostedDeviceSyncDirtyPayloadJson({
+      connectionId: "dsc_junction_cap_2",
+      dirtyRevision: 4n,
+      payloadId: secondPayloadId,
+      provider: "junction",
+      userId: "member_123",
+      value: secondPayloadResource,
+    });
+    const dirtyRecords = [
+      {
+        connectionId: "dsc_junction_cap_1",
+        createdAt: dirtyAt,
+        dirtyResourcesJson: {},
+        dirtyRevision: 2n,
+        eventCount: 2n,
+        firstDirtyAt: dirtyAt,
+        latestDirtyAt: dirtyAt,
+        latestEventType: "daily.data.steps.created",
+        latestResourceCategory: "timeseries",
+        latestTraceId: "trace_cap_1",
+        processedRevision: 1n,
+        provider: "junction",
+        resourceCategoryCountsJson: { timeseries: 2 },
+        sourceProviderCountsJson: { garmin: 2 },
+        updatedAt: dirtyAt,
+        userId: "member_123",
+        windowEnd: new Date("2026-05-26T12:10:00.000Z"),
+        windowStart: dirtyAt,
+      },
+      {
+        connectionId: "dsc_junction_cap_2",
+        createdAt: dirtyAt,
+        dirtyResourcesJson: {},
+        dirtyRevision: 4n,
+        eventCount: 4n,
+        firstDirtyAt: dirtyAt,
+        latestDirtyAt: dirtyAt,
+        latestEventType: "daily.data.heartrate.created",
+        latestResourceCategory: "timeseries",
+        latestTraceId: "trace_cap_2",
+        processedRevision: 3n,
+        provider: "junction",
+        resourceCategoryCountsJson: { timeseries: 4 },
+        sourceProviderCountsJson: { garmin: 4 },
+        updatedAt: dirtyAt,
+        userId: "member_123",
+        windowEnd: new Date("2026-05-26T12:10:00.000Z"),
+        windowStart: dirtyAt,
+      },
+    ];
+    const prisma = {
+      $queryRaw: vi.fn(async () => [
+        { connection_id: "dsc_junction_cap_1" },
+        { connection_id: "dsc_junction_cap_2" },
+      ]),
+      deviceSyncDirtyConnection: {
+        findMany: vi.fn(async () => dirtyRecords),
+      },
+      deviceSyncDirtyPayload: {
+        findMany: vi.fn(async (query: { where: { connectionId: string } }) => {
+          if (query.where.connectionId === "dsc_junction_cap_1") {
+            return [
+              {
+                connectionId: "dsc_junction_cap_1",
+                dirtyRevision: 2n,
+                id: firstPayloadId,
+                provider: "junction",
+                resourceEncrypted: firstResourceEncrypted,
+              },
+            ];
+          }
+
+          return [
+            {
+              connectionId: "dsc_junction_cap_2",
+              dirtyRevision: 4n,
+              id: secondPayloadId,
+              provider: "junction",
+              resourceEncrypted: secondResourceEncrypted,
+            },
+          ];
+        }),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+    const result = await store.listPendingDirtyConnectionsForUser({
+      limit: 10,
+      userId: "member_123",
+    });
+
+    expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      take: 250,
+      where: {
+        connectionId: "dsc_junction_cap_1",
+        userId: "member_123",
+      },
+    }));
+    expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      take: 250,
+      where: {
+        connectionId: "dsc_junction_cap_2",
+        userId: "member_123",
+      },
+    }));
+    expect(result.items.map((item) => Object.values(item.dirtyResources)[0]?.dirtyPayloadId))
+      .toEqual([firstPayloadId, secondPayloadId]);
+  });
+
   it("appends payload-only webhooks to an already dirty connection without rewriting the marker row", async () => {
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     let payloadCreateData: Array<Record<string, unknown>> | null = null;

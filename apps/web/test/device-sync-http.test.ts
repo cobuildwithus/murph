@@ -146,6 +146,38 @@ describe("device sync callback redirect helpers", () => {
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("tok_fake_sensitive_456");
   });
 
+  it("keeps retryable 5xx device-sync domain errors at warning log level", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = httpModule.jsonError(
+      mocks.deviceSyncError({
+        code: "WEBHOOK_TRACE_IN_PROGRESS",
+        httpStatus: 503,
+        message: "Webhook delivery is already being processed. Retry later.",
+        retryable: true,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "WEBHOOK_TRACE_IN_PROGRESS",
+        message: "Webhook delivery is already being processed. Retry later.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith("Hosted device-sync route failed.", {
+      errorCode: "WEBHOOK_TRACE_IN_PROGRESS",
+      errorMessage: "Webhook delivery is already being processed. Retry later.",
+      errorResponseCode: "WEBHOOK_TRACE_IN_PROGRESS",
+      errorResponseRetryable: true,
+      errorResponseStatus: 503,
+      errorType: "MockDeviceSyncError",
+      internalMessage: "Hosted device-sync route failed unexpectedly.",
+    });
+  });
+
   it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const invalidJsonError = new SyntaxError(
