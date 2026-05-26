@@ -346,7 +346,7 @@ test("Junction empty historical backfill schedules a bounded same-window retry",
   );
 });
 
-test("Junction empty historical backfill preserves explicit windows and only clamps future ends", async () => {
+test("Junction empty historical backfill preserves explicit windows", async () => {
   const provider = createEmptyJunctionBackfillProvider();
   const context = createJunctionJobContext({
     now: "2026-04-04T00:00:00.000Z",
@@ -366,19 +366,19 @@ test("Junction empty historical backfill preserves explicit windows and only cla
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2025-01-01T12:34:56.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-05T08:09:10.000Z",
   });
   const retryJob = result.scheduledJobs?.[0];
   assert.deepEqual(retryJob?.payload, {
     windowStart: "2025-01-01T12:34:56.000Z",
-    windowEnd: "2026-04-04T00:00:00.000Z",
+    windowEnd: "2026-04-05T08:09:10.000Z",
   });
   assert.equal(
     retryJob?.dedupeKey,
     buildExpectedJunctionDedupeKey(
       "backfill",
       "2025-01-01T12:34:56.000Z",
-      "2026-04-04T00:00:00.000Z",
+      "2026-04-05T08:09:10.000Z",
     ),
   );
 });
@@ -514,7 +514,7 @@ test("Junction backfill diagnostic reports redacted provider call counts", async
   ]);
   assert.doesNotMatch(
     JSON.stringify(result),
-    /junction-user-1|provider-garmin-1|summary-activity-1/u,
+    /junction-user-1|provider-garmin-1|summary-activity-1|garmin|Garmin/u,
   );
 });
 
@@ -559,7 +559,7 @@ test("Junction REST diagnostic probes a resource without returning raw records",
       endpoint?: string;
       queryParameterNames?: string[];
       resource?: string;
-      sourceProviderSlug?: string | null;
+      sourceFiltered?: boolean;
       window?: Record<string, unknown>;
     };
     response?: { ok?: boolean; recordCount?: number; shape?: Record<string, unknown> };
@@ -568,7 +568,7 @@ test("Junction REST diagnostic probes a resource without returning raw records",
   assert.equal(result.provider, "junction");
   assert.equal(probe.request?.endpoint, "timeseries");
   assert.equal(probe.request?.resource, "steps");
-  assert.equal(probe.request?.sourceProviderSlug, "garmin");
+  assert.equal(probe.request?.sourceFiltered, true);
   assert.deepEqual(probe.request?.queryParameterNames, ["end_date", "provider", "start_date"]);
   assert.deepEqual(probe.request?.window, {
     windowStart: "2026-04-02T00:00:00.000Z",
@@ -582,7 +582,7 @@ test("Junction REST diagnostic probes a resource without returning raw records",
   ]);
   assert.doesNotMatch(
     JSON.stringify(result),
-    /junction-user-1|provider-garmin-1|1234/u,
+    /junction-user-1|provider-garmin-1|1234|garmin/u,
   );
 });
 
@@ -629,9 +629,12 @@ test("Junction REST diagnostic can force a bounded user data refresh", async () 
     if (url === "https://api.sandbox.us.junction.com/v2/user/refresh/junction-user-1?timeout=45") {
       return createJsonResponse({
         success: true,
-        refreshed_sources: ["garmin.steps"],
+        refreshed_sources: ["garmin.steps", "oura.activity"],
         in_progress_sources: ["garmin.sleep"],
-        failed_sources: [{ provider: "garmin", resource: "weight" }],
+        failed_sources: [
+          { provider: "garmin", resource: "weight" },
+          { provider: "oura", resource: "hrv" },
+        ],
         user_id: "junction-user-1",
       });
     }
@@ -674,17 +677,17 @@ test("Junction REST diagnostic can force a bounded user data refresh", async () 
   assert.equal(probe.request?.timeoutSeconds, 45);
   assert.equal(probe.response?.ok, true);
   assert.equal(probe.response?.success, true);
-  assert.equal(probe.response?.refreshedSourceCount, 1);
-  assert.deepEqual(probe.response?.refreshedSources, ["garmin.steps"]);
+  assert.equal(probe.response?.refreshedSourceCount, 2);
+  assert.deepEqual(probe.response?.refreshedSources, ["source_1.steps", "source_2.activity"]);
   assert.equal(probe.response?.inProgressSourceCount, 1);
-  assert.deepEqual(probe.response?.inProgressSources, ["garmin.sleep"]);
-  assert.equal(probe.response?.failedSourceCount, 1);
-  assert.deepEqual(probe.response?.failedSources, ["garmin.weight"]);
+  assert.deepEqual(probe.response?.inProgressSources, ["source_1.sleep"]);
+  assert.equal(probe.response?.failedSourceCount, 2);
+  assert.deepEqual(probe.response?.failedSources, ["source_1.weight", "source_2.hrv"]);
   assert.deepEqual(seenRequests, [{
     method: "POST",
     url: "https://api.sandbox.us.junction.com/v2/user/refresh/junction-user-1?timeout=45",
   }]);
-  assert.doesNotMatch(JSON.stringify(result), /junction-user-1/u);
+  assert.doesNotMatch(JSON.stringify(result), /junction-user-1|garmin|oura/u);
 });
 
 test("Junction backfill diagnostic rejects malformed requested windows without provider calls", async () => {
@@ -3128,7 +3131,7 @@ test("Junction resource jobs import direct daily data webhook payloads without c
         steps: 4321,
       }),
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
     }),
   );
 
@@ -3139,7 +3142,11 @@ test("Junction resource jobs import direct daily data webhook payloads without c
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, unknown[]>;
+    windowEnd?: string;
+    windowStart?: string;
   };
+  assert.equal(snapshot.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(snapshot.windowEnd, "2026-04-05T00:00:00.000Z");
   assert.equal(snapshot.summaries?.activity?.[0]?.steps, 4321);
   assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "garmin");
   assert.deepEqual(snapshot.timeseries, {});
@@ -3406,6 +3413,12 @@ test("Junction resource jobs fetch only the hinted resource window", async () =>
   );
 
   assert.equal(requests.filter((url) => url.includes("/v2/summary/activity/")).length, 1);
+  assert.equal(
+    requests.some((url) =>
+      url === "https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1?start_date=2026-04-01&end_date=2026-04-03&provider=oura"
+    ),
+    true,
+  );
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
   assert.equal(importedSnapshots.length, 1);
   assert.match(JSON.stringify(importedSnapshots[0]), /"activity"/u);

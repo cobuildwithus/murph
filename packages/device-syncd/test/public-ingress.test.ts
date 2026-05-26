@@ -1817,6 +1817,7 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
 test("public ingress leaves unknown-account webhook traces retryable and reruns unknown hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const unknownWebhooks: string[] = [];
+  const warnContexts: Record<string, unknown>[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -1824,6 +1825,27 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
         async verifyAndParseWebhook() {
           return {
             externalAccountId: "demo-late",
+            externalAccountDiagnostic: {
+              selectedPath: "$.user_id",
+              selectedExternalAccountIdHash:
+                "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+              candidates: [
+                {
+                  kind: "external_account_id",
+                  path: "$.user_id",
+                  selected: true,
+                  valueHash:
+                    "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+                },
+                {
+                  kind: "client_user_id",
+                  path: "$.client_user_id",
+                  selected: false,
+                  valueHash:
+                    "67be98c07e10d86381df9c14f3f9ac06e3e07123efbdf646c08bb3e21d22226e",
+                },
+              ],
+            },
             eventType: "demo.updated",
             traceId: "trace-late",
             jobs: [],
@@ -1836,6 +1858,11 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
       onUnknownWebhook({ provider, externalAccountId, traceId, webhook }) {
         assert.equal("traceId" in webhook, false);
         unknownWebhooks.push(`${provider.provider}:${externalAccountId}:${traceId}`);
+      },
+    },
+    log: {
+      warn(_message, context) {
+        warnContexts.push(context ?? {});
       },
     },
   });
@@ -1861,6 +1888,27 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
     `demo:demo-late:${expectedScopedTraceId}`,
     `demo:demo-late:${expectedScopedTraceId}`,
   ]);
+  assert.equal(warnContexts.length, 2);
+  assert.deepEqual(warnContexts[0]?.externalAccountDiagnostic, {
+    selectedPath: "$.user_id",
+    selectedExternalAccountIdHash:
+      "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+    candidates: [
+      {
+        kind: "external_account_id",
+        path: "$.user_id",
+        selected: true,
+        valueHash: "d0d0be384f6eb9a1d4d8472fa24292464405079c3d2dba6454450c4efd0f654a",
+      },
+      {
+        kind: "client_user_id",
+        path: "$.client_user_id",
+        selected: false,
+        valueHash: "67be98c07e10d86381df9c14f3f9ac06e3e07123efbdf646c08bb3e21d22226e",
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(warnContexts).includes("demo-late"), false);
   assert.equal(store.completedWebhookTraceCalls, 0);
   assert.equal(store.lastRecordedWebhookTrace, null);
 });

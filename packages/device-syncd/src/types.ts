@@ -401,6 +401,7 @@ export interface ProviderWebhookContext {
 
 export interface ProviderWebhookResult {
   externalAccountId: string;
+  externalAccountDiagnostic?: DeviceSyncWebhookExternalAccountDiagnostic;
   eventType: string;
   traceId: string;
   occurredAt?: string;
@@ -408,6 +409,19 @@ export interface ProviderWebhookResult {
   resourceCategory?: string | null;
   jobs: DeviceSyncJobInput[];
   unknownAccountAction?: "retry" | "accept";
+}
+
+export interface DeviceSyncWebhookExternalAccountDiagnostic {
+  selectedPath: string | null;
+  selectedExternalAccountIdHash: string;
+  candidates: readonly DeviceSyncWebhookExternalAccountCandidateDiagnostic[];
+}
+
+export interface DeviceSyncWebhookExternalAccountCandidateDiagnostic {
+  path: string;
+  kind: "external_account_id" | "client_user_id";
+  valueHash: string;
+  selected: boolean;
 }
 
 export interface DeviceSyncIngressWebhook {

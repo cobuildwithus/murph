@@ -8,9 +8,23 @@ import type {
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import type { HostedBrowserDeviceSyncConnection } from "@/src/lib/device-sync/public-connection";
+import { sha256Hex } from "@/src/lib/device-sync/shared";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 
 export const GET = withJsonError(async (request: Request) => {
+  return handleDeviceSyncBackfillDiagnostic(request, { allowProviderRefresh: false });
+});
+
+export const POST = withJsonError(async (request: Request) => {
+  assertHostedOnboardingMutationOrigin(request);
+  return handleDeviceSyncBackfillDiagnostic(request, { allowProviderRefresh: true });
+});
+
+async function handleDeviceSyncBackfillDiagnostic(
+  request: Request,
+  options: { allowProviderRefresh: boolean },
+) {
   assertDeviceSyncDiagnosticRouteEnabled(request);
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
@@ -30,6 +44,15 @@ export const GET = withJsonError(async (request: Request) => {
   const windowStart = normalizeQueryString(url.searchParams.get("windowStart"));
   const windowEnd = normalizeQueryString(url.searchParams.get("windowEnd"));
   const restProbe = readRestProbe(url.searchParams);
+  if (restProbe?.endpoint === "refresh" && !options.allowProviderRefresh) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_REST_DIAGNOSTIC_REFRESH_REQUIRES_POST",
+      message: "Junction refresh diagnostics require a POST request.",
+      httpStatus: 405,
+      retryable: false,
+    });
+  }
+
   const settings = await controlPlane.listConnections(auth.member.id);
   const candidates = settings.connections.filter((connection) =>
     connection.provider === providerName
@@ -151,6 +174,7 @@ export const GET = withJsonError(async (request: Request) => {
     publicIngress: describeDiagnosticPublicIngress(controlPlane, provider),
     selectedConnection: {
       connectionMatchCount: candidates.length,
+      externalAccountIdHash: sha256Hex(diagnosticAccount.externalAccountId),
       lastErrorCode: connection.lastErrorCode ?? null,
       lastSyncCompletedAt: connection.lastSyncCompletedAt ?? null,
       lastSyncErrorAt: connection.lastSyncErrorAt ?? null,
@@ -161,27 +185,21 @@ export const GET = withJsonError(async (request: Request) => {
       setupPhase: connection.setupPhase ?? null,
       status: connection.status,
     },
-    webSourceProjection: settings.connectionSources
-      .filter((source) => source.connectionId === connection.id)
-      .map((source) => ({
-        firstSeenAt: source.firstSeenAt,
-        lastSeenAt: source.lastSeenAt,
-        resourceCount: source.resourceCount,
-        sourceProviderSlug: source.sourceProviderSlug,
-        status: source.status,
-      })),
-    diagnostic: diagnostic.result,
+    webSourceProjection: describeDiagnosticWebSourceProjection(
+      settings.connectionSources.filter((source) => source.connectionId === connection.id),
+    ),
+    diagnostic: redactDiagnosticProviderIdentifiers(diagnostic.result),
     ...(restDiagnostic
       ? {
           restProbe: {
             generatedAt: restDiagnostic.generatedAt,
             provider: restDiagnostic.provider,
-            result: restDiagnostic.result,
+            result: redactDiagnosticProviderIdentifiers(restDiagnostic.result),
           },
         }
       : {}),
   });
-});
+}
 
 function assertDeviceSyncDiagnosticRouteEnabled(request: Request): void {
   const url = new URL(request.url);
@@ -321,6 +339,134 @@ function readRestProbeTimeoutSeconds(value: string | null): number | null {
 
   const parsed = Number.parseInt(normalized, 10);
   return Number.isSafeInteger(parsed) ? Math.max(5, Math.min(60, parsed)) : null;
+}
+
+interface DiagnosticWebSourceProjectionInput {
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resourceCount: number;
+  sourceProviderSlug: string;
+  status: string;
+}
+
+function describeDiagnosticWebSourceProjection(
+  sources: readonly DiagnosticWebSourceProjectionInput[],
+): Array<{
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resourceCount: number;
+  sourceKey: string;
+  status: string;
+}> {
+  const sourceKeys = new Map(
+    [...new Set(sources.map((source) => source.sourceProviderSlug))]
+      .sort((left, right) => left.localeCompare(right))
+      .map((slug, index) => [slug, formatDiagnosticSourceKey(index)] as const),
+  );
+
+  return sources.map((source) => ({
+    firstSeenAt: source.firstSeenAt,
+    lastSeenAt: source.lastSeenAt,
+    resourceCount: source.resourceCount,
+    sourceKey: sourceKeys.get(source.sourceProviderSlug) ?? "source_unknown",
+    status: source.status,
+  }));
+}
+
+function redactDiagnosticProviderIdentifiers(value: Record<string, unknown>): Record<string, unknown> {
+  const redacted = redactDiagnosticValue(value, new Map());
+  return isDiagnosticRecord(redacted) ? redacted : {};
+}
+
+function redactDiagnosticValue(value: unknown, sourceKeys: Map<string, string>): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactDiagnosticValue(entry, sourceKeys));
+  }
+
+  if (!isDiagnosticRecord(value)) {
+    return value;
+  }
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "sourceProviderSlug") {
+      const sourceSlug = normalizeQueryString(typeof entry === "string" ? entry : null);
+      redacted.sourceKey = sourceSlug ? readDiagnosticSourceKey(sourceKeys, sourceSlug) : null;
+      continue;
+    }
+
+    if (key === "sourceProviderSlugs" && Array.isArray(entry)) {
+      const slugs = entry
+        .map((candidate) => normalizeQueryString(typeof candidate === "string" ? candidate : null))
+        .filter((candidate): candidate is string => Boolean(candidate));
+      redacted.sourceCount = slugs.length;
+      redacted.sourceKeys = slugs.map((slug) => readDiagnosticSourceKey(sourceKeys, slug));
+      continue;
+    }
+
+    if (key === "resourceCountsBySourceProvider" && isDiagnosticRecord(entry)) {
+      redacted.resourceCountsBySource = Object.entries(entry).map(([sourceSlug, count]) => ({
+        resourceCount: count,
+        sourceKey: readDiagnosticSourceKey(sourceKeys, sourceSlug),
+      }));
+      continue;
+    }
+
+    if (key === "availableResourcesBySourceProvider" && isDiagnosticRecord(entry)) {
+      redacted.availableResourcesBySource = Object.entries(entry).map(([sourceSlug, resources]) => ({
+        resources,
+        sourceKey: readDiagnosticSourceKey(sourceKeys, sourceSlug),
+      }));
+      continue;
+    }
+
+    if (isDiagnosticSourceListKey(key) && Array.isArray(entry)) {
+      redacted[key] = entry
+        .map((candidate) => redactDiagnosticSourcePath(candidate, sourceKeys))
+        .filter((candidate): candidate is string => Boolean(candidate));
+      continue;
+    }
+
+    redacted[key] = redactDiagnosticValue(entry, sourceKeys);
+  }
+
+  return redacted;
+}
+
+function isDiagnosticSourceListKey(key: string): boolean {
+  return key === "failedSources"
+    || key === "inProgressSources"
+    || key === "refreshedSources";
+}
+
+function redactDiagnosticSourcePath(value: unknown, sourceKeys: Map<string, string>): string | null {
+  const normalized = normalizeQueryString(typeof value === "string" ? value : null);
+  if (!normalized) {
+    return null;
+  }
+
+  const [sourceSlug, ...rest] = normalized.split(".");
+  const sourceKey = readDiagnosticSourceKey(sourceKeys, sourceSlug ?? "source");
+  return rest.length > 0 ? `${sourceKey}.${rest.join(".")}` : sourceKey;
+}
+
+function readDiagnosticSourceKey(sourceKeys: Map<string, string>, sourceSlug: string): string {
+  const existing = sourceKeys.get(sourceSlug);
+  if (existing) {
+    return existing;
+  }
+
+  const sourceKey = formatDiagnosticSourceKey(sourceKeys.size);
+  sourceKeys.set(sourceSlug, sourceKey);
+  return sourceKey;
+}
+
+function formatDiagnosticSourceKey(index: number): string {
+  return `source_${index + 1}`;
+}
+
+function isDiagnosticRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 type PublicIngressReachability =

@@ -25,6 +25,7 @@ import {
 
 import type {
   DeviceConnectionSourceStatus,
+  DeviceSyncWebhookExternalAccountDiagnostic,
   DeviceSyncBackfillDiagnosticContext,
   DeviceSyncBackfillDiagnosticResult,
   DeviceSyncJobInput,
@@ -587,7 +588,7 @@ export function createJunctionDeviceSyncProvider(
               user_id: true,
               user_limit: true,
             }),
-            sourceProviderSlug,
+            sourceFiltered: Boolean(sourceProviderSlug),
           },
           response: endpoint === "introspect_resources"
             ? describeJunctionIntrospectionResources(payloadResult, sourceProviderSlug)
@@ -662,7 +663,7 @@ export function createJunctionDeviceSyncProvider(
             : ["end_date", "start_date"],
           resource: normalizedResource,
           resourceCategory,
-          sourceProviderSlug,
+          sourceFiltered: Boolean(sourceProviderSlug),
           window,
         },
         response: describeJunctionDiagnosticRecords(resourceResult),
@@ -784,7 +785,7 @@ export function createJunctionDeviceSyncProvider(
     });
     const eventType = requireJunctionWebhookEventType(verified.payload);
     const data = readPlainObject(verified.payload.data);
-    const externalAccountId = requireJunctionWebhookUserId(verified.payload, data);
+    const externalAccountSelection = requireJunctionWebhookUserIdSelection(verified.payload, data);
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
@@ -808,7 +809,8 @@ export function createJunctionDeviceSyncProvider(
     });
 
     return {
-      externalAccountId,
+      externalAccountId: externalAccountSelection.userId,
+      externalAccountDiagnostic: buildJunctionWebhookExternalAccountDiagnostic(externalAccountSelection),
       eventType,
       traceId: verified.messageId,
       occurredAt,
@@ -1174,14 +1176,15 @@ function describeJunctionIntrospectionResources(
     requestedSourceProviderSlug,
   );
   const resources = [];
+  const sourceKeyMap = buildJunctionDiagnosticSourceKeyMap(sourceProviders);
 
   for (const sourceProvider of sourceProviders) {
     for (const [resource, rawDetails] of Object.entries(sourceProvider.details)) {
       const details = readPlainObject(rawDetails) ?? {};
       const lastAttempt = readPlainObject(details.last_attempt ?? details.lastAttempt);
       resources.push({
-        sourceProviderSlug: sourceProvider.sourceProviderSlug,
         resource,
+        sourceKey: readJunctionDiagnosticSourceKey(sourceKeyMap, sourceProvider.sourceProviderSlug),
         sentCount: readSafeInteger(details.sent_count ?? details.sentCount),
         oldestData: normalizeString(details.oldest_data ?? details.oldestData) ?? null,
         newestData: normalizeString(details.newest_data ?? details.newestData) ?? null,
@@ -1214,6 +1217,7 @@ function describeJunctionIntrospectionHistoricalPull(
     result.payload,
     requestedSourceProviderSlug,
   );
+  const sourceKeyMap = buildJunctionDiagnosticSourceKeyMap(sourceProviders);
   const pulled = [];
   const notPulled = [];
 
@@ -1225,8 +1229,8 @@ function describeJunctionIntrospectionHistoricalPull(
       : [];
     for (const resource of notPulledResources) {
       notPulled.push({
-        sourceProviderSlug: sourceProvider.sourceProviderSlug,
         resource,
+        sourceKey: readJunctionDiagnosticSourceKey(sourceKeyMap, sourceProvider.sourceProviderSlug),
       });
     }
 
@@ -1239,8 +1243,8 @@ function describeJunctionIntrospectionHistoricalPull(
       const details = readPlainObject(rawDetails) ?? {};
       const timeline = readPlainObject(details.timeline);
       pulled.push({
-        sourceProviderSlug: sourceProvider.sourceProviderSlug,
         resource,
+        sourceKey: readJunctionDiagnosticSourceKey(sourceKeyMap, sourceProvider.sourceProviderSlug),
         status: normalizeString(details.status) ?? null,
         daysWithData: readSafeInteger(details.days_with_data ?? details.daysWithData),
         rangeStart: normalizeString(details.range_start ?? details.rangeStart) ?? null,
@@ -1285,6 +1289,11 @@ function describeJunctionRefreshUserData(
   const failedSources = readJunctionRefreshSourceList(
     data.failed_sources ?? data.failedSources ?? data.failed,
   );
+  const sourceKeyMap = buildJunctionRefreshSourceKeyMap([
+    ...refreshedSources,
+    ...inProgressSources,
+    ...failedSources,
+  ]);
   const success = typeof data.success === "boolean"
     ? data.success
     : typeof root.success === "boolean" ? root.success : null;
@@ -1296,9 +1305,9 @@ function describeJunctionRefreshUserData(
     refreshedSourceCount: refreshedSources.length,
     inProgressSourceCount: inProgressSources.length,
     failedSourceCount: failedSources.length,
-    refreshedSources,
-    inProgressSources,
-    failedSources,
+    refreshedSources: redactJunctionRefreshSourceNames(refreshedSources, sourceKeyMap),
+    inProgressSources: redactJunctionRefreshSourceNames(inProgressSources, sourceKeyMap),
+    failedSources: redactJunctionRefreshSourceNames(failedSources, sourceKeyMap),
     shape: describeJunctionDiagnosticShape([data]),
   };
 }
@@ -1359,6 +1368,32 @@ function readJunctionRefreshSourceList(value: unknown): string[] {
   return [...new Set(names)].sort((left, right) => left.localeCompare(right));
 }
 
+function redactJunctionRefreshSourceNames(
+  sourceNames: readonly string[],
+  sourceKeyMap: Map<string, string>,
+): string[] {
+  return sourceNames.map((sourceName) => {
+    const [sourceSlug, ...path] = sourceName.split(".");
+    const sourceKey = readJunctionDiagnosticSourceKey(sourceKeyMap, sourceSlug ?? "source");
+    return path.length > 0 ? `${sourceKey}.${path.join(".")}` : sourceKey;
+  });
+}
+
+function buildJunctionRefreshSourceKeyMap(sourceNames: readonly string[]): Map<string, string> {
+  const sourceSlugs = [...new Set(
+    sourceNames.flatMap((sourceName) => {
+      const [sourceSlug] = sourceName.split(".");
+      const normalized = normalizeProviderSlug(sourceSlug);
+      return normalized ? [normalized] : [];
+    }),
+  )].sort((left, right) => left.localeCompare(right));
+
+  return new Map(sourceSlugs.map((sourceSlug, index) => [
+    sourceSlug,
+    formatJunctionDiagnosticSourceKey(index),
+  ]));
+}
+
 function normalizeJunctionRefreshSourceName(value: unknown): string | null {
   const text = normalizeString(value);
   if (text) {
@@ -1407,13 +1442,40 @@ function readSafeInteger(value: unknown): number | null {
 }
 
 function compareJunctionDiagnosticSourceResourceEntries(
-  left: { sourceProviderSlug: string; resource: string },
-  right: { sourceProviderSlug: string; resource: string },
+  left: { sourceKey: string; resource: string },
+  right: { sourceKey: string; resource: string },
 ): number {
   return (
-    left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    left.sourceKey.localeCompare(right.sourceKey)
     || left.resource.localeCompare(right.resource)
   );
+}
+
+function buildJunctionDiagnosticSourceKeyMap(
+  sourceProviders: readonly { sourceProviderSlug: string }[],
+): Map<string, string> {
+  const sourceSlugs = [...new Set(sourceProviders.map((sourceProvider) => sourceProvider.sourceProviderSlug))]
+    .sort((left, right) => left.localeCompare(right));
+
+  return new Map(sourceSlugs.map((sourceSlug, index) => [
+    sourceSlug,
+    formatJunctionDiagnosticSourceKey(index),
+  ]));
+}
+
+function readJunctionDiagnosticSourceKey(sourceKeyMap: Map<string, string>, sourceSlug: string): string {
+  const existing = sourceKeyMap.get(sourceSlug);
+  if (existing) {
+    return existing;
+  }
+
+  const sourceKey = formatJunctionDiagnosticSourceKey(sourceKeyMap.size);
+  sourceKeyMap.set(sourceSlug, sourceKey);
+  return sourceKey;
+}
+
+function formatJunctionDiagnosticSourceKey(index: number): string {
+  return `source_${index + 1}`;
 }
 
 function describeJunctionDiagnosticShape(records: readonly unknown[]): Record<string, unknown> {
@@ -1486,19 +1548,12 @@ function describeJunctionDiagnosticSourceProviders(
     responseStatus: result.responseStatus ?? 200,
     providerCount: providers.length,
     connectedCount,
-    sourceProviderSlugs: slugs,
-    resourceCountsBySourceProvider: Object.fromEntries(
-      slugs.map((slug) => [
-        slug,
-        countJunctionDiagnosticAvailableResourcesForSlug(providers, slug),
-      ]),
-    ),
-    availableResourcesBySourceProvider: Object.fromEntries(
-      slugs.map((slug) => [
-        slug,
-        listJunctionDiagnosticAvailableResourcesForSlug(providers, slug),
-      ]),
-    ),
+    sourceCount: slugs.length,
+    sources: slugs.map((slug, index) => ({
+      resourceCount: countJunctionDiagnosticAvailableResourcesForSlug(providers, slug),
+      resources: listJunctionDiagnosticAvailableResourcesForSlug(providers, slug),
+      sourceKey: formatJunctionDiagnosticSourceKey(index),
+    })),
   };
 }
 
@@ -2027,8 +2082,10 @@ function resolveJobWindow(
   now: string,
   fallbackDays: number,
 ): { windowStart: string; windowEnd: string } {
-  const rawWindowEnd = normalizeString(job.payload.windowEnd) ?? now;
-  const windowEnd = minIsoTimestamp(new Date(rawWindowEnd).toISOString(), now);
+  const explicitWindowEnd = normalizeString(job.payload.windowEnd);
+  const windowEnd = explicitWindowEnd
+    ? new Date(explicitWindowEnd).toISOString()
+    : new Date(now).toISOString();
   const earliestWindowStart = subtractDays(windowEnd, fallbackDays);
   const explicitWindowStart = normalizeString(job.payload.windowStart);
   const windowStart = explicitWindowStart
@@ -3087,13 +3144,47 @@ function requireJunctionWebhookEventType(payload: Record<string, unknown>): stri
   });
 }
 
-function requireJunctionWebhookUserId(
+interface JunctionWebhookIdentityCandidate {
+  kind: "client_user_id" | "external_account_id";
+  path: string;
+  value: string;
+}
+
+interface JunctionWebhookUserIdSelection {
+  candidates: readonly JunctionWebhookIdentityCandidate[];
+  selectedPath: string;
+  userId: string;
+}
+
+function requireJunctionWebhookUserIdSelection(
   payload: Record<string, unknown>,
   data: Record<string, unknown> | null,
-): string {
-  const userId = readJunctionWebhookUserId(payload, data);
-  if (userId) {
-    return userId;
+): JunctionWebhookUserIdSelection {
+  const candidates = collectJunctionWebhookIdentityCandidates(payload, data);
+  const externalAccountCandidates = candidates.filter((candidate) =>
+    candidate.kind === "external_account_id"
+  );
+  const distinctUserIds = new Set(externalAccountCandidates.map((candidate) => candidate.value));
+
+  if (distinctUserIds.size > 1) {
+    throw deviceSyncError({
+      code: "JUNCTION_WEBHOOK_USER_ID_CONFLICT",
+      message: "Junction webhook payload contains conflicting user_id values.",
+      retryable: false,
+      httpStatus: 400,
+      details: {
+        externalAccountCandidates: describeJunctionWebhookIdentityCandidateDiagnostics(candidates, null),
+      },
+    });
+  }
+
+  const selected = externalAccountCandidates[0];
+  if (selected) {
+    return {
+      candidates,
+      selectedPath: selected.path,
+      userId: selected.value,
+    };
   }
 
   throw deviceSyncError({
@@ -3101,18 +3192,22 @@ function requireJunctionWebhookUserId(
     message: "Junction webhook user_id is missing.",
     retryable: false,
     httpStatus: 400,
+    details: {
+      externalAccountCandidates: describeJunctionWebhookIdentityCandidateDiagnostics(candidates, null),
+    },
   });
 }
 
-function readJunctionWebhookUserId(
+function collectJunctionWebhookIdentityCandidates(
   payload: Record<string, unknown>,
   data: Record<string, unknown> | null,
-): string | null {
-  const userIds: string[] = [];
+): JunctionWebhookIdentityCandidate[] {
+  const candidates: JunctionWebhookIdentityCandidate[] = [];
   const seenContainers = new Set<Record<string, unknown>>();
 
-  const collectUserIds = (
+  const collectCandidates = (
     container: Record<string, unknown> | null,
+    path: string,
     depth: number,
     allowGenericUserId: boolean,
   ): void => {
@@ -3123,38 +3218,97 @@ function readJunctionWebhookUserId(
     seenContainers.add(container);
 
     for (const key of ["user_id", "userId"] as const) {
-      const userId = normalizeString(container[key]);
-      if (userId) {
-        userIds.push(userId);
-      }
+      addJunctionWebhookIdentityCandidate(candidates, {
+        kind: "external_account_id",
+        path: `${path}.${key}`,
+        value: container[key],
+      });
+    }
+
+    for (const key of ["client_user_id", "clientUserId"] as const) {
+      addJunctionWebhookIdentityCandidate(candidates, {
+        kind: "client_user_id",
+        path: `${path}.${key}`,
+        value: container[key],
+      });
     }
 
     if (allowGenericUserId) {
-      const userId = normalizeString(container.id);
-      if (userId) {
-        userIds.push(userId);
-      }
+      addJunctionWebhookIdentityCandidate(candidates, {
+        kind: "external_account_id",
+        path: `${path}.id`,
+        value: container.id,
+      });
     }
 
     for (const key of ["data", "payload", "event", "message", "user"] as const) {
-      collectUserIds(readPlainObject(container[key]), depth + 1, key === "user");
+      collectCandidates(readPlainObject(container[key]), `${path}.${key}`, depth + 1, key === "user");
     }
   };
 
-  collectUserIds(payload, 0, false);
-  collectUserIds(data, 0, false);
+  collectCandidates(payload, "$", 0, false);
+  collectCandidates(data, "$.data", 0, false);
 
-  const distinctUserIds = new Set(userIds);
-  if (distinctUserIds.size > 1) {
-    throw deviceSyncError({
-      code: "JUNCTION_WEBHOOK_USER_ID_CONFLICT",
-      message: "Junction webhook payload contains conflicting user_id values.",
-      retryable: false,
-      httpStatus: 400,
+  return candidates;
+}
+
+function addJunctionWebhookIdentityCandidate(
+  candidates: JunctionWebhookIdentityCandidate[],
+  input: {
+    kind: JunctionWebhookIdentityCandidate["kind"];
+    path: string;
+    value: unknown;
+  },
+): void {
+  const value = normalizeString(input.value);
+  if (!value) {
+    return;
+  }
+
+  candidates.push({
+    kind: input.kind,
+    path: input.path,
+    value,
+  });
+}
+
+function buildJunctionWebhookExternalAccountDiagnostic(
+  selection: JunctionWebhookUserIdSelection,
+): DeviceSyncWebhookExternalAccountDiagnostic {
+  return {
+    selectedPath: selection.selectedPath,
+    selectedExternalAccountIdHash: sha256Text(selection.userId),
+    candidates: describeJunctionWebhookIdentityCandidateDiagnostics(selection.candidates, selection),
+  };
+}
+
+function describeJunctionWebhookIdentityCandidateDiagnostics(
+  candidates: readonly JunctionWebhookIdentityCandidate[],
+  selection: JunctionWebhookUserIdSelection | null,
+): DeviceSyncWebhookExternalAccountDiagnostic["candidates"] {
+  const seen = new Set<string>();
+  const diagnosticCandidates: DeviceSyncWebhookExternalAccountDiagnostic["candidates"][number][] = [];
+
+  for (const candidate of candidates) {
+    const key = `${candidate.kind}:${candidate.path}:${candidate.value}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    diagnosticCandidates.push({
+      kind: candidate.kind === "external_account_id" ? "external_account_id" : "client_user_id",
+      path: candidate.path,
+      selected:
+        selection !== null
+        && candidate.kind === "external_account_id"
+        && candidate.path === selection.selectedPath
+        && candidate.value === selection.userId,
+      valueHash: sha256Text(candidate.value),
     });
   }
 
-  return userIds[0] ?? null;
+  return diagnosticCandidates;
 }
 
 async function projectJunctionSources(
