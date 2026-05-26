@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
@@ -330,6 +331,47 @@ describe("hosted system mailbox notification execution context", () => {
       await workspace.cleanup();
     }
   });
+
+  it("forwards foreground-yield hooks to queued device-sync wakes", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const shouldYieldBackgroundMaintenance = vi.fn(() => true);
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:yield",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        shouldYieldBackgroundMaintenance,
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shouldYieldDeviceSync: shouldYieldBackgroundMaintenance,
+          sourceMailboxItemId: "mailbox_item_system_device_sync",
+          wake: expect.objectContaining({
+            kind: "device-sync.wake",
+          }),
+        }),
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
 });
 
 function createRuntime(
@@ -474,6 +516,47 @@ function createResolvedRuntimeControlItem(): HostedMailboxResolvedImportItem {
     },
     route: {
       action: "apply-runtime-control-request",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createResolvedDeviceSyncItem(): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: FIXED_NOW,
+    dedupeKey: "device-sync.wake:yield",
+    expiresAt: null,
+    id: "mailbox_item_system_device_sync",
+    kind: "device-sync.wake",
+    lane: "system",
+    laneSeq: "1",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_123",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: null,
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "run-device-sync-wake",
       advanceProgress: true,
       itemRef: {
         id: item.id,

@@ -907,6 +907,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     executionContext: input.executionContext,
     runtime: phaseInput.runtime,
     runtimeEnv: phaseInput.runtimeEnv,
+    shouldYieldBackgroundMaintenance: phaseInput.shouldYieldBackgroundMaintenance ?? null,
     vaultRoot: phaseInput.restored.vaultRoot,
   });
   const initialProviderCleanupCheckpoint =
@@ -930,6 +931,9 @@ async function runSystemMailboxMaintenancePhase(input: {
         platformEnv: phaseInput.runtime.platformEnv,
         runtimeLogPlatform: phaseInput.runtime.platform,
         resolvedConfig: phaseInput.runtime.resolvedConfig,
+        ...(phaseInput.shouldYieldBackgroundMaintenance
+          ? { shouldYieldDeviceSync: phaseInput.shouldYieldBackgroundMaintenance }
+          : {}),
         timeoutMs: phaseInput.runtime.commitTimeoutMs,
         vaultRoot: phaseInput.restored.vaultRoot,
         wake: input.wake,

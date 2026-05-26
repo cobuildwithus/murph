@@ -30,6 +30,10 @@ drain to yield so the runner can take the assistant reply path promptly.
 
 ## Verification
 
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-events-coverage.test.ts test/hosted-runtime-system-mailbox-notification.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts test/hosted-runtime-maintenance.test.ts test/hosted-runtime-workspace-runner.test.ts` passed after wiring the foreground yield hook through queued system mailbox device-sync wakes.
+- `pnpm --dir packages/assistant-runtime typecheck` passed.
+- `pnpm typecheck` passed.
+- `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts --no-coverage test/junction-provider.test.ts` passed.
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-maintenance.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts test/hosted-runtime-workspace-runner.test.ts && pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts --no-coverage test/junction-provider.test.ts` passed after adding deferred legacy wake-lane coverage.
 - `pnpm --dir packages/device-syncd typecheck` passed.
 - `pnpm --dir packages/assistant-runtime typecheck` passed.
@@ -45,6 +49,15 @@ drain to yield so the runner can take the assistant reply path promptly.
   until the assistant reply pass at 2026-05-26 22:48:29 UTC. The reply path
   was delayed by deferred/legacy device-sync recovery, not the normal timer
   lane alone.
+- A second hosted-local signup/message flow confirmed a remaining route:
+  a queued `device-sync.wake` system mailbox item invoked device-sync work
+  without the foreground yield hook, so foreground conversation input could
+  import while the device-sync wake continued draining canonical runtime
+  commits.
 - Assistant-runtime foreground import, timer lane, deferred legacy wake lane,
-  and device-sync drain fix is implemented and verified.
+  queued system mailbox device-sync wake lane, and device-sync drain fix is
+  implemented and verified.
 - Junction per-job yield/follow-up scheduling is implemented and verified.
+Status: completed
+Updated: 2026-05-26
+Completed: 2026-05-26
