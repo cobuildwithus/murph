@@ -398,7 +398,7 @@ export function createJunctionDeviceSyncProvider(
     const providerSlugs = [
       ...new Set(
         providers
-          .filter((provider) => mapJunctionSourceStatus(provider.status) !== "disconnected")
+          .filter((provider) => mapJunctionSourceStatus(provider.status) === "connected")
           .map((provider) =>
             normalizeProviderSlug(provider.origin.sourceProviderSlug)
             ?? normalizeProviderSlug(provider.slug)
@@ -407,10 +407,27 @@ export function createJunctionDeviceSyncProvider(
       ),
     ];
 
+    const failedProviderSlugs: string[] = [];
     for (const providerSlug of providerSlugs) {
-      await client.deregisterProvider({
-        providerSlug,
-        userId,
+      try {
+        await client.deregisterProvider({
+          providerSlug,
+          userId,
+        });
+      } catch {
+        failedProviderSlugs.push(providerSlug);
+      }
+    }
+
+    if (failedProviderSlugs.length > 0) {
+      throw deviceSyncError({
+        code: "JUNCTION_PROVIDER_DEREGISTER_FAILED",
+        message: "Junction provider deregistration failed for one or more connected sources.",
+        retryable: true,
+        httpStatus: 503,
+        details: {
+          providerSlugs: failedProviderSlugs,
+        },
       });
     }
   }

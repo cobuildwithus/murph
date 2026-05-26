@@ -1,6 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
+import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import {
@@ -389,7 +391,7 @@ const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Live Prisma, hosted mailbox, device, runtime, and workspace rows are deleted immediately by this workflow.",
   "Cloudflare Durable Object/R2 cleanup is best effort and reported in the deletion result when hosted execution control is configured.",
-  "Provider-side data deletion is limited to revocation hooks and external provider retention controls; wearable sources without a provider-side revocation hook use local-reference deletion unless source-side revocation is implemented.",
+  "Provider-side data deletion is limited to revocation hooks and external provider retention controls; Junction-routed sources are deregistered through Junction when configured.",
   "Stripe, Privy, carrier/email/Telegram/Linq provider records, and infrastructure backups follow their documented retention/legal processes.",
 ] as const;
 
@@ -1272,6 +1274,7 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     request: input.request,
   });
+  assertProviderRevocationsAllowDeletion(providerRevocations);
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
       memberId: input.memberId,
@@ -1617,21 +1620,6 @@ async function revokeDeviceProvidersBestEffort(input: {
 
   const results: HostedAccountProviderRevocationResult[] = [];
   for (const connection of input.connections) {
-    const provider = controlPlane.registry.get(connection.provider);
-
-    const revokeAccess = provider?.connectionHandler?.revokeAccess;
-
-    if (!revokeAccess) {
-      results.push({
-        connectionId: connection.id,
-        errorCode: null,
-        providerLabel: resolveDeviceConnectionProviderLabel(connection),
-        status: "not_needed",
-        warningCode: null,
-      });
-      continue;
-    }
-
     try {
       const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
         input.memberId,
@@ -1645,6 +1633,22 @@ async function revokeDeviceProvidersBestEffort(input: {
           providerLabel: resolveDeviceConnectionProviderLabel(connection),
           status: "warning",
           warningCode: "CONNECTION_SECRET_MISSING",
+        });
+        continue;
+      }
+
+      const provider = controlPlane.registry.get(connection.provider);
+      const revokeAccess = provider?.connectionHandler?.revokeAccess;
+
+      if (!revokeAccess) {
+        results.push({
+          connectionId: connection.id,
+          errorCode: storedAccount.credential.kind === "provider_config"
+            ? "PROVIDER_REVOKE_NOT_CONFIGURED"
+            : null,
+          providerLabel: resolveDeviceConnectionProviderLabel(connection),
+          status: storedAccount.credential.kind === "provider_config" ? "failed" : "not_needed",
+          warningCode: null,
         });
         continue;
       }
@@ -1671,6 +1675,29 @@ async function revokeDeviceProvidersBestEffort(input: {
   return results;
 }
 
+function assertProviderRevocationsAllowDeletion(
+  providerRevocations: readonly HostedAccountProviderRevocationResult[],
+): void {
+  const failures = providerRevocations.filter((revocation) => revocation.status === "failed");
+
+  if (failures.length === 0) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+    httpStatus: 503,
+    message: "Provider access could not be revoked. Retry account deletion before local device records are removed.",
+    retryable: true,
+    details: {
+      providerRevocations: failures.map((failure) => ({
+        errorCode: failure.errorCode,
+        providerLabel: failure.providerLabel,
+      })),
+    },
+  });
+}
+
 function buildDeviceWebhookTraceWhere(
   connections: readonly DeviceConnectionIdentity[],
 ): Prisma.DeviceWebhookTraceWhereInput | null {
@@ -1685,5 +1712,13 @@ function buildDeviceWebhookTraceWhere(
 }
 
 function safeErrorCode(error: unknown): string {
-  return error instanceof Error && error.name ? error.name : "UnknownError";
+  if (isDeviceSyncError(error)) {
+    return sanitizeHostedRuntimeErrorCode(error.code) ?? "DEVICE_SYNC_ERROR";
+  }
+
+  if (error instanceof Error) {
+    return sanitizeHostedRuntimeErrorCode(error.name) ?? "ERROR";
+  }
+
+  return "UNKNOWN_ERROR";
 }

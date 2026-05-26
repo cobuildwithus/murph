@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 
+import { normalizeJunctionProviderSlug } from "../config/connect-routes.ts";
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
 import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
@@ -233,14 +234,18 @@ export class JunctionClient {
     providerSlug: string;
     userId: string;
   }): Promise<void> {
-    const providerSlug = normalizeSourceSlug(input.providerSlug);
+    const providerSlug = normalizeJunctionProviderSlug(input.providerSlug);
     if (!providerSlug) {
       throw new TypeError("Junction provider deregistration requires a provider slug.");
+    }
+    const userId = normalizeString(input.userId);
+    if (!userId) {
+      throw new TypeError("Junction provider deregistration requires a Junction user id.");
     }
 
     await this.requestJson<unknown>(
       "DELETE",
-      `/v2/user/${encodeURIComponent(input.userId)}/${encodeURIComponent(providerSlug)}`,
+      `/v2/user/${encodeURIComponent(userId)}/${encodeURIComponent(providerSlug)}`,
       undefined,
       { endpointKind: "junction_user_provider_deregister" },
     );

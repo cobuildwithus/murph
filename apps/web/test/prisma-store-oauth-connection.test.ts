@@ -633,6 +633,95 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     );
   });
 
+  it("clears provider-config credentials after successful remote provider revoke", async () => {
+    let connection = createConnection({
+      credentialKind: "provider_config",
+      credentialMetadataJson: {
+        "subject.region": "us",
+      },
+      externalAccountIdEncrypted: "enc:junction-user-123",
+      provider: "junction",
+      providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+        key: BLIND_INDEX_KEY,
+        provider: "junction",
+        externalAccountId: "junction-user-123",
+      }),
+      providerConfigKey: "junction",
+      refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+      refreshLeaseOwner: "provider-config-revoke",
+      refreshLeaseTokenVersion: 1,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null,
+          updateMany: async ({ data, where }: {
+            data: Partial<MutableConnectionRecord>;
+            where: Partial<MutableConnectionRecord>;
+          }) => {
+            if (
+              where.id !== connection.id
+              || where.userId !== connection.userId
+              || where.provider !== connection.provider
+              || where.providerConfigKey !== connection.providerConfigKey
+              || where.providerAccountBlindIndex !== connection.providerAccountBlindIndex
+            ) {
+              return { count: 0 };
+            }
+
+            connection = {
+              ...connection,
+              ...data,
+            };
+            return { count: 1 };
+          },
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.clearStoredProviderConfigCredential({
+      connectionId: "dsc_123",
+      externalAccountId: "junction-user-123",
+      provider: "junction",
+      providerConfigKey: "junction",
+      userId: "user-123",
+    })).resolves.toBe(true);
+
+    expect(connection).toMatchObject({
+      accessTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+      credentialKind: "none",
+      credentialMetadataJson: {},
+      externalAccountIdEncrypted: null,
+      keyVersion: null,
+      providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+        key: BLIND_INDEX_KEY,
+        provider: "junction",
+        externalAccountId: "opaque:dsc_123",
+      }),
+      providerConfigKey: null,
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: null,
+      refreshLeaseTokenVersion: null,
+      refreshTokenEncrypted: null,
+      tokenVersion: null,
+    });
+    await expect(store.getStoredConnectionAccountForUser("user-123", "dsc_123")).resolves.toEqual(
+      expect.objectContaining({
+        credential: {
+          kind: "none",
+          credentialMetadata: {},
+        },
+        externalAccountId: "opaque:dsc_123",
+      }),
+    );
+  });
+
   it("rejects provider-config hosted connection credentials with unexpected provider profile keys", async () => {
     let createCalled = false;
     const tx = {

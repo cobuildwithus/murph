@@ -860,10 +860,14 @@ export class DeviceSyncPublicIngress {
           await this.hooks.onUnknownWebhook?.({
             provider,
             traceId,
-            webhook,
+            webhook: {
+              ...webhook,
+              jobs: [],
+            },
             externalAccountId: parsed.externalAccountId,
             now,
           });
+          await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
         } catch (error) {
           this.logger.warn?.(
             "Failed to run unknown device sync webhook hook; releasing orphan trace for retry.",
@@ -872,8 +876,6 @@ export class DeviceSyncPublicIngress {
           await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
           throw error;
         }
-
-        await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
 
         return {
           accepted: true,

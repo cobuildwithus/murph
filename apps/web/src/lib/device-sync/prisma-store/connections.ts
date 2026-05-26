@@ -620,6 +620,53 @@ export class PrismaHostedConnectionStore {
     });
   }
 
+  async clearStoredProviderConfigCredential(input: {
+    connectionId: string;
+    externalAccountId: string;
+    provider: string;
+    providerConfigKey: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const prisma = input.tx ?? this.prisma;
+    const providerConfigKey = normalizeNullableString(input.providerConfigKey);
+    const externalAccountId = normalizeNullableString(input.externalAccountId);
+
+    if (!providerConfigKey || !externalAccountId) {
+      return false;
+    }
+
+    const previousProviderAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, externalAccountId);
+    const nextProviderAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, `opaque:${input.connectionId}`);
+    const update = await prisma.deviceConnection.updateMany({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+        provider: input.provider,
+        credentialKind: "provider_config",
+        providerConfigKey,
+        providerAccountBlindIndex: previousProviderAccountBlindIndex,
+      },
+      data: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        credentialKind: "none",
+        credentialMetadataJson: toPrismaJsonObject({}),
+        externalAccountIdEncrypted: null,
+        keyVersion: null,
+        providerAccountBlindIndex: nextProviderAccountBlindIndex,
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: null,
+        tokenVersion: null,
+      },
+    });
+
+    return update.count > 0;
+  }
+
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
     const record = await this.prisma.deviceConnection.findUnique({
       where: {

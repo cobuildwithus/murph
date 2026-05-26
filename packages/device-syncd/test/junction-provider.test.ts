@@ -1713,10 +1713,6 @@ test("Junction provider revokes connected remote provider slugs", async () => {
       method: "DELETE",
       url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/garmin",
     },
-    {
-      method: "DELETE",
-      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/oura",
-    },
   ]);
 });
 
@@ -1849,16 +1845,35 @@ test("Junction client deregisters provider connections by normalized provider sl
   });
 
   await client.deregisterProvider({
-    providerSlug: "Garmin",
+    providerSlug: "Apple Health",
     userId: "junction-user-1",
   });
 
   assert.deepEqual(requests, [
     {
       method: "DELETE",
-      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/garmin",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/apple_health",
     },
   ]);
+});
+
+test("Junction client rejects provider deregistration without a Junction user id", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      throw new Error("deregisterProvider should not send a request without a user id");
+    },
+  });
+
+  await assert.rejects(
+    () => client.deregisterProvider({
+      providerSlug: "garmin",
+      userId: "  ",
+    }),
+    /requires a Junction user id/u,
+  );
 });
 
 test("Junction client derives the API host from environment and region", async () => {
@@ -3711,6 +3726,116 @@ test("Junction direct resource jobs fall back when payload source differs from t
   assert.deepEqual(snapshot.timeseries, {});
 });
 
+test("Junction direct resource jobs fall back when payload source is missing or ambiguous", async () => {
+  const cases: Array<{
+    label: string;
+    directRecord: Record<string, unknown>;
+    restSteps: number;
+  }> = [
+    {
+      label: "missing-source",
+      directRecord: {
+        date: "2026-04-02",
+        id: "activity-inline-missing-source",
+        steps: 9999,
+      },
+      restSteps: 2222,
+    },
+    {
+      label: "ambiguous-source",
+      directRecord: {
+        data: [
+          {
+            sourceProviderSlug: "fitbit",
+            steps: 9999,
+          },
+        ],
+        date: "2026-04-02",
+        id: "activity-inline-ambiguous-source",
+        sourceProviderSlug: "garmin",
+      },
+      restSteps: 3333,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const requests: string[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({
+          data: [
+            {
+              date: "2026-04-02",
+              id: `activity-rest-${testCase.label}`,
+              provider_connection_id: "provider-garmin-1",
+              steps: testCase.restSteps,
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      summaryResources: ["activity"],
+      timeseriesResources: [],
+    });
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        eventType: "daily.data.activity.created",
+        objectId: `activity-${testCase.label}`,
+        occurredAt: "2026-04-02T00:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "garmin",
+        webhookDataJson: JSON.stringify(testCase.directRecord),
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-05T00:00:00.000Z",
+      }),
+    );
+
+    assert.equal(
+      requests.some((url) => url.includes("/v2/summary/activity/")),
+      true,
+      testCase.label,
+    );
+    assert.equal(importedSnapshots.length, 1, testCase.label);
+    const snapshot = importedSnapshots[0] as {
+      summaries?: Record<string, Array<Record<string, unknown>>>;
+      timeseries?: Record<string, unknown[]>;
+    };
+    assert.equal(snapshot.summaries?.activity?.[0]?.steps, testCase.restSteps, testCase.label);
+    assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999, testCase.label);
+    assert.deepEqual(snapshot.timeseries, {}, testCase.label);
+  }
+});
+
 test("Junction oversized daily summary webhook payloads keep REST fallback", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
@@ -4379,6 +4504,10 @@ test("Junction resource jobs skip opt-in glucose when it is not configured", asy
       occurredAt: "2026-04-02T00:00:00.000Z",
       resource: "glucose",
       sourceProviderSlug: "dexcom_v3",
+      webhookDataJson: JSON.stringify({
+        data: [{ timestamp: "2026-04-02T00:00:00.000Z", value: 101 }],
+        sourceProviderSlug: "dexcom_v3",
+      }),
       windowStart: "2026-04-01T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
@@ -4387,6 +4516,7 @@ test("Junction resource jobs skip opt-in glucose when it is not configured", asy
   assert.equal(requests.filter((url) => url.includes("glucose")).length, 0);
   assert.equal(importedSnapshots.length, 1);
   assert.deepEqual((importedSnapshots[0] as { timeseries?: Record<string, unknown[]> }).timeseries, {});
+  assert.doesNotMatch(JSON.stringify(importedSnapshots), /101/u);
   assert.equal(warnings[0]?.resource, "glucose");
   assert.equal(warnings[0]?.resourceCategory, "timeseries");
 });

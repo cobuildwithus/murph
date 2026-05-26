@@ -1,6 +1,6 @@
 # Junction remote disconnect and orphan webhook handling
 
-Status: active
+Status: completed
 Created: 2026-05-26
 Updated: 2026-05-26
 
@@ -52,5 +52,9 @@ Updated: 2026-05-26
 
 ## Verification
 
-- Commands to run: focused device-syncd and apps/web tests for touched behavior, `pnpm typecheck`, and truthful diff coverage if available.
-- Expected outcomes: focused tests and typecheck pass, with any unrelated pre-existing dirty-tree failures called out explicitly.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/device-sync-hosted-wake.test.ts apps/web/test/hosted-account-data-service.test.ts apps/web/test/prisma-store-oauth-connection.test.ts apps/web/test/agent-route.test.ts` passed.
+- `pnpm --dir packages/device-syncd test -- test/junction-provider.test.ts test/public-ingress.test.ts test/provider-descriptor-integration.test.ts` passed.
+- `pnpm typecheck` passed.
+- `pnpm --dir packages/device-syncd test:coverage` passed.
+- `pnpm test:diff apps/web/src/lib/device-sync/wake-service.ts apps/web/src/lib/device-sync/prisma-store.ts apps/web/src/lib/device-sync/prisma-store/connections.ts apps/web/src/lib/hosted-privacy/account-data-service.ts packages/device-syncd/src/providers/junction.ts packages/device-syncd/src/providers/junction-client.ts packages/device-syncd/src/public-ingress.ts` reached `apps/web verify`; build, lint, and dev smoke completed, but the app test lane failed in `apps/web/test/prisma-store-device-sync-signal.test.ts` because the concurrent webhook-trace owner-lock fake Prisma transaction lacks `$queryRaw`. That failure is outside this task's diff.
+Completed: 2026-05-26
