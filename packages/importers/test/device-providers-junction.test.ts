@@ -1482,6 +1482,51 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workouts"));
 });
 
+test("Junction normalizer maps documented sleep summary scalar fields", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "sleep-documented-fields",
+          bedtime_start: "2026-05-20T02:00:00+00:00",
+          bedtime_stop: "2026-05-20T10:00:00+00:00",
+          duration: 28800,
+          total: 25200,
+          deep: 5400,
+          rem: 7200,
+          light: 12600,
+          awake: 1800,
+          average_hrv: 42,
+          hr_average: 54,
+          respiratory_rate: 14.2,
+        },
+      ],
+    },
+  });
+
+  const sleepSession = payload.events?.find((event) => event.kind === "sleep_session");
+  assert.equal(sleepSession?.fields?.durationMinutes, 480);
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metricValue = (metric: string) =>
+    observations.find((event) => event.fields?.metric === metric)?.fields?.value;
+
+  assert.equal(metricValue("sleep-total-minutes"), 420);
+  assert.equal(metricValue("sleep-deep-minutes"), 90);
+  assert.equal(metricValue("sleep-rem-minutes"), 120);
+  assert.equal(metricValue("sleep-light-minutes"), 210);
+  assert.equal(metricValue("sleep-awake-minutes"), 30);
+  assert.equal(metricValue("hrv"), 42);
+  assert.equal(metricValue("average-heart-rate"), 54);
+  assert.equal(metricValue("respiratory-rate"), 14.2);
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep"));
+});
+
 test("Junction workout provider IDs drive stable summary external refs", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",

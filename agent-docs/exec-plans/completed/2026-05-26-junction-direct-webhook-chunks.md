@@ -41,3 +41,6 @@ Expected commands:
 - `pnpm test:diff packages/device-syncd/src/providers/junction.ts packages/device-syncd/test/junction-provider.test.ts apps/web/test/device-sync-hosted-wake.test.ts`
 
 Use scoped commands if unrelated dirty work blocks the full lane; record exact blockers.
+Status: completed
+Updated: 2026-05-26
+Completed: 2026-05-26

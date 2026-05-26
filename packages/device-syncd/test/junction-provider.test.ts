@@ -2476,6 +2476,58 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   assert.equal(typeof parsed.jobs[0]?.dedupeKey, "string");
 });
 
+test("Junction rejects webhooks with only a client_user_id and no Junction user_id", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.activity.created",
+      client_user_id: "murph_blinded",
+      data: {
+        id: "activity-1",
+        date: "2026-04-02",
+        resource: "activity",
+        source: {
+          provider: "oura",
+        },
+      },
+    },
+    messageId: "msg_client_user_only_1",
+    timestamp: "1775174400",
+  });
+
+  await assert.rejects(
+    () => requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_WEBHOOK_USER_ID_MISSING");
+      assert.equal(error.httpStatus, 400);
+      assert.equal(JSON.stringify(error.details).includes("murph_blinded"), false);
+      assert.deepEqual(error.details, {
+        externalAccountCandidates: [
+          {
+            kind: "client_user_id",
+            path: "$.client_user_id",
+            selected: false,
+            valueHash: sha256ForTest("murph_blinded"),
+          },
+        ],
+      });
+      return true;
+    },
+  );
+});
+
 test("Junction webhook jobs dedupe by resource window instead of Svix trace", async () => {
   const provider = createJunctionProvider(
     async (input) => {
@@ -3474,6 +3526,7 @@ test("Junction resource jobs import direct daily data webhook payloads without c
       webhookDataJson: JSON.stringify({
         date: "2026-04-02",
         id: "activity-1",
+        memo: "from junction-user-1 payload",
         sourceProviderSlug: "garmin",
         steps: 4321,
       }),
@@ -3495,8 +3548,309 @@ test("Junction resource jobs import direct daily data webhook payloads without c
   assert.equal(snapshot.windowStart, "2026-04-01T00:00:00.000Z");
   assert.equal(snapshot.windowEnd, "2026-04-05T00:00:00.000Z");
   assert.equal(snapshot.summaries?.activity?.[0]?.steps, 4321);
+  assert.equal(snapshot.summaries?.activity?.[0]?.memo, "from [redacted] payload");
   assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "garmin");
   assert.deepEqual(snapshot.timeseries, {});
+  assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+});
+
+test("Junction queued oversized direct resource payloads keep REST fallback", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          {
+            date: "2026-04-02",
+            id: "activity-rest-queued-oversized",
+            provider_connection_id: "provider-garmin-1",
+            steps: 2468,
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.activity.created",
+      objectId: "activity-queued-oversized",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        date: "2026-04-02",
+        id: "activity-inline-too-large",
+        memo: "x".repeat(DIRECT_WEBHOOK_JOB_MAX_BYTES_FOR_TEST + 1),
+        sourceProviderSlug: "garmin",
+        steps: 9999,
+      }),
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.some((url) => url.includes("/v2/summary/activity/")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 2468);
+  assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction direct resource jobs fall back when payload source differs from the job source", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          {
+            date: "2026-04-02",
+            id: "activity-rest-source-mismatch",
+            provider_connection_id: "provider-garmin-1",
+            steps: 1357,
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.activity.created",
+      objectId: "activity-source-mismatch",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        date: "2026-04-02",
+        id: "activity-inline-source-mismatch",
+        sourceProviderSlug: "fitbit",
+        steps: 9999,
+      }),
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.some((url) => url.includes("/v2/summary/activity/")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 1357);
+  assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction oversized daily summary webhook payloads keep REST fallback", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          {
+            date: "2026-04-02",
+            id: "activity-rest-1",
+            provider_connection_id: "provider-garmin-1",
+            steps: 1234,
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.activity.created",
+      user_id: "junction-user-1",
+      data: {
+        date: "2026-04-02",
+        id: "activity-inline-too-large",
+        memo: "x".repeat(DIRECT_WEBHOOK_JOB_MAX_BYTES_FOR_TEST + 1),
+        source: {
+          provider: "garmin",
+          type: "watch",
+        },
+        steps: 9999,
+        user_id: "junction-user-1",
+      },
+    },
+    messageId: "msg_large_activity_payload_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.jobs.length, 1);
+  assert.equal(parsed.jobs[0]?.kind, "resource");
+  assert.equal("webhookDataJson" in (parsed.jobs[0]?.payload ?? {}), false);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", parsed.jobs[0]?.payload ?? {}),
+  );
+
+  assert.equal(requests.some((url) => url.includes("/v2/summary/activity/")), true);
+  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.summaries?.activity?.[0]?.steps, 1234);
+  assert.notEqual(snapshot.summaries?.activity?.[0]?.steps, 9999);
+  assert.deepEqual(snapshot.timeseries, {});
+  assert.doesNotMatch(JSON.stringify(importedSnapshots), /junction-user-1/u);
+});
+
+test("Junction nested timeseries webhooks use sample timestamps for stable jobs", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    timeseriesResources: ["steps"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    webhookTimestampToleranceMs: 3 * 24 * 60 * 60_000,
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.steps.created",
+      user_id: "junction-user-1",
+      data: {
+        data: [
+          {
+            end: "2026-04-02T14:30:00.000Z",
+            start: "2026-04-02T14:00:00.000Z",
+            unit: "count",
+            value: 321,
+          },
+        ],
+        source: {
+          provider: "garmin",
+          type: "watch",
+        },
+      },
+    },
+    messageId: "msg_steps_stable_nested_payload_1",
+    timestamp: "1775174400",
+  });
+
+  const firstParse = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const secondParse = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-04T00:00:00.000Z",
+  });
+
+  assert.equal(firstParse.jobs[0]?.dedupeKey, secondParse.jobs[0]?.dedupeKey);
+  assert.equal(firstParse.jobs[0]?.payload?.occurredAt, "2026-04-02T14:30:00.000Z");
+  assert.equal(firstParse.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(firstParse.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
 test("Junction signed daily timeseries webhooks import payload samples without collection fetches", async () => {
@@ -3585,6 +3939,98 @@ test("Junction signed daily timeseries webhooks import payload samples without c
     },
   ]);
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+});
+
+test("Junction direct daily timeseries payload import survives provider-list outages", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+        status: 503,
+        headers: {
+          "Content-Type": "application/json",
+          "retry-after": "0",
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["steps"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        assert.deepEqual(requests, []);
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.steps.created",
+      objectId: "steps-1",
+      occurredAt: "2026-04-02T14:00:00.000Z",
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        data: [
+          {
+            end: "2026-04-02T14:30:00.000Z",
+            start: "2026-04-02T14:00:00.000Z",
+            unit: "count",
+            value: 321,
+          },
+        ],
+        sourceProviderSlug: "garmin",
+      }),
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requests.length > 0, true);
+  assert.equal(
+    requests.every((url) => url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1"),
+    true,
+  );
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, unknown[]>;
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.deepEqual(snapshot.summaries, {});
+  assert.equal(snapshot.timeseries?.steps?.[0]?.sourceProviderSlug, "garmin");
+  assert.deepEqual(snapshot.timeseries?.steps?.[0]?.data, [
+    {
+      end: "2026-04-02T14:30:00.000Z",
+      start: "2026-04-02T14:00:00.000Z",
+      unit: "count",
+      value: 321,
+    },
+  ]);
+  assert.equal(
+    warnings.some((warning) =>
+      warning.errorCode === "JUNCTION_API_REQUEST_FAILED"
+      && warning.provider === "junction"
+      && warning.responseStatus === 503
+      && warning.retryable === true
+    ),
+    true,
+  );
+  assert.doesNotMatch(JSON.stringify(importedSnapshots), /junction-user-1/u);
 });
 
 test("Junction splits oversized daily timeseries webhook samples into bounded direct jobs", async () => {
