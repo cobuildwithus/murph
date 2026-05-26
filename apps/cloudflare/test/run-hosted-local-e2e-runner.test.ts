@@ -120,6 +120,8 @@ describe("run-hosted-local-e2e", () => {
   it("cleans up when the hosted-local vitest process fails", async () => {
     spawnMock
       .mockImplementationOnce(() => createExitingChild(0))
+      .mockImplementationOnce(() => createExitingChild(0))
+      .mockImplementationOnce(() => createExitingChild(0))
       .mockImplementationOnce(() => createExitingChild(1));
 
     await expect(import("../scripts/run-hosted-local-e2e.ts"))
@@ -158,10 +160,12 @@ describe("run-hosted-local-e2e", () => {
     const interruptedChild = createSignalControlledChild();
     spawnMock
       .mockImplementationOnce(() => createExitingChild(0))
+      .mockImplementationOnce(() => createExitingChild(0))
+      .mockImplementationOnce(() => createExitingChild(0))
       .mockImplementationOnce(() => interruptedChild);
 
     const runPromise = import("../scripts/run-hosted-local-e2e.ts");
-    await waitForSpawnCalls(2);
+    await waitForSpawnCalls(4);
     for (const handler of signalHandlers.get("SIGINT") ?? []) {
       handler();
     }
@@ -211,13 +215,24 @@ async function waitForSpawnCalls(count: number): Promise<void> {
 }
 
 function expectVitestSpawnCall(): void {
-  expect(spawnMock).toHaveBeenCalledTimes(2);
+  expect(spawnMock).toHaveBeenCalledTimes(4);
   const [baseCommand, baseArgs, baseOptions] = spawnMock.mock.calls[0] ?? [];
   expect(baseCommand).toBe("pnpm");
   expect(baseArgs).toEqual(["--dir", "apps/cloudflare", "runner:docker:base"]);
   expect(baseOptions?.stdio).toBe("inherit");
 
-  const [command, args, options] = spawnMock.mock.calls[1] ?? [];
+  const [prismaCommand, prismaArgs, prismaOptions] = spawnMock.mock.calls[1] ?? [];
+  expect(prismaCommand).toBe("pnpm");
+  expect(prismaArgs).toEqual(["--dir", "apps/web", "prisma:generate"]);
+  expect(prismaOptions?.stdio).toBe("inherit");
+
+  const [healthCommonsCommand, healthCommonsArgs, healthCommonsOptions] =
+    spawnMock.mock.calls[2] ?? [];
+  expect(healthCommonsCommand).toBe("pnpm");
+  expect(healthCommonsArgs).toEqual(["health-commons:generate"]);
+  expect(healthCommonsOptions?.stdio).toBe("inherit");
+
+  const [command, args, options] = spawnMock.mock.calls[3] ?? [];
   expect(command).toBe("pnpm");
   expect(args).toEqual([
     "exec",
@@ -251,6 +266,8 @@ function expectVitestSpawnCall(): void {
   expect(options?.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_BUNDLE).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE).toBe("1");
+  expect(options?.env.MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED).toBe("1");
+  expect(options?.env.MURPH_HEALTH_COMMONS_GENERATED_PREPARED).toBe("1");
   expect(options?.env.MURPH_DEV_TEMPORAL).toBe("managed");
   expect(options?.stdio).toBe("inherit");
 }
@@ -276,7 +293,7 @@ function expectSingleCleanupCall(): void {
   expect(cleanupHostedRunnerImagesMock).toHaveBeenCalledTimes(1);
   const [cleanupInput] = cleanupHostedRunnerContainersMock.mock.calls[0] ?? [];
   const [imageCleanupInput] = cleanupHostedRunnerImagesMock.mock.calls[0] ?? [];
-  const [, , spawnOptions] = spawnMock.mock.calls[1] ?? [];
+  const [, , spawnOptions] = spawnMock.mock.calls[3] ?? [];
   expect(typeof cleanupInput?.cwd).toBe("string");
   expect(cleanupInput?.env).toBe(spawnOptions?.env);
   expect(cleanupInput?.ignoreErrors).toBe(true);
