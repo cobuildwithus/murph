@@ -181,6 +181,9 @@
       "@murphai/importers/device-providers/junction-origin": [
         "packages/importers/src/device-providers/junction-origin.ts"
       ],
+      "@murphai/importers/device-providers/junction-resources": [
+        "packages/importers/src/device-providers/junction-resources.ts"
+      ],
       "@murphai/importers/device-providers/canonical-wearable-records": [
         "packages/importers/src/device-providers/canonical-wearable-records.ts"
       ],

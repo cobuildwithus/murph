@@ -27,6 +27,7 @@ export {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   junctionProviderAdapter,
+  normalizeJunctionResourceName,
   normalizeJunctionSnapshot,
   type JunctionSnapshotInput,
 } from "./junction.ts";

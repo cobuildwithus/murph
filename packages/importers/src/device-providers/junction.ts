@@ -18,6 +18,12 @@ import {
   trimToLength,
 } from "./shared-normalization.ts";
 import {
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
+} from "./junction-resources.ts";
+import {
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
@@ -34,27 +40,12 @@ import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
-export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
-  "profile",
-  "activity",
-  "sleep",
-  "workouts",
-  "body",
-] as const);
-
-export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  "steps",
-  "heartrate",
-  "hrv",
-  "respiratory_rate",
-  "blood_oxygen",
-  "weight",
-] as const);
-
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
-  "distance",
-  "glucose",
-] as const);
+export {
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
+} from "./junction-resources.ts";
 
 export interface JunctionSnapshotInput {
   accountId?: string | number;
@@ -215,8 +206,14 @@ const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>>
     title: "Junction blood oxygen",
     paths: ["value", "spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"],
   },
+  calories_active: {
+    metric: "active-calories",
+    unit: "kcal",
+    title: "Junction active calories",
+    paths: ["value", "calories", "calories_active", "activeCalories", "active_calories"],
+  },
   distance: { metric: "distance", unit: "m", title: "Junction distance", paths: ["value", "distance", "distanceMeters", "distance_meters"] },
-  weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "weightKg", "weight_kg", "weight"] },
+  weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "bodyWeight", "body_weight", "weightKg", "weight_kg", "weight"] },
 });
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
@@ -978,7 +975,7 @@ function allowedResourceEntries(
   }
 
   return Object.entries(resources).flatMap(([resource, payload]) => {
-    const normalized = normalizeResourceKey(resource);
+    const normalized = normalizeJunctionResourceName(resource);
     return normalized && allowlist.has(normalized) ? [[normalized, payload] as const] : [];
   });
 }
@@ -1070,17 +1067,6 @@ function listAllowedResourceKeys(
   allowlist: ReadonlySet<string>,
 ): string[] {
   return allowedResourceEntries(resources, allowlist).map(([resource]) => resource);
-}
-
-function normalizeResourceKey(value: string): string | undefined {
-  const key = value.trim().toLowerCase().replace(/-/gu, "_");
-  if (key === "heart_rate") {
-    return "heartrate";
-  }
-  if (key === "spo2" || key === "blood_oxygen_saturation") {
-    return "blood_oxygen";
-  }
-  return key.length > 0 ? key : undefined;
 }
 
 function resolveTimeseriesObservationUnit(
