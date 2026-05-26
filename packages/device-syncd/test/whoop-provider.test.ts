@@ -1455,6 +1455,7 @@ test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhoo
   });
 
   assert.deepEqual(parsed, {
+    acceptanceMode: "level_dirty_hint",
     externalAccountId: "whoop-user-1",
     eventType: "team.updated",
     traceId: expectedTraceId,

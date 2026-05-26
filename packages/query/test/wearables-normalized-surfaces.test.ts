@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
+import { normalizeJunctionSnapshot } from "@murphai/importers";
+
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import {
@@ -148,6 +150,93 @@ function makeVault(entities: readonly CanonicalEntity[]) {
     vaultRoot: "/virtual/wearables-normalized",
   });
 }
+
+function makeVaultFromJunctionSnapshot(snapshot: Parameters<typeof normalizeJunctionSnapshot>[0]) {
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const events = (payload.events ?? []).map((event, index) =>
+    makeEntity({
+      entityId: `evt_junction_${index}`,
+      family: "event",
+      kind: event.kind,
+      recordClass: "ledger",
+      occurredAt: event.occurredAt,
+      date: event.dayKey ?? null,
+      title: event.title ?? null,
+      attributes: {
+        dayKey: event.dayKey,
+        recordedAt: event.recordedAt,
+        timeZone: event.timeZone,
+        source: event.source,
+        externalRef: event.externalRef,
+        dataOrigin: event.dataOrigin,
+        ...(event.fields ?? {}),
+      },
+    })
+  );
+  const samples = (payload.samples ?? []).map((sample, index) =>
+    makeEntity({
+      entityId: `sample_junction_${index}`,
+      family: "sample",
+      kind: sample.stream,
+      recordClass: "ledger",
+      occurredAt: sample.sample.occurredAt ?? sample.sample.startAt ?? sample.recordedAt ?? null,
+      date: sample.dayKey ?? null,
+      stream: sample.stream,
+      title: sample.stream,
+      attributes: {
+        dayKey: sample.dayKey,
+        recordedAt: sample.recordedAt,
+        timeZone: sample.timeZone,
+        source: sample.source,
+        quality: sample.quality,
+        unit: sample.unit,
+        externalRef: sample.externalRef,
+        dataOrigin: sample.dataOrigin,
+        ...sample.sample,
+      },
+    })
+  );
+
+  return makeVault([...events, ...samples]);
+}
+
+test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      activity: {
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        observedAt: "2026-05-20T12:00:00Z",
+        data: {
+          steps: 7200,
+        },
+      },
+      sleep: {
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        observedAt: "2026-05-20T10:00:00Z",
+        data: {
+          id: "sleep-object-envelope",
+          bedtime_start: "2026-05-20T02:00:00+00:00",
+          bedtime_stop: "2026-05-20T10:00:00+00:00",
+          duration: 28800,
+          total: 25200,
+          sleepScore: 82,
+        },
+      },
+    },
+  });
+
+  const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
+
+  assert.equal(latest?.latestDate, "2026-05-20");
+  assert.equal(latest?.activity?.steps.selection.value, 7200);
+  assert.equal(latest?.activity?.steps.selection.provider, "garmin");
+  assert.equal(latest?.sleep?.sleepScore.selection.value, 82);
+  assert.equal(latest?.sleep?.totalSleepMinutes.selection.value, 420);
+  assert.deepEqual(latest?.providers, ["garmin"]);
+});
 
 test("latest and metric-latest surfaces stay structured and respect dayKey semantics", () => {
   const vault = makeVault([

@@ -1182,6 +1182,7 @@ export function createStravaDeviceSyncProvider(
       }
 
       return {
+        acceptanceMode: "level_dirty_hint",
         externalAccountId: ownerId,
         eventType,
         traceId,

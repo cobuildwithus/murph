@@ -278,6 +278,13 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.getDirtyConnection(input);
   }
 
+  async hasPendingDirtyConnection(
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<boolean> {
+    return this.dirtyConnections.hasPendingDirtyConnection(connectionId, tx);
+  }
+
   async listPendingDirtyConnectionsForUser(input: {
     limit: number;
     userId: string;

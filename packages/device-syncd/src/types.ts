@@ -402,6 +402,7 @@ export interface ProviderWebhookContext {
 export interface ProviderWebhookResult {
   externalAccountId: string;
   externalAccountDiagnostic?: DeviceSyncWebhookExternalAccountDiagnostic;
+  acceptanceMode: DeviceSyncWebhookAcceptanceMode;
   eventType: string;
   traceId: string;
   occurredAt?: string;
@@ -425,12 +426,17 @@ export interface DeviceSyncWebhookExternalAccountCandidateDiagnostic {
 }
 
 export interface DeviceSyncIngressWebhook {
+  acceptanceMode: DeviceSyncWebhookAcceptanceMode;
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
 }
+
+export type DeviceSyncWebhookAcceptanceMode =
+  | "level_dirty_hint"
+  | "durable_payload";
 
 export interface DeviceSyncWebhookPreflightResponse {
   status: number;
@@ -479,6 +485,18 @@ export interface DeviceSyncPublicIngressWebhookAcceptedResult {
   webhookTraceCompleted: true;
 }
 
+export interface DeviceSyncPublicIngressWebhookAlreadySatisfiedInput {
+  account: PublicDeviceSyncAccount;
+  traceId: string;
+  webhook: DeviceSyncIngressWebhook;
+  provider: DeviceSyncProvider;
+  now: string;
+}
+
+export interface DeviceSyncPublicIngressWebhookAlreadySatisfiedResult {
+  accepted: true;
+}
+
 export interface DeviceSyncPublicIngressUnknownWebhookInput {
   provider: DeviceSyncProvider;
   traceId: string;
@@ -489,6 +507,11 @@ export interface DeviceSyncPublicIngressUnknownWebhookInput {
 
 export interface DeviceSyncPublicIngressHooks {
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
+  onLevelDirtyWebhookAlreadySatisfied?(
+    input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
+  ): DeviceSyncPublicIngressWebhookAlreadySatisfiedResult
+    | null
+    | Promise<DeviceSyncPublicIngressWebhookAlreadySatisfiedResult | null>;
   // When present, the hook owns durable webhook acceptance and must complete the claimed trace
   // transactionally once its side effects are committed by using traceId.
   onWebhookAccepted?(

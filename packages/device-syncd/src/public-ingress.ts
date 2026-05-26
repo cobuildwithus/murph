@@ -33,6 +33,7 @@ import type {
   DeviceSyncPublicIngressConnectionEstablishedInput,
   DeviceSyncPublicIngressHooks,
   DeviceSyncPublicIngressStore,
+  DeviceSyncWebhookAcceptanceMode,
   DeviceWebhookHandler,
   DeviceSyncRegistry,
   HandleConnectionCallbackInput,
@@ -69,6 +70,7 @@ const CONNECT_TARGET_STATE_METADATA_KEY =
   "__murphConnectTarget";
 
 function toIngressWebhook(parsed: {
+  acceptanceMode: DeviceSyncWebhookAcceptanceMode;
   eventType: string;
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
@@ -77,6 +79,7 @@ function toIngressWebhook(parsed: {
   const resourceCategory = normalizeString(parsed.resourceCategory);
 
   return {
+    acceptanceMode: parsed.acceptanceMode,
     eventType: parsed.eventType,
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
@@ -802,7 +805,7 @@ export class DeviceSyncPublicIngress {
       jobs,
     });
 
-    const traceClaim = await this.store.claimWebhookTrace({
+    const claimWebhookTrace = () => this.store.claimWebhookTrace({
       provider: provider.provider,
       traceId,
       claimToken,
@@ -811,6 +814,30 @@ export class DeviceSyncPublicIngress {
       receivedAt: now,
       processingExpiresAt: addMilliseconds(now, WEBHOOK_TRACE_PROCESSING_TTL_MS),
     });
+
+    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
+
+    if (account?.status === "active" && webhook.acceptanceMode === "level_dirty_hint") {
+      const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
+        account,
+        traceId,
+        webhook,
+        provider,
+        now,
+      });
+
+      if (alreadySatisfied?.accepted === true) {
+        return {
+          accepted: true,
+          duplicate: false,
+          provider: provider.provider,
+          eventType: webhook.eventType,
+          traceId,
+        };
+      }
+    }
+
+    const traceClaim = await claimWebhookTrace();
 
     if (traceClaim === "processed") {
       return {
@@ -830,8 +857,6 @@ export class DeviceSyncPublicIngress {
         httpStatus: 503,
       });
     }
-
-    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
     if (!account) {
       const unknownWebhookLogContext: Record<string, unknown> = {
@@ -1316,6 +1341,7 @@ export type {
   DeviceSyncJobInput,
   DeviceSyncProvider,
   DeviceSyncPublicIngressStore,
+  DeviceSyncWebhookAcceptanceMode,
   DeviceSyncWebhookPreflightResponse,
   DeviceSyncPublicIngressWebhookAcceptedResult,
   DeviceSyncRegistry,

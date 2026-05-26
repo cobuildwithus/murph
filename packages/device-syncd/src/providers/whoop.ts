@@ -989,6 +989,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         );
 
       return {
+        acceptanceMode: "level_dirty_hint",
         externalAccountId,
         eventType,
         traceId,
