@@ -124,6 +124,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (messageEvent.data.message.parts.length === 0) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("empty-message-parts"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberMatch: "none",
+        reason: "empty-message-parts",
+        routeStage: "ignored-empty-message-parts",
+      }),
+    );
+  }
+
   if (!participantContact) {
     const reason = summary.isFromMe ? "own-message" : "invalid-contact";
     return logHostedLinqWebhookPlannerDecisionAndReturn(
