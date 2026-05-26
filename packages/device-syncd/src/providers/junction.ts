@@ -50,6 +50,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
 
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
 export {
@@ -976,7 +977,7 @@ export function createJunctionDeviceSyncProvider(
     });
 
     return {
-      acceptanceMode: webhookDataJsons.length > 0 ? "durable_payload" : "level_dirty_hint",
+      acceptanceMode: classifyDeviceSyncWebhookAcceptanceMode(jobs),
       externalAccountId: externalAccountSelection.userId,
       externalAccountDiagnostic: buildJunctionWebhookExternalAccountDiagnostic(externalAccountSelection),
       eventType,

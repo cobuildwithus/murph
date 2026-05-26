@@ -41,6 +41,7 @@ import {
 
 import type {
   DeviceSyncAccount,
+  DeviceSyncJobInput,
   DeviceSyncWebhookPreflightResponse,
   DeviceSyncJobRecord,
   DeviceSyncOAuthProvider,
@@ -55,7 +56,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
+import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import type { OuraWebhookSubscriptionClient } from "./oura-webhooks.ts";
 
 const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
@@ -1384,41 +1385,42 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
             payloadOccurredAt ?? new Date(timestampMs).toISOString()
           }`,
         );
+      const jobs: DeviceSyncJobInput[] = [
+        {
+          kind: operation === "delete" ? "delete" : operation ? "resource" : "reconcile",
+          priority: operation === "delete" ? OURA_WEBHOOK_DELETE_PRIORITY : OURA_WEBHOOK_RESOURCE_PRIORITY,
+          dedupeKey: `oura-webhook:${traceId}`,
+          payload:
+            operation === "delete"
+              ? buildOuraDeleteWebhookJobPayload({
+                  sourceEventType: eventType,
+                  dataType,
+                  objectId,
+                  occurredAt,
+                })
+              : operation
+                ? buildOuraResourceWebhookJobPayload({
+                    dataType,
+                    objectId,
+                    occurredAt,
+                    now: context.now,
+                  })
+                : buildOuraWindowJobPayload({
+                    now: context.now,
+                    includePersonalInfo: false,
+                    windowDays: reconcileDays,
+                  }),
+        },
+      ];
 
       return {
-        acceptanceMode: "level_dirty_hint",
+        acceptanceMode: classifyDeviceSyncWebhookAcceptanceMode(jobs),
         externalAccountId,
         eventType,
         traceId,
         occurredAt,
         resourceCategory: dataType,
-        jobs: [
-          {
-            kind: operation === "delete" ? "delete" : operation ? "resource" : "reconcile",
-            priority: operation === "delete" ? OURA_WEBHOOK_DELETE_PRIORITY : OURA_WEBHOOK_RESOURCE_PRIORITY,
-            dedupeKey: `oura-webhook:${traceId}`,
-            payload:
-              operation === "delete"
-                ? buildOuraDeleteWebhookJobPayload({
-                    sourceEventType: eventType,
-                    dataType,
-                    objectId,
-                    occurredAt,
-                  })
-                : operation
-                  ? buildOuraResourceWebhookJobPayload({
-                      dataType,
-                      objectId,
-                      occurredAt,
-                      now: context.now,
-                    })
-                  : buildOuraWindowJobPayload({
-                      now: context.now,
-                      includePersonalInfo: false,
-                      windowDays: reconcileDays,
-                    }),
-          },
-        ],
+        jobs,
       };
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {

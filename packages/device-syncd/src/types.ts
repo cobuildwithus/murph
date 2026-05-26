@@ -434,9 +434,60 @@ export interface DeviceSyncIngressWebhook {
   resourceCategory?: string | null;
 }
 
+// Durable webhook work means any exact event work that must be durably merged before acknowledgement:
+// direct payloads, resource fetches, deletes, deauthorizations, or other non-rehydratable jobs.
 export type DeviceSyncWebhookAcceptanceMode =
   | "level_dirty_hint"
-  | "durable_payload";
+  | "durable_webhook_work";
+
+const COALESCIBLE_LEVEL_DIRTY_JOB_KINDS = new Set(["backfill", "reconcile"]);
+const COALESCIBLE_LEVEL_DIRTY_JOB_PAYLOAD_KEYS = new Set([
+  "includeAthlete",
+  "includePersonalInfo",
+  "kind",
+  "windowDays",
+  "windowEnd",
+  "windowKind",
+  "windowStart",
+]);
+
+export function classifyDeviceSyncWebhookAcceptanceMode(
+  jobs: readonly DeviceSyncJobInput[],
+): DeviceSyncWebhookAcceptanceMode {
+  if (jobs.length === 0) {
+    return "durable_webhook_work";
+  }
+
+  return jobs.every(isCoalescibleLevelDirtyWebhookJob)
+    ? "level_dirty_hint"
+    : "durable_webhook_work";
+}
+
+function isCoalescibleLevelDirtyWebhookJob(job: DeviceSyncJobInput): boolean {
+  if (!COALESCIBLE_LEVEL_DIRTY_JOB_KINDS.has(job.kind)) {
+    return false;
+  }
+
+  const payload = job.payload ?? {};
+  if (!hasBoundedDirtyWindowPayload(payload)) {
+    return false;
+  }
+
+  return Object.entries(payload).every(([key, value]) => {
+    if (!COALESCIBLE_LEVEL_DIRTY_JOB_PAYLOAD_KEYS.has(key)) {
+      return false;
+    }
+
+    return key !== "kind" || value === job.kind;
+  });
+}
+
+function hasBoundedDirtyWindowPayload(payload: Record<string, unknown>): boolean {
+  return typeof payload.windowStart === "string"
+    && payload.windowStart.trim().length > 0
+    && typeof payload.windowEnd === "string"
+    && payload.windowEnd.trim().length > 0;
+}
 
 export interface DeviceSyncWebhookPreflightResponse {
   status: number;

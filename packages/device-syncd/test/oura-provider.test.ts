@@ -1252,7 +1252,7 @@ test("Oura provider validates webhook signatures and turns notifications into re
   });
 
   assert.deepEqual(parsed, {
-    acceptanceMode: "level_dirty_hint",
+    acceptanceMode: "durable_webhook_work",
     externalAccountId: "oura-user-1",
     eventType: "daily_sleep.updated",
     traceId: parsed?.traceId,
@@ -1340,7 +1340,7 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
   });
 
   assert.deepEqual(parsed, {
-    acceptanceMode: "level_dirty_hint",
+    acceptanceMode: "durable_webhook_work",
     externalAccountId: "oura-user-1",
     eventType: "workout.updated",
     traceId: parsed?.traceId,
@@ -1467,7 +1467,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
   });
 
   assert.deepEqual(parsed, {
-    acceptanceMode: "level_dirty_hint",
+    acceptanceMode: "durable_webhook_work",
     externalAccountId: "oura-user-1",
     eventType: "session.deleted",
     traceId: parsed?.traceId,

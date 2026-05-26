@@ -80,6 +80,65 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retry or sleep on dirty-state contention inside caller-owned transactions", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const prisma = {
+      $transaction: vi.fn(),
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+    const createTx = {
+      deviceSyncDirtyConnection: {
+        createMany: vi.fn(async () => ({ count: 0 })),
+        findUnique: vi.fn(async () => null),
+      },
+    };
+    const ackTx = {
+      deviceSyncDirtyConnection: {
+        findFirst: vi.fn(async () => ({
+          connectionId: "dsc_dirty_1",
+          dirtyRevision: 2n,
+          latestDirtyAt: new Date("2026-05-26T12:00:00.000Z"),
+          processedRevision: 1n,
+          userId: "member_dirty_1",
+        })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+
+    try {
+      await expect(store.upsertDirtyConnection({
+        connectionId: "dsc_dirty_1",
+        dirtyAt: "2026-05-26T12:00:00.000Z",
+        eventType: "sleep.updated",
+        provider: "oura",
+        resourceCategory: "sleep",
+        traceId: "trace_dirty_1",
+        tx: createTx as never,
+        userId: "member_dirty_1",
+      })).rejects.toMatchObject({
+        code: "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION",
+        retryable: true,
+      });
+
+      await expect(store.markDirtyConnectionProcessed({
+        connectionId: "dsc_dirty_1",
+        processedRevision: 2n,
+        tx: ackTx as never,
+        userId: "member_dirty_1",
+      })).rejects.toMatchObject({
+        code: "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION",
+        retryable: true,
+      });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(createTx.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+      expect(ackTx.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledTimes(1);
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it("scans stale dirty connections only for active connections and active hosted members", async () => {
     const staleBefore = new Date("2026-05-05T00:00:30.000Z");
     const queryCalls: unknown[] = [];
