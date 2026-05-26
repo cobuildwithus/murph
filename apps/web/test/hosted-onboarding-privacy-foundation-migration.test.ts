@@ -412,13 +412,16 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceConnectionRefreshLeaseMigrationSql).not.toContain("CREATE TABLE");
     expect(deviceSyncDirtyPayloadMigrationSql).toContain('CREATE TABLE "device_sync_dirty_payload"');
     expect(deviceSyncDirtyPayloadMigrationSql).toContain('"resource_encrypted" TEXT NOT NULL');
+    expect(deviceSyncDirtyPayloadMigrationSql).toContain(
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    );
     expect(deviceSyncDirtyPayloadMigrationSql).not.toContain("resource_json");
     expect(deviceSyncDirtyPayloadMigrationSql).toContain(
       'REFERENCES "device_connection"("id")',
     );
     expect(deviceSyncDirtyPayloadMigrationSql).toContain("ON DELETE CASCADE");
     expect(deviceSyncDirtyPayloadMigrationSql).toContain(
-      'CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revision_idx"',
+      'CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revis_idx"',
     );
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
@@ -501,8 +504,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at")',
     );
-    expect(schema).toContain(
-      'stripeMeterStatus          String       @default("skipped") @map("stripe_meter_status")',
+    expect(schema).toMatch(
+      /stripeMeterStatus\s+String\s+@default\("skipped"\)\s+@map\("stripe_meter_status"\)/u,
     );
     expect(hostedAiUsageStripeMeterSkippedMigrationSql).toContain(
       'ALTER TABLE "hosted_ai_usage"',
