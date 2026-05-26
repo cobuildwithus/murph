@@ -733,6 +733,7 @@ describe("Strava device-sync provider", () => {
       now: STRAVA_WEBHOOK_NOW,
     });
 
+    expect(createResult?.acceptanceMode).toBe("durable_webhook_work");
     expect(createResult?.externalAccountId).toBe("12345");
     expect(createResult?.eventType).toBe("activity.create");
     expect(createResult?.jobs).toEqual([
@@ -763,6 +764,7 @@ describe("Strava device-sync provider", () => {
       now: STRAVA_WEBHOOK_NOW,
     });
 
+    expect(deleteResult?.acceptanceMode).toBe("durable_webhook_work");
     expect(deleteResult?.jobs).toEqual([
       {
         kind: "delete",
@@ -804,6 +806,7 @@ describe("Strava device-sync provider", () => {
     });
 
     expect(result).toMatchObject({
+      acceptanceMode: "durable_webhook_work",
       externalAccountId: "12345",
       eventType: "athlete.deauthorized",
       jobs: [

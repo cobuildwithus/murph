@@ -2460,7 +2460,7 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   assert.equal(JSON.stringify(parsed.externalAccountDiagnostic).includes("junction-user-1"), false);
   assert.equal(JSON.stringify(parsed.externalAccountDiagnostic).includes("murph_blinded"), false);
   assert.equal(parsed.eventType, "daily.data.activity.created");
-  assert.equal(parsed.acceptanceMode, "durable_payload");
+  assert.equal(parsed.acceptanceMode, "durable_webhook_work");
   assert.equal(parsed.traceId, "msg_activity_1");
   assert.equal(parsed.resourceCategory, "summary");
   assert.equal(parsed.unknownAccountAction, "accept");
@@ -3929,7 +3929,7 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
   });
 
   assert.equal(parsed.jobs.length, 1);
-  assert.equal(parsed.acceptanceMode, "level_dirty_hint");
+  assert.equal(parsed.acceptanceMode, "durable_webhook_work");
   assert.equal(parsed.jobs[0]?.kind, "resource");
   assert.equal("webhookDataJson" in (parsed.jobs[0]?.payload ?? {}), false);
 
@@ -4315,7 +4315,7 @@ test("Junction splits oversized daily timeseries webhook samples into bounded di
     now: "2026-04-03T00:00:00.000Z",
   });
 
-  assert.equal(parsed.acceptanceMode, "durable_payload");
+  assert.equal(parsed.acceptanceMode, "durable_webhook_work");
   assert.equal(parsed.jobs.every((job) => job.kind === "resource"), true);
   const directJobs = parsed.jobs.map((job) => ({
     ...job,

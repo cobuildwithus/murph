@@ -1346,6 +1346,7 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
     });
 
     assert.ok(result);
+    assert.equal(result?.acceptanceMode, "durable_webhook_work");
     assert.equal(result?.eventType, testCase.eventType);
     assert.equal(result?.externalAccountId, "whoop-user-1");
     assert.equal(result?.traceId, `trace:${testCase.eventType}`);
@@ -1455,7 +1456,7 @@ test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhoo
   });
 
   assert.deepEqual(parsed, {
-    acceptanceMode: "level_dirty_hint",
+    acceptanceMode: "durable_webhook_work",
     externalAccountId: "whoop-user-1",
     eventType: "team.updated",
     traceId: expectedTraceId,

@@ -1742,7 +1742,7 @@ function buildHostedProviderCleanupRedactedStatus(input: {
 function shouldSkipDeviceSyncForAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  if (isDueHostedDeviceSyncReconcileAlarm(input)) {
+  if (isDueHostedDeviceSyncReconcileWake(input)) {
     return false;
   }
 
@@ -1764,6 +1764,16 @@ function isDueHostedDeviceSyncReconcileAlarm(
   return (
     isDueHostedWorkspaceAlarm(input)
     && input.workspace?.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+  );
+}
+
+function isDueHostedDeviceSyncReconcileWake(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return (
+    input.workspace?.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    && !hasFreshHostedConversationInput(input)
+    && isDueHostedWorkspaceWakeAt(input)
   );
 }
 

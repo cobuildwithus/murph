@@ -744,6 +744,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       connectionId: input.connectionId,
     });
 
+    // Level webhooks may be coalesced only after committed dirty state exists.
+    // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
     if (!lockAcquired) {
       if (
         input.acceptanceMode === "level_dirty_hint"
@@ -763,7 +765,10 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       });
     }
 
-    if (input.acceptanceMode === "level_dirty_hint" && await input.store.hasPendingDirtyConnection(input.connectionId, tx)) {
+    if (
+      input.acceptanceMode === "level_dirty_hint"
+      && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
+    ) {
       await completeHostedWebhookTraceTx(input, tx);
       return {
         mailboxItemId: null,

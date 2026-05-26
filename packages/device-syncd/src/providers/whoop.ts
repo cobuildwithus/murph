@@ -54,7 +54,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
+import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
 
 const WHOOP_AUTH_PATH = "/oauth/oauth2/auth";
 const WHOOP_TOKEN_PATH = "/oauth/oauth2/token";
@@ -987,15 +987,16 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         sha256Text(
           `${externalAccountId}:${eventType}:${resourceId ?? ""}:${sha256Text(context.rawBody.toString("utf8"))}`,
         );
+      const jobs = buildWhoopWebhookJobs(eventType, resourceId, payload, traceId);
 
       return {
-        acceptanceMode: "level_dirty_hint",
+        acceptanceMode: classifyDeviceSyncWebhookAcceptanceMode(jobs),
         externalAccountId,
         eventType,
         traceId,
         occurredAt: context.now,
         resourceCategory: WHOOP_WEBHOOK_EVENT_MAP[eventType]?.resourceType ?? null,
-        jobs: buildWhoopWebhookJobs(eventType, resourceId, payload, traceId),
+        jobs,
       };
     },
     async executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {

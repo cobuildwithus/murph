@@ -377,7 +377,7 @@ type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
   verifyAndParseWebhook?: (
     context: Parameters<NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]>>[0],
   ) => Promise<Omit<Awaited<ReturnType<NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]>>>, "acceptanceMode"> & {
-    acceptanceMode?: "level_dirty_hint" | "durable_payload";
+    acceptanceMode?: "level_dirty_hint" | "durable_webhook_work";
   }>;
   executeJob?: DeviceJobExecutor["executeJob"];
 };
@@ -2028,6 +2028,64 @@ test("public ingress accepts provider-requested unknown-account webhooks without
   assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 });
 
+test("public ingress retries durable webhook work for unknown accounts even when provider asks to accept orphans", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const unknownCalls: string[] = [];
+  const warnContexts: Record<string, unknown>[] = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            acceptanceMode: "durable_webhook_work",
+            externalAccountId: "demo-late",
+            eventType: "demo.updated",
+            traceId: "trace-durable-orphan",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  resourceId: "resource-1",
+                  webhookDataJson: "{\"sample\":true}",
+                },
+              },
+            ],
+            unknownAccountAction: "accept",
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onUnknownWebhook({ traceId }) {
+        unknownCalls.push(traceId);
+      },
+    },
+    log: {
+      warn(_message, context) {
+        warnContexts.push(context ?? {});
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+
+  assert.deepEqual(unknownCalls, []);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+  assert.equal(warnContexts[0]?.acceptanceMode, "durable_webhook_work");
+  assert.equal(warnContexts[0]?.unknownAccountAction, "accept");
+  assert.equal(warnContexts[0]?.unknownWebhookHookConfigured, true);
+});
+
 test("public ingress passes only a stripped webhook summary into accepted hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const acceptedCalls: Array<{ traceId: string; webhook: DeviceSyncIngressWebhook }> = [];
@@ -2280,7 +2338,7 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
 });
 
-test("public ingress does not use already-satisfied coalescing for durable payload webhooks", async () => {
+test("public ingress does not use already-satisfied coalescing for durable webhook work", async () => {
   const store = new InMemoryPublicIngressStore();
   let alreadySatisfiedCalls = 0;
   let acceptedCalls = 0;
@@ -2290,7 +2348,7 @@ test("public ingress does not use already-satisfied coalescing for durable paylo
       createFakeProvider({
         async verifyAndParseWebhook() {
           return {
-            acceptanceMode: "durable_payload",
+            acceptanceMode: "durable_webhook_work",
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-payload",
@@ -2314,7 +2372,7 @@ test("public ingress does not use already-satisfied coalescing for durable paylo
       },
       onWebhookAccepted({ account, claimToken, traceId, webhook }) {
         acceptedCalls += 1;
-        assert.equal(webhook.acceptanceMode, "durable_payload");
+        assert.equal(webhook.acceptanceMode, "durable_webhook_work");
         return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
@@ -2654,6 +2712,7 @@ test("public ingress hashes unknown external account ids before logging them", a
     externalAccountIdHash: sha256Text("demo-unknown"),
     eventType: "demo.updated",
     traceId: scopeWebhookTraceId("demo", "demo-unknown", "trace-unknown-account"),
+    acceptanceMode: "level_dirty_hint",
     unknownAccountAction: "retry",
     unknownWebhookHookConfigured: false,
   });

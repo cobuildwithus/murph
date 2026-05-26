@@ -1541,7 +1541,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: { provider: string };
           traceId: string;
           webhook: {
-            acceptanceMode: "level_dirty_hint" | "durable_payload";
+            acceptanceMode: "level_dirty_hint" | "durable_webhook_work";
             eventType: string;
             jobs: [];
             resourceCategory: string | null;
@@ -2173,7 +2173,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("preserves Junction daily data webhook payloads across the hosted dirty handoff", async () => {
+  it("does not suppress Junction daily data webhook payloads when dirty state would already be pending", async () => {
     const webhookDataJson = JSON.stringify({
       data: Array.from({ length: 30 }, (_, index) => ({
         end: `2026-05-26T${String(index % 24).padStart(2, "0")}:30:00.000Z`,
@@ -2184,6 +2184,7 @@ describe("appendHostedDeviceSyncWake", () => {
       sourceProviderSlug: "garmin",
     });
     expect(webhookDataJson.length).toBeGreaterThan(512);
+    mocks.hasPendingDirtyConnection.mockResolvedValue(true);
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -2203,7 +2204,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_junction_123",
           webhook: {
-            acceptanceMode: "durable_payload",
+            acceptanceMode: "durable_webhook_work",
             eventType: "daily.data.steps.created",
             jobs: [
               {
@@ -2251,6 +2252,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
 
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(dirtyResources).toEqual([
       {
         count: 1,
@@ -2315,7 +2317,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_junction_payload_busy",
           webhook: {
-            acceptanceMode: "durable_payload",
+            acceptanceMode: "durable_webhook_work",
             eventType: "daily.data.steps.created",
             jobs: [
               {
@@ -2406,7 +2408,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_junction_chunks_123",
           webhook: {
-            acceptanceMode: "durable_payload",
+            acceptanceMode: "durable_webhook_work",
             eventType: "daily.data.steps.created",
             jobs: webhookDataJsons.map((webhookDataJson, index) => ({
               kind: "resource",

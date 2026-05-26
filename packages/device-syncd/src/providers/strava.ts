@@ -57,7 +57,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
+import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import type { StravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
 
 const STRAVA_AUTH_BASE_URL = "https://www.strava.com";
@@ -1182,7 +1182,7 @@ export function createStravaDeviceSyncProvider(
       }
 
       return {
-        acceptanceMode: "level_dirty_hint",
+        acceptanceMode: classifyDeviceSyncWebhookAcceptanceMode(jobs),
         externalAccountId: ownerId,
         eventType,
         traceId,

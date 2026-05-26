@@ -818,6 +818,8 @@ export class DeviceSyncPublicIngress {
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
     if (account?.status === "active" && webhook.acceptanceMode === "level_dirty_hint") {
+      // Only provider-declared level hints can be satisfied by committed dirty state.
+      // Exact webhook work must pass through trace claim and durable acceptance.
       const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
         account,
         traceId,
@@ -864,6 +866,7 @@ export class DeviceSyncPublicIngress {
         externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
         eventType: webhook.eventType,
         traceId,
+        acceptanceMode: webhook.acceptanceMode,
         unknownAccountAction: parsed.unknownAccountAction ?? "retry",
         unknownWebhookHookConfigured: Boolean(this.hooks.onUnknownWebhook),
       };
@@ -871,7 +874,9 @@ export class DeviceSyncPublicIngress {
         unknownWebhookLogContext.externalAccountDiagnostic = parsed.externalAccountDiagnostic;
       }
 
-      const shouldAcceptUnknownWebhook = parsed.unknownAccountAction === "accept";
+      const shouldAcceptUnknownWebhook =
+        parsed.unknownAccountAction === "accept"
+        && webhook.acceptanceMode === "level_dirty_hint";
 
       this.logger.warn?.(
         shouldAcceptUnknownWebhook
