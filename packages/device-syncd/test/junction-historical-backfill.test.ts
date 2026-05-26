@@ -169,6 +169,38 @@ test("Junction sleep-cycle historical backfill marks staged records complete", a
   assert.equal(importedSnapshots.length, 1);
 });
 
+for (const [label, summaryRecord] of [
+  [
+    "stage duration",
+    {
+      id: "sleep-cycle-duration-1",
+      connectionId: "provider-garmin-1",
+      stages: [
+        {
+          stage: "deep",
+          durationMinutes: 40,
+        },
+      ],
+    },
+  ],
+  [
+    "stage count",
+    {
+      id: "sleep-cycle-stage-count-1",
+      connectionId: "provider-garmin-1",
+      stageCount: 4,
+    },
+  ],
+] satisfies Array<[string, Record<string, unknown>]>) {
+  test(`Junction sleep-cycle historical backfill marks ${label} records complete`, async () => {
+    const { importedSnapshots, result } = await executeBackfill(summaryRecord);
+
+    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "complete");
+    assert.equal(result.scheduledJobs, undefined);
+    assert.equal(importedSnapshots.length, 1);
+  });
+}
+
 test("Junction sleep-cycle id-only historical backfill keeps retrying", async () => {
   const { importedSnapshots, result } = await executeBackfill({
     id: "sleep-cycle-empty-1",
@@ -185,3 +217,23 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
   assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
   assert.equal(importedSnapshots.length, 0);
 });
+
+for (const stageCount of [0, -1]) {
+  test(`Junction sleep-cycle stageCount ${stageCount} historical backfill keeps retrying`, async () => {
+    const { importedSnapshots, result } = await executeBackfill({
+      id: `sleep-cycle-stage-count-${stageCount}`,
+      connectionId: "provider-garmin-1",
+      stageCount,
+    });
+
+    assert.deepEqual(result.metadataPatch, {
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    });
+    assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
+    assert.equal(importedSnapshots.length, 0);
+  });
+}
