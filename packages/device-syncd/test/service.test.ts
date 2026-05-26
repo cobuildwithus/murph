@@ -146,6 +146,7 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     nextReconcileAt: "2026-03-18T00:00:00.000Z",
   });
   const defaultVerifyAndParseWebhook: DeviceWebhookHandler["verifyAndParseWebhook"] = async () => ({
+    acceptanceMode: "level_dirty_hint",
     externalAccountId: "demo-abc",
     eventType: "demo.updated",
     traceId: "trace-1",
@@ -1757,6 +1758,7 @@ test("device sync service accepts and dedupes disconnected-account webhooks whil
       createFakeProvider({
         async verifyAndParseWebhook() {
           return {
+            acceptanceMode: "level_dirty_hint",
             externalAccountId: "demo-xyz",
             eventType: "demo.updated",
             traceId: "trace-disconnected",
