@@ -83,6 +83,7 @@ export function splitScopeList(value: unknown): string[] {
 }
 
 export {
+  isBlockedStoredDeviceSyncMetadataKey,
   mergeStoredDeviceSyncMetadataPatch,
   sanitizeStoredDeviceSyncMetadata,
 } from "./metadata.ts";

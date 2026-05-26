@@ -27,6 +27,7 @@ import {
   readTableColumnsForTesting,
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceStatusForTesting,
+  setCredentialStateForTesting,
 } from "./store-test-helpers.ts";
 
 import type {
@@ -678,6 +679,79 @@ test("device sync service redacts connection metadata from public account respon
   await service.runWorkerOnce();
   assert.deepEqual(seenMetadata, {
     connectedBy: "sensitive-connect-code",
+  });
+
+  close();
+});
+
+test("device sync service sanitizes legacy credential metadata before provider runtime context", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-credential-runtime-sanitize");
+  let seenCredentialMetadata: Record<string, unknown> | null = null;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          seenCredentialMetadata = context.account.credential.kind === "provider_config"
+            ? { ...context.account.credential.credentialMetadata }
+            : null;
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-config",
+    displayName: "Demo Provider Config",
+    scopes: [],
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "demo",
+      subject: {
+        clientUserIdHash: "client-user-id-hash",
+      },
+      credentialMetadata: {
+        mode: "external-link",
+      },
+    },
+    metadata: {},
+    connectedAt: "2026-04-07T00:00:00.000Z",
+  });
+  setCredentialStateForTesting(store, account.id, {
+    credential_metadata_json: JSON.stringify({
+      authHeader: "Bearer legacy-auth-token",
+      mode: "external-link",
+      token: "legacy-token",
+      subject: {
+        clientUserId: "legacy-client-user-id",
+        clientUserIdHash: "client-user-id-hash",
+        sessionToken: "legacy-session-token",
+        userHashId: "legacy-user-id",
+      },
+    }),
+  });
+  store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "reconcile",
+    payload: {},
+    availableAt: "2026-04-07T00:00:00.000Z",
+  });
+
+  await service.runWorkerOnce();
+
+  assert.deepEqual(seenCredentialMetadata, {
+    mode: "external-link",
+    subject: {
+      clientUserIdHash: "client-user-id-hash",
+    },
   });
 
   close();
@@ -3261,13 +3335,29 @@ test("sqlite store sanitizes connection metadata writes and metadataPatch merges
     displayName: "Seeded Account",
     externalAccountId: "demo-sanitize",
     metadata: {
+      athleteId: "raw-athlete-id",
+      authHeader: "Bearer auth-token",
+      credential: "credential-material",
       enabled: true,
+      externalAccountId: "raw-account-id",
+      hmacSecret: "hmac-secret",
       longText: "x".repeat(300),
       nested: {
         secret: "drop-me",
       },
+      profileId: "raw-profile-id",
+      ownerId: "raw-owner-id",
+      session: "session",
+      sessionHandle: "session-handle",
+      sessionHash: "session-hash",
+      sessionKey: "session-key",
+      sourceId: "raw-source-id",
       source: "browser",
+      subjectId: "raw-subject-id",
+      token: "generic-token",
       values: ["drop-me"],
+      webhookSecret: "webhook-secret",
+      webhookSignature: "webhook-signature",
     },
     nextReconcileAt: null,
     provider: "demo",
@@ -3291,6 +3381,14 @@ test("sqlite store sanitizes connection metadata writes and metadataPatch merges
       metadataPatch: {
         count: 3,
         enabled: false,
+        authHeader: "Bearer patched-auth-token",
+        memberId: "patched-member-id",
+        providerConnectionId: "provider-connection-id",
+        secret: "generic-secret",
+        sessionHash: "patched-session-hash",
+        sessionKey: "patched-session-key",
+        sourceInstanceId: "source-instance-id",
+        webhookSignature: "patched-webhook-signature",
         nested: {
           secret: "still-drop-me",
         },

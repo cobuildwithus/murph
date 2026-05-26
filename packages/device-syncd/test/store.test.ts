@@ -409,12 +409,44 @@ test("device sync store stores provider-config and none credentials without toke
         kind: "provider_config",
         providerConfigKey: "junction",
         subject: {
+          account: "raw-account",
+          accountHashedId: "raw-account-id",
+          accountIdentifier: "raw-account-identifier",
+          athleteId: "raw-athlete-id",
+          authHeader: "Bearer subject-auth-token",
+          client: "raw-client",
           clientUserId: "raw-client-user-id",
           clientUserIdHash: "client-user-id-hash",
+          credential: "credential-material",
+          external: "raw-external",
+          externalAccount: "raw-external-account",
+          externalAccountRawId: "raw-external-account-id",
+          externalIdentifier: "raw-external-identifier",
+          member: "raw-member",
+          memberIdentifier: "raw-member-identifier",
+          memberId: "raw-member-id",
+          owner: "raw-owner",
+          ownerIdentifier: "raw-owner-identifier",
           ownerId: "raw-owner-id",
           ownerIdHash: "owner-id-hash",
+          passwordHash: "password-hash",
+          profile: "raw-profile",
+          profileIdentifier: "raw-profile-identifier",
+          profileId: "raw-profile-id",
+          providerAccount: "raw-provider-account",
+          providerAccountHashIdentifier: "raw-provider-account-identifier",
+          providerAccountIdentifier: "raw-provider-account-identifier",
+          sessionHash: "session-hash",
+          sessionToken: "session-token",
+          subject: "raw-subject",
+          subjectIdentifier: "raw-subject-identifier",
+          subjectId: "raw-subject-id",
+          user: "raw-user",
+          userHashId: "raw-user-id",
+          userIdentifier: "raw-user-identifier",
           userId: "raw-user-id",
           userIdHash: "user-id-hash",
+          webhookSignature: "webhook-signature",
         },
         credentialMetadata: {
           hmacSecret: "drop-me",
@@ -474,6 +506,71 @@ test("device sync store stores provider-config and none credentials without toke
       provider_config_key: "junction",
       refresh_token_encrypted: null,
     });
+
+    const sanitizedCredentialMetadata = {
+      mode: "external-link",
+      ownerIdHash: "keep-owner-hash",
+      userIdHash: "keep-user-hash",
+      subject: {
+        clientUserIdHash: "client-user-id-hash",
+        ownerIdHash: "owner-id-hash",
+        userIdHash: "user-id-hash",
+      },
+    };
+    setCredentialStateForTesting(store, providerConfigAccount.id, {
+      credential_metadata_json: JSON.stringify({
+        authHeader: "Bearer legacy-auth-token",
+        mode: "external-link",
+        ownerId: "legacy-owner-id",
+        ownerIdHash: "keep-owner-hash",
+        token: "legacy-token",
+        userIdHash: "keep-user-hash",
+        subject: {
+          clientUserId: "legacy-client-user-id",
+          clientUserIdHash: "client-user-id-hash",
+          owner: "legacy-owner",
+          ownerIdHash: "owner-id-hash",
+          sessionToken: "legacy-session-token",
+          userHashId: "legacy-user-id",
+          userIdHash: "user-id-hash",
+        },
+      }),
+    });
+    const legacyContaminatedAccount = store.getAccountById(providerConfigAccount.id);
+    assert.equal(legacyContaminatedAccount?.credential.kind, "provider_config");
+    assert.deepEqual(legacyContaminatedAccount?.credential.credentialMetadata, sanitizedCredentialMetadata);
+
+    const preservedHydration = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-hash",
+        metadata: providerConfigAccount.metadata,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+        updatedAt: "2026-04-07T00:30:00.000Z",
+      },
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-04-07T00:30:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: "2026-04-07T01:00:00.000Z",
+      },
+    });
+    assert.equal(preservedHydration?.credential.kind, "provider_config");
+    assert.deepEqual(preservedHydration?.credential.credentialMetadata, sanitizedCredentialMetadata);
+    const providerConfigCredentialAfterHydration = readCredentialStateForTesting(store, providerConfigAccount.id);
+    assert.ok(providerConfigCredentialAfterHydration);
+    assert.equal(
+      providerConfigCredentialAfterHydration.credential_metadata_json,
+      JSON.stringify(sanitizedCredentialMetadata),
+    );
 
     assert.equal(
       store.updateAccountTokens(providerConfigAccount.id, {
@@ -583,7 +680,31 @@ test("device sync store hosted hydration can create provider-config accounts wit
         kind: "provider_config",
         providerConfigKey: "junction",
         subject: {
+          account: "hosted-account",
+          accountHashedId: "hosted-account-id",
+          accountIdentifier: "hosted-account-identifier",
+          authHeader: "Bearer hosted-auth-token",
+          client: "hosted-client",
           clientUserIdHash: "hosted-client-user-id-hash",
+          externalAccount: "hosted-external-account",
+          externalAccountRawId: "hosted-external-account-id",
+          externalIdentifier: "hosted-external-identifier",
+          memberIdentifier: "hosted-member-identifier",
+          owner: "hosted-owner",
+          ownerIdentifier: "hosted-owner-identifier",
+          passwordHash: "hosted-password-hash",
+          profile: "hosted-profile",
+          profileIdentifier: "hosted-profile-identifier",
+          providerAccountHashIdentifier: "hosted-provider-account-identifier",
+          providerAccountIdentifier: "hosted-provider-account-identifier",
+          sessionHash: "hosted-session-hash",
+          sessionToken: "hosted-session-token",
+          subjectIdentifier: "hosted-subject-identifier",
+          subjectId: "hosted-subject-id",
+          user: "hosted-user",
+          userHashId: "hosted-user-id",
+          userIdentifier: "hosted-user-identifier",
+          webhookSignature: "hosted-webhook-signature",
         },
       },
       hostedObservedTokenVersion: null,

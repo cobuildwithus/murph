@@ -2,7 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
-import { generatePrefixedId, sanitizeStoredDeviceSyncMetadata, stringifyJson } from "../shared.ts";
+import {
+  generatePrefixedId,
+  isBlockedStoredDeviceSyncMetadataKey,
+  sanitizeStoredDeviceSyncMetadata,
+  stringifyJson,
+} from "../shared.ts";
 import type {
   DeviceAccountCredential,
   DeviceAccountCredentialKind,
@@ -113,7 +118,7 @@ function sanitizeCredentialMetadata(
 }
 
 function sanitizeCredentialSubject(
-  value: Record<string, string> | null | undefined,
+  value: object | null | undefined,
 ): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -127,14 +132,11 @@ function sanitizeCredentialSubject(
     }
 
     const key = rawKey.trim();
-    const normalizedKey = normalizeMetadataKey(key);
 
     if (
       !key
       || key.length > 64
-      || normalizedKey.includes("hmacsecret")
-      || normalizedKey.includes("webhooksecret")
-      || isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey)
+      || isBlockedStoredDeviceSyncMetadataKey(key)
     ) {
       continue;
     }
