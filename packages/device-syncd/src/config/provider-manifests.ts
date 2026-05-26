@@ -294,6 +294,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
         resource: stringJobField({ includeInHostedHint: true }),
         resourceCategory: stringJobField({ includeInHostedHint: true }),
         sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+        webhookDataJson: stringJobField({ includeInHostedHint: true }),
         windowEnd: stringJobField({ includeInHostedHint: true }),
         windowStart: stringJobField({ includeInHostedHint: true }),
       },

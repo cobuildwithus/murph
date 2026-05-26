@@ -3,6 +3,83 @@ import { describe, expect, it, vi } from "vitest";
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
 
 describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
+  it("preserves bounded Junction webhook payload JSON while keeping ordinary payload strings short", async () => {
+    let createData: Record<string, unknown> | null = null;
+    let findCount = 0;
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+          createData = input.data;
+          return { count: 1 };
+        }),
+        findUnique: vi.fn(async () => {
+          findCount += 1;
+          if (findCount === 1 || !createData) {
+            return null;
+          }
+
+          const dirtyAt = createData.latestDirtyAt as Date;
+          return {
+            connectionId: createData.connectionId,
+            userId: createData.userId,
+            provider: createData.provider,
+            dirtyRevision: createData.dirtyRevision,
+            processedRevision: createData.processedRevision,
+            firstDirtyAt: createData.firstDirtyAt,
+            latestDirtyAt: createData.latestDirtyAt,
+            windowStart: createData.windowStart,
+            windowEnd: createData.windowEnd,
+            eventCount: createData.eventCount,
+            latestTraceId: createData.latestTraceId,
+            latestEventType: createData.latestEventType,
+            latestResourceCategory: createData.latestResourceCategory,
+            sourceProviderCountsJson: createData.sourceProviderCountsJson,
+            resourceCategoryCountsJson: createData.resourceCategoryCountsJson,
+            dirtyResourcesJson: createData.dirtyResourcesJson,
+            createdAt: dirtyAt,
+            updatedAt: dirtyAt,
+          };
+        }),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+    const webhookDataJson = JSON.stringify({
+      data: "x".repeat(1_000),
+      sourceProviderSlug: "garmin",
+    });
+
+    const result = await store.upsertDirtyConnection({
+      connectionId: "dsc_junction_123",
+      dirtyAt: "2026-05-26T12:00:00.000Z",
+      eventType: "daily.data.steps.created",
+      provider: "junction",
+      resourceCategory: "timeseries",
+      resources: [
+        {
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            ordinary: "y".repeat(1_000),
+            webhookDataJson,
+          },
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowEnd: "2026-05-27T00:00:00.000Z",
+          windowStart: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      traceId: "trace_junction_123",
+      userId: "member_123",
+    });
+    const dirtyResource = Object.values(result.dirty.dirtyResources)[0];
+
+    expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
+    expect(dirtyResource?.payload?.ordinary).toHaveLength(512);
+    expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+  });
+
   it("scans stale dirty connections only for active connections and active hosted members", async () => {
     const staleBefore = new Date("2026-05-05T00:00:30.000Z");
     const queryCalls: unknown[] = [];

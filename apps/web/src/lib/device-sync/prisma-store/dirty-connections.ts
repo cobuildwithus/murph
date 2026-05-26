@@ -22,6 +22,7 @@ type DeviceSyncDirtyConnectionPrismaRecord =
 const DIRTY_COUNTER_KEY_MAX_LENGTH = 96;
 const DIRTY_RESOURCE_KEY_MAX_LENGTH = 256;
 const DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH = 512;
+const DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_LENGTH = 64_000;
 const DIRTY_RESOURCE_PAYLOAD_BLOCKED_KEY_PATTERN =
   /(?:authorization|authheader|bearer|clientsecret|cookie|credential|password|secret|token|apikey)/iu;
 const DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS = 12;
@@ -585,7 +586,10 @@ function readDirtyResourcePayload(value: unknown): HostedDeviceSyncDirtyResource
       continue;
     }
     if (typeof entry === "string") {
-      payload[normalizedKey] = entry.slice(0, DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH);
+      const maxLength = normalizedKey.toLowerCase() === "webhookdatajson"
+        ? DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_LENGTH
+        : DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH;
+      payload[normalizedKey] = entry.slice(0, maxLength);
     } else if (typeof entry === "boolean") {
       payload[normalizedKey] = entry;
     } else if (typeof entry === "number" && Number.isFinite(entry)) {

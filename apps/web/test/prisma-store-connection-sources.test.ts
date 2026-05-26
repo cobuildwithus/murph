@@ -91,6 +91,36 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
       .map(cloneSourceRecord),
   );
 
+  const updateMany = vi.fn(async (input: {
+    where: {
+      connectionId: string;
+      status?: {
+        not?: string;
+      };
+    };
+    data: Partial<MutableConnectionSourceRecord>;
+  }) => {
+    let count = 0;
+
+    for (const [key, record] of records.entries()) {
+      if (record.connectionId !== input.where.connectionId) {
+        continue;
+      }
+
+      if (input.where.status?.not && record.status === input.where.status.not) {
+        continue;
+      }
+
+      records.set(key, {
+        ...record,
+        ...input.data,
+      });
+      count += 1;
+    }
+
+    return { count };
+  });
+
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
       deviceConnection: {
@@ -98,6 +128,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
       },
       deviceConnectionSource: {
         findMany,
+        updateMany,
         upsert,
       },
     } as never,
@@ -108,6 +139,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     findMany,
     records,
     store,
+    updateMany,
     upsert,
   };
 }
@@ -264,6 +296,73 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       ],
       where: {
         connectionId: "dsc_parent",
+      },
+    }));
+  });
+
+  it("marks all non-disconnected sources for one parent connection disconnected", async () => {
+    const { records, store, updateMany } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_parent_connected",
+        sourceInstanceKey: "src_oura_a",
+        status: "connected",
+      }),
+      createSourceRecord({
+        id: "dcs_parent_error",
+        sourceInstanceKey: "src_garmin_a",
+        sourceProviderSlug: "garmin",
+        status: "error",
+        lastErrorCode: "SOURCE_UNAVAILABLE",
+        lastErrorMessage: "temporary provider detail",
+      }),
+      createSourceRecord({
+        id: "dcs_parent_disconnected",
+        sourceInstanceKey: "src_strava_a",
+        sourceProviderSlug: "strava",
+        status: "disconnected",
+        updatedAt: new Date("2026-03-25T03:00:00.000Z"),
+      }),
+      createSourceRecord({
+        id: "dcs_other_connected",
+        connectionId: "dsc_other",
+        sourceInstanceKey: "src_oura_other",
+        status: "connected",
+      }),
+    ]);
+
+    await expect(store.markConnectionSourcesDisconnected({
+      connectionId: "dsc_parent",
+      now: "2026-03-26T12:00:00.000Z",
+    })).resolves.toBe(2);
+
+    expect(records.get(sourceMapKey("dsc_parent", "src_oura_a"))).toMatchObject({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      status: "disconnected",
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    });
+    expect(records.get(sourceMapKey("dsc_parent", "src_garmin_a"))).toMatchObject({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      status: "disconnected",
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    });
+    expect(records.get(sourceMapKey("dsc_parent", "src_strava_a"))).toMatchObject({
+      status: "disconnected",
+      updatedAt: new Date("2026-03-25T03:00:00.000Z"),
+    });
+    expect(records.get(sourceMapKey("dsc_other", "src_oura_other"))).toMatchObject({
+      status: "connected",
+    });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "disconnected",
+      }),
+      where: {
+        connectionId: "dsc_parent",
+        status: {
+          not: "disconnected",
+        },
       },
     }));
   });

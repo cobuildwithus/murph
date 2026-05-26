@@ -404,7 +404,7 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
-  // Keep the shared parser result narrow so ingress hooks do not inherit raw provider payloads.
+  // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
   jobs: DeviceSyncJobInput[];
   unknownAccountAction?: "retry" | "accept";
@@ -414,7 +414,7 @@ export interface DeviceSyncIngressWebhook {
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
-  // Accepted and unknown ingress hooks should receive only the stripped webhook summary.
+  // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
 }
 
@@ -511,6 +511,49 @@ export interface ProviderJobResult {
   nextReconcileAt?: string | null;
 }
 
+export interface DeviceSyncBackfillDiagnosticContext {
+  account: DeviceSyncAccount;
+  now: string;
+  timeseriesProbeDays?: number;
+  windowEnd?: string | null;
+  windowStart?: string | null;
+}
+
+export interface DeviceSyncBackfillDiagnosticResult {
+  generatedAt: string;
+  provider: string;
+  result: Record<string, unknown>;
+}
+
+export type DeviceSyncRestDiagnosticEndpoint =
+  | "auto"
+  | "historical_pull"
+  | "introspect_resources"
+  | "providers"
+  | "refresh"
+  | "summary"
+  | "timeseries";
+
+export interface DeviceSyncRestDiagnosticContext {
+  account: DeviceSyncAccount;
+  endpoint: DeviceSyncRestDiagnosticEndpoint;
+  now: string;
+  resource?: string | null;
+  sourceProviderSlug?: string | null;
+  timeoutSeconds?: number | null;
+  windowEnd?: string | null;
+  windowStart?: string | null;
+}
+
+export interface DeviceSyncProviderDiagnostics {
+  diagnoseBackfill?(
+    context: DeviceSyncBackfillDiagnosticContext,
+  ): Promise<DeviceSyncBackfillDiagnosticResult>;
+  probeRest?(
+    context: DeviceSyncRestDiagnosticContext,
+  ): Promise<DeviceSyncBackfillDiagnosticResult>;
+}
+
 export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
@@ -543,6 +586,7 @@ export interface DeviceSyncProvider {
   descriptor: DeviceProviderDescriptor;
   credentialPolicy?: DeviceSyncProviderCredentialPolicy;
   connectionHandler?: DeviceConnectionHandler;
+  diagnostics?: DeviceSyncProviderDiagnostics;
   webhookHandler?: DeviceWebhookHandler;
   jobExecutor?: DeviceJobExecutor;
   webhookAdmin?: ProviderWebhookAdminCapability;

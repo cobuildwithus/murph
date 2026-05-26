@@ -443,6 +443,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  webhookDataJson: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });

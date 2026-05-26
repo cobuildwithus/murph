@@ -9,13 +9,20 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createBrowserConnectionId: vi.fn(),
+  diagnoseBackfill: vi.fn(),
   disconnectConnection: vi.fn(),
+  getConnectionForUser: vi.fn(),
   getPrisma: vi.fn(),
   getConnectionStatus: vi.fn(),
+  getStoredConnectionAccountForUser: vi.fn(),
   listConnections: vi.fn(),
+  listConnectionsForUser: vi.fn(),
+  probeRest: vi.fn(),
   prismaClient: {
     label: "test-prisma",
   },
+  registryGet: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   startConnection: vi.fn(),
 }));
@@ -42,12 +49,15 @@ vi.mock("@/src/lib/prisma", () => ({
 
 type SettingsDeviceSyncRouteModule = typeof import("../app/api/settings/device-sync/route");
 type SettingsDeviceSyncSidebarStatusRouteModule = typeof import("../app/api/settings/device-sync/sidebar-status/route");
+type SettingsDeviceSyncDiagnoseBackfillRouteModule =
+  typeof import("../app/api/settings/device-sync/diagnose-backfill/route");
 type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
 type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
 type ConnectSourceStartRouteModule = typeof import("../app/api/connect-sources/[sourceId]/start/route");
 
 let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
 let settingsDeviceSyncSidebarStatusRoute: SettingsDeviceSyncSidebarStatusRouteModule;
+let settingsDeviceSyncDiagnoseBackfillRoute: SettingsDeviceSyncDiagnoseBackfillRouteModule;
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 let connectSourceStartRoute: ConnectSourceStartRouteModule;
@@ -56,6 +66,8 @@ describe("device sync settings routes", () => {
   beforeAll(async () => {
     settingsDeviceSyncRoute = await import("../app/api/settings/device-sync/route");
     settingsDeviceSyncSidebarStatusRoute = await import("../app/api/settings/device-sync/sidebar-status/route");
+    settingsDeviceSyncDiagnoseBackfillRoute =
+      await import("../app/api/settings/device-sync/diagnose-backfill/route");
     settingsDeviceSyncDisconnectRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
     settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
     connectSourceStartRoute = await import("../app/api/connect-sources/[sourceId]/start/route");
@@ -72,6 +84,7 @@ describe("device sync settings routes", () => {
     vi.stubEnv("JUNCTION_ENV", "");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
     vi.stubEnv("JUNCTION_REGION", "");
+    vi.stubEnv("DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED", "true");
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -81,10 +94,97 @@ describe("device sync settings routes", () => {
       },
     });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      connections: {
+        createBrowserConnectionId: mocks.createBrowserConnectionId,
+      },
       disconnectConnection: mocks.disconnectConnection,
       getConnectionStatus: mocks.getConnectionStatus,
       listConnections: mocks.listConnections,
+      publicIngressBaseUrl: "http://localhost:3000/api/device-sync",
+      publicIngressBaseUrlSource: "request",
+      registry: {
+        get: mocks.registryGet,
+      },
       startConnection: mocks.startConnection,
+      store: {
+        getConnectionForUser: mocks.getConnectionForUser,
+        getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
+        listConnectionsForUser: mocks.listConnectionsForUser,
+      },
+    });
+    mocks.createBrowserConnectionId.mockImplementation((connectionId: string) =>
+      connectionId === "dsc_junction_123" ? "dspc_junction_123" : connectionId
+    );
+    mocks.registryGet.mockReturnValue({
+      credentialPolicy: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      diagnostics: {
+        diagnoseBackfill: mocks.diagnoseBackfill,
+        probeRest: mocks.probeRest,
+      },
+      descriptor: {
+        provider: "junction",
+        webhook: {
+          path: "/webhooks/junction",
+          supportsAdmin: false,
+        },
+      },
+      provider: "junction",
+    });
+    mocks.getConnectionForUser.mockResolvedValue(null);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
+    mocks.listConnectionsForUser.mockResolvedValue([]);
+    mocks.diagnoseBackfill.mockResolvedValue({
+      generatedAt: "2026-04-03T12:00:00.000Z",
+      provider: "junction",
+      result: {
+        account: {
+          historicalBackfill: null,
+          setupPhase: "link_returned",
+          status: "active",
+        },
+        sourceProviders: {
+          ok: true,
+          recordCount: 1,
+          sourceProviderSlugs: ["garmin"],
+        },
+        summary: {
+          hasUsefulHistoricalRecords: false,
+          resources: [],
+        },
+        timeseriesProbe: {
+          days: 1,
+          resources: [],
+          window: null,
+        },
+        window: {
+          windowEnd: "2026-04-03T12:00:00.000Z",
+          windowStart: "2026-01-04T12:00:00.000Z",
+        },
+      },
+    });
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-04-03T12:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: {
+          endpoint: "timeseries",
+          endpointKind: "junction_timeseries_collection",
+          resource: "steps",
+          resourceCategory: "timeseries",
+        },
+        response: {
+          ok: true,
+          recordCount: 1,
+          responseStatus: 200,
+          shape: {
+            kind: "object",
+            keys: ["timestamp", "value"],
+          },
+        },
+      },
     });
     mocks.getConnectionStatus.mockResolvedValue({
       connection: {
@@ -257,6 +357,385 @@ describe("device sync settings routes", () => {
       status: {
         message: "Garmin connected",
         tone: "connected",
+      },
+    });
+  });
+
+  it("diagnoses Junction backfill using the visible provider-config connection when no stored account is hydrated", async () => {
+    mocks.listConnections.mockResolvedValueOnce({
+      connectionSources: [
+        {
+          connectionId: "dspc_junction_123",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T07:01:00.000Z",
+          resourceCount: 0,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      connections: [
+        {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          createdAt: "2026-04-01T08:00:00.000Z",
+          displayName: "Junction",
+          id: "dspc_junction_123",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          metadata: {
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-01-04T00:00:00.000Z",
+          },
+          nextReconcileAt: "2026-04-03T16:00:00.000Z",
+          provider: "junction",
+          scopes: [],
+          setupPhase: "link_returned",
+          status: "active",
+          updatedAt: "2026-04-03T08:00:00.000Z",
+        },
+      ],
+      providers: [],
+    });
+    mocks.listConnectionsForUser.mockResolvedValueOnce([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-01T08:00:00.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-redacted",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-01-04T00:00:00.000Z",
+        },
+        nextReconcileAt: "2026-04-03T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "link_returned",
+        status: "active",
+        updatedAt: "2026-04-03T08:00:00.000Z",
+      },
+    ]);
+
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction&timeseriesDays=0"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getStoredConnectionAccountForUser).toHaveBeenCalledWith(
+      "member_123",
+      "dsc_junction_123",
+    );
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).toHaveBeenCalledWith(expect.objectContaining({
+      account: expect.objectContaining({
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: "junction-user-redacted",
+        id: "dsc_junction_123",
+      }),
+      timeseriesProbeDays: 0,
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      diagnostic: {
+        summary: {
+          hasUsefulHistoricalRecords: false,
+        },
+      },
+      ok: true,
+      publicIngress: {
+        baseUrl: "http://localhost:3000/api/device-sync",
+        externalReachability: "loopback",
+        providerAcceptsWebhooks: true,
+        providerSupportsWebhookAdmin: false,
+        source: "request",
+        webhookPath: "/webhooks/junction",
+        webhookUrl: "http://localhost:3000/api/device-sync/webhooks/junction",
+      },
+      selectedConnection: {
+        connectionMatchCount: 1,
+        lastErrorCode: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: "2026-04-03T16:00:00.000Z",
+        provider: "junction",
+        setupPhase: "link_returned",
+        status: "active",
+      },
+      webSourceProjection: [
+        {
+          resourceCount: 0,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+    });
+  });
+
+  it("runs a Junction REST diagnostic probe through the backfill diagnostic route", async () => {
+    mocks.listConnections.mockResolvedValueOnce({
+      connectionSources: [
+        {
+          connectionId: "dspc_junction_123",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T07:01:00.000Z",
+          resourceCount: 20,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      connections: [
+        {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          createdAt: "2026-04-01T08:00:00.000Z",
+          displayName: "Junction",
+          id: "dspc_junction_123",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          metadata: {},
+          nextReconcileAt: "2026-04-03T16:00:00.000Z",
+          provider: "junction",
+          scopes: [],
+          setupPhase: "source_confirmed",
+          status: "active",
+          updatedAt: "2026-04-03T08:00:00.000Z",
+        },
+      ],
+      providers: [],
+    });
+    mocks.listConnectionsForUser.mockResolvedValueOnce([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-01T08:00:00.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-redacted",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: "2026-04-03T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "source_confirmed",
+        status: "active",
+        updatedAt: "2026-04-03T08:00:00.000Z",
+      },
+    ]);
+
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction&restProbe=timeseries&resource=steps&sourceProvider=garmin&windowStart=2026-04-02T00:00:00.000Z&windowEnd=2026-04-03T00:00:00.000Z",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: "timeseries",
+      now: "2026-04-03T12:00:00.000Z",
+      resource: "steps",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }));
+    expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
+      account: expect.objectContaining({
+        externalAccountId: "junction-user-redacted",
+        id: "dsc_junction_123",
+      }),
+    }));
+    const bodyText = await response.text();
+    expect(bodyText).not.toContain("junction-user-redacted");
+    expect(JSON.parse(bodyText)).toMatchObject({
+      ok: true,
+      restProbe: {
+        provider: "junction",
+        result: {
+          request: {
+            endpoint: "timeseries",
+            resource: "steps",
+          },
+          response: {
+            ok: true,
+            recordCount: 1,
+          },
+        },
+      },
+    });
+  });
+
+  it("runs a Junction refresh REST diagnostic through the backfill diagnostic route", async () => {
+    mocks.probeRest.mockResolvedValueOnce({
+      generatedAt: "2026-04-03T12:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: {
+          endpoint: "refresh",
+          endpointKind: "junction_user_refresh",
+          method: "POST",
+          queryParameterNames: ["timeout"],
+          timeoutSeconds: 45,
+        },
+        response: {
+          failedSourceCount: 0,
+          inProgressSourceCount: 0,
+          ok: true,
+          refreshedSourceCount: 1,
+          responseStatus: 200,
+          success: true,
+        },
+      },
+    });
+    mocks.listConnections.mockResolvedValueOnce({
+      connectionSources: [],
+      connections: [
+        {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          createdAt: "2026-04-01T08:00:00.000Z",
+          displayName: "Junction",
+          id: "dspc_junction_123",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          metadata: {},
+          nextReconcileAt: "2026-04-03T16:00:00.000Z",
+          provider: "junction",
+          scopes: [],
+          setupPhase: "source_confirmed",
+          status: "active",
+          updatedAt: "2026-04-03T08:00:00.000Z",
+        },
+      ],
+      providers: [],
+    });
+    mocks.listConnectionsForUser.mockResolvedValueOnce([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-01T08:00:00.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-redacted",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: "2026-04-03T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "source_confirmed",
+        status: "active",
+        updatedAt: "2026-04-03T08:00:00.000Z",
+      },
+    ]);
+
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction&restProbe=refresh&timeout=45",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: "refresh",
+      now: "2026-04-03T12:00:00.000Z",
+      resource: null,
+      sourceProviderSlug: null,
+      timeoutSeconds: 45,
+      windowEnd: null,
+      windowStart: null,
+    }));
+    const bodyText = await response.text();
+    expect(bodyText).not.toContain("junction-user-redacted");
+    expect(JSON.parse(bodyText)).toMatchObject({
+      ok: true,
+      restProbe: {
+        provider: "junction",
+        result: {
+          request: {
+            endpoint: "refresh",
+            method: "POST",
+            timeoutSeconds: 45,
+          },
+          response: {
+            ok: true,
+            success: true,
+          },
+        },
+      },
+    });
+  });
+
+  it("does not run Junction backfill diagnostics for inactive connections", async () => {
+    mocks.listConnections.mockResolvedValueOnce({
+      connectionSources: [],
+      connections: [
+        {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          createdAt: "2026-04-01T08:00:00.000Z",
+          displayName: "Junction",
+          id: "dspc_junction_123",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          metadata: {},
+          nextReconcileAt: null,
+          provider: "junction",
+          scopes: [],
+          setupPhase: null,
+          status: "disconnected",
+          updatedAt: "2026-04-03T08:00:00.000Z",
+        },
+      ],
+      providers: [],
+    });
+
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction"),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_NOT_ACTIVE",
+        message: "Backfill diagnostics require an active device-sync connection.",
+        retryable: false,
       },
     });
   });
