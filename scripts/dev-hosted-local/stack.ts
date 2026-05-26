@@ -705,11 +705,12 @@ export async function startHostedLocalDevStack(input: {
     throwIfAbortSignalAborted(input.abortSignal);
 
     const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
+      const childSignal = resolveHostedLocalChildShutdownSignal(signal);
       for (const { child } of children) {
-        terminateChildProcess(child, signal);
+        terminateChildProcess(child, childSignal);
       }
       if (stripeListener !== null) {
-        terminateChildProcess(stripeListener.child, signal);
+        terminateChildProcess(stripeListener.child, childSignal);
       }
       terminateKnownHostedLocalProcessResidue({
         config,
@@ -722,7 +723,7 @@ export async function startHostedLocalDevStack(input: {
           temporalWorker: temporalRuntime?.workerProcess !== null,
           web: webProcess !== null,
         },
-        signal,
+        signal: childSignal,
         stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
       });
     };
@@ -754,16 +755,35 @@ export async function startHostedLocalDevStack(input: {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
         }
-        kill(signal);
+        const childSignal = resolveHostedLocalChildShutdownSignal(signal);
+        kill(childSignal);
         const terminationResults = await Promise.allSettled([
-          ...children.map(({ child }) => terminateChildProcessAndWait(child, { signal })),
+          ...children.map(({ child }) =>
+            terminateChildProcessAndWait(child, { signal: childSignal })
+          ),
           ...(stripeListener !== null
-            ? [terminateChildProcessAndWait(stripeListener.child, { signal })]
+            ? [terminateChildProcessAndWait(stripeListener.child, { signal: childSignal })]
             : []),
         ]);
         const terminationFailure = terminationResults.find(
           (result): result is PromiseRejectedResult => result.status === "rejected",
         );
+        if (childSignal !== "SIGKILL") {
+          terminateKnownHostedLocalProcessResidue({
+            config,
+            owned: {
+              cloudflareWorker: cloudflareProcess !== null,
+              healthCommons: healthCommonsWatcher !== null,
+              linqTunnel: linqTunnelProcess !== null,
+              stripe: stripeListener !== null,
+              temporalServer: temporalRuntime?.serverProcess !== null,
+              temporalWorker: temporalRuntime?.workerProcess !== null,
+              web: webProcess !== null,
+            },
+            signal: "SIGKILL",
+            stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
+          });
+        }
         if (workerRuntimeEnv && workerPortMode === "start") {
           await cleanupHostedRunnerContainers({
             cwd: repoRoot,
@@ -1739,6 +1759,10 @@ function findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix: string)
 function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>): boolean {
   const value = env.MURPH_DEV_REUSE_EXISTING_WORKER?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
+}
+
+function resolveHostedLocalChildShutdownSignal(signal: NodeJS.Signals): NodeJS.Signals {
+  return signal === "SIGINT" ? "SIGTERM" : signal;
 }
 
 export function terminateKnownHostedLocalProcessResidue(input: {

@@ -968,6 +968,54 @@ describe("hosted local dev stack", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
+  it("treats Ctrl-C as child termination and force-sweeps owned worker residue", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const cloudflareChild = createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 });
+    const webChild = createBufferedChild({ exitCode: null, name: "web", pid: 102 });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(webChild);
+
+    try {
+      const { startHostedLocalDevStack } = await import("./stack.ts");
+
+      const stack = await startHostedLocalDevStack({
+        env: process.env,
+      });
+      await stack.ready;
+      spawnSync.mockClear();
+
+      await stack.stop("SIGINT");
+
+      expect(terminateChildProcess).toHaveBeenCalledWith(cloudflareChild.child, "SIGTERM");
+      expect(terminateChildProcess).toHaveBeenCalledWith(webChild.child, "SIGTERM");
+      expect(terminateChildProcessAndWait).toHaveBeenCalledWith(
+        cloudflareChild.child,
+        { signal: "SIGTERM" },
+      );
+      expect(terminateChildProcessAndWait).toHaveBeenCalledWith(
+        webChild.child,
+        { signal: "SIGTERM" },
+      );
+
+      const pkillArgs = spawnSync.mock.calls
+        .filter(([command]) => command === "pkill")
+        .map(([, args]) => args);
+      expect(pkillArgs).toContainEqual([
+        "-SIGTERM",
+        "-f",
+        "workerd.*127\\.0\\.0\\.1:8787",
+      ]);
+      expect(pkillArgs).toContainEqual([
+        "-SIGKILL",
+        "-f",
+        "workerd.*127\\.0\\.0\\.1:8787",
+      ]);
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
   it("only emits process residue cleanup patterns for owned services", async () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
 
