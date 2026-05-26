@@ -374,6 +374,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
         body: JSON.stringify({
           connectionId: "conn_dirty_first",
+          processedDirtyPayloadIds: ["dsp_payload_1"],
           processedRevision: "3",
           userId: "user_123",
         }),
@@ -384,6 +385,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
 
     expect(markDirtyConnectionProcessed).toHaveBeenCalledWith({
       connectionId: "conn_dirty_first",
+      processedDirtyPayloadIds: ["dsp_payload_1"],
       processedRevision: 3n,
       userId: "user_123",
     });

@@ -179,6 +179,74 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     }));
   });
 
+  it("appends payload-only webhooks to an already dirty connection without rewriting the marker row", async () => {
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    let payloadCreateData: Array<Record<string, unknown>> | null = null;
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        findUnique: vi.fn(async () => ({
+          connectionId: "dsc_junction_123",
+          createdAt: dirtyAt,
+          dirtyResourcesJson: {},
+          dirtyRevision: 7n,
+          eventCount: 7n,
+          firstDirtyAt: dirtyAt,
+          latestDirtyAt: dirtyAt,
+          latestEventType: "daily.data.steps.created",
+          latestResourceCategory: "timeseries",
+          latestTraceId: "trace_existing",
+          processedRevision: 6n,
+          provider: "junction",
+          resourceCategoryCountsJson: {},
+          sourceProviderCountsJson: {},
+          updatedAt: dirtyAt,
+          userId: "member_123",
+          windowEnd: null,
+          windowStart: null,
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deviceSyncDirtyPayload: {
+        createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
+          payloadCreateData = input.data;
+          return { count: input.data.length };
+        }),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+    const result = await store.upsertDirtyConnection({
+      connectionId: "dsc_junction_123",
+      dirtyAt: "2026-05-26T12:01:00.000Z",
+      eventType: "daily.data.steps.created",
+      provider: "junction",
+      resourceCategory: "timeseries",
+      resources: [
+        {
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            webhookDataJson: JSON.stringify({ source: "garmin", value: 123 }),
+          },
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowEnd: "2026-05-27T00:00:00.000Z",
+          windowStart: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      traceId: "trace_new_payload",
+      userId: "member_123",
+    });
+
+    expect(prisma.deviceSyncDirtyConnection.updateMany).not.toHaveBeenCalled();
+    expect(payloadCreateData?.[0]?.dirtyRevision).toBe(7n);
+    expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
+      .toBe(payloadCreateData?.[0]?.id);
+    expect(result.shouldRequestWake).toBe(false);
+  });
+
   it("deletes only explicitly acknowledged durable payload ids", async () => {
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     const remainingPayloadResource = {

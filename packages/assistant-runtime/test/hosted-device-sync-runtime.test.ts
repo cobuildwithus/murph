@@ -1599,6 +1599,7 @@ describe("hosted device-sync runtime", () => {
         dirtyResources: [
           {
             count: 12,
+            dirtyPayloadId: "dsp_payload_steps_1",
             jobKind: "resource",
             resource: "steps",
             resourceCategory: "timeseries",
@@ -1666,6 +1667,7 @@ describe("hosted device-sync runtime", () => {
         connectionId: "hosted_conn_dirty_wake",
         localAccountId: connected.account.id,
         nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_payload_steps_1"],
         processedRevision: "42",
       });
       const jobs = readJobsForAccount(service, connected.account.id);

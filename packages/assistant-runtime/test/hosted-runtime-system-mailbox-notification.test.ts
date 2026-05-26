@@ -219,6 +219,7 @@ describe("hosted system mailbox notification execution context", () => {
         connectionId: "dsc_dirty_123",
         kind: "device-sync.dirty-processed",
         nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_payload_1"],
         processedRevision: "12",
       },
       redactedLogEntries: [],
@@ -278,6 +279,7 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(ackDirtyStateProcessed).toHaveBeenCalledWith({
         connectionId: "dsc_dirty_123",
+        processedDirtyPayloadIds: ["dsp_payload_1"],
         processedRevision: "12",
       });
     } finally {
