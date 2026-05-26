@@ -302,6 +302,9 @@ function normalizeSummaries(
         case "sleep":
           pushSleepSummary(entry, resourceContext, context);
           break;
+        case "sleep_cycle":
+          // Sleep-stage cycles are preserved as raw artifacts until the event model has a structured stage family.
+          break;
         case "workouts":
           pushWorkoutSummary(entry, resourceContext, context);
           break;
