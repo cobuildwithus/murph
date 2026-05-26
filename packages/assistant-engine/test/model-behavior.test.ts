@@ -137,7 +137,7 @@ describe('assistant local PDF evidence guidance', () => {
       '`vault-cli device account list --format json` shows an active user-facing provider account or connected upstream source',
     )
     expect(prompt).toContain(
-      'offer to send a connection link',
+      'use `vault-cli device connect <provider> --format json` and send the returned `connectUrl` on its own final line',
     )
     expect(prompt).not.toContain('hosted connect helper is not exposed')
     expect(prompt).not.toContain('connection links are temporarily unavailable')
@@ -874,7 +874,16 @@ describe('assistant conversation onboarding guidance', () => {
       'Do not compress the whole orientation into one "send me things" reply',
     )
     expect(prompt).toContain('Murph is a health context layer')
+    expect(prompt).toContain(
+      'complete a wearable/app checkpoint before first experiment or logging setup',
+    )
+    expect(prompt).toContain(
+      'A wearable is optional, but this checkpoint is not',
+    )
     expect(prompt).toContain('Identify data sources in one short message')
+    expect(prompt).toContain(
+      'This is a required onboarding checkpoint before first experiment or logging habit',
+    )
     expect(prompt).toContain(
       'Before asking whether they use a wearable or app for sleep, workouts, activity, or recovery',
     )
@@ -900,7 +909,20 @@ describe('assistant conversation onboarding guidance', () => {
       'Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data',
     )
     expect(prompt).toContain(
-      'Ask whether they use a wearable/app, or offer a connection link, only when no connected wearable/app source is visible',
+      'If no connected source is visible, ask one short question about whether they use a wearable/app for sleep, workouts, activity, or recovery before moving to first-experiment guidance',
+    )
+    expect(prompt).toContain(
+      'If the user asks to connect a wearable without naming one, ask which supported provider they use',
+    )
+    expect(prompt).toContain(
+      'If no connected wearable/app source is visible and the user asks to connect a wearable without naming a provider',
+    )
+    expect(prompt).toContain(
+      'use `vault-cli device connect <provider> --format json` and send the returned `connectUrl` on its own final line',
+    )
+    expect(prompt).toContain('Do not merely say they can connect later')
+    expect(prompt).not.toContain(
+      'say they can start by texting notes and connect wearables later',
     )
     expect(prompt).toContain('WHOOP')
     expect(prompt).toContain('one lightweight, bounded experiment at a time')
