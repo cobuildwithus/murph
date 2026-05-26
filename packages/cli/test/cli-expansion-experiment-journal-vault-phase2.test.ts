@@ -198,6 +198,10 @@ test('experiment start schema exposes typed fields while protocol import-json ke
     experimentStartSchema.options.properties.testPlanId.description ?? '',
     /Only valid with --from-protocol/u,
   )
+  assert.match(
+    experimentStartSchema.options.properties.primaryBiomarkerKey.description ?? '',
+    /Required for --custom starts.*biomarker:<metric-slug>/u,
+  )
   assert.equal('interventionStart' in experimentStartSchema.options.properties, true)
   assert.equal('dryRun' in experimentStartSchema.options.properties, true)
   assert.equal('input' in protocolImportJsonSchema.options.properties, true)
@@ -348,6 +352,48 @@ test.sequential('experiment start requires an explicit protocol or custom fallba
       customWithProtocolOnlyOption.error.message ?? '',
       /--test-plan-id, --page-revision-id, and --run-spec-revision-id are only valid with --from-protocol/u,
     )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('custom experiment start explains the required primary metric before writing', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-metric-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const result = await runSliceCli([
+      'experiment',
+      'start',
+      'pushup-capacity',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Pushup Capacity',
+      '--intervention-start',
+      '2026-05-01',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.match(
+      result.error.message ?? '',
+      /Custom experiment starts require --primary-biomarker-key biomarker:<metric-slug>/u,
+    )
+    assert.match(
+      result.error.message ?? '',
+      /no protocol\/test-plan default primary metric/u,
+    )
+
+    const shownAfterFailure = await runSliceCli([
+      'experiment',
+      'show',
+      'pushup-capacity',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(shownAfterFailure.ok, false)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
