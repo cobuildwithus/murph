@@ -5,6 +5,7 @@ import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
   DeviceSyncJobFailureDiagnostic,
+  StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
@@ -21,6 +22,7 @@ import type {
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as HostedDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate as HostedDeviceSyncRuntimeConnectionSourceUpdate,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   HostedExecutionDeviceSyncRuntimeFailureDiagnostic as HostedDeviceSyncRuntimeFailureDiagnostic,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as HostedDeviceSyncRuntimeLocalStateSnapshot,
@@ -190,6 +192,10 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
+      sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
+      sources: store.listConnectionSources({
+        connectionId: account.id,
+      }),
     });
 
     if (update) {
@@ -587,6 +593,8 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
   observedTokenVersion: number | null;
+  sourceApplyEnabled: boolean;
+  sources: readonly StoredDeviceConnectionSource[];
 }): HostedDeviceSyncRuntimeConnectionUpdate | null {
   const baselineConnection = input.baseline?.connection ?? null;
   const baselineLocalState = input.baseline
@@ -608,6 +616,15 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     connectionId: input.hostedConnectionId,
     observedUpdatedAt: baselineConnection?.updatedAt ?? null,
   };
+  const sources = input.sourceApplyEnabled
+    ? buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
+        input.sources,
+        input.baseline?.sources ?? [],
+      )
+    : [];
+  if (sources.length > 0) {
+    update.sources = sources;
+  }
 
   if (input.account.status === "disconnected") {
     if (baselineConnection?.status !== "disconnected") {
@@ -742,7 +759,64 @@ function hasHostedDeviceSyncRuntimeConnectionUpdateChanges(
     || update.localState !== undefined
     || update.credential !== undefined
     || update.failureDiagnostic !== undefined
-    || update.observedTokenVersion !== undefined;
+    || update.observedTokenVersion !== undefined
+    || (update.sources !== undefined && update.sources.length > 0);
+}
+
+function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
+  sources: readonly StoredDeviceConnectionSource[],
+  baselineSources: readonly NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number][],
+): HostedDeviceSyncRuntimeConnectionSourceUpdate[] {
+  const baselineByInstanceKey = new Map(
+    baselineSources
+      .filter((source) => Boolean(source.sourceInstanceKey))
+      .map((source) => [source.sourceInstanceKey as string, source]),
+  );
+
+  return sources
+    .map((source): HostedDeviceSyncRuntimeConnectionSourceUpdate => {
+      const baseline = baselineByInstanceKey.get(source.sourceInstanceKey) ?? null;
+
+      return {
+        sourceInstanceKey: source.sourceInstanceKey,
+        sourceProviderSlug: source.sourceProviderSlug,
+        observedLastSeenAt: baseline?.lastSeenAt ?? null,
+        displayName: source.displayName ?? null,
+        status: source.status,
+        resourceAvailabilitySummary: { ...source.resourceAvailabilitySummary },
+        lastErrorCode: source.lastErrorCode ?? null,
+        lastErrorMessage: source.lastErrorMessage ?? null,
+        firstSeenAt: source.firstSeenAt,
+        lastSeenAt: source.lastSeenAt,
+      };
+    })
+    .filter((source) =>
+      !hostedDeviceSyncRuntimeSourceUpdateMatchesBaseline(
+        source,
+        baselineByInstanceKey.get(source.sourceInstanceKey) ?? null,
+      )
+    );
+}
+
+function hostedDeviceSyncRuntimeSourceUpdateMatchesBaseline(
+  update: HostedDeviceSyncRuntimeConnectionSourceUpdate,
+  baseline: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number] | null,
+): boolean {
+  if (!baseline) {
+    return false;
+  }
+
+  return baseline.sourceProviderSlug === update.sourceProviderSlug
+    && (baseline.displayName ?? null) === (update.displayName ?? null)
+    && baseline.status === update.status
+    && equalJsonRecords(
+      baseline.resourceAvailabilitySummary ?? {},
+      update.resourceAvailabilitySummary ?? {},
+    )
+    && (baseline.lastErrorCode ?? null) === (update.lastErrorCode ?? null)
+    && (baseline.lastErrorMessage ?? null) === (update.lastErrorMessage ?? null)
+    && baseline.firstSeenAt === (update.firstSeenAt ?? null)
+    && baseline.lastSeenAt === update.lastSeenAt;
 }
 
 function assignHostedDeviceSyncRuntimeCredentialUpdate(
@@ -952,6 +1026,7 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
     localState: {
       ...resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.entry),
     },
+    ...(input.entry.sources === undefined ? {} : { sources: input.entry.sources }),
     credential,
   };
 }

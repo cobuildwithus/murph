@@ -18,11 +18,13 @@ import {
   type HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
   type HostedExecutionDeviceSyncRuntimeCredentialUpdate,
   type HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot,
+  type HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate,
   type HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
@@ -115,6 +117,9 @@ export async function readHostedDeviceSyncRuntimeState(input: {
   );
 
   return {
+    capabilities: {
+      connectionSourceApply: true,
+    },
     connections: sortHostedRuntimeConnectionSnapshots(connections),
     generatedAt: new Date().toISOString(),
     userId: input.trustedUserId,
@@ -180,9 +185,19 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             includeCredentialMaterial: true,
           },
         );
+        const sourceUpdates = resolveHostedRuntimeSourceUpdatesToApply({
+          connectionId: record.id,
+          currentSources: sources,
+          provider: record.provider,
+          updates: update.sources ?? [],
+        });
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
         const credentialMutationRequested = update.credential !== undefined;
-        const connectionWriteRequested = stateMutationRequested || credentialMutationRequested;
+        const sourceMutationRequested = sourceUpdates.toApply.length > 0;
+        const sourceVersionMismatch =
+          (update.sources?.length ?? 0) > 0 && sourceUpdates.staleCount > 0 && !sourceMutationRequested;
+        const connectionWriteRequested =
+          stateMutationRequested || credentialMutationRequested || sourceMutationRequested;
         const connectionVersionMismatch = stateMutationRequested
           && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
         const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
@@ -190,7 +205,8 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           && baselineTokenVersion !== update.observedTokenVersion;
         const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
           && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
-        const versionMismatch = connectionVersionMismatch || tokenVersionMismatch || tokenRefreshLeaseConflict;
+        const versionMismatch =
+          connectionVersionMismatch || tokenVersionMismatch || tokenRefreshLeaseConflict;
         const credentialUpdate = update.credential === undefined
           ? undefined
           : resolveHostedRuntimeCredentialUpdate(update.credential);
@@ -288,14 +304,43 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "unchanged" : "missing";
         }
 
-        const writeUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] = versionMismatch
+        const writeUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] =
+          versionMismatch || sourceVersionMismatch
           ? "skipped_version_mismatch"
           : connectionWriteRequested
             ? "applied"
             : "unchanged";
 
-        if (!versionMismatch && connectionWriteRequested) {
+        if (!versionMismatch && (stateMutationRequested || credentialMutationRequested)) {
           await controlPlane.store.syncDurableConnectionState(nextAccount, tx);
+        }
+
+        if (!versionMismatch && sourceMutationRequested) {
+          for (const source of sourceUpdates.toApply) {
+            await controlPlane.store.upsertConnectionSource({
+              connectionId: update.connectionId,
+              sourceInstanceKey: source.sourceInstanceKey,
+              sourceProviderSlug: source.sourceProviderSlug,
+              ...(Object.prototype.hasOwnProperty.call(source, "displayName")
+                ? { displayName: source.displayName ?? null }
+                : {}),
+              status: source.status,
+              ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
+                ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastErrorCode")
+                ? { lastErrorCode: source.lastErrorCode ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastErrorMessage")
+                ? { lastErrorMessage: source.lastErrorMessage ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
+                ? { firstSeenAt: source.firstSeenAt ?? null }
+                : {}),
+              lastSeenAt: source.lastSeenAt,
+              tx,
+            });
+          }
         }
 
         if (!versionMismatch && credentialToPersist) {
@@ -314,7 +359,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           });
         }
 
-        if (!versionMismatch && connectionWriteRequested) {
+        if (!versionMismatch && (stateMutationRequested || credentialMutationRequested)) {
           await recordHostedRuntimeFailureApplyDiagnostic({
             appliedAt,
             baseline,
@@ -574,9 +619,137 @@ function toHostedRuntimeConnectionSourceSnapshot(
     resourceCount: countHostedRuntimeConnectionSourceResources(
       source.resourceAvailabilitySummary,
     ),
+    resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? {},
+    sourceInstanceKey: source.sourceInstanceKey,
     sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
   };
+}
+
+function resolveHostedRuntimeSourceUpdatesToApply(input: {
+  connectionId: string;
+  currentSources: readonly HostedDeviceConnectionSource[];
+  provider: string;
+  updates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+}): {
+  staleCount: number;
+  toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+} {
+  const currentByInstanceKey = new Map(
+    input.currentSources.map((source) => [source.sourceInstanceKey, source]),
+  );
+  const toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[] = [];
+  let staleCount = 0;
+
+  for (const rawUpdate of input.updates) {
+    const { sourceInstanceKeyCanonicalized, update } = normalizeHostedRuntimeSourceUpdateForProvider({
+      connectionId: input.connectionId,
+      provider: input.provider,
+      update: rawUpdate,
+    });
+    const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    const currentLastSeenAt = current?.lastSeenAt ?? null;
+
+    if (sourceInstanceKeyCanonicalized) {
+      if (current && isHostedRuntimeTimestampOlder(update.lastSeenAt, currentLastSeenAt)) {
+        staleCount += 1;
+        continue;
+      }
+    } else if (currentLastSeenAt !== update.observedLastSeenAt) {
+      staleCount += 1;
+      continue;
+    }
+
+    if (current && hostedRuntimeSourceUpdateMatchesCurrent(update, current)) {
+      continue;
+    }
+
+    toApply.push(update);
+  }
+
+  return { staleCount, toApply };
+}
+
+function normalizeHostedRuntimeSourceUpdateForProvider(input: {
+  connectionId: string;
+  provider: string;
+  update: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate;
+}): {
+  sourceInstanceKeyCanonicalized: boolean;
+  update: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate;
+} {
+  if (input.provider.trim().toLowerCase() !== "junction") {
+    return {
+      sourceInstanceKeyCanonicalized: false,
+      update: input.update,
+    };
+  }
+
+  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.connectionId,
+    sourceProviderSlug: input.update.sourceProviderSlug,
+  });
+
+  if (!canonicalSourceInstanceKey || canonicalSourceInstanceKey === input.update.sourceInstanceKey) {
+    return {
+      sourceInstanceKeyCanonicalized: false,
+      update: input.update,
+    };
+  }
+
+  return {
+    sourceInstanceKeyCanonicalized: true,
+    update: {
+      ...input.update,
+      sourceInstanceKey: canonicalSourceInstanceKey,
+    },
+  };
+}
+
+function isHostedRuntimeTimestampOlder(
+  candidate: string | null | undefined,
+  reference: string | null | undefined,
+): boolean {
+  if (!candidate || !reference) {
+    return false;
+  }
+
+  const candidateTime = Date.parse(candidate);
+  const referenceTime = Date.parse(reference);
+  return !Number.isNaN(candidateTime)
+    && !Number.isNaN(referenceTime)
+    && candidateTime < referenceTime;
+}
+
+function hostedRuntimeSourceUpdateMatchesCurrent(
+  update: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate,
+  current: HostedDeviceConnectionSource,
+): boolean {
+  return current.sourceProviderSlug === update.sourceProviderSlug
+    && current.displayName === (update.displayName ?? null)
+    && current.status === update.status
+    && equalHostedRuntimeSourceSummaries(
+      current.resourceAvailabilitySummary ?? {},
+      update.resourceAvailabilitySummary ?? {},
+    )
+    && current.lastErrorCode === (update.lastErrorCode ?? null)
+    && current.lastErrorMessage === (update.lastErrorMessage ?? null)
+    && current.firstSeenAt === (update.firstSeenAt ?? null)
+    && current.lastSeenAt === update.lastSeenAt;
+}
+
+function equalHostedRuntimeSourceSummaries(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  return JSON.stringify(sortHostedRuntimeJsonRecord(left))
+    === JSON.stringify(sortHostedRuntimeJsonRecord(right));
+}
+
+function sortHostedRuntimeJsonRecord(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
+  );
 }
 
 function countHostedRuntimeConnectionSourceResources(
