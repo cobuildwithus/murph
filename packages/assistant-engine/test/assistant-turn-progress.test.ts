@@ -17,7 +17,6 @@ import type {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.js'
 import type {
-  AssistantDeliveryOutcome,
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.js'
@@ -34,7 +33,7 @@ describe('assistant turn progress', () => {
   it('normalizes user-facing progress text before delivery', () => {
     expect(
       normalizeAssistantProgressText(
-        '  Reading [the report](https://example.test/report)\\n\\nand checking context.  ',
+        '  Reading [the report](https://example.test/report)\n\nand checking context.  ',
       ),
     ).toBe('Reading the report and checking context.')
 
@@ -46,12 +45,8 @@ describe('assistant turn progress', () => {
   it('dedupes and rate-limits progress updates inside one turn', async () => {
     let now = 1_000
     const delivered: DeliverProgressInput[] = []
-    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<AssistantDeliveryOutcome> => {
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
       delivered.push(input)
-      return {
-        kind: 'not-requested',
-        session: input.session,
-      }
     })
     const progress = createHostedAssistantTurnProgress({
       deliver,

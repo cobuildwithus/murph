@@ -402,7 +402,7 @@ async function executeAssistantCodexAttempt(input: {
         userMessageContent: executionPlan.input.userMessageContent,
       }),
       systemPrompt: attemptPlan.routePlan.systemPrompt,
-      turnProgress: executionPlan.turnProgress,
+      turnProgress: executionPlan.turnProgress ?? null,
       turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {

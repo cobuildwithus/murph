@@ -1,9 +1,7 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
-import type { AssistantTurnProgress } from '../assistant/turn-progress.js'
 import { MAX_PROGRESS_CHARS } from '../assistant/turn-progress.js'
 import type {
-  CodexRpcId,
   CodexRpcMessage,
 } from './app-server-rpc.js'
 
@@ -29,8 +27,6 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
 } as const
 
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
-const SEND_PROGRESS_UPDATE_TOOL_NAMESPACE = 'murph'
-const SEND_PROGRESS_UPDATE_TOOL_NAME = 'send_progress_update'
 
 interface ParsedDynamicToolCallRequest {
   arguments: unknown
@@ -38,63 +34,50 @@ interface ParsedDynamicToolCallRequest {
   tool: string | null
 }
 
-export async function maybeHandleMurphDynamicToolRequest(input: {
-  message: CodexRpcMessage
-  requestId: CodexRpcId
-  turnProgress: AssistantTurnProgress
-  writeRpcMessage: (payload: Record<string, unknown>) => void
-}): Promise<boolean> {
-  const request = parseDynamicToolCallRequest(input.message)
+export type MurphDynamicToolRequest =
+  | {
+      kind: 'invalid-progress-arguments'
+    }
+  | {
+      kind: 'send-progress-update'
+      text: string
+    }
+  | {
+      kind: 'unsupported-dynamic-tool'
+      namespace: string | null
+      tool: string | null
+    }
+
+export function readMurphDynamicToolRequest(
+  message: CodexRpcMessage,
+): MurphDynamicToolRequest | null {
+  const request = parseDynamicToolCallRequest(message)
   if (!request) {
-    return false
+    return null
   }
 
   if (
-    request.namespace !== SEND_PROGRESS_UPDATE_TOOL_NAMESPACE ||
-    request.tool !== SEND_PROGRESS_UPDATE_TOOL_NAME
+    request.namespace !== MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace ||
+    request.tool !== MURPH_SEND_PROGRESS_UPDATE_TOOL.name
   ) {
-    input.writeRpcMessage({
-      id: input.requestId,
-      error: {
-        code: -32000,
-        message: `Unsupported dynamic tool ${request.namespace ?? ''}.${request.tool ?? 'unknown'}`,
-      },
-    })
-    return true
+    return {
+      kind: 'unsupported-dynamic-tool',
+      namespace: request.namespace,
+      tool: request.tool,
+    }
   }
 
   const parsed = parseSendProgressUpdateArguments(request.arguments)
   if (!parsed.ok) {
-    input.writeRpcMessage({
-      id: input.requestId,
-      result: {
-        success: false,
-        contentItems: [
-          {
-            type: 'inputText',
-            text: 'invalid progress update arguments',
-          },
-        ],
-      },
-    })
-    return true
+    return {
+      kind: 'invalid-progress-arguments',
+    }
   }
 
-  await input.turnProgress.send(parsed.text)
-
-  input.writeRpcMessage({
-    id: input.requestId,
-    result: {
-      success: true,
-      contentItems: [
-        {
-          type: 'inputText',
-          text: 'progress update sent',
-        },
-      ],
-    },
-  })
-  return true
+  return {
+    kind: 'send-progress-update',
+    text: parsed.text,
+  }
 }
 
 function parseDynamicToolCallRequest(

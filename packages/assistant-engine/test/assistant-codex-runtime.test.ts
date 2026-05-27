@@ -1681,7 +1681,6 @@ describe('assistant codex runtime', () => {
         void _text
       }),
     }
-    const onProgress = vi.fn()
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -1742,7 +1741,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'progress update sent',
+                  text: 'progress update accepted',
                 },
               ],
             },
@@ -1781,7 +1780,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        onProgress,
         prompt: 'process this blood test',
         turnProgress,
         workingDirectory,
@@ -1796,12 +1794,6 @@ describe('assistant codex runtime', () => {
       'Blood test received - I will extract the PDF and check the relevant results.',
     )
     expect(turnProgress.send).not.toHaveBeenCalledWith('Provider-side status text')
-    expect(onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'status',
-        text: 'Provider-side status text',
-      }),
-    )
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
@@ -1987,6 +1979,100 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-invalid',
+    })
+    expect(turnProgress.send).not.toHaveBeenCalled()
+  })
+
+  it('rejects progress dynamic tool calls on resumed threads without sending progress', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-progress-resume-')
+    const turnProgress = {
+      send: vi.fn(async (_text: string) => {
+        void _text
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          expect(asRecord(threadResume.params)).not.toHaveProperty('dynamicTools')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-progress-resume',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-progress-resume',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 99,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'send_progress_update',
+                arguments: {
+                  text: 'Checking the file now.',
+                },
+              },
+            }),
+          )
+
+          const messages = await waitForRpcMessages(child, 5)
+          expect(messages[4]).toEqual({
+            id: 99,
+            error: {
+              code: -32000,
+              message:
+                'Murph does not support interactive Codex app-server request item/tool/call in noninteractive assistant turns.',
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-progress-resume',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'resume and try progress',
+        resumeSessionId: 'existing-thread-without-progress-tool',
+        turnProgress,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-progress-resume',
     })
     expect(turnProgress.send).not.toHaveBeenCalled()
   })

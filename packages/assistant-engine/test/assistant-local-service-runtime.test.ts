@@ -4405,6 +4405,7 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/delivery-service.js', () => ({
     deliverAssistantReply: mocks.dispatchAssistantReply,
+    deliverAssistantProgressUpdate: vi.fn(async () => undefined),
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({

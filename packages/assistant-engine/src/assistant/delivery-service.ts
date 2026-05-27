@@ -5,7 +5,11 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
-import { normalizeAssistantDeliveryError } from './outbox.js'
+import {
+  type AssistantOutboxDispatchPayload,
+  normalizeAssistantDeliveryError,
+  sendAssistantOutboxPayload,
+} from './outbox.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -86,11 +90,21 @@ export async function deliverAssistantReply(input: {
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  if (!input.input.deliverResponse) {
+    return {
+      kind: 'not-requested',
+      session: input.session,
+    }
+  }
+
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
-    audience,
-    channel: deliveryChannel,
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: deliveryFields.channel,
     input: input.input,
     session: input.session,
   })
@@ -113,28 +127,35 @@ export async function deliverAssistantProgressUpdate(input: {
   sharedPlan: AssistantTurnSharedPlan
   text: string
   turnId: string
-}): Promise<AssistantDeliveryOutcome> {
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+}): Promise<void> {
+  if (!input.input.deliverResponse) {
+    return
+  }
+
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const deliveryIdempotencyKey = buildAssistantProgressDeliveryIdempotencyKey({
-    deliveryIdempotencyKey: input.input.deliveryIdempotencyKey,
+    deliveryIdempotencyKey: resolveAssistantHostedDeliveryIdempotency({
+      audience: input.sharedPlan.conversationPolicy.audience,
+      channel: deliveryFields.channel,
+      input: input.input,
+      session: input.session,
+    }).deliveryIdempotencyKey,
     ordinal: input.ordinal,
     turnId: input.turnId,
   })
 
-  return await deliverAssistantCurrentAudienceMessage({
-    deliveryIdempotencyKey,
-    deliveryTransportIdempotent:
-      resolveHostedAssistantDeliveryTransportIdempotentOverride({
-        channel: deliveryChannel,
-        deliveryIdempotencyKey,
-        executionContext: input.input.executionContext,
-      }),
-    input: input.input,
-    message: input.text,
-    session: input.session,
-    sharedPlan: input.sharedPlan,
-    turnId: input.turnId,
+  await sendAssistantOutboxPayload({
+    payload: {
+      ...deliveryFields,
+      deliveryIdempotencyKey,
+      message: input.text,
+      turnId: input.turnId,
+    },
+    vault: input.input.vault,
   })
 }
 
@@ -149,6 +170,43 @@ export function buildAssistantProgressDeliveryIdempotencyKey(input: {
   }
 
   return `assistant-progress:${input.turnId}:${input.ordinal}`
+}
+
+type AssistantCurrentAudienceDeliveryFields = Pick<
+  AssistantOutboxDispatchPayload,
+  | 'actorId'
+  | 'bindingDelivery'
+  | 'channel'
+  | 'deliverySource'
+  | 'explicitTarget'
+  | 'identityId'
+  | 'replyToMessageId'
+  | 'sessionId'
+  | 'subject'
+  | 'threadId'
+  | 'threadIsDirect'
+>
+
+function resolveAssistantCurrentAudienceDeliveryFields(input: {
+  input: AssistantMessageInput
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): AssistantCurrentAudienceDeliveryFields {
+  const audience = input.sharedPlan.conversationPolicy.audience
+  return {
+    actorId: audience?.actorId ?? input.session.binding.actorId,
+    bindingDelivery: audience?.bindingDelivery ?? input.session.binding.delivery,
+    channel: audience?.channel ?? input.session.binding.channel,
+    deliverySource: input.input.deliverySource ?? null,
+    explicitTarget: audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
+    identityId: audience?.identityId ?? input.session.binding.identityId,
+    replyToMessageId:
+      input.input.deliveryReplyToMessageId ?? audience?.replyToMessageId ?? null,
+    sessionId: input.session.sessionId,
+    subject: input.input.deliverySubject ?? null,
+    threadId: audience?.threadId ?? input.session.binding.threadId,
+    threadIsDirect: audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
+  }
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
@@ -168,25 +226,17 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   }
 
   const state = createAssistantRuntimeStateService(input.input.vault)
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const outcome = await state.outbox.deliverMessage({
-    turnId: input.turnId,
-    sessionId: input.session.sessionId,
+    ...deliveryFields,
     message: input.message,
-    channel: deliveryChannel,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
-    deliverySource: input.input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-    identityId: audience?.identityId ?? input.session.binding.identityId,
-    actorId: audience?.actorId ?? input.session.binding.actorId,
-    threadId: audience?.threadId ?? input.session.binding.threadId,
-    threadIsDirect: audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
-    bindingDelivery: audience?.bindingDelivery ?? input.session.binding.delivery,
-    explicitTarget: audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
-    replyToMessageId:
-      input.input.deliveryReplyToMessageId ?? audience?.replyToMessageId ?? null,
-    subject: input.input.deliverySubject ?? null,
+    turnId: input.turnId,
     dependencies: undefined,
     dispatchMode: input.input.deliveryDispatchMode,
   })

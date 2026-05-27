@@ -79,12 +79,6 @@ export function createHostedAssistantTurnProgress(input: {
   }
 }
 
-export function createNoopAssistantTurnProgress(): AssistantTurnProgress {
-  return {
-    async send() {},
-  }
-}
-
 export function normalizeAssistantProgressText(rawText: string): string | null {
   const withoutMarkdownLinks = rawText.replace(/\[([^\]\n]+)\]\([^)]+\)/gu, '$1')
   const normalized = normalizeNullableString(

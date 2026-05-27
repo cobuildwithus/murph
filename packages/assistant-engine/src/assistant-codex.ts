@@ -34,7 +34,7 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
-  maybeHandleMurphDynamicToolRequest,
+  readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
   attachCodexAppServerProcessExitCleanup,
@@ -399,6 +399,10 @@ async function runCodexAppServerTurn(
   let abortRequested = false
   let nextRequestId = 1
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
+  const progressToolAvailable =
+    input.turnProgress !== null &&
+    input.turnProgress !== undefined &&
+    codexThreadId === null
   let turnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
@@ -638,41 +642,8 @@ async function runCodexAppServerTurn(
 
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
-      if (input.turnProgress) {
-        void maybeHandleMurphDynamicToolRequest({
-          message,
-          requestId,
-          turnProgress: input.turnProgress,
-          writeRpcMessage: (payload) => {
-            void tryWriteRpcMessage(payload)
-          },
-        })
-          .then((handled) => {
-            if (!handled) {
-              denyUnsupportedCodexServerRequest({
-                message,
-                requestId,
-                writeRpcMessage: (payload) => {
-                  void tryWriteRpcMessage(payload)
-                },
-              })
-            }
-          })
-          .catch(() => {
-            void tryWriteRpcMessage({
-              id: requestId,
-              result: {
-                success: false,
-                contentItems: [
-                  {
-                    type: 'inputText',
-                    text: 'progress update failed',
-                  },
-                ],
-              },
-            })
-          })
-      } else {
+      const dynamicToolRequest = readMurphDynamicToolRequest(message)
+      if (!dynamicToolRequest || !input.turnProgress || !progressToolAvailable) {
         denyUnsupportedCodexServerRequest({
           message,
           requestId,
@@ -680,7 +651,65 @@ async function runCodexAppServerTurn(
             void tryWriteRpcMessage(payload)
           },
         })
+        return
       }
+
+      if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
+        void tryWriteRpcMessage({
+          id: requestId,
+          error: {
+            code: -32000,
+            message: `Unsupported dynamic tool ${dynamicToolRequest.namespace ?? ''}.${dynamicToolRequest.tool ?? 'unknown'}`,
+          },
+        })
+        return
+      }
+
+      if (dynamicToolRequest.kind === 'invalid-progress-arguments') {
+        void tryWriteRpcMessage({
+          id: requestId,
+          result: {
+            success: false,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: 'invalid progress update arguments',
+              },
+            ],
+          },
+        })
+        return
+      }
+
+      void input.turnProgress.send(dynamicToolRequest.text)
+        .then(() => {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update accepted',
+                },
+              ],
+            },
+          })
+        })
+        .catch(() => {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update failed',
+                },
+              ],
+            },
+          })
+        })
       return
     }
 

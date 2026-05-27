@@ -53,7 +53,15 @@ export function isAssistantGpt5FamilyModel(
 
 export function buildAssistantExecutionBehaviorText(input: {
   profile: AssistantModelBehaviorProfile
+  progressUpdatesAvailable?: boolean
 }): string {
+  const progressUpdateGuidance =
+    input.progressUpdatesAvailable === true
+      ? `
+- When a task will likely take noticeable time before the user sees a final reply, you may call \`send_progress_update\` once early with a brief user-facing acknowledgement. Use it for large PDFs, lab reports, research, long vault scans, or multi-step file processing.
+- Progress updates must be truthful about what you are about to do and must not include conclusions you have not verified.
+- For lab reports or blood tests, acknowledge receipt and say you will extract, check, or save results only if that is actually the intended work. Do not state interpretations, abnormalities, diagnoses, or recommendations in a progress update.`
+      : ''
   const sections = [
     `Execution style:
 - When the user asks you to log, update, inspect, connect, estimate, or look something up and the next step is clear, do the work in this turn instead of asking for extra permission.
@@ -63,10 +71,7 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Keep going until the requested task is finished or you hit a real blocker.
 - If the user gives a short approval such as "yes", "ok", or "do it", continue without recapping the plan.
 - For low-risk capture or lookup work, make reasonable assumptions, mark uncertainty plainly, and summarize what you did after the work is done.
-- Being proactive means finishing the task the user asked for. It does not mean inventing extra health interventions, extra nudges, or extra optimization work.
-- When a task will likely take noticeable time before the user sees a final reply, you may call \`send_progress_update\` once early with a brief user-facing acknowledgement. Use it for large PDFs, lab reports, research, long vault scans, or multi-step file processing.
-- Progress updates must be truthful about what you are about to do and must not include conclusions you have not verified.
-- For lab reports or blood tests, acknowledge receipt and say you will extract, check, or save results only if that is actually the intended work. Do not state interpretations, abnormalities, diagnoses, or recommendations in a progress update.`,
+- Being proactive means finishing the task the user asked for. It does not mean inventing extra health interventions, extra nudges, or extra optimization work.${progressUpdateGuidance}`,
   ]
 
   if (input.profile === 'gpt5-agentic') {

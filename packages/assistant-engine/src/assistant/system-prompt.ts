@@ -29,6 +29,7 @@ export interface AssistantSystemPromptInput {
   assistantKnowledgeToolsAvailable?: boolean;
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantTurnProgressAvailable?: boolean;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
@@ -190,6 +191,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantExperimentOnboardingGuidanceText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
+      progressUpdatesAvailable: input.assistantTurnProgressAvailable ?? false,
     }),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:

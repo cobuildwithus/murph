@@ -231,7 +231,7 @@ export interface AssistantCodexTurnExecutionPlan {
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
-  turnProgress: AssistantTurnProgress | null
+  turnProgress?: AssistantTurnProgress | null
   turnId: string
 }
 
@@ -363,6 +363,7 @@ export async function buildCodexTurnAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
+      turnProgress: input.executionPlan.turnProgress ?? null,
     }),
     session: input.session,
   }
@@ -377,6 +378,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   route: CodexThreadIdentity
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
+  turnProgress?: AssistantTurnProgress | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
   const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
@@ -486,6 +488,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const toolSchemaHash = null
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
+    assistantTurnProgressAvailable: boolean
     injectBootstrapContext: boolean
     injectOnboardingGuidance: boolean
   }) =>
@@ -521,6 +524,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
+            assistantTurnProgressAvailable:
+              options.assistantTurnProgressAvailable,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -556,6 +561,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     'primarySystemPromptElapsedMs',
     () => buildRouteSystemPromptResult({
       assistantCliContract: actualAssistantCliContract,
+      assistantTurnProgressAvailable:
+        input.turnProgress !== null && input.turnProgress !== undefined &&
+        resumeCodexThreadId === null,
       injectBootstrapContext: shouldPrepareBootstrapContext,
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     }),
@@ -566,6 +574,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         'freshThreadFallbackPromptElapsedMs',
         () => buildRouteSystemPromptResult({
           assistantCliContract: bootstrapAssistantCliContract,
+          assistantTurnProgressAvailable:
+            input.turnProgress !== null && input.turnProgress !== undefined,
           injectBootstrapContext: true,
           injectOnboardingGuidance: shouldInjectOnboardingGuidance,
         }),
