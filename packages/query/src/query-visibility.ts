@@ -23,17 +23,12 @@ export function isDenseProviderObservationEntity(entity: CanonicalEntity): boole
   }
 
   const attributes = isRecord(entity.attributes) ? entity.attributes : {};
-  const source = normalizedString(attributes.source);
-  const providerBacked =
-    source === "device" ||
-    attributes.externalRef !== undefined ||
-    attributes.dataOrigin !== undefined;
   const isMetricObservation =
     typeof attributes.metric === "string" &&
     typeof attributes.value === "number" &&
     Number.isFinite(attributes.value);
 
-  return providerBacked && isMetricObservation && !isDisplayGradeObservation(attributes);
+  return isMetricObservation && !isDisplayGradeObservation(attributes);
 }
 
 export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean {

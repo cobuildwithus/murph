@@ -3,7 +3,7 @@ import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import { buildTimeline, type TimelineEntry } from "../timeline.ts";
-import type { VaultReadModel } from "../read-model.ts";
+import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
 import {
   buildWearableAssistantSummary,
   summarizeWearableSourceHealth,
@@ -52,17 +52,17 @@ export async function createBrowserVaultReplica(
     ? requireIsoDateTime(input.generatedAt, "Browser vault replica generatedAt")
     : new Date().toISOString();
   const policy = createBrowserVaultReplicaPolicy();
-  const entities = input.vault.entities
+  const defaultProjectedVault = createDefaultProjectedVault(input.vault);
+  const entities = defaultProjectedVault.entities
     .filter((entity) => isBrowserVaultIncludedFamily(entity.family))
-    .filter(isBrowserVaultIncludedEntity)
     .map(projectEntity);
-  const timelineRows = buildTimeline(input.vault, { limit: TIMELINE_LIMIT })
+  const timelineRows = buildTimeline(defaultProjectedVault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
-  const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
+  const weeklySampleSummaries = projectWeeklySampleSummaries(defaultProjectedVault, generatedAt);
   const allMetricPoints = input.metricPoints;
-  const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
-  const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(input.vault.entities);
-  const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(input.vault.entities);
+  const requestedMetrics = collectRequestedBrowserVaultMetrics(defaultProjectedVault.entities);
+  const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(defaultProjectedVault.entities);
+  const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(defaultProjectedVault.entities);
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) =>
     isBrowserVaultMetricRowPoint(point, requestedMetrics) &&
@@ -83,13 +83,13 @@ export async function createBrowserVaultReplica(
     requestedMetrics,
     selectionPoints: selectionMetricPoints,
   });
-  const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
+  const sourceHealthRows = summarizeWearableSourceHealth(defaultProjectedVault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const replicaWithoutVersion: BrowserVaultReplica = {
-    assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(input.vault)),
+    assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
     generatedAt,
-    metricGoalProgressRows: buildMetricGoalProgressRows(input.vault.entities, allMetricPoints, generatedAt),
+    metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
     policy,
@@ -147,8 +147,12 @@ function isBrowserVaultIncludedFamily(family: string): boolean {
   return (INCLUDED_FAMILIES as readonly string[]).includes(family);
 }
 
-function isBrowserVaultIncludedEntity(entity: CanonicalEntity): boolean {
-  return isDefaultProjectedQueryEntity(entity);
+function createDefaultProjectedVault(vault: VaultReadModel): VaultReadModel {
+  return createVaultReadModel({
+    entities: vault.entities.filter(isDefaultProjectedQueryEntity),
+    metadata: vault.metadata,
+    vaultRoot: vault.vaultRoot,
+  });
 }
 
 function buildMetricGoalProgressRows(
