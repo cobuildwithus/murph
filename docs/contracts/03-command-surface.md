@@ -813,7 +813,7 @@ The query text may be passed either positionally as `vault-cli search query <que
 }
 ```
 
-`dbPath` always reports the shared query-owned local projection at `.runtime/projections/query.sqlite`. Inbox or gateway runtime databases are separate stores and are never treated as fallbacks for query reads or lexical search.
+`dbPath` always reports the shared query-owned local projection at `.runtime/projections/query.sqlite`. Inbox runtime databases are separate stores and are never treated as fallbacks for query reads or lexical search; retired `gateway.sqlite` residue is ignored as machine-local projection state.
 
 ### `query projection rebuild`
 

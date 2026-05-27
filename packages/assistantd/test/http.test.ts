@@ -2,30 +2,6 @@ import assert from 'node:assert/strict'
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
-import type {
-  GatewayAttachment,
-  GatewayConversation,
-  GatewayFetchAttachmentsInput,
-  GatewayGetConversationInput,
-  GatewayListConversationsInput,
-  GatewayListConversationsResult,
-  GatewayListOpenPermissionsInput,
-  GatewayMessage,
-  GatewayPermissionRequest,
-  GatewayPollEventsInput,
-  GatewayPollEventsResult,
-  GatewayReadMessagesInput,
-  GatewayReadMessagesResult,
-  GatewayRespondToPermissionInput,
-  GatewaySendMessageInput,
-  GatewaySendMessageResult,
-  GatewayService,
-  GatewayWaitForEventsInput,
-} from '@murphai/gateway-core'
-import {
-  createGatewaySessionNotFoundError,
-  createGatewayUnsupportedOperationError,
-} from '@murphai/gateway-core'
 import { createAssistantdVaultMismatchError } from '../src/errors.js'
 import { AssistantHttpRequestError } from '../src/http-protocol.js'
 import {
@@ -207,52 +183,6 @@ const TEST_CRON_RUN = {
   responseLength: 4,
   error: null,
 } satisfies AssistantCronRuns['runs'][number]
-
-const TEST_GATEWAY_CONVERSATION: GatewayConversation = {
-  schema: 'murph.gateway-conversation.v1',
-  sessionKey: 'gwcs_http_test',
-  title: 'Lab thread',
-  titleSource: 'thread-title',
-  lastMessagePreview: 'Please send the latest PDF.',
-  lastActivityAt: '2026-03-28T00:00:00.000Z',
-  messageCount: 2,
-  canSend: true,
-  route: {
-    channel: 'email',
-    identityId: 'murph@example.com',
-    participantId: 'contact:alex',
-    threadId: 'thread-labs',
-    directness: 'group',
-    reply: {
-      kind: 'thread',
-      target: 'thread-labs',
-    },
-  },
-}
-
-const TEST_GATEWAY_ATTACHMENT: GatewayAttachment = {
-  schema: 'murph.gateway-attachment.v1',
-  attachmentId: 'gwca_http_test',
-  messageId: 'gwcm_http_test',
-  kind: 'document',
-  mime: 'application/pdf',
-  fileName: 'labs.pdf',
-  byteSize: 3,
-  parseState: 'pending',
-  extractedText: null,
-  transcriptText: null,
-}
-
-const TEST_GATEWAY_MESSAGE: GatewayMessage = {
-  schema: 'murph.gateway-message.v1',
-  messageId: TEST_GATEWAY_ATTACHMENT.messageId,
-  sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
-  direction: 'inbound',
-  createdAt: '2026-03-28T00:00:00.000Z',
-  actorDisplayName: 'Alex',
-  text: 'Here is the latest lab PDF.',
-  attachments: [TEST_GATEWAY_ATTACHMENT],
-}
 
 const TEST_CRON_STATUS: AssistantCronStatus = {
   totalJobs: 1,
@@ -449,60 +379,6 @@ function createSetCronTargetResult(input: {
     changed: input.changed ?? true,
     continuityReset: input.continuityReset ?? false,
     dryRun: input.dryRun ?? false,
-  }
-}
-
-function createGatewayServiceMock(
-  overrides: Partial<GatewayService> = {},
-): GatewayService {
-  return {
-    fetchAttachments: async (
-      _input: GatewayFetchAttachmentsInput,
-    ): Promise<GatewayAttachment[]> => [TEST_GATEWAY_ATTACHMENT],
-    getConversation: async (
-      _input: GatewayGetConversationInput,
-    ): Promise<GatewayConversation | null> => TEST_GATEWAY_CONVERSATION,
-    listConversations: async (
-      _input?: GatewayListConversationsInput,
-    ): Promise<GatewayListConversationsResult> => ({
-      conversations: [TEST_GATEWAY_CONVERSATION],
-      nextCursor: null,
-    }),
-    listOpenPermissions: async (
-      _input?: GatewayListOpenPermissionsInput,
-    ): Promise<GatewayPermissionRequest[]> => [],
-    pollEvents: async (
-      input?: GatewayPollEventsInput,
-    ): Promise<GatewayPollEventsResult> => ({
-      events: [],
-      nextCursor: input?.cursor ?? 0,
-      live: true,
-    }),
-    readMessages: async (
-      _input: GatewayReadMessagesInput,
-    ): Promise<GatewayReadMessagesResult> => ({
-      messages: [TEST_GATEWAY_MESSAGE],
-      nextCursor: null,
-    }),
-    respondToPermission: async (
-      _input: GatewayRespondToPermissionInput,
-    ): Promise<GatewayPermissionRequest | null> => null,
-    sendMessage: async (
-      input: GatewaySendMessageInput,
-    ): Promise<GatewaySendMessageResult> => ({
-      sessionKey: input.sessionKey,
-      messageId: 'gwcm_sent_http_test',
-      queued: false,
-      delivery: null,
-    }),
-    waitForEvents: async (
-      input?: GatewayWaitForEventsInput,
-    ): Promise<GatewayPollEventsResult> => ({
-      events: [],
-      nextCursor: input?.cursor ?? 0,
-      live: true,
-    }),
-    ...overrides,
   }
 }
 
@@ -793,69 +669,6 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       _input?: Parameters<AssistantLocalService['getStatus']>[0],
     ): Promise<AssistantStatus> => TEST_ASSISTANT_STATUS,
   )
-  const listGatewayConversations = vi.fn(
-    async (
-      _input?: GatewayListConversationsInput,
-    ): Promise<GatewayListConversationsResult> => ({
-      conversations: [TEST_GATEWAY_CONVERSATION],
-      nextCursor: null,
-    }),
-  )
-  const getGatewayConversation = vi.fn(
-    async (
-      _input: GatewayGetConversationInput,
-    ): Promise<GatewayConversation | null> => TEST_GATEWAY_CONVERSATION,
-  )
-  const readGatewayMessages = vi.fn(
-    async (_input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult> => ({
-      messages: [TEST_GATEWAY_MESSAGE],
-      nextCursor: null,
-    }),
-  )
-  const fetchGatewayAttachments = vi.fn(
-    async (_input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]> => [
-      TEST_GATEWAY_ATTACHMENT,
-    ],
-  )
-  const gatewaySendMessage = vi.fn(async (input: GatewaySendMessageInput): Promise<GatewaySendMessageResult> => ({
-    sessionKey: input.sessionKey,
-    messageId: 'gwcm_sent_http_test',
-    queued: true,
-    delivery: null,
-  }))
-  const gatewayPollEvents = vi.fn(async (input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult> => ({
-    events: [],
-    nextCursor: input?.cursor ?? 0,
-    live: true,
-  }))
-  const gatewayWaitForEvents = vi.fn(
-    async (input?: GatewayWaitForEventsInput): Promise<GatewayPollEventsResult> => ({
-      events: [],
-      nextCursor: input?.cursor ?? 0,
-      live: true,
-    }),
-  )
-  const gatewayListOpenPermissions = vi.fn(
-    async (
-      _input?: GatewayListOpenPermissionsInput,
-    ): Promise<GatewayPermissionRequest[]> => [],
-  )
-  const gatewayRespondToPermission = vi.fn(
-    async (
-      _input: GatewayRespondToPermissionInput,
-    ): Promise<GatewayPermissionRequest | null> => null,
-  )
-  const gateway = createGatewayServiceMock({
-    fetchAttachments: fetchGatewayAttachments,
-    getConversation: getGatewayConversation,
-    listConversations: listGatewayConversations,
-    listOpenPermissions: gatewayListOpenPermissions,
-    pollEvents: gatewayPollEvents,
-    readMessages: readGatewayMessages,
-    respondToPermission: gatewayRespondToPermission,
-    sendMessage: gatewaySendMessage,
-    waitForEvents: gatewayWaitForEvents,
-  })
   const drainOutbox = vi.fn(
     async (
       _input?: Parameters<AssistantLocalService['drainOutbox']>[0],
@@ -885,7 +698,6 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       vaultBound: true,
     }),
     getStatus,
-    gateway,
     listCronJobs: async () => [TEST_CRON_JOB],
     listCronRuns: async () => ({
       jobId: TEST_CRON_JOB.jobId,
@@ -1094,368 +906,6 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       requireFirstCallArg<{ limit?: number }>(drainOutbox, 'drainOutbox').limit,
       3,
     )
-
-    const gatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        includeLastMessage: true,
-        limit: 5,
-        search: 'lab',
-      }),
-    })
-    assert.equal(gatewayList.status, 200)
-    const gatewayListPayload = await gatewayList.json() as {
-      conversations: Array<{ sessionKey: string }>
-    }
-    assert.equal(
-      gatewayListPayload.conversations[0]?.sessionKey,
-      TEST_GATEWAY_CONVERSATION.sessionKey,
-    )
-    const listGatewayConversationsInput = requireFirstCallArg<{
-      limit?: number
-      search?: string | null
-    }>(listGatewayConversations, 'listGatewayConversations')
-    assert.equal(listGatewayConversationsInput.limit, 5)
-    assert.equal(listGatewayConversationsInput.search, 'lab')
-
-    const gatewayConversation = await fetch(`${handle.address.baseUrl}/gateway/conversations/get`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
-      }),
-    })
-    assert.equal(gatewayConversation.status, 200)
-    const gatewayConversationPayload = await gatewayConversation.json() as {
-      sessionKey: string
-    }
-    assert.equal(
-      gatewayConversationPayload.sessionKey,
-      TEST_GATEWAY_CONVERSATION.sessionKey,
-    )
-    assert.equal(
-      requireFirstCallArg<{ sessionKey: string }>(
-        getGatewayConversation,
-        'getGatewayConversation',
-      ).sessionKey,
-      TEST_GATEWAY_CONVERSATION.sessionKey,
-    )
-
-    const gatewayMessages = await fetch(`${handle.address.baseUrl}/gateway/messages/read`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        oldestFirst: true,
-        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
-      }),
-    })
-    assert.equal(gatewayMessages.status, 200)
-    const gatewayMessagesPayload = await gatewayMessages.json() as {
-      messages: Array<{ messageId: string }>
-    }
-    assert.equal(
-      gatewayMessagesPayload.messages[0]?.messageId,
-      TEST_GATEWAY_MESSAGE.messageId,
-    )
-    assert.equal(
-      requireFirstCallArg<{ oldestFirst?: boolean }>(
-        readGatewayMessages,
-        'readGatewayMessages',
-      ).oldestFirst,
-      true,
-    )
-
-    const gatewayAttachments = await fetch(`${handle.address.baseUrl}/gateway/attachments/fetch`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        messageId: TEST_GATEWAY_MESSAGE.messageId,
-      }),
-    })
-    assert.equal(gatewayAttachments.status, 200)
-    const gatewayAttachmentsPayload = await gatewayAttachments.json() as Array<{
-      attachmentId: string
-    }>
-    assert.equal(
-      gatewayAttachmentsPayload[0]?.attachmentId,
-      TEST_GATEWAY_ATTACHMENT.attachmentId,
-    )
-    assert.equal(
-      requireFirstCallArg<GatewayFetchAttachmentsInput>(
-        fetchGatewayAttachments,
-        'fetchGatewayAttachments',
-      ).messageId,
-      TEST_GATEWAY_MESSAGE.messageId,
-    )
-
-    const gatewaySend = await fetch(`${handle.address.baseUrl}/gateway/messages/send`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
-        text: 'please follow up',
-      }),
-    })
-    assert.equal(gatewaySend.status, 200)
-    const gatewaySendPayload = await gatewaySend.json() as {
-      queued: boolean
-      sessionKey: string
-    }
-    assert.equal(gatewaySendPayload.sessionKey, TEST_GATEWAY_CONVERSATION.sessionKey)
-    assert.equal(gatewaySendPayload.queued, true)
-    assert.equal(gatewaySendMessage.mock.calls[0]?.[0]?.text, 'please follow up')
-
-    const gatewayPoll = await fetch(`${handle.address.baseUrl}/gateway/events/poll`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        cursor: 7,
-      }),
-    })
-    assert.equal(gatewayPoll.status, 200)
-    assert.equal(
-      requireFirstCallArg<{ cursor?: number }>(
-        gatewayPollEvents,
-        'gatewayPollEvents',
-      ).cursor,
-      7,
-    )
-
-    const gatewayWait = await fetch(`${handle.address.baseUrl}/gateway/events/wait`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        cursor: 8,
-        timeoutMs: 100,
-      }),
-    })
-    assert.equal(gatewayWait.status, 200)
-    assert.equal(
-      requireFirstCallArg<{ timeoutMs?: number }>(
-        gatewayWaitForEvents,
-        'gatewayWaitForEvents',
-      ).timeoutMs,
-      100,
-    )
-
-    const gatewayPermissions = await fetch(
-      `${handle.address.baseUrl}/gateway/permissions/list-open`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer secret-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          vault: '/tmp/vault',
-          sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
-        }),
-      },
-    )
-    assert.equal(gatewayPermissions.status, 200)
-    assert.equal(
-      requireFirstCallArg<GatewayListOpenPermissionsInput>(
-        gatewayListOpenPermissions,
-        'gatewayListOpenPermissions',
-      ).sessionKey,
-      TEST_GATEWAY_CONVERSATION.sessionKey,
-    )
-
-    const gatewayPermissionResponse = await fetch(
-      `${handle.address.baseUrl}/gateway/permissions/respond`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer secret-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          vault: '/tmp/vault',
-          decision: 'approve',
-          requestId: 'perm_http_test',
-        }),
-      },
-    )
-    assert.equal(gatewayPermissionResponse.status, 200)
-    assert.equal(
-      requireFirstCallArg<{ requestId: string }>(
-        gatewayRespondToPermission,
-        'gatewayRespondToPermission',
-      ).requestId,
-      'perm_http_test',
-    )
-
-    const invalidGatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        limit: 'bad',
-      }),
-    })
-    assert.equal(invalidGatewayList.status, 400)
-
-    const invalidGatewayConversation = await fetch(`${handle.address.baseUrl}/gateway/conversations/get`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sessionKey: '',
-      }),
-    })
-    assert.equal(invalidGatewayConversation.status, 400)
-
-    const invalidGatewayMessages = await fetch(`${handle.address.baseUrl}/gateway/messages/read`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sessionKey: 123,
-      }),
-    })
-    assert.equal(invalidGatewayMessages.status, 400)
-
-    const invalidGatewayAttachments = await fetch(`${handle.address.baseUrl}/gateway/attachments/fetch`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messageId: 123,
-      }),
-    })
-    assert.equal(invalidGatewayAttachments.status, 400)
-
-    const invalidGatewaySend = await fetch(`${handle.address.baseUrl}/gateway/messages/send`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
-        text: '',
-      }),
-    })
-    assert.equal(invalidGatewaySend.status, 400)
-
-    const invalidGatewayPoll = await fetch(`${handle.address.baseUrl}/gateway/events/poll`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        cursor: 'bad',
-      }),
-    })
-    assert.equal(invalidGatewayPoll.status, 400)
-
-    const invalidGatewayWait = await fetch(`${handle.address.baseUrl}/gateway/events/wait`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        timeoutMs: 'bad',
-      }),
-    })
-    assert.equal(invalidGatewayWait.status, 400)
-
-    const invalidGatewayPermissions = await fetch(
-      `${handle.address.baseUrl}/gateway/permissions/list-open`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer secret-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sessionKey: 123,
-        }),
-      },
-    )
-    assert.equal(invalidGatewayPermissions.status, 400)
-
-    const invalidGatewayPermissionResponse = await fetch(
-      `${handle.address.baseUrl}/gateway/permissions/respond`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer secret-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          decision: 'approve',
-        }),
-      },
-    )
-    assert.equal(invalidGatewayPermissionResponse.status, 400)
-
-    const mismatchedGatewayVault = await fetch(
-      `${handle.address.baseUrl}/gateway/conversations/list`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer secret-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          vault: '/tmp/other-vault',
-        }),
-      },
-    )
-    assert.equal(mismatchedGatewayVault.status, 400)
-    const mismatchedGatewayVaultPayload = await mismatchedGatewayVault.json() as {
-      code?: string
-      error?: string
-    }
-    assert.equal(
-      mismatchedGatewayVaultPayload.code,
-      'ASSISTANTD_VAULT_MISMATCH',
-    )
-    assert.equal(
-      mismatchedGatewayVaultPayload.error,
-      'Request vault does not match the daemon-bound vault.',
-    )
-    assert.doesNotMatch(mismatchedGatewayVaultPayload.error ?? '', /\/tmp/u)
 
     const cronStatus = await fetch(
       `${handle.address.baseUrl}/cron/status?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -1813,7 +1263,51 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   }
 })
 
-test('assistantd http server maps bound-vault mismatches on non-gateway routes to typed 400 responses', async () => {
+test('assistantd http server does not expose local gateway routes', async () => {
+  const baseUrl = 'http://127.0.0.1:50241'
+  const controlToken = 'secret-token'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken,
+      host: '127.0.0.1',
+      port: 0,
+      service: createUnusedAssistantService(),
+    }),
+    baseUrl,
+  )
+
+  for (const route of [
+    '/gateway/conversations/list',
+    '/gateway/conversations/get',
+    '/gateway/messages/read',
+    '/gateway/attachments/fetch',
+    '/gateway/messages/send',
+    '/gateway/events/poll',
+    '/gateway/events/wait',
+    '/gateway/permissions/list-open',
+    '/gateway/permissions/respond',
+  ]) {
+    const response = await fetch(`${baseUrl}${route}`, {
+      method: 'POST',
+      headers: {
+        Authorization: createBearerAuthorization(controlToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        decision: 'approve',
+        messageId: 'gwcm_removed',
+        requestId: 'gwpr_removed',
+        sessionKey: 'gwcs_removed',
+        text: 'removed route',
+        vault: '/tmp/vault',
+      }),
+    })
+
+    assert.equal(response.status, 404, `${route} should stay removed`)
+  }
+})
+
+test('assistantd http server maps bound-vault mismatches on assistant control routes to typed 400 responses', async () => {
   const configuredVault = '/tmp/vault'
   const otherVault = '/tmp/other-vault'
   const rejectMismatchedVault = (vault: string | null | undefined): void => {
@@ -2012,69 +1506,6 @@ test('assistantd http server maps bound-vault mismatches on non-gateway routes t
   }
 })
 
-test('assistantd http server maps gateway send domain errors to typed non-500 responses', async () => {
-  const gatewaySendMessage = vi.fn(async (input: GatewaySendMessageInput) => {
-    if (input.sessionKey === 'gwcs_missing_http_test') {
-      throw createGatewaySessionNotFoundError(
-        `Gateway session ${input.sessionKey} was not found.`,
-      )
-    }
-
-    throw createGatewayUnsupportedOperationError(
-      `Gateway session ${input.sessionKey} does not have a routable reply target.`,
-    )
-  })
-  const service: AssistantLocalService = {
-    ...createUnusedAssistantService(),
-    gateway: createGatewayServiceMock({
-      sendMessage: gatewaySendMessage,
-    }),
-    vault: '/tmp/vault',
-  }
-  const baseUrl = 'http://127.0.0.1:50241'
-  const controlToken = 'secret-token'
-  const fetch = createAssistantdTestFetch(
-    createAssistantHttpRequestHandler({
-      controlToken,
-      host: '127.0.0.1',
-      port: 0,
-      service,
-    }),
-    baseUrl,
-  )
-
-  const sendGatewayMessage = async (sessionKey: string) =>
-    fetch(`${baseUrl}/gateway/messages/send`, {
-      method: 'POST',
-      headers: {
-        Authorization: createBearerAuthorization(controlToken),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        vault: '/tmp/vault',
-        sessionKey,
-        text: 'please follow up',
-      }),
-    })
-
-  const missing = await sendGatewayMessage('gwcs_missing_http_test')
-  assert.equal(missing.status, 404)
-  const missingPayload = await missing.json() as { code?: string; error?: string }
-  assert.equal(missingPayload.code, 'ASSISTANT_GATEWAY_SESSION_NOT_FOUND')
-  assert.match(missingPayload.error ?? '', /was not found/u)
-
-  const unsupported = await sendGatewayMessage('gwcs_unroutable_http_test')
-  assert.equal(unsupported.status, 400)
-  const unsupportedPayload = await unsupported.json() as { code?: string; error?: string }
-  assert.equal(
-    unsupportedPayload.code,
-    'ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION',
-  )
-  assert.match(unsupportedPayload.error ?? '', /routable reply target/u)
-
-  assert.equal(gatewaySendMessage.mock.calls.length, 2)
-})
-
 test('assistant http handler rejects continuous automation without the inbox daemon', async () => {
   const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
@@ -2103,7 +1534,6 @@ test('assistant http handler rejects continuous automation without the inbox dae
       )
     },
     sendMessage: async () => createAssistantSendMessageResult('hello', 'daemon response'),
-    gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
   }
@@ -2176,7 +1606,6 @@ test('assistantd http server preserves typed assistant error codes for invalid i
     setCronTarget: async () => createSetCronTargetResult({ changed: false, jobId: TEST_CRON_JOB.jobId }),
     runAutomationOnce: async () => createAssistantRunAutomationResult(0),
     sendMessage: async () => createAssistantSendMessageResult('noop', 'noop'),
-    gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
   }
@@ -2257,7 +1686,6 @@ test('assistantd http server does not reflect raw internal errors back to the cl
     setCronTarget: async () => createSetCronTargetResult({ changed: false, jobId: TEST_CRON_JOB.jobId }),
     runAutomationOnce: async () => createAssistantRunAutomationResult(0),
     sendMessage: async () => createAssistantSendMessageResult('hello', 'daemon response'),
-    gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
   }

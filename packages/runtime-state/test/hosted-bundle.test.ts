@@ -2190,7 +2190,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test.json"), "{\"status\":\"committed\"}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads", "staged.md"), "staged payload\n");
     await writeFile(path.join(vaultRoot, ".runtime", "cache", "assistant-cache.json"), "{\"cache\":true}\n");
-    await writeFile(path.join(vaultRoot, ".runtime", "projections", "gateway.sqlite"), "gateway-projection\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "projections", "gateway.sqlite"), "retired-gateway-projection\n");
     await writeFile(path.join(vaultRoot, ".runtime", "projections", "query.sqlite"), "query-projection\n");
     await writeFile(path.join(vaultRoot, ".runtime", "search.sqlite"), "legacy-search\n");
     await writeFile(path.join(vaultRoot, ".runtime", "tmp", "scratch.txt"), "scratch\n");
@@ -4734,8 +4734,8 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/projections/gateway.sqlite")).toMatchObject({
     classification: "projection",
     portability: "machine_local",
-    owner: "gateway-local",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/projections/gateway.sqlite")?.owner).toBeUndefined();
 });
 
 test("hosted execution can defer artifact materialization until a targeted restore request", async () => {
