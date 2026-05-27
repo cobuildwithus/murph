@@ -1,8 +1,14 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
@@ -43,8 +49,10 @@ import {
   HostedMailboxImportCheckpointConflictError,
   HostedMailboxImportCheckpointUserMismatchError,
   importHostedMailboxPrefixAndCheckpoint,
+  type HostedMailboxImportCheckpointResult,
 } from "./hosted-runtime/mailbox-checkpoint.ts";
 import type {
+  HostedWorkspaceCheckpointRequestBuilder,
   HostedWorkspaceSnapshotCheckpointBuilder,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
@@ -236,6 +244,74 @@ export {
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
+
+const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
+const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
+const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
+
+interface HostedInitialMailboxImportResult {
+  bootstrapPending: boolean;
+  result: HostedMailboxImportCheckpointResult;
+}
+
+function resolveHostedInitialMailboxImportLanes(input: {
+  vaultRoot: string;
+}): typeof HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES
+  | typeof HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES {
+  return hasHostedVaultMetadata(input.vaultRoot)
+    ? HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES
+    : HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES;
+}
+
+function hasHostedVaultMetadata(vaultRoot: string): boolean {
+  return existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata));
+}
+
+async function importHostedInitialMailboxForWorkspaceRunner(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  runnerInput: HostedWorkspaceRunnerInput;
+  requestId: string;
+}): Promise<HostedInitialMailboxImportResult> {
+  const lanes = resolveHostedInitialMailboxImportLanes({
+    vaultRoot: input.runnerInput.vaultRoot,
+  });
+  const result = await importHostedMailboxForWorkspaceRunner({
+    checkpointRequestBuilder: input.checkpointRequestBuilder,
+    checkpointReason: "import",
+    deferCheckpoint: true,
+    input: input.runnerInput,
+    deferConversationUntil: lanes === HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES
+      ? {
+          ready: () => hasHostedVaultMetadata(input.runnerInput.vaultRoot),
+          reasonCode: HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE,
+        }
+      : null,
+    lanes,
+    requestId: input.requestId,
+  });
+
+  return {
+    bootstrapPending: isHostedInitialBootstrapPending({
+      lanes,
+      result,
+      vaultRoot: input.runnerInput.vaultRoot,
+    }),
+    result,
+  };
+}
+
+function isHostedInitialBootstrapPending(input: {
+  lanes: readonly ("conversation" | "system")[];
+  result: HostedMailboxImportCheckpointResult;
+  vaultRoot: string;
+}): boolean {
+  return input.lanes === HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES
+    && !hasHostedVaultMetadata(input.vaultRoot)
+    && input.result.importResult.blocked.some((item) =>
+      item.lane === "system"
+      || item.reasonCode === HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE
+    );
+}
 
 export interface HostedWorkspaceRuntimeJobOptions {
   createCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
@@ -522,9 +598,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
+    const initialMailboxImportLanes = resolveHostedInitialMailboxImportLanes({
+      vaultRoot: restored.vaultRoot,
+    });
     emitPhaseLog({
       details: {
         foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
+        initialMailboxImportLanes: [...initialMailboxImportLanes],
         mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
       },
       input,
@@ -532,7 +612,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "mailbox.import.initial",
       status: "start",
     });
-    const initialMailboxImport = await raceHostedRuntimeCancellation(
+    const initialMailboxImportResult = await raceHostedRuntimeCancellation(
       withHostedProcessEnvironment(
         {
           envOverrides: hostedCodexRuntime.runtimeEnv,
@@ -540,19 +620,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           vaultRoot: restored.vaultRoot,
         },
         async () =>
-          importHostedMailboxForWorkspaceRunner({
+          importHostedInitialMailboxForWorkspaceRunner({
             checkpointRequestBuilder,
-            checkpointReason: "import",
-            deferCheckpoint: true,
-            input: baseRunnerInput,
-            lanes: ["conversation"],
+            runnerInput: baseRunnerInput,
             requestId,
           }),
       ),
       runtimeAbortController.signal,
     );
+    const initialMailboxImport = initialMailboxImportResult.result;
     emitPhaseLog({
       details: {
+        bootstrapPending: initialMailboxImportResult.bootstrapPending,
         checkpointDeferred: initialMailboxImport.checkpointDeferred,
         checkpointed: initialMailboxImport.checkpoint?.checkpointed ?? false,
         fetchedCount: initialMailboxImport.importResult.fetchedCount,
@@ -565,6 +644,91 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
+    if (initialMailboxImportResult.bootstrapPending) {
+      const redactedStatus = buildHostedMailboxImportRedactedStatus(
+        initialMailboxImport.importResult,
+      );
+      const nextWake = resolveHostedWorkspaceRunNextWake({
+        assistantPhaseResult: null,
+        committedWorkspace: workspaceRead.workspace,
+        mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
+        nowMs: Date.now(),
+      });
+
+      if (initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged) {
+        emitPhaseLog({
+          details: {
+            nextWakeAtPresent: nextWake.nextWakeAt !== null,
+            nextWakeReasonPresent: nextWake.nextWakeReason !== null,
+          },
+          input,
+          phase: "checkpoint",
+          requestId,
+          stage: "workspace.checkpoint.idle_shutdown",
+          status: "start",
+        });
+        const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+          assertRuntimeNotAborted,
+          checkpointRequestBuilder,
+          expectedUserId: input.request.userId,
+          nextWakeAt: nextWake.nextWakeAt,
+          nextWakeReason: nextWake.nextWakeReason,
+          redactedStatus,
+          runtimeAbortSignal: runtimeAbortController.signal,
+          workspacePort: foregroundWorkspacePort,
+        });
+        emitPhaseLog({
+          details: {
+            checkpointed: checkpoint.checkpointed,
+            checkpointWorkspaceVersion: checkpoint.workspace.version,
+          },
+          input,
+          phase: "checkpoint",
+          requestId,
+          stage: "workspace.checkpoint.idle_shutdown",
+          status: "done",
+        });
+        const invocationResult = {
+          nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+          redactedStatus: checkpoint.workspace.redactedStatus ?? redactedStatus,
+          status: resolveHostedWorkspaceInvocationStatus({
+            mailboxBudgetExhausted: mailboxBudgetExhausted(),
+            nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+          }),
+        };
+        emitPhaseLog({
+          details: {
+            invocationStatus: invocationResult.status,
+            nextWakeAtPresent: invocationResult.nextWakeAt !== null,
+          },
+          input,
+          requestId,
+          stage: "runtime.return",
+          status: "done",
+        });
+        return invocationResult;
+      }
+
+      const invocationResult = {
+        nextWakeAt: nextWake.nextWakeAt,
+        redactedStatus,
+        status: resolveHostedWorkspaceInvocationStatus({
+          mailboxBudgetExhausted: mailboxBudgetExhausted(),
+          nextWakeAt: nextWake.nextWakeAt,
+        }),
+      };
+      emitPhaseLog({
+        details: {
+          invocationStatus: invocationResult.status,
+          nextWakeAtPresent: invocationResult.nextWakeAt !== null,
+        },
+        input,
+        requestId,
+        stage: "runtime.return",
+        status: "done",
+      });
+      return invocationResult;
+    }
     if (restored.restoreWasCold) {
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
     }

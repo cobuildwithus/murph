@@ -298,6 +298,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }));
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
+          { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
         [
@@ -1145,6 +1146,400 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxSystemImportedSeq: "0",
         },
         status: "idle",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("imports system bootstrap before initial conversation import for cold vaults", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const imported: string[] = [];
+    let bootstrapImported = false;
+
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_image_only_001",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+    });
+    const systemItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_member_activated_001",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
+        events.push("sidecar.ready");
+        assert.equal(input.rebuild, true);
+        return true;
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_cold_conversation_bootstrap",
+            budget: {
+              maxMailboxItems: 10,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            assert.equal(await readCheckpointConversationWatermark(snapshotInput, vaultRoot), "1");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/cold-bootstrap.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.kind}`);
+            if (item.item.kind === "member.activated") {
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+              bootstrapImported = true;
+              return { status: "imported" };
+            }
+
+            assert.equal(bootstrapImported, true);
+            return {
+              assistantInputId: "ain_00000000000000000000000000000000",
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [conversationItem, systemItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
+            assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
+        ["system", "conversation"],
+      ]);
+      assert.deepEqual(imported, [
+        "system:member.activated",
+        "conversation:conversation.message",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.deepEqual(result, {
+        nextWakeAt: null,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "1",
+          hostedMailboxFetchedCount: 2,
+          hostedMailboxImportedCount: 2,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemImportedSeq: "1",
+        },
+        status: "idle",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const imported: string[] = [];
+
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_deferred_image_only_001",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+    });
+    const systemItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_deferred_member_activated_001",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_cold_conversation_bootstrap",
+            budget: {
+              maxMailboxItems: 10,
+            },
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Deferred bootstrap should not checkpoint unchanged mailbox state.");
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.kind}`);
+            return {
+              reasonCode: "bootstrap.deferred",
+              status: "deferred",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [conversationItem, systemItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Deferred bootstrap should not run assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
+        ["system", "conversation"],
+      ]);
+      assert.deepEqual(imported, [
+        "system:member.activated",
+      ]);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(typeof result.nextWakeAt, "string");
+      assert.deepEqual(result, {
+        nextWakeAt: result.nextWakeAt,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 2,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 2,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxNextRetryAtPresent: true,
+          hostedMailboxRetryableBlockedCount: 2,
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        status: "scheduled",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("stops before assistant runtime when cold bootstrap is deferred without conversation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const imported: string[] = [];
+    const systemItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_system_deferred_only_001",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_system_bootstrap_only",
+            budget: {
+              maxMailboxItems: 10,
+            },
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Deferred system bootstrap should not checkpoint unchanged mailbox state.");
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.kind}`);
+            return {
+              reasonCode: "bootstrap.deferred",
+              status: "deferred",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [systemItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Deferred system bootstrap should not run assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
+        ["system", "conversation"],
+      ]);
+      assert.deepEqual(imported, [
+        "system:member.activated",
+      ]);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(typeof result.nextWakeAt, "string");
+      assert.deepEqual(result, {
+        nextWakeAt: result.nextWakeAt,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 1,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 1,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxNextRetryAtPresent: true,
+          hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        status: "scheduled",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("does not resolve initial conversation payloads before cold bootstrap exists", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const imported: string[] = [];
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_unbootstrapped_image_only_001",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "payload_ref_synthetic_conversation",
+    });
+    const baseMailboxPort = createMailboxPort({
+      events,
+      fetchRequests,
+      items: [conversationItem],
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...baseMailboxPort,
+      async fetchPayload() {
+        events.push("mailbox.fetchPayload");
+        throw new Error("Cold bootstrap should defer before conversation payload fetch.");
+      },
+    };
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_unbootstrapped_conversation_payload",
+            budget: {
+              maxMailboxItems: 10,
+            },
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Unbootstrapped conversation deferral should not checkpoint.");
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.kind}`);
+            throw new Error("Unbootstrapped conversation deferral should not import.");
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Unbootstrapped conversation deferral should not run assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
+        ["system", "conversation"],
+      ]);
+      assert.deepEqual(imported, []);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(typeof result.nextWakeAt, "string");
+      assert.deepEqual(result, {
+        nextWakeAt: result.nextWakeAt,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 1,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 1,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxNextRetryAtPresent: true,
+          hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        status: "scheduled",
       });
     } finally {
       await removeTempRoot(vaultRoot);
@@ -4086,64 +4481,67 @@ describe("hosted workspace runtime entrypoint", () => {
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-          workspaceVersion: "9",
-        },
+            workspaceVersion: "9",
+          },
         }),
-      {
-        async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
-          return {
-            snapshotRef: createBundleRef({
-              hash: "d".repeat(64),
-              key: "users/bundles/member-synthetic/restored-after-import.bundle.json",
-              size: 512,
-            }),
-          };
-        },
-        async importItem(item) {
-          imported.push(item.item.laneSeq);
-          return { status: "imported" };
-        },
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort: createMailboxPort({
-            events,
-            fetchRequests,
-            items: [
-              createMailboxItem({
-                id: "mailbox_item_entrypoint_restored_old",
-                laneSeq: "3",
-              }),
-              createMailboxItem({
-                id: "mailbox_item_entrypoint_restored_new",
-                laneSeq: "4",
-              }),
-            ],
-          }),
-          workspacePort: createWorkspacePort({
-            checkpointRequests,
-            events,
-            workspace: createWorkspaceState({
-              redactedStatus: {
-                hostedMailboxConversationImportedSeq: "0",
-                hostedMailboxSystemImportedSeq: "0",
-              },
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
               snapshotRef: createBundleRef({
-                hash: bundleHash,
-                key: "users/bundles/member-synthetic/restored-before-import.bundle.json",
-                size: bundle.byteLength,
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/restored-after-import.bundle.json",
+                size: 512,
               }),
-              version: "9",
+            };
+          },
+          async importItem(item) {
+            imported.push(item.item.laneSeq);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            artifactGetCalls,
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_restored_old",
+                  laneSeq: "3",
+                }),
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_restored_new",
+                  laneSeq: "4",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                redactedStatus: {
+                  hostedMailboxConversationImportedSeq: "0",
+                  hostedMailboxSystemImportedSeq: "0",
+                },
+                snapshotRef: createBundleRef({
+                  hash: bundleHash,
+                  key: "users/bundles/member-synthetic/restored-before-import.bundle.json",
+                  size: bundle.byteLength,
+                }),
+                version: "9",
+              }),
             }),
           }),
-        }),
-        vaultRoot,
-      });
+          vaultRoot,
+        });
 
       assert.deepEqual(artifactGetCalls, [bundleHash]);
       assert.deepEqual(imported, ["4"]);
       assert.equal(fetchRequests.length, 1);
+      assert.deepEqual(fetchRequests[0]?.lanes, [
+        { importedSeq: "3", lane: "conversation" },
+      ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
       assert.deepEqual(events, [
@@ -5918,7 +6316,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("returns mailbox retry wake for a pure retryable sidecar block without idle checkpointing", async () => {
+  test("returns mailbox retry wake for an unbootstrapped sidecar item without idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -5971,7 +6369,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "mailbox.fetchPayload",
       ]);
       assert.deepEqual(checkpointRequests, []);
       const mailboxRetryWakeAt = result.nextWakeAt;

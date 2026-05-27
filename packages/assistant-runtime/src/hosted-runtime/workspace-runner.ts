@@ -34,6 +34,7 @@ import {
   type HostedMailboxImportCheckpointResult,
 } from "./mailbox-checkpoint.ts";
 import type {
+  HostedMailboxConversationDeferral,
   HostedMailboxItemImportOutcome,
   HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
@@ -691,6 +692,7 @@ function formatHostedActiveTurnConversationNotificationKey(
 export async function importHostedMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   checkpointReason: HostedWorkspaceCheckpointReason;
+  deferConversationUntil?: HostedMailboxConversationDeferral | null;
   deferCheckpoint?: boolean;
   importItem?: HostedWorkspaceRunnerMailboxImportItem | null;
   input: HostedWorkspaceRunnerInput;
@@ -712,6 +714,7 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
           : {}),
         reason: input.checkpointReason,
       }),
+    deferConversationUntil: input.deferConversationUntil ?? null,
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
     importItem: input.importItem ?? input.input.importItem,

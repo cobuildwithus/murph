@@ -8,6 +8,7 @@ import type {
 
 import {
   fetchAndProcessHostedMailboxPrefix,
+  type HostedMailboxConversationDeferral,
   type HostedMailboxImportLoopResult,
   type HostedMailboxPostCheckpointEffect,
   type HostedMailboxPrefixPrefetch,
@@ -29,6 +30,7 @@ import type {
 } from "./platform.ts";
 
 export interface HostedMailboxImportCheckpointInput {
+  deferConversationUntil?: HostedMailboxConversationDeferral | null;
   deferCheckpoint?: boolean;
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
@@ -99,6 +101,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   });
   const afterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   const importResult = await fetchAndProcessHostedMailboxPrefix({
+    deferConversationUntil: input.deferConversationUntil ?? null,
     expectedUserId: input.expectedUserId,
     importItem: async (item) => {
       const outcome = await input.importItem(item);
