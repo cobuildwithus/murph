@@ -86,6 +86,16 @@ test("browser vault replica excludes dense provider observations but keeps displ
           kind: "observation",
           title: "Raw heart-rate point",
         }),
+        createCanonicalEntity("event", "evt_raw_import_point", {
+          attributes: {
+            metric: "resting-heart-rate",
+            source: "import",
+            unit: "bpm",
+            value: 59,
+          },
+          kind: "observation",
+          title: "Raw imported resting heart-rate point",
+        }),
         createCanonicalEntity("event", "evt_display_device_fact", {
           attributes: {
             metric: "readiness-score",
@@ -107,9 +117,14 @@ test("browser vault replica excludes dense provider observations but keeps displ
   const observationSearchRows = client.search("observation");
 
   assert.equal(client.entities.get("evt_raw_device_point"), null);
+  assert.equal(client.entities.get("evt_raw_import_point"), null);
   assert.equal(client.entities.get("evt_display_device_fact")?.id, "evt_display_device_fact");
   assert.equal(observationSearchRows.some((row) => row.entityId === "evt_raw_device_point"), false);
+  assert.equal(observationSearchRows.some((row) => row.entityId === "evt_raw_import_point"), false);
   assert.equal(observationSearchRows.some((row) => row.entityId === "evt_display_device_fact"), true);
+  assert.equal(replica.timelineRows.some((row) => row.id === "evt_raw_device_point"), false);
+  assert.equal(replica.timelineRows.some((row) => row.id === "evt_raw_import_point"), false);
+  assert.equal(replica.timelineRows.some((row) => row.id === "evt_display_device_fact"), true);
 });
 
 test("browser vault replica creation uses supplied metric points with a sparse vault", async () => {

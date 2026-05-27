@@ -2223,6 +2223,22 @@ test("searchVault keeps dense provider observations out of in-memory search", ()
       value: 72,
     },
   });
+  const denseImportObservation = createRecord({
+    id: "evt_dense_import_resting_heart_rate",
+    lookupIds: ["evt_dense_import_resting_heart_rate"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T08:03:00Z",
+    date: "2026-03-12",
+    kind: "observation",
+    title: "Imported raw resting heart-rate point",
+    data: {
+      source: "import",
+      metric: "resting-heart-rate",
+      unit: "bpm",
+      value: 59,
+    },
+  });
   const displayObservation = createRecord({
     id: "evt_display_readiness_fact",
     lookupIds: ["evt_display_readiness_fact"],
@@ -2241,12 +2257,14 @@ test("searchVault keeps dense provider observations out of in-memory search", ()
     },
   });
 
-  vault.events = [denseObservation, displayObservation];
-  vault.entities = [denseObservation, displayObservation];
+  vault.events = [denseObservation, denseImportObservation, displayObservation];
+  vault.entities = [denseObservation, denseImportObservation, displayObservation];
   syncVaultDerivedFields(vault);
 
   assert.equal(searchVault(vault, "garmin heart-rate").total, 0);
   assert.equal(searchVaultSafe(vault, "garmin heart-rate").total, 0);
+  assert.equal(searchVault(vault, "imported resting").total, 0);
+  assert.equal(searchVaultSafe(vault, "imported resting").total, 0);
   assert.equal(searchVault(vault, "readiness").hits[0]?.recordId, "evt_display_readiness_fact");
 });
 
@@ -4023,6 +4041,19 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
         value: 60,
         unit: "bpm",
       },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_dense_provider_steps_import_missing_provenance",
+        kind: "observation",
+        occurredAt: "2026-03-16T07:00:00Z",
+        recordedAt: "2026-03-16T07:01:00Z",
+        dayKey: "2026-03-16",
+        source: "import",
+        title: "Imported missing provenance resting heart rate",
+        metric: "resting-heart-rate",
+        value: 61,
+        unit: "bpm",
+      },
     ];
     await writeFile(
       eventLedgerPath,
@@ -4059,7 +4090,8 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
             'evt_dense_provider_steps_01',
             'evt_dense_provider_steps_import_source',
             'evt_dense_provider_steps_missing_source',
-            'evt_dense_provider_steps_missing_provenance'
+            'evt_dense_provider_steps_missing_provenance',
+            'evt_dense_provider_steps_import_missing_provenance'
           )
         `)
         .get() as { count: number };
@@ -4071,7 +4103,8 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
             'evt_dense_provider_steps_01',
             'evt_dense_provider_steps_import_source',
             'evt_dense_provider_steps_missing_source',
-            'evt_dense_provider_steps_missing_provenance'
+            'evt_dense_provider_steps_missing_provenance',
+            'evt_dense_provider_steps_import_missing_provenance'
           )
         `)
         .get() as { count: number };
@@ -4221,6 +4254,7 @@ test("rebuildQueryProjection indexes compact structured terms without raw attrib
         dayKey: "2026-03-18",
         source: "manual",
         title: "Structured allowlist observation",
+        queryVisibility: "default",
         metric: "energy-score",
         value: 7,
         unit: "score",
