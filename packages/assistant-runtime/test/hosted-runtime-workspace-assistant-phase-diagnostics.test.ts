@@ -223,6 +223,61 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     expect(JSON.stringify(logRequests)).not.toContain("private text should not persist");
     expect(JSON.stringify(logRequests)).not.toContain("test-token-value");
   });
+
+  it("preserves neutral route-planning timing diagnostics", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [{
+        component: "runtime.provider",
+        level: "info",
+        message: "Hosted assistant provider plan captured.",
+        phase: "wake.running",
+        redacted: {
+          providerTraceKind: "assistant.provider.plan",
+          routePlanningElapsedMs: 71_000,
+          routePlanningFallbackInstructionsElapsedMs: 66_000,
+          routePlanningFreshThreadFallbackPromptElapsedMs: 66_000,
+          routePlanningMeasuredElapsedMs: 70_990,
+          routePlanningMemoryOverviewElapsedMs: 900,
+          routePlanningPrimaryInstructionsElapsedMs: 70,
+          routePlanningPrimarySystemPromptElapsedMs: 70,
+          routePlanningSlowestStage: "fallback_instructions",
+          routePlanningSlowestStageElapsedMs: 66_000,
+          routePlanningVaultOverviewElapsedMs: 900,
+          schema: "murph.assistant-provider-plan.v1",
+        },
+      }],
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+
+    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      redactedJson: expect.objectContaining({
+        routePlanningElapsedMs: 71_000,
+        routePlanningFallbackInstructionsElapsedMs: 66_000,
+        routePlanningMeasuredElapsedMs: 70_990,
+        routePlanningMemoryOverviewElapsedMs: 900,
+        routePlanningPrimaryInstructionsElapsedMs: 70,
+        routePlanningSlowestStage: "fallback_instructions",
+        routePlanningSlowestStageElapsedMs: 66_000,
+      }),
+    }));
+    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
+      expect.objectContaining({
+        routePlanningFreshThreadFallbackPromptElapsedMs: expect.anything(),
+        routePlanningPrimarySystemPromptElapsedMs: expect.anything(),
+        routePlanningVaultOverviewElapsedMs: expect.anything(),
+      }),
+    );
+  });
 });
 
 function createPhaseInput(input: {

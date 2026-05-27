@@ -86,12 +86,83 @@ export interface AssistantRoutePlanningDiagnostics {
   activeExperimentContextElapsedMs: number | null
   allowSensitiveHealthContext: boolean
   cliBootstrapElapsedMs: number | null
+  primarySystemPromptElapsedMs: number | null
   routePlanningElapsedMs: number
+  routePlanningMeasuredElapsedMs: number
+  routePlanningSlowestStage: AssistantRoutePlanningStage | null
+  routePlanningSlowestStageElapsedMs: number | null
+  routePlanningUnaccountedElapsedMs: number
+  routeResumeBindingElapsedMs: number | null
+  routeTargetCapabilitiesElapsedMs: number | null
   shouldPrepareAnyBootstrapContext: boolean
   shouldPrepareBootstrapContext: boolean
   shouldPrepareFreshThreadFallback: boolean
+  supportedExperimentProtocolsElapsedMs: number | null
+  freshThreadFallbackPromptElapsedMs: number | null
   vaultOverviewElapsedMs: number | null
 }
+
+type AssistantRoutePlanningSpanKey =
+  | 'activeExperimentContextElapsedMs'
+  | 'cliBootstrapElapsedMs'
+  | 'freshThreadFallbackPromptElapsedMs'
+  | 'primarySystemPromptElapsedMs'
+  | 'routeResumeBindingElapsedMs'
+  | 'routeTargetCapabilitiesElapsedMs'
+  | 'supportedExperimentProtocolsElapsedMs'
+  | 'vaultOverviewElapsedMs'
+
+type AssistantRoutePlanningSpanMetrics = Partial<
+  Record<AssistantRoutePlanningSpanKey, number>
+>
+
+export type AssistantRoutePlanningStage =
+  | 'active_experiment_context'
+  | 'cli_bootstrap'
+  | 'fallback_instructions'
+  | 'memory_overview'
+  | 'primary_instructions'
+  | 'resume_binding'
+  | 'supported_experiment_protocols'
+  | 'target_capabilities'
+
+const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
+  key: AssistantRoutePlanningSpanKey
+  stage: AssistantRoutePlanningStage
+}[] = [
+  {
+    key: 'activeExperimentContextElapsedMs',
+    stage: 'active_experiment_context',
+  },
+  {
+    key: 'cliBootstrapElapsedMs',
+    stage: 'cli_bootstrap',
+  },
+  {
+    key: 'freshThreadFallbackPromptElapsedMs',
+    stage: 'fallback_instructions',
+  },
+  {
+    key: 'primarySystemPromptElapsedMs',
+    stage: 'primary_instructions',
+  },
+  {
+    key: 'routeResumeBindingElapsedMs',
+    stage: 'resume_binding',
+  },
+  {
+    key: 'routeTargetCapabilitiesElapsedMs',
+    stage: 'target_capabilities',
+  },
+  {
+    key: 'supportedExperimentProtocolsElapsedMs',
+    stage: 'supported_experiment_protocols',
+  },
+  {
+    key: 'vaultOverviewElapsedMs',
+    stage: 'memory_overview',
+  },
+]
 
 export interface AssistantRouteFreshThreadFallbackPlan {
   developerInstructions: string | null
@@ -302,14 +373,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
   sharedPlan: AssistantTurnSharedPlan
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
+  const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
-  const resumeBinding = resolveAssistantRouteResumeBinding({
-    route: input.route,
-    sessionResumeState: readAssistantCodexResume(input.session),
-  })
-  const routeProviderCapabilities = resolveCodexAssistantTargetCapabilities({
-    ...input.route.providerOptions,
-  })
+  const resumeBinding = measureRoutePlanningSync(
+    routePlanningSpans,
+    'routeResumeBindingElapsedMs',
+    () => resolveAssistantRouteResumeBinding({
+      route: input.route,
+      sessionResumeState: readAssistantCodexResume(input.session),
+    }),
+  )
+  const routeProviderCapabilities = measureRoutePlanningSync(
+    routePlanningSpans,
+    'routeTargetCapabilitiesElapsedMs',
+    () => resolveCodexAssistantTargetCapabilities({
+      ...input.route.providerOptions,
+    }),
+  )
   const activeTurnHistory = input.activeTurnHistory ?? null
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
@@ -349,7 +429,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     shouldPrepareAnyBootstrapContext && input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
   const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
-    ? await measureElapsed(
+    ? await measureRoutePlanningAsync(
+        routePlanningSpans,
+        'cliBootstrapElapsedMs',
         () => resolveAssistantCliSurfaceBootstrapContext({
           cliEnv: input.sharedPlan.cliAccess.env,
           executionContext: input.input.executionContext,
@@ -364,11 +446,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : null
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
-      ? resolveAssistantSupportedExperimentProtocols()
+      ? measureRoutePlanningSync(
+          routePlanningSpans,
+          'supportedExperimentProtocolsElapsedMs',
+          () => resolveAssistantSupportedExperimentProtocols(),
+        )
       : []
   let vaultOverviewElapsedMs: number | null = null
   const bootstrapVaultOverview = shouldPrepareAnyBootstrapContext
-    ? await measureElapsed(
+    ? await measureRoutePlanningAsync(
+        routePlanningSpans,
+        'vaultOverviewElapsedMs',
         () => resolveAssistantVaultOverviewBlock(input.input.vault),
         (elapsedMs) => {
           vaultOverviewElapsedMs = elapsedMs
@@ -377,7 +465,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : null
   let activeExperimentContextElapsedMs: number | null = null
   const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
-    ? await measureElapsed(
+    ? await measureRoutePlanningAsync(
+        routePlanningSpans,
+        'activeExperimentContextElapsedMs',
         () => resolveAssistantActiveExperimentContextBlock(input.input.vault),
         (elapsedMs) => {
           activeExperimentContextElapsedMs = elapsedMs
@@ -455,17 +545,25 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
     : null
-  const systemPromptResult = buildRouteSystemPromptResult({
-    assistantCliContract: actualAssistantCliContract,
-    injectBootstrapContext: shouldPrepareBootstrapContext,
-    injectOnboardingGuidance: shouldInjectOnboardingGuidance,
-  })
+  const systemPromptResult = measureRoutePlanningSync(
+    routePlanningSpans,
+    'primarySystemPromptElapsedMs',
+    () => buildRouteSystemPromptResult({
+      assistantCliContract: actualAssistantCliContract,
+      injectBootstrapContext: shouldPrepareBootstrapContext,
+      injectOnboardingGuidance: shouldInjectOnboardingGuidance,
+    }),
+  )
   const freshThreadFallbackPromptResult = shouldPrepareFreshThreadFallback
-    ? buildRouteSystemPromptResult({
-        assistantCliContract: bootstrapAssistantCliContract,
-        injectBootstrapContext: true,
-        injectOnboardingGuidance: shouldInjectOnboardingGuidance,
-      })
+    ? measureRoutePlanningSync(
+        routePlanningSpans,
+        'freshThreadFallbackPromptElapsedMs',
+        () => buildRouteSystemPromptResult({
+          assistantCliContract: bootstrapAssistantCliContract,
+          injectBootstrapContext: true,
+          injectOnboardingGuidance: shouldInjectOnboardingGuidance,
+        }),
+      )
     : null
   const refreshThreadInstructions = resumeCodexThreadId === null
   const systemPrompt = systemPromptResult.prompt
@@ -489,6 +587,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
         ),
       }
     : undefined
+  const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
+  const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
+    routePlanningSpans,
+  )
+  const routePlanningUnaccountedElapsedMs = Math.max(
+    0,
+    routePlanningElapsedMs - routePlanningMeasuredElapsedMs,
+  )
+  const routePlanningSlowestSpan =
+    resolveRoutePlanningSlowestSpan(routePlanningSpans)
 
   return {
     assistantCliContract: actualAssistantCliContract,
@@ -505,10 +613,25 @@ export async function resolveAssistantRouteTurnPlan(input: {
       activeExperimentContextElapsedMs,
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
       cliBootstrapElapsedMs,
-      routePlanningElapsedMs: elapsedSince(routePlanningStartedAt),
+      primarySystemPromptElapsedMs:
+        routePlanningSpans.primarySystemPromptElapsedMs ?? null,
+      routePlanningElapsedMs,
+      routePlanningMeasuredElapsedMs,
+      routePlanningSlowestStage: routePlanningSlowestSpan?.stage ?? null,
+      routePlanningSlowestStageElapsedMs:
+        routePlanningSlowestSpan?.elapsedMs ?? null,
+      routePlanningUnaccountedElapsedMs,
+      routeResumeBindingElapsedMs:
+        routePlanningSpans.routeResumeBindingElapsedMs ?? null,
+      routeTargetCapabilitiesElapsedMs:
+        routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
       shouldPrepareAnyBootstrapContext,
       shouldPrepareBootstrapContext,
       shouldPrepareFreshThreadFallback,
+      supportedExperimentProtocolsElapsedMs:
+        routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
+      freshThreadFallbackPromptElapsedMs:
+        routePlanningSpans.freshThreadFallbackPromptElapsedMs ?? null,
       vaultOverviewElapsedMs,
     },
     refreshThreadInstructions,
@@ -525,16 +648,74 @@ export async function resolveAssistantRouteTurnPlan(input: {
   }
 }
 
-async function measureElapsed<TResult>(
+async function measureRoutePlanningAsync<TResult>(
+  spans: AssistantRoutePlanningSpanMetrics,
+  key: AssistantRoutePlanningSpanKey,
   work: () => Promise<TResult>,
-  record: (elapsedMs: number) => void,
+  record?: (elapsedMs: number) => void,
 ): Promise<TResult> {
   const startedAt = Date.now()
   try {
     return await work()
   } finally {
-    record(elapsedSince(startedAt))
+    const elapsedMs = elapsedSince(startedAt)
+    spans[key] = elapsedMs
+    record?.(elapsedMs)
   }
+}
+
+function measureRoutePlanningSync<TResult>(
+  spans: AssistantRoutePlanningSpanMetrics,
+  key: AssistantRoutePlanningSpanKey,
+  work: () => TResult,
+): TResult {
+  const startedAt = Date.now()
+  try {
+    return work()
+  } finally {
+    spans[key] = elapsedSince(startedAt)
+  }
+}
+
+function sumRoutePlanningSpanMetrics(
+  spans: AssistantRoutePlanningSpanMetrics,
+): number {
+  return Object.values(spans).reduce(
+    (total, value) => total + (Number.isFinite(value) ? value : 0),
+    0,
+  )
+}
+
+function resolveRoutePlanningSlowestSpan(
+  spans: AssistantRoutePlanningSpanMetrics,
+): {
+  elapsedMs: number
+  stage: AssistantRoutePlanningStage
+} | null {
+  let slowest: {
+    elapsedMs: number
+    stage: AssistantRoutePlanningStage
+  } | null = null
+
+  for (const candidate of ASSISTANT_ROUTE_PLANNING_SPAN_STAGES) {
+    const elapsedMs = spans[candidate.key]
+    if (
+      typeof elapsedMs !== 'number'
+      || !Number.isFinite(elapsedMs)
+      || elapsedMs <= 0
+    ) {
+      continue
+    }
+
+    if (!slowest || elapsedMs > slowest.elapsedMs) {
+      slowest = {
+        elapsedMs,
+        stage: candidate.stage,
+      }
+    }
+  }
+
+  return slowest
 }
 
 function elapsedSince(startedAt: number): number {

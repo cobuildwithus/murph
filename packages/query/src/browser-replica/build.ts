@@ -1,4 +1,5 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { isDenseProviderObservationEntity } from "../dense-provider-observation.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import { buildTimeline, type TimelineEntry } from "../timeline.ts";
@@ -148,6 +149,10 @@ function isBrowserVaultIncludedFamily(family: string): boolean {
 }
 
 function isBrowserVaultIncludedEntity(entity: CanonicalEntity): boolean {
+  if (isDenseProviderObservationEntity(entity)) {
+    return false;
+  }
+
   if (entity.family === "sample") {
     return entity.kind === "metric_sample" && isDisplayGradeMetricSampleEntity(entity);
   }

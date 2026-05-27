@@ -15,6 +15,7 @@ import { extractIsoDatePrefix } from "@murphai/contracts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { CanonicalEntityFamily } from "./canonical-entities.ts";
 import { compareCanonicalEntities } from "./canonical-entities.ts";
+import { isDenseProviderObservationEntity } from "./dense-provider-observation.ts";
 import { ALL_QUERY_ENTITY_FAMILIES } from "./entity-families.ts";
 import { createVaultReadModel } from "./read-model.ts";
 import {
@@ -45,6 +46,32 @@ import {
 } from "./metrics/projection.ts";
 import { isDisplayGradeMetricSampleEntity, parseGoalMetricTargets } from "./metrics/index.ts";
 import {
+  buildWearableSummaryBundle,
+  explainWearableDriftFromBundle,
+  summarizeWearableActivityFromBundle,
+  summarizeWearableBodyStateFromBundle,
+  summarizeWearableDayFromBundle,
+  summarizeWearableLatestFromBundle,
+  summarizeWearableMetricLatestFromBundle,
+  summarizeWearableMetricTrendFromBundle,
+  summarizeWearableRecoveryFromBundle,
+  summarizeWearableSleepFromBundle,
+  summarizeWearableSourceHealthFromBundle,
+  type WearableActivitySummary,
+  type WearableBodyStateSummary,
+  type WearableDaySummary,
+  type WearableDriftSummary,
+  type WearableLatestSummary,
+  type WearableMetricLatestSummary,
+  type WearableMetricSummaryFilters,
+  type WearableMetricTrendSummary,
+  type WearableRecoverySummary,
+  type WearableSleepSummary,
+  type WearableSourceHealthSummary,
+  type WearableSummaryBundle,
+  type WearableSummaryFilters,
+} from "./wearables.ts";
+import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
   type QuerySourceManifestEntry,
@@ -65,10 +92,12 @@ export type {
 } from "./query-projection-types.ts";
 
 const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-const QUERY_PROJECTION_SQLITE_VERSION = 3;
+const QUERY_PROJECTION_SQLITE_VERSION = 4;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
+const WEARABLE_SUMMARY_PROJECTION_LIMIT = 365;
+const MAX_WEARABLE_PROVIDER_SCOPE_COMBINATIONS = 64;
 
 interface QueryProjectionLocation {
   absolutePath: string;
@@ -103,6 +132,26 @@ interface QueryProjectionMetaRow {
 
 interface QueryProjectionCountRow {
   count: number;
+}
+
+const QUERY_WEARABLE_SUMMARY_KINDS = [
+  "activity",
+  "body_state",
+  "recovery",
+  "sleep",
+  "source_health",
+] as const;
+
+type QueryWearableSummaryKind = typeof QUERY_WEARABLE_SUMMARY_KINDS[number];
+
+interface QueryWearableSummaryRow {
+  id: string;
+  providerScopeJson: string;
+  providerScopeKey: string;
+  sortRank: number;
+  summaryDate: string | null;
+  summaryJson: string;
+  summaryKind: QueryWearableSummaryKind;
 }
 
 function expectString(value: unknown, field: string): string {
@@ -196,6 +245,31 @@ function decodeQueryProjectionCountRow(row: SqliteRow): QueryProjectionCountRow 
   };
 }
 
+function decodeQueryWearableSummaryRow(row: SqliteRow): QueryWearableSummaryRow {
+  return {
+    id: expectString(row.id, "query_wearable_summaries.id"),
+    providerScopeJson: expectString(
+      row.providerScopeJson,
+      "query_wearable_summaries.provider_scope_json",
+    ),
+    providerScopeKey: expectString(
+      row.providerScopeKey,
+      "query_wearable_summaries.provider_scope_key",
+    ),
+    sortRank: expectNumber(row.sortRank, "query_wearable_summaries.sort_rank"),
+    summaryDate: expectNullableString(
+      row.summaryDate,
+      "query_wearable_summaries.summary_date",
+    ),
+    summaryJson: expectString(row.summaryJson, "query_wearable_summaries.summary_json"),
+    summaryKind: expectEnumString(
+      row.summaryKind,
+      "query_wearable_summaries.summary_kind",
+      QUERY_WEARABLE_SUMMARY_KINDS,
+    ),
+  };
+}
+
 export async function getQueryProjectionStatus(
   vaultRoot: string,
 ): Promise<QueryProjectionStatus> {
@@ -242,6 +316,102 @@ export async function listMetricPointsRuntime(
 ): Promise<MetricPoint[]> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   return listStoredMetricPoints(location, normalizeMetricPointFilters(filters));
+}
+
+export async function summarizeWearableDayRuntime(
+  vaultRoot: string,
+  date: string,
+  filters: Omit<WearableSummaryFilters, "date" | "from" | "to"> = {},
+): Promise<WearableDaySummary | null> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, {
+    date,
+    providers: filters.providers,
+  });
+  return summarizeWearableDayFromBundle(bundle, date);
+}
+
+export async function summarizeWearableLatestRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableLatestSummary | null> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableLatestFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableMetricLatestRuntime(
+  vaultRoot: string,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): Promise<WearableMetricLatestSummary | null> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableMetricLatestFromBundle(bundle, metric, filters);
+}
+
+export async function summarizeWearableMetricTrendRuntime(
+  vaultRoot: string,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): Promise<WearableMetricTrendSummary | null> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableMetricTrendFromBundle(bundle, metric, filters);
+}
+
+export async function explainWearableDriftRuntime(
+  vaultRoot: string,
+  filters: WearableMetricSummaryFilters = {},
+): Promise<WearableDriftSummary | null> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return explainWearableDriftFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableSleepRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableSleepSummary[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableSleepFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableActivityRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableActivitySummary[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableActivityFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableBodyStateRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableBodyStateSummary[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableBodyStateFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableRecoveryRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableRecoverySummary[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableRecoveryFromBundle(bundle, filters);
+}
+
+export async function summarizeWearableSourceHealthRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableSourceHealthSummary[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const bundle = readStoredWearableSummaryBundle(location, filters);
+  return summarizeWearableSourceHealthFromBundle(bundle, filters);
 }
 
 export async function selectMetricRuntime(input: {
@@ -311,8 +481,10 @@ async function rebuildQueryProjectionWithManifest(
   const dailySampleSummaries = metricProjection.dailySampleSummaries;
   const metricPoints = metricProjection.metricPoints;
   const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
+  const wearableSummaries = buildWearableSummaryProjection(snapshotReadModel);
+  const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
   const searchDocuments = [
-    ...materializeSearchDocuments(projectedEntities),
+    ...materializeSearchDocuments(searchableEntities),
     ...materializeSummaryDocuments(dailySampleSummaries),
   ];
   const database = openQueryProjectionDatabase(location, { create: true });
@@ -324,9 +496,9 @@ async function rebuildQueryProjectionWithManifest(
         DELETE FROM query_entities;
         DELETE FROM query_metric_points;
         DELETE FROM query_metric_targets;
+        DELETE FROM query_wearable_summaries;
         DELETE FROM query_source_manifest;
         DELETE FROM query_search_document;
-        DELETE FROM query_search_fts;
       `);
 
       const insertEntity = database.prepare(`
@@ -395,6 +567,17 @@ async function rebuildQueryProjectionWithManifest(
           target_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
+      const insertWearableSummary = database.prepare(`
+        INSERT INTO query_wearable_summaries (
+          id,
+          provider_scope_key,
+          provider_scope_json,
+          summary_kind,
+          summary_date,
+          sort_rank,
+          summary_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
       const insertSearchDocument = database.prepare(`
         INSERT INTO query_search_document (
           record_id,
@@ -413,15 +596,6 @@ async function rebuildQueryProjectionWithManifest(
           tags_text,
           structured_text
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const insertSearchFts = database.prepare(`
-        INSERT INTO query_search_fts (
-          record_id,
-          title_text,
-          body_text,
-          tags_text,
-          structured_text
-        ) VALUES (?, ?, ?, ?, ?)
       `);
 
       projectedEntities.forEach((entity, index) => {
@@ -486,6 +660,18 @@ async function rebuildQueryProjectionWithManifest(
         );
       });
 
+      wearableSummaries.forEach((row) => {
+        insertWearableSummary.run(
+          row.id,
+          row.providerScopeKey,
+          row.providerScopeJson,
+          row.summaryKind,
+          row.summaryDate,
+          row.sortRank,
+          row.summaryJson,
+        );
+      });
+
       currentManifest.forEach((entry) => {
         insertManifestEntry.run(entry.relativePath, entry.sizeBytes, entry.mtimeMs);
       });
@@ -508,14 +694,9 @@ async function rebuildQueryProjectionWithManifest(
           document.tagsText,
           document.structuredText,
         );
-        insertSearchFts.run(
-          document.recordId,
-          document.titleText,
-          document.bodyText,
-          document.tagsText,
-          document.structuredText,
-        );
       });
+
+      database.exec("INSERT INTO query_search_fts(query_search_fts) VALUES ('rebuild');");
 
       const builtAt = new Date().toISOString();
       writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
@@ -540,11 +721,121 @@ async function rebuildQueryProjectionWithManifest(
 }
 
 function isProjectedQueryEntity(entity: CanonicalEntity): boolean {
+  if (isDenseProviderObservationEntity(entity)) {
+    return false;
+  }
+
   if (entity.family !== "sample") {
     return true;
   }
 
   return entity.kind === "metric_sample" && isDisplayGradeMetricSampleEntity(entity);
+}
+
+function isSearchIndexedQueryEntity(entity: CanonicalEntity): boolean {
+  return !isDenseProviderObservationEntity(entity);
+}
+
+interface WearableProviderScope {
+  key: string;
+  providers: string[];
+}
+
+function buildWearableSummaryProjection(vault: ReturnType<typeof createVaultReadModel>): QueryWearableSummaryRow[] {
+  const allBundle = buildWearableSummaryBundle(vault);
+  const providers = normalizeWearableProviderScope(allBundle.sourceHealth.map((entry) => entry.provider));
+  const scopes = buildWearableProviderScopes(providers);
+
+  return scopes.flatMap((scope) => {
+    const bundle = scope.providers.length === 0
+      ? allBundle
+      : buildWearableSummaryBundle(vault, { providers: scope.providers });
+    return materializeWearableSummaryRows(scope, bundle);
+  });
+}
+
+function buildWearableProviderScopes(providers: readonly string[]): WearableProviderScope[] {
+  const normalizedProviders = normalizeWearableProviderScope(providers);
+  const scopes = new Map<string, WearableProviderScope>();
+  const register = (scopeProviders: readonly string[]) => {
+    const normalized = normalizeWearableProviderScope(scopeProviders);
+    const key = wearableProviderScopeKey(normalized);
+    scopes.set(key, { key, providers: normalized });
+  };
+
+  register([]);
+
+  if (normalizedProviders.length === 0) {
+    return [...scopes.values()];
+  }
+
+  if ((2 ** normalizedProviders.length) - 1 <= MAX_WEARABLE_PROVIDER_SCOPE_COMBINATIONS) {
+    for (let mask = 1; mask < 2 ** normalizedProviders.length; mask += 1) {
+      register(normalizedProviders.filter((_provider, index) => (mask & (1 << index)) !== 0));
+    }
+  } else {
+    for (const provider of normalizedProviders) {
+      register([provider]);
+    }
+  }
+
+  return [...scopes.values()];
+}
+
+function materializeWearableSummaryRows(
+  scope: WearableProviderScope,
+  bundle: WearableSummaryBundle,
+): QueryWearableSummaryRow[] {
+  const rows: QueryWearableSummaryRow[] = [];
+  const providerScopeJson = JSON.stringify(scope.providers);
+  const push = <TSummary extends { date: string }>(
+    summaryKind: Exclude<QueryWearableSummaryKind, "source_health">,
+    summaries: readonly TSummary[],
+  ) => {
+    summaries.slice(0, WEARABLE_SUMMARY_PROJECTION_LIMIT).forEach((summary, index) => {
+      rows.push({
+        id: `${scope.key}:${summaryKind}:${summary.date}:${index}`,
+        providerScopeJson,
+        providerScopeKey: scope.key,
+        sortRank: index,
+        summaryDate: summary.date,
+        summaryJson: JSON.stringify(summary),
+        summaryKind,
+      });
+    });
+  };
+
+  push("activity", bundle.activityDays);
+  push("body_state", bundle.bodyStateDays);
+  push("recovery", bundle.recoveryDays);
+  push("sleep", bundle.sleepNights);
+
+  bundle.sourceHealth.forEach((summary, index) => {
+    rows.push({
+      id: `${scope.key}:source_health:${summary.provider}:${index}`,
+      providerScopeJson,
+      providerScopeKey: scope.key,
+      sortRank: index,
+      summaryDate: summary.lastDate ?? summary.firstDate,
+      summaryJson: JSON.stringify(summary),
+      summaryKind: "source_health",
+    });
+  });
+
+  return rows;
+}
+
+function normalizeWearableProviderScope(providers: readonly string[] | undefined): string[] {
+  return [...new Set(
+    (providers ?? [])
+      .map((provider) => provider.trim().toLowerCase())
+      .filter((provider) => provider.length > 0),
+  )].sort();
+}
+
+function wearableProviderScopeKey(providers: readonly string[]): string {
+  const normalized = normalizeWearableProviderScope(providers);
+  return normalized.length === 0 ? "all" : `providers:${normalized.join(",")}`;
 }
 
 async function resetUnsupportedQueryProjection(
@@ -723,6 +1014,148 @@ function listStoredMetricPoints(
   } finally {
     database.close();
   }
+}
+
+function readStoredWearableSummaryBundle(
+  location: QueryProjectionLocation,
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): WearableSummaryBundle {
+  const database = openQueryProjectionDatabase(location, {
+    create: false,
+    readOnly: true,
+  });
+
+  try {
+    if (!hasQueryProjectionTables(database)) {
+      throw new Error(
+        `Query projection at ${location.dbPath} is missing required tables. Rebuild the projection and try again.`,
+      );
+    }
+
+    const readRows = (scopeKey: string) => database.prepare(`
+        SELECT
+          id,
+          provider_scope_key AS providerScopeKey,
+          provider_scope_json AS providerScopeJson,
+          summary_kind AS summaryKind,
+          summary_date AS summaryDate,
+          sort_rank AS sortRank,
+          summary_json AS summaryJson
+        FROM query_wearable_summaries
+        WHERE provider_scope_key = ?
+        ORDER BY summary_kind ASC, summary_date DESC, sort_rank ASC
+      `).all(scopeKey).map(decodeQueryWearableSummaryRow);
+    const providerScopeKey = wearableProviderScopeKey(normalizeWearableProviderScope(filters.providers));
+    const scopedRows = readRows(providerScopeKey);
+    const rows = scopedRows.length > 0 || providerScopeKey === "all"
+      ? scopedRows
+      : readRows("all");
+
+    return wearableSummaryBundleFromRows(rows, filters);
+  } finally {
+    database.close();
+  }
+}
+
+function wearableSummaryBundleFromRows(
+  rows: readonly QueryWearableSummaryRow[],
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): WearableSummaryBundle {
+  const bundle: WearableSummaryBundle = {
+    activityDays: [],
+    bodyStateDays: [],
+    recoveryDays: [],
+    sleepNights: [],
+    sourceHealth: [],
+  };
+
+  for (const row of rows) {
+    if (!wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)) {
+      continue;
+    }
+
+    switch (row.summaryKind) {
+      case "activity": {
+        const summary = parseJsonValue<WearableActivitySummary | null>(row.summaryJson, null);
+        if (summary) bundle.activityDays.push(summary);
+        break;
+      }
+      case "body_state": {
+        const summary = parseJsonValue<WearableBodyStateSummary | null>(row.summaryJson, null);
+        if (summary) bundle.bodyStateDays.push(summary);
+        break;
+      }
+      case "recovery": {
+        const summary = parseJsonValue<WearableRecoverySummary | null>(row.summaryJson, null);
+        if (summary) bundle.recoveryDays.push(summary);
+        break;
+      }
+      case "sleep": {
+        const summary = parseJsonValue<WearableSleepSummary | null>(row.summaryJson, null);
+        if (summary) bundle.sleepNights.push(summary);
+        break;
+      }
+      case "source_health": {
+        const summary = parseJsonValue<WearableSourceHealthSummary | null>(row.summaryJson, null);
+        if (summary && wearableSourceHealthMatchesDateFilters(summary, filters)) {
+          bundle.sourceHealth.push(summary);
+        }
+        break;
+      }
+    }
+  }
+
+  return bundle;
+}
+
+function wearableSummaryRowMatchesDateFilters(
+  summaryDate: string | null,
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): boolean {
+  const date = summaryDate ? extractIsoDatePrefix(summaryDate) ?? summaryDate : null;
+
+  if (filters.date) {
+    return date === (extractIsoDatePrefix(filters.date) ?? filters.date);
+  }
+
+  if (filters.from && date && date < (extractIsoDatePrefix(filters.from) ?? filters.from)) {
+    return false;
+  }
+
+  if (filters.to && date && date > (extractIsoDatePrefix(filters.to) ?? filters.to)) {
+    return false;
+  }
+
+  return true;
+}
+
+function wearableSourceHealthMatchesDateFilters(
+  summary: WearableSourceHealthSummary,
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): boolean {
+  const firstDate = summary.firstDate;
+  const lastDate = summary.lastDate;
+
+  if (filters.date) {
+    const date = extractIsoDatePrefix(filters.date) ?? filters.date;
+    return firstDate === null || lastDate === null || (firstDate <= date && lastDate >= date);
+  }
+
+  if (filters.from) {
+    const from = extractIsoDatePrefix(filters.from) ?? filters.from;
+    if (lastDate !== null && lastDate < from) {
+      return false;
+    }
+  }
+
+  if (filters.to) {
+    const to = extractIsoDatePrefix(filters.to) ?? filters.to;
+    if (firstDate !== null && firstDate > to) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function normalizeMetricPointLimit(value: number): number {
@@ -939,7 +1372,7 @@ function searchQueryProjection(
         query_search_document.tags_text,
         query_search_document.structured_text
       FROM query_search_fts
-      JOIN query_search_document ON query_search_document.record_id = query_search_fts.record_id
+      JOIN query_search_document ON query_search_document.rowid = query_search_fts.rowid
       WHERE ${whereClauses.join(" AND ")}
       ORDER BY bm25(query_search_fts) ASC, query_search_document.record_id ASC
       LIMIT ?
@@ -983,6 +1416,7 @@ function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
     !tableExists(database, "query_entities") ||
     !tableExists(database, "query_metric_points") ||
     !tableExists(database, "query_metric_targets") ||
+    !tableExists(database, "query_wearable_summaries") ||
     !tableExists(database, "query_source_manifest") ||
     !tableExists(database, "query_search_document") ||
     !tableExists(database, "query_search_fts")
@@ -1096,6 +1530,19 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_metric_targets_metric_idx ON query_metric_targets(metric_key);
     CREATE INDEX IF NOT EXISTS query_metric_targets_biomarker_idx ON query_metric_targets(biomarker_key);
 
+    CREATE TABLE IF NOT EXISTS query_wearable_summaries (
+      id TEXT PRIMARY KEY,
+      provider_scope_key TEXT NOT NULL,
+      provider_scope_json TEXT NOT NULL,
+      summary_kind TEXT NOT NULL,
+      summary_date TEXT,
+      sort_rank INTEGER NOT NULL,
+      summary_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
+      ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
+
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,
       size_bytes INTEGER NOT NULL,
@@ -1128,11 +1575,12 @@ function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_search_document_occurred_at_idx ON query_search_document(occurred_at);
 
     CREATE VIRTUAL TABLE IF NOT EXISTS query_search_fts USING fts5(
-      record_id UNINDEXED,
       title_text,
       body_text,
       tags_text,
       structured_text,
+      content = 'query_search_document',
+      content_rowid = 'rowid',
       tokenize = 'unicode61 remove_diacritics 2 tokenchars ''-_'''
     );
   `);
@@ -1143,6 +1591,7 @@ function hasQueryProjectionTables(database: DatabaseSync): boolean {
     tableExists(database, "query_entities") &&
     tableExists(database, "query_metric_points") &&
     tableExists(database, "query_metric_targets") &&
+    tableExists(database, "query_wearable_summaries") &&
     tableExists(database, "query_source_manifest") &&
     tableExists(database, "query_search_document") &&
     tableExists(database, "query_search_fts")

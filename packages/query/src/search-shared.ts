@@ -5,6 +5,7 @@ import {
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
+import { isDenseProviderObservationEntity } from "./dense-provider-observation.ts";
 import type { DailySampleSummary } from "./summaries.ts";
 
 const DEFAULT_LIMIT = 20;
@@ -162,12 +163,7 @@ function buildSearchDocument(
     ...(options.includeSourcePathTerms ? [entity.path] : []),
     ...entity.lookupIds,
     ...entityRelationTargetIds(entity),
-    ...(options.includeStructuredPayload
-      ? [
-          safeJsonStringify(entity.attributes),
-          entity.frontmatter ? safeJsonStringify(entity.frontmatter) : null,
-        ]
-      : []),
+    ...(options.includeStructuredPayload ? searchableStructuredPayloadTerms(entity) : []),
   ]).join("\n");
 
   return {
@@ -187,6 +183,122 @@ function buildSearchDocument(
     tagsText,
     structuredText,
   };
+}
+
+const STRUCTURED_VALUE_KEYS = new Set([
+  "category",
+  "docType",
+  "experimentSlug",
+  "kind",
+  "metric",
+  "mimeType",
+  "provider",
+  "schemaVersion",
+  "source",
+  "status",
+  "stream",
+  "title",
+  "unit",
+]);
+
+const STRUCTURED_EXCLUDED_KEYS = new Set([
+  "data",
+  "externalRef",
+  "payload",
+  "raw",
+  "rawArtifact",
+  "rawArtifacts",
+  "rawPayload",
+  "rawRefs",
+  "samples",
+  "timeseries",
+  "value",
+  "values",
+]);
+
+const MAX_STRUCTURED_TERM_CHARS = 120;
+const MAX_STRUCTURED_PAYLOAD_CHARS = 4_000;
+
+function searchableStructuredPayloadTerms(entity: CanonicalEntity): string[] {
+  if (isDenseProviderObservationEntity(entity)) {
+    return [];
+  }
+
+  const terms = [
+    ...structuredTermsFromRecord(entity.attributes),
+    ...(entity.frontmatter ? structuredTermsFromRecord(entity.frontmatter) : []),
+  ];
+  const limited: string[] = [];
+  let totalChars = 0;
+
+  for (const term of terms) {
+    const normalized = normalizeStructuredTerm(term);
+    if (!normalized) {
+      continue;
+    }
+
+    if (totalChars + normalized.length > MAX_STRUCTURED_PAYLOAD_CHARS) {
+      break;
+    }
+
+    limited.push(normalized);
+    totalChars += normalized.length;
+  }
+
+  return limited;
+}
+
+function structuredTermsFromRecord(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+
+  const terms: string[] = [];
+
+  for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    if (!key || STRUCTURED_EXCLUDED_KEYS.has(key)) {
+      continue;
+    }
+
+    terms.push(key);
+
+    if (STRUCTURED_VALUE_KEYS.has(key)) {
+      const normalizedValue = scalarStructuredValue(rawValue);
+      if (normalizedValue) {
+        terms.push(normalizedValue);
+      }
+    }
+  }
+
+  return terms;
+}
+
+function scalarStructuredValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  return null;
+}
+
+function normalizeStructuredTerm(value: string): string | null {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.length > MAX_STRUCTURED_TERM_CHARS
+    ? trimmed.slice(0, MAX_STRUCTURED_TERM_CHARS)
+    : trimmed;
 }
 
 function buildSampleSummarySearchDocument(
@@ -539,12 +651,4 @@ function normalizeLimit(limit: number | undefined): number {
   }
 
   return Math.max(1, Math.min(MAX_LIMIT, Math.trunc(limit ?? DEFAULT_LIMIT)));
-}
-
-function safeJsonStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? "";
-  } catch {
-    return "";
-  }
 }

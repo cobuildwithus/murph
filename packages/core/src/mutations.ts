@@ -2062,7 +2062,8 @@ export async function importDeviceBatch({
   denseSamplePolicy,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
-  assertDenseDeviceSamplePolicy({
+  assertDenseDeviceTelemetryPolicy({
+    observationEventCount: countDenseDeviceObservationEvents(events),
     policy: denseSamplePolicy,
     sampleCount: Array.isArray(samples) ? samples.length : 0,
   });
@@ -2174,11 +2175,15 @@ export async function importDeviceBatch({
   });
 }
 
-function assertDenseDeviceSamplePolicy(input: {
+function assertDenseDeviceTelemetryPolicy(input: {
+  observationEventCount: number;
   policy?: DenseDeviceSamplePolicyInput;
   sampleCount: number;
 }): void {
-  if (input.sampleCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT) {
+  if (
+    input.sampleCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT &&
+    input.observationEventCount <= MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT
+  ) {
     return;
   }
   if (
@@ -2193,7 +2198,35 @@ function assertDenseDeviceSamplePolicy(input: {
     "Device provider imports must keep dense timeseries as raw evidence and emit compact product facts.",
     {
       maxAllowed: MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT,
+      observationEventCount: input.observationEventCount,
       sampleCount: input.sampleCount,
     },
+  );
+}
+
+function countDenseDeviceObservationEvents(events: readonly DeviceEventInput[] | undefined): number {
+  if (!Array.isArray(events)) {
+    return 0;
+  }
+
+  return events.filter(isDenseDeviceObservationInput).length;
+}
+
+function isDenseDeviceObservationInput(event: DeviceEventInput): boolean {
+  if (String(event.kind ?? "").trim() !== "observation") {
+    return false;
+  }
+
+  const fields = event.fields && typeof event.fields === "object" && !Array.isArray(event.fields)
+    ? event.fields as Record<string, unknown>
+    : {};
+  const metric = fields.metric ?? event.metric;
+  const value = fields.value ?? event.value;
+
+  return (
+    typeof metric === "string" &&
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    (event.externalRef !== undefined || event.dataOrigin !== undefined)
   );
 }

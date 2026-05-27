@@ -73,6 +73,16 @@ const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
   "hosted-stable-proc-cwd",
   "raw",
 ]);
+const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
+  "active_experiment_context",
+  "cli_bootstrap",
+  "fallback_instructions",
+  "memory_overview",
+  "primary_instructions",
+  "resume_binding",
+  "supported_experiment_protocols",
+  "target_capabilities",
+]);
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES = new Set([
   "fresh-thread-fallback",
   "primary",
@@ -749,6 +759,17 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     "routePlanningActiveExperimentContextElapsedMs",
     "routePlanningCliBootstrapElapsedMs",
     "routePlanningElapsedMs",
+    "routePlanningFallbackInstructionsElapsedMs",
+    "routePlanningFreshThreadFallbackPromptElapsedMs",
+    "routePlanningMemoryOverviewElapsedMs",
+    "routePlanningMeasuredElapsedMs",
+    "routePlanningPrimaryInstructionsElapsedMs",
+    "routePlanningPrimarySystemPromptElapsedMs",
+    "routePlanningResumeBindingElapsedMs",
+    "routePlanningSlowestStageElapsedMs",
+    "routePlanningSupportedExperimentProtocolsElapsedMs",
+    "routePlanningTargetCapabilitiesElapsedMs",
+    "routePlanningUnaccountedElapsedMs",
     "routePlanningVaultOverviewElapsedMs",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
@@ -757,6 +778,15 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
       readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
     );
   }
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "routePlanningSlowestStage",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "routePlanningSlowestStage",
+      HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES,
+    ),
+  );
   for (const key of [
     "routePlanningAnyBootstrapContextPrepared",
     "routePlanningBootstrapContextPrepared",

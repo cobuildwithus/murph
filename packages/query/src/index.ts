@@ -3,6 +3,20 @@ import type {
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
 import type { SearchFilters, SearchResult } from "./search-shared.ts";
+import type {
+  WearableActivitySummary,
+  WearableBodyStateSummary,
+  WearableDaySummary,
+  WearableDriftSummary,
+  WearableLatestSummary,
+  WearableMetricLatestSummary,
+  WearableMetricSummaryFilters,
+  WearableMetricTrendSummary,
+  WearableRecoverySummary,
+  WearableSleepSummary,
+  WearableSourceHealthSummary,
+  WearableSummaryFilters,
+} from "./wearables.ts";
 
 export {
   createVaultReadModel,
@@ -182,7 +196,9 @@ export {
 } from "./query-projection-types.ts";
 export {
   buildWearableAssistantSummary,
+  buildWearableSummaryBundle,
   collectCanonicalWearableDataset,
+  explainWearableDriftFromBundle,
   explainWearableDrift,
   listWearableActivityDays,
   listWearableBodyStateDays,
@@ -190,14 +206,23 @@ export {
   listWearableSleepNights,
   listWearableSourceHealth,
   summarizeWearableLatest,
+  summarizeWearableLatestFromBundle,
   summarizeWearableActivity,
+  summarizeWearableActivityFromBundle,
   summarizeWearableBodyState,
+  summarizeWearableBodyStateFromBundle,
   summarizeWearableDay,
+  summarizeWearableDayFromBundle,
   summarizeWearableMetricLatest,
+  summarizeWearableMetricLatestFromBundle,
   summarizeWearableMetricTrend,
+  summarizeWearableMetricTrendFromBundle,
   summarizeWearableRecovery,
+  summarizeWearableRecoveryFromBundle,
   summarizeWearableSleep,
+  summarizeWearableSleepFromBundle,
   summarizeWearableSourceHealth,
+  summarizeWearableSourceHealthFromBundle,
 } from "./wearables.ts";
 export type {
   WearableActivityDay,
@@ -230,6 +255,7 @@ export type {
   WearableSleepSummary,
   WearableSourceHealth,
   WearableSourceHealthSummary,
+  WearableSummaryBundle,
   WearableSummaryConfidence,
   WearableSummaryFilters,
 } from "./wearables.ts";
@@ -474,6 +500,89 @@ export async function searchVaultRuntime(
 ): Promise<SearchResult> {
   const mod = await import("./query-projection.ts");
   return mod.searchVaultRuntime(vaultRoot, query, filters);
+}
+
+export async function summarizeWearableDayRuntime(
+  vaultRoot: string,
+  date: string,
+  filters: Omit<WearableSummaryFilters, "date" | "from" | "to"> = {},
+): Promise<WearableDaySummary | null> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableDayRuntime(vaultRoot, date, filters);
+}
+
+export async function summarizeWearableLatestRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableLatestSummary | null> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableLatestRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableMetricLatestRuntime(
+  vaultRoot: string,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): Promise<WearableMetricLatestSummary | null> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableMetricLatestRuntime(vaultRoot, metric, filters);
+}
+
+export async function summarizeWearableMetricTrendRuntime(
+  vaultRoot: string,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): Promise<WearableMetricTrendSummary | null> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableMetricTrendRuntime(vaultRoot, metric, filters);
+}
+
+export async function explainWearableDriftRuntime(
+  vaultRoot: string,
+  filters: WearableMetricSummaryFilters = {},
+): Promise<WearableDriftSummary | null> {
+  const mod = await import("./query-projection.ts");
+  return mod.explainWearableDriftRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableSleepRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableSleepSummary[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableSleepRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableActivityRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableActivitySummary[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableActivityRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableBodyStateRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableBodyStateSummary[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableBodyStateRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableRecoveryRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableRecoverySummary[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableRecoveryRuntime(vaultRoot, filters);
+}
+
+export async function summarizeWearableSourceHealthRuntime(
+  vaultRoot: string,
+  filters: WearableSummaryFilters = {},
+): Promise<WearableSourceHealthSummary[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.summarizeWearableSourceHealthRuntime(vaultRoot, filters);
 }
 
 export * from "./scheduled-logs.ts";

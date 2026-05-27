@@ -247,6 +247,8 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
         routePlanningCliBootstrapElapsedMs:
           input.routePlanningDiagnostics.cliBootstrapElapsedMs,
+        routePlanningMemoryOverviewElapsedMs:
+          input.routePlanningDiagnostics.vaultOverviewElapsedMs,
         routePlanningVaultOverviewElapsedMs:
           input.routePlanningDiagnostics.vaultOverviewElapsedMs,
         routePlanningActiveExperimentContextElapsedMs:
@@ -257,8 +259,30 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
         routePlanningFreshThreadFallbackPrepared:
           input.routePlanningDiagnostics.shouldPrepareFreshThreadFallback,
+        routePlanningFallbackInstructionsElapsedMs:
+          input.routePlanningDiagnostics.freshThreadFallbackPromptElapsedMs,
+        routePlanningFreshThreadFallbackPromptElapsedMs:
+          input.routePlanningDiagnostics.freshThreadFallbackPromptElapsedMs,
+        routePlanningMeasuredElapsedMs:
+          input.routePlanningDiagnostics.routePlanningMeasuredElapsedMs,
+        routePlanningPrimaryInstructionsElapsedMs:
+          input.routePlanningDiagnostics.primarySystemPromptElapsedMs,
+        routePlanningPrimarySystemPromptElapsedMs:
+          input.routePlanningDiagnostics.primarySystemPromptElapsedMs,
+        routePlanningResumeBindingElapsedMs:
+          input.routePlanningDiagnostics.routeResumeBindingElapsedMs,
+        routePlanningSlowestStage:
+          input.routePlanningDiagnostics.routePlanningSlowestStage,
+        routePlanningSlowestStageElapsedMs:
+          input.routePlanningDiagnostics.routePlanningSlowestStageElapsedMs,
         routePlanningSensitiveHealthContextAllowed:
           input.routePlanningDiagnostics.allowSensitiveHealthContext,
+        routePlanningSupportedExperimentProtocolsElapsedMs:
+          input.routePlanningDiagnostics.supportedExperimentProtocolsElapsedMs,
+        routePlanningTargetCapabilitiesElapsedMs:
+          input.routePlanningDiagnostics.routeTargetCapabilitiesElapsedMs,
+        routePlanningUnaccountedElapsedMs:
+          input.routePlanningDiagnostics.routePlanningUnaccountedElapsedMs,
         refreshThreadInstructions: input.refreshThreadInstructions,
         resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
         workingDirectoryKind:
