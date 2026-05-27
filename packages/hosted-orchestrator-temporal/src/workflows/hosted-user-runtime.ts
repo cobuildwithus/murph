@@ -16,6 +16,7 @@ import type * as activities from "../activities/index.js";
 import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+  HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
   HOSTED_RUNTIME_PREWARM_SOURCE,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
@@ -52,6 +53,8 @@ const HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH =
   "hosted-user-runtime-recheck-signal-v1";
 const HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH =
   "hosted-user-runtime-prewarm-signal-v1";
+const HOSTED_USER_RUNTIME_PREWARM_DEDICATED_TASK_QUEUE_PATCH =
+  "hosted-user-runtime-prewarm-dedicated-task-queue-v1";
 export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
@@ -83,7 +86,7 @@ export async function hostedUserRuntimeWorkflow(
     },
     startToCloseTimeout: options.ensureRuntimeProcessingStartToCloseTimeoutMs,
   });
-  const prewarmActivities = proxyActivities<typeof activities>({
+  const sharedQueuePrewarmActivities = proxyActivities<typeof activities>({
     cancellationType: ActivityCancellationType.ABANDON,
     retry: {
       initialInterval: "1 second",
@@ -94,6 +97,20 @@ export async function hostedUserRuntimeWorkflow(
       options.ensureRuntimeProcessingStartToCloseTimeoutMs,
       HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
     ),
+  });
+  const dedicatedQueuePrewarmActivities = proxyActivities<typeof activities>({
+    cancellationType: ActivityCancellationType.ABANDON,
+    retry: {
+      initialInterval: "1 second",
+      maximumAttempts: 2,
+      maximumInterval: "5 seconds",
+    },
+    startToCloseTimeout: Math.min(
+      options.ensureRuntimeProcessingStartToCloseTimeoutMs,
+      HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
+    ),
+    scheduleToStartTimeout: "2 seconds",
+    taskQueue: options.prewarmTaskQueue,
   });
   const machine = createHostedUserRuntimeWorkflowMachine(input, {
     continueAsNew: async (nextInput) => continueAsNew<typeof hostedUserRuntimeWorkflow>(
@@ -108,7 +125,9 @@ export async function hostedUserRuntimeWorkflow(
       return {
         cancel: () => scope.cancel(),
         result: scope.run(() =>
-          prewarmActivities.prewarmRuntimeContainer(prewarmInput)
+          patched(HOSTED_USER_RUNTIME_PREWARM_DEDICATED_TASK_QUEUE_PATCH)
+            ? dedicatedQueuePrewarmActivities.prewarmRuntimeContainer(prewarmInput)
+            : sharedQueuePrewarmActivities.prewarmRuntimeContainer(prewarmInput)
         ),
       };
     },
@@ -208,6 +227,7 @@ export interface HostedUserRuntimeWorkflowMachine {
 interface NormalizedWorkflowOptions {
   continueAsNewAfterIterations: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
+  prewarmTaskQueue: string;
   readRuntimeDemandStartToCloseTimeoutMs: number;
 }
 
@@ -681,6 +701,10 @@ export function normalizeHostedUserRuntimeWorkflowOptions(
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
       value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
     }),
+    prewarmTaskQueue: normalizeTaskQueueOption(
+      options?.prewarmTaskQueue,
+      HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
+    ),
     readRuntimeDemandStartToCloseTimeoutMs: normalizePositiveIntegerOption({
       fallback: HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
       max: HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
@@ -703,6 +727,7 @@ function normalizeContinueAsNewOptions(
   return {
     continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
     ensureRuntimeProcessingStartToCloseTimeoutMs,
+    prewarmTaskQueue: normalized.prewarmTaskQueue,
     readRuntimeDemandStartToCloseTimeoutMs:
       normalized.readRuntimeDemandStartToCloseTimeoutMs,
   };
@@ -721,6 +746,20 @@ function normalizePositiveIntegerOption(input: {
     throw new TypeError("Hosted runtime workflow numeric options must be integers.");
   }
   return Math.min(Math.max(input.value, input.min), input.max);
+}
+
+function normalizeTaskQueueOption(
+  value: string | undefined,
+  fallback: string,
+): string {
+  if (value === undefined) {
+    return fallback;
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > 128) {
+    throw new TypeError("Hosted runtime workflow task queue options must be bounded non-empty strings.");
+  }
+  return normalized;
 }
 
 function readCarryForwardState(
@@ -1006,6 +1045,12 @@ function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         "scopeHash",
         "source",
       ]);
+      if (record.scopeHash !== undefined && record.scopeHash !== null) {
+        requireOpaqueIdentifier(
+          record.scopeHash,
+          "Hosted runtime prewarm signal scopeHash",
+        );
+      }
       return {
         eventId: requireOpaqueIdentifier(
           record.eventId,
@@ -1016,14 +1061,6 @@ function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
           record.occurredAt,
           "Hosted runtime prewarm signal occurredAt",
         ),
-        ...(record.scopeHash === undefined || record.scopeHash === null
-          ? {}
-          : {
-              scopeHash: requireOpaqueIdentifier(
-                record.scopeHash,
-                "Hosted runtime prewarm signal scopeHash",
-              ),
-            }),
         source: requirePrewarmSource(
           record.source,
           "Hosted runtime prewarm signal source",

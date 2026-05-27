@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
+  prewarmTaskQueue: "murph-hosted-runtime-prewarm",
   readRuntimeDemandStartToCloseTimeoutMs: 10_000,
 };
 
@@ -238,7 +239,6 @@ describe("hosted runtime Temporal signaling", () => {
       client: buildClient(),
       eventId: "linq_event_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
-      scopeHash: "linq-chat:abc123",
       userId: "member_123",
     });
 
@@ -252,7 +252,6 @@ describe("hosted runtime Temporal signaling", () => {
           eventId: expect.stringMatching(/^runtime-prewarm:[0-9a-f]{32}$/u),
           kind: "runtime_prewarm_requested",
           occurredAt: "2026-03-26T12:00:00.000Z",
-          scopeHash: "linq-chat:abc123",
           source: "linq.imessage.typing",
         }],
         workflowId: "hosted-user-runtime:member_123",

@@ -121,7 +121,6 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         "eventId",
         "kind",
         "occurredAt",
-        "scopeHash",
         "source",
       ]);
 
@@ -135,14 +134,6 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
           record.occurredAt,
           "Hosted runtime prewarm signal occurredAt",
         ),
-        ...(record.scopeHash === undefined || record.scopeHash === null
-          ? {}
-          : {
-              scopeHash: requireOpaqueIdentifier(
-                record.scopeHash,
-                "Hosted runtime prewarm signal scopeHash",
-              ),
-            }),
         source: parseHostedRuntimePrewarmSource(
           record.source,
           "Hosted runtime prewarm signal source",

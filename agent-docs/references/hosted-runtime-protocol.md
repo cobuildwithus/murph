@@ -183,18 +183,22 @@ Temporal signals only coalesce pending work.
 
 Linq typing prewarm is the only conversation-webhook latency hint that does not
 append mailbox demand. After provider verification, web may classify
-`chat.typing_indicator.started`, resolve only an already-active hosted Linq
-route, throttle by user/source, and signal the existing per-user Temporal
-workflow with `runtime_prewarm_requested`. That signal carries only an opaque
-event id, timestamp, source, and optional hashed scope. It must not plan
+`chat.typing_indicator.started` only when the Linq service is explicitly
+`iMessage`, resolve only an already-active hosted Linq route, throttle by
+user/source, and signal the existing per-user Temporal workflow with
+`runtime_prewarm_requested`. That signal carries only an opaque event id,
+timestamp, and source; chat ids, phone numbers, and raw provider payloads must
+not enter Temporal state or logs. It must not plan
 onboarding, bind routes, append mailbox rows, send read receipts, call
 Cloudflare directly, or add a `readRuntimeDemand` source. Temporal reads real
 web-owned demand first; if mailbox or other durable demand exists, normal
 ensure-processing wins. If demand is idle, Temporal may issue one short
-best-effort Cloudflare prewarm Activity and clears the hint after the attempt.
-If a real demand signal arrives while the prewarm Activity is pending, the
-workflow abandons the prewarm wait and immediately re-reads demand, so mailbox
-processing never waits behind a typing hint.
+best-effort Cloudflare prewarm Activity on a dedicated prewarm task queue and
+clears the hint after the attempt. If a real demand signal arrives while the
+prewarm Activity is pending, the workflow abandons the prewarm wait and
+immediately re-reads demand. Mailbox processing must not wait behind a typing
+hint in workflow state, Temporal Activity worker capacity, or Cloudflare
+container lifecycle locks.
 
 Non-conversation control wakes follow the same durable-demand rule. Manual
 runs, browser-vault refreshes, and device-sync recovery handoffs append
@@ -273,6 +277,8 @@ workspace state, import mailbox rows, invoke the assistant runtime, checkpoint,
 record usage, or enqueue cleanup as if runtime work began. If a write fence is
 already active it returns `already_running`; if the shell is already responsive
 it returns `already_warm`; otherwise it returns `started` or `retry_later`.
+Prewarm readiness must be preemptible by real workspace invocation or
+ensure-processing calls.
 Cloudflare worker config fails closed when `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`
 is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus the
 owner-watchdog recheck margin, so env overrides cannot make Temporal re-read

@@ -10,6 +10,7 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     expect(readHostedRuntimeTemporalEnvironment({})).toEqual({
       address: "localhost:7233",
       namespace: "default",
+      prewarmTaskQueue: "murph-hosted-runtime-prewarm",
       taskQueue: "murph-hosted-runtime",
       tls: false,
     });
@@ -24,6 +25,7 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     })).toEqual({
       address: "temporal.example.test:7233",
       namespace: "hosted-local",
+      prewarmTaskQueue: "hosted-runtime-local-prewarm",
       taskQueue: "hosted-runtime-local",
       tls: true,
     });
@@ -45,6 +47,7 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
       address: "hosted-temporal.example.test:7233",
       apiKey: "hosted_temporal_test_api_key",
       namespace: "hosted-prefixed",
+      prewarmTaskQueue: "hosted-prefixed-queue-prewarm",
       taskQueue: "hosted-prefixed-queue",
       tls: true,
     });
@@ -57,6 +60,7 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
       address: "localhost:7233",
       apiKey: "temporal_test_api_key",
       namespace: "default",
+      prewarmTaskQueue: "murph-hosted-runtime-prewarm",
       taskQueue: "murph-hosted-runtime",
       tls: true,
     });
@@ -143,7 +147,16 @@ describe("readHostedUserRuntimeWorkflowOptions", () => {
   it("reads shared workflow timing options", () => {
     expect(readHostedUserRuntimeWorkflowOptions({})).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
+      prewarmTaskQueue: "murph-hosted-runtime-prewarm",
       readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+    });
+  });
+
+  it("reads the dedicated prewarm task queue from env", () => {
+    expect(readHostedUserRuntimeWorkflowOptions({
+      HOSTED_TEMPORAL_PREWARM_TASK_QUEUE: "hosted-prewarm-custom",
+    })).toMatchObject({
+      prewarmTaskQueue: "hosted-prewarm-custom",
     });
   });
 

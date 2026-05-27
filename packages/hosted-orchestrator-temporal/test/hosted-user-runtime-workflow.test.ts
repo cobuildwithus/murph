@@ -215,6 +215,42 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("accepts legacy prewarm scopeHash without carrying it into prewarm requests", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(idleDemand(null));
+    runtime.prewarms.push({
+      action: "started",
+      kind: "runtime_prewarm_accepted",
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal({
+      eventId: "runtime-prewarm:event-test",
+      kind: "runtime_prewarm_requested",
+      occurredAt: "2026-05-20T11:59:58.000Z",
+      scopeHash: "linq-chat:legacy-scope",
+      source: "linq.imessage.typing",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.prewarmRequests).toEqual([
+      {
+        prewarmAttemptId: "orchestration-attempt-1",
+        source: "linq.imessage.typing",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state).toMatchObject({
+      lastPrewarmResult: "accepted",
+      prewarmRequested: false,
+      prewarmSignalCount: 1,
+    });
+  });
+
   it("does not let pending prewarm block a later mailbox demand signal", async () => {
     const runtime = new FakeWorkflowRuntime();
     let machine: HostedUserRuntimeWorkflowMachine | null = null;
@@ -1181,6 +1217,7 @@ function normalizedContinuedOptions(
     continueAsNewAfterIterations: 500,
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
+    prewarmTaskQueue: "murph-hosted-runtime-prewarm",
     readRuntimeDemandStartToCloseTimeoutMs: 10_000,
     ...overrides,
   };
