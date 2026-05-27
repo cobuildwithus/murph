@@ -1,4 +1,6 @@
 import type {
+  QueryMetricPointFilters,
+  QueryMetricTarget,
   QueryProjectionStatus,
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
@@ -192,38 +194,12 @@ export {
   type MetricRowEvidence,
 } from "./metrics/index.ts";
 export {
+  type QueryMetricPointFilters,
+  type QueryMetricTarget,
+  type QueryMetricTargetRow,
   type QueryProjectionStatus,
   type RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
-export {
-  buildWearableAssistantSummary,
-  buildWearableSummaryBundle,
-  explainWearableDriftFromBundle,
-  explainWearableDrift,
-  listWearableActivityDays,
-  listWearableBodyStateDays,
-  listWearableRecoveryDays,
-  listWearableSleepNights,
-  listWearableSourceHealth,
-  summarizeWearableLatest,
-  summarizeWearableLatestFromBundle,
-  summarizeWearableActivity,
-  summarizeWearableActivityFromBundle,
-  summarizeWearableBodyState,
-  summarizeWearableBodyStateFromBundle,
-  summarizeWearableDay,
-  summarizeWearableDayFromBundle,
-  summarizeWearableMetricLatest,
-  summarizeWearableMetricLatestFromBundle,
-  summarizeWearableMetricTrend,
-  summarizeWearableMetricTrendFromBundle,
-  summarizeWearableRecovery,
-  summarizeWearableRecoveryFromBundle,
-  summarizeWearableSleep,
-  summarizeWearableSleepFromBundle,
-  summarizeWearableSourceHealth,
-  summarizeWearableSourceHealthFromBundle,
-} from "./wearables.ts";
 export type {
   ProjectedWearableActivitySummary,
   ProjectedWearableBodyStateSummary,
@@ -383,7 +359,7 @@ export * from "./memory.ts";
 
 export async function listMetricPoints(
   vaultRoot: string,
-  filters: import("./query-projection.ts").QueryMetricPointFilters = {},
+  filters: QueryMetricPointFilters = {},
 ): Promise<import("@murphai/health-metrics").MetricPoint[]> {
   const mod = await import("./query-projection.ts");
   return mod.listMetricPointsRuntime(vaultRoot, filters);
@@ -478,7 +454,7 @@ export async function getMurphAgeSubmittedCalculatorViewBundle(
 
 export async function listMetricTargets(
   vaultRoot: string,
-): Promise<import("./query-projection.ts").QueryMetricTargetRow[]> {
+): Promise<QueryMetricTarget[]> {
   const mod = await import("./query-projection.ts");
   return mod.listMetricTargetsRuntime(vaultRoot);
 }

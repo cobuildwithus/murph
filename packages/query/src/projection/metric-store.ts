@@ -8,6 +8,10 @@ import {
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { parseGoalMetricTargets } from "../metrics/index.ts";
+import type {
+  QueryMetricPointFilters,
+  QueryMetricTargetRow,
+} from "../query-projection-types.ts";
 import {
   assertQueryProjectionTables,
   openQueryProjectionDatabase,
@@ -15,20 +19,6 @@ import {
   type DatabaseSync,
   type QueryProjectionLocation,
 } from "./schema.ts";
-
-export interface QueryMetricPointFilters {
-  biomarkerKey?: string;
-  from?: string;
-  limit?: number | null;
-  metricKey?: string;
-  to?: string;
-}
-
-export interface QueryMetricTargetRow {
-  goalId: string;
-  id: string;
-  target: GoalMetricTarget;
-}
 
 export function insertMetricPoints(
   database: DatabaseSync,

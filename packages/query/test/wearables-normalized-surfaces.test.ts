@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { test } from "vitest";
 
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import { normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
-import { createVaultReadModel } from "../src/model.ts";
+import { createVaultReadModel, listEntities, readVault } from "../src/model.ts";
+import { searchVaultRuntime } from "../src/query-projection.ts";
+import { searchVault } from "../src/search.ts";
 import {
   explainWearableDrift,
   summarizeWearableLatest,
@@ -200,6 +206,77 @@ function makeVaultFromJunctionSnapshot(snapshot: Parameters<typeof normalizeJunc
   return makeVault([...events, ...samples]);
 }
 
+test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-raw-timeseries-query-"));
+  const rawTimeseriesSnapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    timeseries: {
+      heartrate: [{
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        timestamp: "2026-05-20T08:00:00Z",
+        unit: "bpm",
+        value: 61,
+      }],
+    },
+  };
+  const rawOnlyPayload = normalizeJunctionSnapshot(rawTimeseriesSnapshot);
+  const rawArtifact = rawOnlyPayload.rawArtifacts?.find((artifact) =>
+    artifact.role === "junction-timeseries-heartrate"
+  );
+
+  assert.deepEqual(rawOnlyPayload.events, []);
+  assert.deepEqual(rawOnlyPayload.samples ?? [], []);
+  assert.ok(rawArtifact);
+
+  try {
+    const rawArtifactPath = path.join(
+      vaultRoot,
+      "raw/integrations/junction/2026/05/xfm_junction_raw_timeseries/01-junction-timeseries-heartrate.json",
+    );
+    await mkdir(path.dirname(rawArtifactPath), { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
+        createdAt: "2026-05-20T00:00:00.000Z",
+        title: "Junction raw timeseries query vault",
+        timezone: "UTC",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(rawArtifactPath, `${JSON.stringify(rawArtifact.content)}\n`, "utf8");
+
+    assert.match(await readFile(rawArtifactPath, "utf8"), /"value":61/u);
+
+    const persistedRawVault = await readVault(vaultRoot);
+    assert.deepEqual(listEntities(persistedRawVault, { families: ["event"] }), []);
+    assert.deepEqual(listEntities(persistedRawVault, { families: ["sample"] }), []);
+    assert.equal(searchVault(persistedRawVault, "heart rate").total, 0);
+    assert.equal((await searchVaultRuntime(vaultRoot, "heart rate")).total, 0);
+    assert.equal(summarizeWearableLatest(persistedRawVault, { providers: ["garmin"] }), null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+
+  const compactSummaryVault = makeVaultFromJunctionSnapshot({
+    ...rawTimeseriesSnapshot,
+    summaries: {
+      activity: [{
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        observedAt: "2026-05-20T12:00:00Z",
+        steps: 7200,
+      }],
+    },
+  });
+  const latest = summarizeWearableLatest(compactSummaryVault, { providers: ["garmin"] });
+
+  assert.equal(latest?.latestDate, "2026-05-20");
+  assert.equal(latest?.activity?.steps.selection.value, 7200);
+});
+
 test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {
   const vault = makeVaultFromJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",
@@ -209,6 +286,9 @@ test("latest surface sees Junction Garmin object data envelopes as usable summar
         sourceType: "watch",
         observedAt: "2026-05-20T12:00:00Z",
         data: {
+          calories_active: 640,
+          calories_total: 2400,
+          distance: 7500,
           steps: 7200,
         },
       },
@@ -221,6 +301,8 @@ test("latest surface sees Junction Garmin object data envelopes as usable summar
           bedtime_start: "2026-05-20T02:00:00+00:00",
           bedtime_stop: "2026-05-20T10:00:00+00:00",
           duration: 28800,
+          efficiency: 0.97,
+          recovery_readiness_score: 74,
           total: 25200,
           sleepScore: 82,
         },
@@ -232,9 +314,14 @@ test("latest surface sees Junction Garmin object data envelopes as usable summar
 
   assert.equal(latest?.latestDate, "2026-05-20");
   assert.equal(latest?.activity?.steps.selection.value, 7200);
+  assert.equal(latest?.activity?.activeCalories.selection.value, 640);
+  assert.equal(latest?.activity?.totalCalories.selection.value, 2400);
+  assert.equal(latest?.activity?.distanceKm.selection.value, 7.5);
   assert.equal(latest?.activity?.steps.selection.provider, "garmin");
   assert.equal(latest?.sleep?.sleepScore.selection.value, 82);
   assert.equal(latest?.sleep?.totalSleepMinutes.selection.value, 420);
+  assert.equal(latest?.sleep?.sleepEfficiency.selection.value, 97);
+  assert.equal(latest?.recovery?.recoveryScore.selection.value, 74);
   assert.deepEqual(latest?.providers, ["garmin"]);
 });
 

@@ -34,6 +34,7 @@ import {
   EVENT_SOURCES,
   FRONTMATTER_SCHEMA_VERSIONS,
   ID_PREFIXES,
+  OBSERVATION_GRAINS,
   SAMPLE_QUALITIES,
   SAMPLE_SCHEMA_VERSION,
   SAMPLE_SOURCES,
@@ -447,6 +448,7 @@ interface NormalizedSampleSeed {
 
 const EVENT_KIND_SET = new Set<EventKind>(BASELINE_EVENT_KINDS as readonly EventKind[]);
 const EVENT_SOURCE_SET = new Set<EventSource>(EVENT_SOURCES as readonly EventSource[]);
+const OBSERVATION_GRAIN_SET = new Set<string>(OBSERVATION_GRAINS);
 const SAMPLE_STREAM_SET = new Set<SampleStream>(BASELINE_SAMPLE_STREAMS as readonly SampleStream[]);
 const SAMPLE_SOURCE_SET = new Set<SampleSource>(SAMPLE_SOURCES as readonly SampleSource[]);
 const SAMPLE_QUALITY_SET = new Set<SampleQuality>(SAMPLE_QUALITIES as readonly SampleQuality[]);
@@ -2226,8 +2228,13 @@ function isDenseDeviceObservationInput(event: DeviceEventInput): boolean {
     return false;
   }
 
-  const metric = readDeviceObservationField(event, "metric");
-  const value = readDeviceObservationField(event, "value");
+  const observationGrain = normalizedDeviceObservationString(readPersistedDeviceObservationField(event, "observationGrain"));
+  if (observationGrain && OBSERVATION_GRAIN_SET.has(observationGrain) && observationGrain !== "sample") {
+    return false;
+  }
+
+  const metric = readPersistedDeviceObservationField(event, "metric");
+  const value = readPersistedDeviceObservationField(event, "value");
 
   return (
     typeof metric === "string" &&
@@ -2237,19 +2244,19 @@ function isDenseDeviceObservationInput(event: DeviceEventInput): boolean {
   );
 }
 
-function readDeviceObservationField(event: DeviceEventInput, key: string): unknown {
+function readPersistedDeviceObservationField(event: DeviceEventInput, key: string): unknown {
   const fields = event.fields && typeof event.fields === "object" && !Array.isArray(event.fields)
     ? event.fields as Record<string, unknown>
     : {};
 
-  return fields[key] ?? event[key];
+  return fields[key];
 }
 
 function isDisplayGradeDeviceObservationInput(event: DeviceEventInput): boolean {
   return (
-    normalizedDeviceObservationString(readDeviceObservationField(event, "visibility")) === "display" ||
-    normalizedDeviceObservationString(readDeviceObservationField(event, "queryVisibility")) === "default" ||
-    readDeviceObservationField(event, "canonicalFact") === true
+    normalizedDeviceObservationString(readPersistedDeviceObservationField(event, "visibility")) === "display" ||
+    normalizedDeviceObservationString(readPersistedDeviceObservationField(event, "queryVisibility")) === "default" ||
+    readPersistedDeviceObservationField(event, "canonicalFact") === true
   );
 }
 

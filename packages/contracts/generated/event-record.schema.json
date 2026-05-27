@@ -2791,6 +2791,14 @@
           "type": "boolean",
           "const": true
         },
+        "observationGrain": {
+          "type": "string",
+          "enum": [
+            "sample",
+            "summary",
+            "derived_fact"
+          ]
+        },
         "unit": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._/%-]+$"

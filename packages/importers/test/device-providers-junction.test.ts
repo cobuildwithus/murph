@@ -1580,8 +1580,8 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
       sleep: [
         {
           source: {
-            provider: "garmin",
-            type: "watch",
+            provider: "oura",
+            type: "ring",
           },
           id: "sleep-documented-fields",
           bedtime_start: "2026-05-20T02:00:00+00:00",
@@ -1592,9 +1592,15 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
           rem: 7200,
           light: 12600,
           awake: 1800,
+          efficiency: 0.97,
           average_hrv: 42,
           hr_average: 54,
+          hr_lowest: 43,
+          hr_resting: 50,
+          recovery_readiness_score: 82,
           respiratory_rate: 14.2,
+          skin_temperature: 36.5,
+          temperature_delta: -0.2,
         },
       ],
     },
@@ -1612,10 +1618,101 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.equal(metricValue("sleep-rem-minutes"), 120);
   assert.equal(metricValue("sleep-light-minutes"), 210);
   assert.equal(metricValue("sleep-awake-minutes"), 30);
+  assert.equal(metricValue("sleep-efficiency"), 97);
   assert.equal(metricValue("hrv"), 42);
   assert.equal(metricValue("average-heart-rate"), 54);
+  assert.equal(metricValue("lowest-heart-rate"), 43);
+  assert.equal(metricValue("resting-heart-rate"), 50);
+  assert.equal(metricValue("readiness-score"), 82);
   assert.equal(metricValue("respiratory-rate"), 14.2);
-  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep"));
+  assert.equal(metricValue("temperature"), 36.5);
+  assert.equal(metricValue("temperature-deviation"), -0.2);
+  assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-oura-sleep"));
+});
+
+test("Junction normalizer maps documented activity and body summary scalar fields", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        source: {
+          provider: "garmin",
+          type: "watch",
+        },
+        id: "activity-documented-fields",
+        date: "2026-05-20T00:00:00+00:00",
+        calories_active: 640,
+        calories_total: 2400,
+        distance: 7500,
+        heart_rate: {
+          max_bpm: 148,
+          resting_bpm: 52,
+        },
+        steps: 9400,
+      }],
+      body: [{
+        source: {
+          provider: "withings",
+          type: "scale",
+        },
+        id: "body-documented-fields",
+        date: "2026-05-20T08:00:00+00:00",
+        body_mass_index: 22.3,
+        fat: 30,
+        weight: 80,
+      }],
+    },
+  });
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metricValue = (metric: string) =>
+    observations.find((event) => event.fields?.metric === metric)?.fields?.value;
+
+  assert.equal(metricValue("daily-steps"), 9400);
+  assert.equal(metricValue("active-calories"), 640);
+  assert.equal(metricValue("total-calories"), 2400);
+  assert.equal(metricValue("distance-km"), 7.5);
+  assert.equal(metricValue("max-heart-rate"), 148);
+  assert.equal(metricValue("resting-heart-rate"), 52);
+  assert.equal(metricValue("weight"), 80);
+  assert.equal(metricValue("bmi"), 22.3);
+  assert.equal(metricValue("body-fat-percentage"), 30);
+  assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
+});
+
+test("Junction recovery readiness score preserves source-specific semantics", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [
+        {
+          source: { provider: "oura", type: "ring" },
+          id: "oura-readiness",
+          date: "2026-05-20T08:00:00+00:00",
+          recovery_readiness_score: 82,
+        },
+        {
+          source: { provider: "whoop", type: "strap" },
+          id: "whoop-recovery",
+          date: "2026-05-20T08:00:00+00:00",
+          recovery_readiness_score: 67,
+        },
+      ],
+    },
+  });
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  assert.ok(observations.some((event) =>
+    event.fields?.metric === "readiness-score"
+    && event.fields.value === 82
+    && event.externalRef?.resourceType === "junction-oura-sleep"
+  ));
+  assert.ok(observations.some((event) =>
+    event.fields?.metric === "recovery-score"
+    && event.fields.value === 67
+    && event.externalRef?.resourceType === "junction-whoop-sleep"
+  ));
 });
 
 test("Junction workout provider IDs drive stable summary external refs", () => {

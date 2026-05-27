@@ -329,17 +329,9 @@ export function createHostedUserRuntimeWorkflowMachine(
         if (signalArrivedDuringExecution) {
           continue;
         }
-        const deviceSyncRecoveryWakeLimitReached =
-          sameRuntimeWakeCountPatchEnabled
-          && isDeviceSyncRecoveryWakeLimitReached(
-            state,
-            demand.source,
-            execution,
-          );
-        clearConsumedFlagsAfterRun(state, demand.source, execution);
-        if (deviceSyncRecoveryWakeLimitReached) {
-          state.deviceSyncRecoveryRequested = false;
-        }
+        clearConsumedFlagsAfterRun(state, demand.source, execution, {
+          deviceSyncRecoveryWakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
+        });
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
@@ -408,18 +400,30 @@ function recordRuntimeProcessingAccepted(
   state.sameRuntimeWakeAcceptedCount = options.countFirstAcceptedWake ? 1 : 0;
 }
 
-function isDeviceSyncRecoveryWakeLimitReached(
-  state: HostedRuntimeWorkflowState,
-  source: HostedRuntimeRunDemand["source"],
+function shouldKeepDeviceSyncRecoveryRequest(input: {
+  currentRequested: boolean;
   execution: Extract<
     HostedRuntimeEnsureProcessingResponse,
     { kind: "runtime_processing_accepted" }
-  >,
-): boolean {
-  return source === "device_sync_recovery"
-    && isRuntimeWakeAcceptedAction(execution.action)
-    && state.sameRuntimeWakeAcceptedCount
-      >= HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT;
+  >;
+  source: HostedRuntimeRunDemand["source"];
+  wakeCount: number;
+  wakeLimitEnabled: boolean;
+}): boolean {
+  if (
+    !input.currentRequested
+    || input.source !== "device_sync_recovery"
+    || !isRuntimeWakeAcceptedAction(input.execution.action)
+  ) {
+    return false;
+  }
+
+  if (!input.wakeLimitEnabled) {
+    return true;
+  }
+
+  return input.wakeCount
+    < HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT;
 }
 
 function isRuntimeWakeAcceptedAction(
@@ -579,7 +583,11 @@ function clearSatisfiedFlags(
 function clearConsumedFlagsAfterRun(
   state: HostedRuntimeWorkflowState,
   source: HostedRuntimeRunDemand["source"],
-  execution?: HostedRuntimeEnsureProcessingResponse,
+  execution: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >,
+  options: { deviceSyncRecoveryWakeLimitEnabled: boolean },
 ): void {
   switch (source) {
     case "mailbox_backlog": {
@@ -596,16 +604,13 @@ function clearConsumedFlagsAfterRun(
       return;
     }
     case "device_sync_recovery": {
-      if (
-        execution?.kind === "runtime_processing_accepted"
-        && (
-          execution.action === "already_running"
-          || execution.action === "woken"
-        )
-      ) {
-        return;
-      }
-      state.deviceSyncRecoveryRequested = false;
+      state.deviceSyncRecoveryRequested = shouldKeepDeviceSyncRecoveryRequest({
+        currentRequested: state.deviceSyncRecoveryRequested,
+        execution,
+        source,
+        wakeCount: state.sameRuntimeWakeAcceptedCount,
+        wakeLimitEnabled: options.deviceSyncRecoveryWakeLimitEnabled,
+      });
       return;
     }
     case "lag_recovery": {

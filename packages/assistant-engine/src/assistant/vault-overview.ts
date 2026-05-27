@@ -4,8 +4,9 @@ import { resolveVaultPath, VAULT_LAYOUT, walkVaultFiles } from '@murphai/core'
 import {
   listAutomations,
   listBloodTests,
-  listWearableSourceHealth,
   readVault,
+  summarizeWearableSourceHealthRuntime,
+  type ProjectedWearableSourceHealthSummary,
   type VaultReadModel,
 } from '@murphai/query'
 
@@ -19,6 +20,7 @@ export async function buildAssistantVaultOverviewBlock(
     vault,
     automations,
     bloodTests,
+    wearableSourceHealth,
     rawMealManifestPaths,
     researchNotePaths,
     rawInboxPresent,
@@ -28,6 +30,7 @@ export async function buildAssistantVaultOverviewBlock(
       readVault(vaultRoot),
       listAutomations(vaultRoot, { limit: 1 }),
       listBloodTests(vaultRoot, { limit: 1 }),
+      summarizeWearableSourceHealthRuntime(vaultRoot),
       listRawMealManifestPaths(vaultRoot),
       walkVaultFiles(vaultRoot, RESEARCH_ROOT, { extension: '.md' }),
       directoryHasEntries(vaultRoot, VAULT_LAYOUT.rawInboxDirectory),
@@ -36,7 +39,7 @@ export async function buildAssistantVaultOverviewBlock(
 
   const eventKindCounts = countEventKinds(vault)
   const canonicalCoverage = summarizeCanonicalCoverage(vault, eventKindCounts)
-  const wearableCoverage = summarizeWearableCoverage(vault)
+  const wearableCoverage = summarizeWearableCoverage(wearableSourceHealth)
   const healthContextCoverage = summarizeHealthContextCoverage(vault)
   const bloodTestCoverage = summarizeBloodTestCoverage(bloodTests.length)
   const journalAndDocumentCoverage = summarizeJournalAndDocumentCoverage(
@@ -95,8 +98,9 @@ function summarizeCanonicalCoverage(
   return `- Canonical coverage includes ${joinWithAnd(parts)}.`
 }
 
-function summarizeWearableCoverage(vault: VaultReadModel): string | null {
-  const sourceHealth = listWearableSourceHealth(vault)
+function summarizeWearableCoverage(
+  sourceHealth: readonly ProjectedWearableSourceHealthSummary[],
+): string | null {
   if (sourceHealth.length === 0) {
     return null
   }

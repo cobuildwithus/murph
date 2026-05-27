@@ -32,6 +32,8 @@ import {
 } from "./schema.ts";
 import {
   buildWearableSummaryProjection,
+} from "./wearable-summary-projector.ts";
+import {
   insertWearableSummaryRows,
 } from "./wearable-summary-store.ts";
 

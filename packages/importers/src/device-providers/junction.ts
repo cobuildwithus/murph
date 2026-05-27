@@ -93,6 +93,8 @@ interface MetricDescriptor {
   unit: string;
   title: string;
   paths: readonly string[];
+  metersPaths?: readonly string[];
+  percentRatioPaths?: readonly string[];
   secondsPaths?: readonly string[];
 }
 
@@ -147,16 +149,18 @@ const RAW_SOURCE_CONTAINER_LINKAGE_KEY_PARTS = [
 
 const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
-  { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories"] },
-  { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories"] },
-  { metric: "distance-km", unit: "km", title: "Junction distance", paths: ["distanceKm", "distance_km"] },
+  { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories", "calories_active"] },
+  { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories", "calories_total"] },
+  { metric: "distance-km", unit: "km", title: "Junction distance", paths: ["distanceKm", "distance_km"], metersPaths: ["distance"] },
   { metric: "activity-score", unit: "%", title: "Junction activity score", paths: ["activityScore", "activity_score", "score"] },
+  { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
+  { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
 
 const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
-  { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent"] },
+  { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "fat"] },
 ];
 
 const SLEEP_METRICS: readonly MetricDescriptor[] = [
@@ -172,11 +176,15 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-rem-minutes", unit: "minutes", title: "Junction REM sleep", paths: ["remMinutes", "rem_minutes"], secondsPaths: ["rem"] },
   { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: ["lightMinutes", "light_minutes"], secondsPaths: ["light"] },
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: ["awakeMinutes", "awake_minutes"], secondsPaths: ["awake"] },
+  { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: ["sleepEfficiency", "sleep_efficiency", "efficiency"] },
   { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: ["hrv", "hrvRmssd", "hrv_rmssd", "average_hrv"] },
   { metric: "average-heart-rate", unit: "bpm", title: "Junction sleep average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr", "hr_average"] },
-  { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr"] },
+  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction sleep lowest heart rate", paths: ["lowestHeartRate", "lowest_heart_rate", "min_hr", "hr_lowest"] },
+  { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "hr_resting"] },
   { metric: "respiratory-rate", unit: "breaths_per_minute", title: "Junction respiratory rate", paths: ["respiratoryRate", "respiratory_rate"] },
   { metric: "spo2", unit: "%", title: "Junction blood oxygen", paths: ["spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
+  { metric: "temperature", unit: "celsius", title: "Junction sleep skin temperature", paths: ["skin_temperature"] },
+  { metric: "temperature-deviation", unit: "celsius", title: "Junction sleep temperature delta", paths: ["temperatureDelta", "temperature_delta", "skin_temperature_delta"] },
 ];
 
 const WORKOUT_METRICS: readonly MetricDescriptor[] = [
@@ -548,6 +556,7 @@ function pushSleepSummary(
   }
 
   pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS);
+  pushJunctionRecoveryReadinessScore(entry, resourceContext, context, timestamp);
 }
 
 function pushSleepCycle(
@@ -720,9 +729,8 @@ function pushObservationMetrics(
   }
 
   for (const metric of metrics) {
-    const value = firstNumberFromPaths(entry, metric.paths)
-      ?? secondsToMinutes(firstNumberFromPaths(entry, metric.secondsPaths ?? []));
-    if (value === undefined) {
+    const resolved = resolveMetricDescriptorValue(entry, metric);
+    if (!resolved) {
       continue;
     }
 
@@ -739,11 +747,79 @@ function pushObservationMetrics(
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
         metric: metric.metric,
-        value,
-        unit: firstStringFromPaths(entry, ["unit"]) ?? metric.unit,
+        observationGrain: "summary",
+        value: resolved.value,
+        unit: resolved.unit,
       },
     }));
   }
+}
+
+function pushJunctionRecoveryReadinessScore(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+  timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
+): void {
+  const value = firstNumberFromPaths(entry, ["recoveryReadinessScore", "recovery_readiness_score"]);
+  if (value === undefined) {
+    return;
+  }
+
+  const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  if (!timestamp.occurredAt) {
+    return;
+  }
+
+  const metric = resourceContext.sourceProviderSlug === "oura" ? "readiness-score" : "recovery-score";
+  context.events.push(stripUndefined({
+    kind: "observation",
+    occurredAt: timestamp.occurredAt,
+    recordedAt: timestamp.recordedAt,
+    dayKey: timestamp.dayKey,
+    timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+    source: "device",
+    title: "Junction recovery readiness score",
+    rawArtifactRoles: resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric),
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    fields: {
+      metric,
+      observationGrain: "summary",
+      value,
+      unit: "%",
+    },
+  }));
+}
+
+function resolveMetricDescriptorValue(
+  entry: PlainObject,
+  metric: MetricDescriptor,
+): { value: number; unit: string } | null {
+  const directValue = firstNumberFromPaths(entry, metric.paths);
+  if (directValue !== undefined) {
+    return {
+      value: directValue,
+      unit: firstStringFromPaths(entry, ["unit"]) ?? metric.unit,
+    };
+  }
+
+  const secondsValue = secondsToMinutes(firstNumberFromPaths(entry, metric.secondsPaths ?? []));
+  if (secondsValue !== undefined) {
+    return { value: secondsValue, unit: metric.unit };
+  }
+
+  const metersValue = metersToKilometers(firstNumberFromPaths(entry, metric.metersPaths ?? []));
+  if (metersValue !== undefined) {
+    return { value: metersValue, unit: metric.unit };
+  }
+
+  const percentRatioValue = normalizePercentRatio(firstNumberFromPaths(entry, metric.percentRatioPaths ?? []));
+  if (percentRatioValue !== undefined) {
+    return { value: percentRatioValue, unit: metric.unit };
+  }
+
+  return null;
 }
 
 function buildResourceContext(input: {
@@ -1460,6 +1536,16 @@ function metersToKilometers(value: unknown): number | undefined {
   }
 
   return numeric / 1000;
+}
+
+function normalizePercentRatio(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined) {
+    return undefined;
+  }
+
+  return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
 }
 
 function firstStringFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | undefined {

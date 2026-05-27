@@ -91,6 +91,8 @@ export type HealthHistoryEventKind = (typeof HEALTH_HISTORY_EVENT_KINDS)[number]
 
 export const EVENT_SOURCES = Object.freeze(["manual", "import", "device", "derived"] as const);
 
+export const OBSERVATION_GRAINS = Object.freeze(["sample", "summary", "derived_fact"] as const);
+
 export const EXPERIMENT_PHASES = Object.freeze(["start", "checkpoint", "stop"] as const);
 
 export const SAMPLE_STREAMS = Object.freeze([

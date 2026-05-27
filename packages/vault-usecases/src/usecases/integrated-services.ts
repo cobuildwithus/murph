@@ -883,10 +883,7 @@ function createIntegratedQueryServices(): QueryServices {
       const normalized = normalizeWearableDayInput(input)
       const query = await loadQueryRuntime()
       const summary = await query.summarizeWearableDayRuntime(input.vault, normalized.date, {
-        providers:
-          normalized.filters.providers.length > 0
-            ? normalized.filters.providers
-            : undefined,
+        providers: normalizeWearableProviderQueryFilter(input.providers, normalized.filters.providers),
       })
 
       return {
@@ -1143,7 +1140,7 @@ function normalizeWearableSurfaceInput(input: {
       date,
       from,
       to,
-      providers: providers.length > 0 ? providers : undefined,
+      providers: normalizeWearableProviderQueryFilter(input.providers, providers),
     },
   }
 }
@@ -1242,6 +1239,17 @@ function normalizeWearableProviders(providers: readonly string[] | undefined): s
       .map((provider) => provider.trim())
       .filter((provider) => provider.length > 0),
   )]
+}
+
+function normalizeWearableProviderQueryFilter(
+  inputProviders: readonly string[] | undefined,
+  normalizedProviders: readonly string[],
+): string[] | undefined {
+  if (inputProviders === undefined || inputProviders.length === 0) {
+    return undefined
+  }
+
+  return [...normalizedProviders]
 }
 
 function normalizeWearableLimit(limit: number): number {
