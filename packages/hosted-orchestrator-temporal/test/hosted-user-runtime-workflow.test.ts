@@ -5,10 +5,12 @@ import type {
   HostedRuntimeDemandRequest,
   HostedRuntimeDemandWorkspaceProjection,
   HostedRuntimeEnsureProcessingResponse,
-  HostedRuntimePrewarmResponse,
   HostedRuntimeSignal,
   HostedUserRuntimeWorkflowInput,
 } from "../src/index.js";
+import type {
+  HostedRuntimePrewarmResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   createHostedUserRuntimeWorkflowMachine,
   HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
