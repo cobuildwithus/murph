@@ -6,7 +6,7 @@ import { normalizeString } from "../shared.ts";
 import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
 import {
   createProviderRequestAbortSignal,
-  isProviderAbortError,
+  isProviderParentAbortError,
   isProviderTimeoutError,
   normalizeProviderAbortError,
   throwIfProviderRequestAborted,
@@ -470,14 +470,14 @@ export class JunctionClient {
       } catch (error) {
         lastError = error;
 
-        if (isProviderAbortError(error, requestAbort.signal)) {
+        if (isProviderParentAbortError(error, requestAbort.signal)) {
           throw normalizeProviderAbortError(error, requestAbort.signal);
         }
 
         if (
           !requestAbort.signal.aborted
           && options.signal
-          && isProviderAbortError(error, options.signal)
+          && isProviderParentAbortError(error, options.signal)
         ) {
           throw normalizeProviderAbortError(error, options.signal);
         }

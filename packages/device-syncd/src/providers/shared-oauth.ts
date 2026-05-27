@@ -8,7 +8,7 @@ import {
 } from "./provider-diagnostics.ts";
 import {
   createProviderRequestAbortSignal,
-  isProviderAbortError,
+  isProviderParentAbortError,
   normalizeProviderAbortError,
   throwIfProviderRequestAborted,
   waitForProviderRetryDelay,
@@ -52,7 +52,7 @@ export async function parseResponseBody(response: Response, signal?: AbortSignal
     throwIfProviderRequestAborted(signal);
     return body;
   } catch (error) {
-    if (isProviderAbortError(error, signal)) {
+    if (isProviderParentAbortError(error, signal)) {
       throw normalizeProviderAbortError(error, signal);
     }
 
@@ -223,14 +223,14 @@ export async function postOAuthTokenRequest<T>(input: {
 
     return (await response.json()) as T;
   } catch (error) {
-    if (isProviderAbortError(error, requestAbort.signal)) {
+    if (isProviderParentAbortError(error, requestAbort.signal)) {
       throw normalizeProviderAbortError(error, requestAbort.signal);
     }
 
     if (
       !requestAbort.signal.aborted
       && input.signal
-      && isProviderAbortError(error, input.signal)
+      && isProviderParentAbortError(error, input.signal)
     ) {
       throw normalizeProviderAbortError(error, input.signal);
     }
@@ -541,14 +541,14 @@ export async function fetchBearerJson<T>(input: {
 
     return (await response.json()) as T;
   } catch (error) {
-    if (isProviderAbortError(error, requestAbort.signal)) {
+    if (isProviderParentAbortError(error, requestAbort.signal)) {
       throw normalizeProviderAbortError(error, requestAbort.signal);
     }
 
     if (
       !requestAbort.signal.aborted
       && input.signal
-      && isProviderAbortError(error, input.signal)
+      && isProviderParentAbortError(error, input.signal)
     ) {
       throw normalizeProviderAbortError(error, input.signal);
     }
