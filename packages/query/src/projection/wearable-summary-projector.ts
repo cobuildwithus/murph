@@ -27,8 +27,8 @@ import type {
 
 export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWearableSummaryRow[] {
   const dataset = collectWearableDataset(vault, {});
-  const allBundle = buildWearableSummaryBundleFromDataset(dataset);
   const datasetsByProvider = groupWearableDatasetByPublicProvider(dataset);
+  const allBundle = buildWearableSummaryBundleFromDataset(mergeWearableDatasets(datasetsByProvider.values()));
   const providers = normalizeWearableProviders(allBundle.sourceHealth.map((entry) => entry.provider));
 
   return providers.flatMap((provider) =>
@@ -63,19 +63,19 @@ function groupWearableDatasetByPublicProvider(dataset: WearableDataset): Map<str
 
   for (const candidate of dataset.metricCandidates) {
     const provider = resolveMetricCandidatePublicProvider(candidate);
-    ensureProviderDataset(provider).metricCandidates.push(projectWearableMetricCandidateProvider(candidate, provider));
+    ensureProviderDataset(provider).metricCandidates.push(projectUnknownWearableMetricCandidateProvider(candidate, provider));
   }
   for (const candidate of dataset.rawMetricCandidates) {
     const provider = resolveMetricCandidatePublicProvider(candidate);
-    ensureProviderDataset(provider).rawMetricCandidates.push(projectWearableMetricCandidateProvider(candidate, provider));
+    ensureProviderDataset(provider).rawMetricCandidates.push(projectUnknownWearableMetricCandidateProvider(candidate, provider));
   }
   for (const aggregate of dataset.activitySessionAggregates) {
     const provider = resolveWearableDatasetItemPublicProvider(aggregate);
-    ensureProviderDataset(provider).activitySessionAggregates.push(projectWearableAggregateProvider(aggregate, provider));
+    ensureProviderDataset(provider).activitySessionAggregates.push(projectUnknownWearableAggregateProvider(aggregate, provider));
   }
   for (const window of dataset.sleepWindows) {
     const provider = resolveWearableDatasetItemPublicProvider(window);
-    ensureProviderDataset(provider).sleepWindows.push(projectWearableSleepWindowProvider(window, provider));
+    ensureProviderDataset(provider).sleepWindows.push(projectUnknownWearableSleepWindowProvider(window, provider));
   }
   for (const diagnostic of dataset.provenanceDiagnostics) {
     const provider = resolveProjectionDiagnosticProvider(diagnostic.provider, grouped);
@@ -96,6 +96,20 @@ function emptyWearableDataset(): MutableWearableDataset {
     rawMetricCandidates: [],
     sleepWindows: [],
   };
+}
+
+function mergeWearableDatasets(datasets: Iterable<WearableDataset>): WearableDataset {
+  const merged = emptyWearableDataset();
+
+  for (const dataset of datasets) {
+    merged.activitySessionAggregates.push(...dataset.activitySessionAggregates);
+    merged.metricCandidates.push(...dataset.metricCandidates);
+    merged.provenanceDiagnostics.push(...dataset.provenanceDiagnostics);
+    merged.rawMetricCandidates.push(...dataset.rawMetricCandidates);
+    merged.sleepWindows.push(...dataset.sleepWindows);
+  }
+
+  return merged;
 }
 
 function resolveMetricCandidatePublicProvider(candidate: WearableMetricCandidate): string {
@@ -148,49 +162,60 @@ function resolveProjectionDiagnosticProvider(
   return normalizedProvider && grouped.has(normalizedProvider) ? normalizedProvider : "unknown";
 }
 
-function projectWearableMetricCandidateProvider(
+function projectUnknownWearableMetricCandidateProvider(
   candidate: WearableMetricCandidate,
   provider: string,
 ): WearableMetricCandidate {
+  if (provider !== "unknown") {
+    return candidate;
+  }
+
   return {
     ...candidate,
-    dataOrigin: projectWearableDataOrigin(candidate.dataOrigin, provider),
+    dataOrigin: projectUnknownWearableDataOrigin(candidate.dataOrigin),
     provider,
   };
 }
 
-function projectWearableAggregateProvider(
+function projectUnknownWearableAggregateProvider(
   aggregate: WearableActivitySessionAggregate,
   provider: string,
 ): WearableActivitySessionAggregate {
+  if (provider !== "unknown") {
+    return aggregate;
+  }
+
   return {
     ...aggregate,
-    dataOrigin: projectWearableDataOrigin(aggregate.dataOrigin, provider),
+    dataOrigin: projectUnknownWearableDataOrigin(aggregate.dataOrigin),
     provider,
   };
 }
 
-function projectWearableSleepWindowProvider(
+function projectUnknownWearableSleepWindowProvider(
   window: WearableSleepWindowCandidate,
   provider: string,
 ): WearableSleepWindowCandidate {
+  if (provider !== "unknown") {
+    return window;
+  }
+
   return {
     ...window,
-    dataOrigin: projectWearableDataOrigin(window.dataOrigin, provider),
+    dataOrigin: projectUnknownWearableDataOrigin(window.dataOrigin),
     provider,
   };
 }
 
-function projectWearableDataOrigin<TOrigin extends WearableMetricCandidate["dataOrigin"]>(
-  origin: TOrigin,
-  provider: string,
-): TOrigin {
-  if (provider !== "unknown" || !origin) {
+function projectUnknownWearableDataOrigin(
+  origin: WearableMetricCandidate["dataOrigin"],
+): WearableMetricCandidate["dataOrigin"] {
+  if (!origin) {
     return origin;
   }
 
   const { sourceInstanceId: _sourceInstanceId, ...publicOrigin } = origin;
-  return publicOrigin as TOrigin;
+  return publicOrigin;
 }
 
 function materializeWearableSummaryRows(
