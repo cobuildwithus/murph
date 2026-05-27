@@ -65,3 +65,6 @@ Success criteria:
   readiness, and accepted runtime processing after the direct Durable Object RPC
   invocation fix.
 - Pending: required completion audits.
+Status: completed
+Updated: 2026-05-27
+Completed: 2026-05-27

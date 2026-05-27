@@ -425,6 +425,31 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("returns retry_later and clears the fresh fence when prepared workspace ownership mismatches", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({
+        userId: "member_other",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expectFreshRuntimeRetryAndCleared({
+      retryAt: "2026-04-27T00:00:30.000Z",
+      runner,
+      sql,
+    });
+
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("returns retry_later and clears the fresh fence when runtime config preparation fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
