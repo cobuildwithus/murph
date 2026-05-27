@@ -138,6 +138,19 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
   });
 }
 
+export async function signalHostedDeviceSyncBackgroundMaintenanceRuntime(
+  input: SignalHostedDeviceSyncRecoveryInput,
+): Promise<HostedRuntimeSignalResult> {
+  return signalHostedUserRuntimeWorkflow({
+    client: input.client,
+    ensureWorkspace: true,
+    signal: parseHostedRuntimeSignal({
+      kind: "device_sync_recovery_requested",
+    }),
+    userId: input.userId,
+  });
+}
+
 export async function signalHostedBrowserVaultRefreshRuntime(
   input: SignalHostedBrowserVaultRefreshInput,
 ): Promise<HostedRuntimeSignalResult> {

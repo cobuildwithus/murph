@@ -29,6 +29,7 @@ import {
   type AppendHostedMailboxItemResult,
 } from "../hosted-mailbox/store";
 import {
+  signalHostedDeviceSyncBackgroundMaintenanceRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   type HostedDeviceSyncRecoverySignalIntent,
 } from "../hosted-orchestration/signal-runtime";
@@ -723,6 +724,27 @@ async function startHostedDeviceSyncWakeWorkflow(
   }
 }
 
+async function signalHostedDeviceSyncDirtyBackgroundMaintenanceBestEffort(input: {
+  traceId: string | null;
+  userId: string;
+}): Promise<void> {
+  try {
+    await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
+      userId: input.userId,
+    });
+  } catch (error) {
+    console.warn("Hosted device-sync dirty background maintenance signal failed after webhook acceptance.", {
+      code: sanitizeHostedRuntimeErrorCode(
+        isDeviceSyncError(error)
+          ? error.code
+          : "HOSTED_DEVICE_SYNC_BACKGROUND_MAINTENANCE_SIGNAL_FAILED",
+      ),
+      traceIdPresent: input.traceId !== null,
+      userIdPresent: input.userId.length > 0,
+    });
+  }
+}
+
 async function persistHostedDeviceSyncWebhookAccepted(input: {
   acceptedAt: string;
   acceptanceMode: DeviceSyncWebhookAcceptanceMode;
@@ -747,7 +769,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
-          mailboxItemId: null,
+          backgroundNudgeRequested: false,
         };
       }
 
@@ -778,39 +800,21 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       await completeHostedWebhookTraceTx(input, tx);
 
       if (dirtyUpdate.shouldRequestWake) {
-        const wake = buildHostedDeviceSyncWake({
-          connectionId: input.connectionId,
-          eventId: buildHostedDeviceSyncDirtyWakeEventId({
-            connectionId: input.connectionId,
-            dedupeKey: `dirty-revision:${dirtyUpdate.dirty.dirtyRevision.toString()}`,
-            occurredAt: input.occurredAt,
-            provider: input.provider,
-            traceId: input.traceId,
-            userId: input.userId,
-          }),
-          hint: buildHostedDeviceSyncDirtyWakeHint(input),
-          occurredAt: input.occurredAt,
-          provider: input.provider,
-          source: "webhook-hint",
-          traceId: input.traceId,
-          userId: input.userId,
-        });
-        const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-          envelope: wake,
-          tx,
-        });
         return {
-          mailboxItemId: mailboxAppend.item.id,
+          backgroundNudgeRequested: true,
         };
       }
 
       return {
-        mailboxItemId: null,
+        backgroundNudgeRequested: false,
       };
     }));
 
-  if (result.mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(result.mailboxItemId);
+  if (result.backgroundNudgeRequested) {
+    await signalHostedDeviceSyncDirtyBackgroundMaintenanceBestEffort({
+      traceId: input.traceId,
+      userId: input.userId,
+    });
   }
 }
 
