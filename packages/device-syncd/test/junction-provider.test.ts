@@ -1858,6 +1858,71 @@ test("Junction client treats request timeouts as terminal aborts", async () => {
   assert.equal(requests, 1);
 });
 
+test("Junction client wraps generic abort errors caused by request timeouts", async () => {
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    requestTimeoutMs: 1,
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      const signal = init?.signal;
+      assert.ok(signal);
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("The operation was aborted.", "AbortError")),
+          { once: true },
+        );
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1"),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.cause instanceof DOMException, true);
+      assert.equal((error.cause as DOMException).name, "AbortError");
+      return true;
+    },
+  );
+  assert.equal(requests, 1);
+});
+
+test("Junction client rethrows caller aborts instead of wrapping them as provider failures", async () => {
+  const abortController = new AbortController();
+  const abortError = new Error("foreground yield");
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      abortController.abort(abortError);
+      const signal = init?.signal;
+      assert.ok(signal);
+
+      if (signal.aborted) {
+        throw signal.reason;
+      }
+
+      throw new Error("request should have been aborted");
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1", {
+      signal: abortController.signal,
+    }),
+    (error) => error === abortError,
+  );
+  assert.equal(requests, 1);
+});
+
 test("Junction client deregisters provider connections by normalized provider slug", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const client = new JunctionClient({
@@ -3679,6 +3744,55 @@ test("Junction resource jobs import direct daily data webhook payloads without c
   assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "garmin");
   assert.deepEqual(snapshot.timeseries, {});
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+});
+
+test("Junction direct webhook source projection rethrows foreground yield aborts", async () => {
+  const abortController = new AbortController();
+  const abortError = new Error("foreground yield");
+  const provider = createJunctionProvider(async (input, init) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      abortController.abort(abortError);
+      const signal = init?.signal;
+      assert.ok(signal);
+
+      if (signal.aborted) {
+        throw signal.reason;
+      }
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        signal: abortController.signal,
+      }),
+      createJob("resource", {
+        eventType: "daily.data.activity.created",
+        objectId: "activity-1",
+        occurredAt: "2026-04-02T00:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "garmin",
+        webhookDataJson: JSON.stringify({
+          date: "2026-04-02",
+          id: "activity-1",
+          sourceProviderSlug: "garmin",
+          steps: 4321,
+        }),
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-05T00:00:00.000Z",
+      }),
+    ),
+    (error) => error === abortError,
+  );
 });
 
 test("Junction queued oversized direct resource payloads keep REST fallback", async () => {

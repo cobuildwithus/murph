@@ -507,6 +507,34 @@ test("shared oauth retry helpers refresh before requests, recover from a first 4
     /stop retry/u,
   );
   assert.equal(abortedRetryAttempts, 1);
+
+  vi.useFakeTimers();
+  try {
+    const delayAbortController = new AbortController();
+    let delayRetryAttempts = 0;
+    const delayRetryPromise = requestWithRefreshAndRetry({
+      shouldRefresh: () => false,
+      async refresh() {
+        throw new Error("refresh should not run during retry delay abort");
+      },
+      async request() {
+        delayRetryAttempts += 1;
+        throw {
+          retryable: true,
+          httpStatus: 503,
+        };
+      },
+      signal: delayAbortController.signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    assert.equal(delayRetryAttempts, 1);
+    delayAbortController.abort(new Error("stop during retry delay"));
+    await assert.rejects(() => delayRetryPromise, /stop during retry delay/u);
+    assert.equal(delayRetryAttempts, 1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("shared oauth helper flows cover auth-code exchange, refresh rotation, bearer fetch success, and scheduling", async () => {

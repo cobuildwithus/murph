@@ -8,6 +8,7 @@ import {
 } from "./provider-diagnostics.ts";
 import {
   createProviderRequestAbortSignal,
+  isProviderAbortError,
   throwIfProviderRequestAborted,
   waitForProviderRetryDelay,
 } from "./request-abort.ts";
@@ -44,10 +45,17 @@ interface DeviceSyncOAuthProviderDefinition
   executeJob(context: ProviderJobContext, job: Parameters<DeviceJobExecutor["executeJob"]>[1]): Promise<ProviderJobResult>;
 }
 
-export async function parseResponseBody(response: Response): Promise<string> {
+export async function parseResponseBody(response: Response, signal?: AbortSignal | null): Promise<string> {
   try {
-    return await response.text();
-  } catch {
+    const body = await response.text();
+    throwIfProviderRequestAborted(signal);
+    return body;
+  } catch (error) {
+    if (isProviderAbortError(error, signal)) {
+      throw error;
+    }
+
+    throwIfProviderRequestAborted(signal);
     return "";
   }
 }
@@ -209,7 +217,7 @@ export async function postOAuthTokenRequest<T>(input: {
     });
 
     if (!response.ok) {
-      throw input.buildError(response, await parseResponseBody(response));
+      throw input.buildError(response, await parseResponseBody(response, requestAbort.signal));
     }
 
     return (await response.json()) as T;
@@ -513,7 +521,7 @@ export async function fetchBearerJson<T>(input: {
     }
 
     if (!response.ok) {
-      throw input.buildError(response, await parseResponseBody(response));
+      throw input.buildError(response, await parseResponseBody(response, requestAbort.signal));
     }
 
     return (await response.json()) as T;

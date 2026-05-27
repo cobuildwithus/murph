@@ -656,9 +656,7 @@ class DeviceSyncServiceController {
                 httpStatus: 409,
               });
             }
-            const refreshed = await refreshTokens(currentAccount, {
-              signal: jobAbortController.signal,
-            });
+            const refreshed = await refreshTokens(currentAccount);
             ensureJobLeaseOwned();
             ensureAccountActive();
             const updated = this.store.updateAccountTokens(

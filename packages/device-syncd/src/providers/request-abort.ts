@@ -58,6 +58,36 @@ export function throwIfProviderRequestAborted(signal?: AbortSignal | null): void
   throw readAbortReason(signal);
 }
 
+export function isProviderAbortError(error: unknown, signal?: AbortSignal | null): boolean {
+  if (signal) {
+    if (!signal.aborted || isProviderTimeoutReason(signal.reason)) {
+      return false;
+    }
+
+    const reason = signal.reason;
+
+    if (error === reason) {
+      return true;
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return true;
+    }
+  }
+
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+export function isProviderTimeoutError(error: unknown, signal?: AbortSignal | null): boolean {
+  return isProviderTimeoutReason(error)
+    || (
+      signal?.aborted === true
+      && isProviderTimeoutReason(signal.reason)
+      && error instanceof DOMException
+      && error.name === "AbortError"
+    );
+}
+
 export async function waitForProviderRetryDelay(
   delayMs: number,
   signal?: AbortSignal | null,
@@ -93,4 +123,8 @@ function readAbortReason(signal?: AbortSignal | null): Error {
   return reason instanceof Error
     ? reason
     : new DOMException("The operation was aborted.", "AbortError");
+}
+
+function isProviderTimeoutReason(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
 }
