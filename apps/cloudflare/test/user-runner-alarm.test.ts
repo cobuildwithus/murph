@@ -273,6 +273,59 @@ describe("HostedUserRunner execution coordination", () => {
     expect(waitUntilSettled).toBe(true);
   });
 
+  it("clears the fresh fence asynchronously when the accepted first container request fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql, waitUntilPromises } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      source: "device_sync_recovery",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(waitUntilPromises).toHaveLength(1);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      failure_count: 0,
+    });
+
+    invocationResult.reject(new Error("Hosted container first request failed."));
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      last_invocation_at: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          transportFailureFenceCleared: true,
+          workspaceVersion: "5",
+        }),
+        message: "Hosted runner runtime execution adapter failed.",
+      }),
+    );
+  });
+
   it("returns retry_later when processing cannot start without a container binding", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

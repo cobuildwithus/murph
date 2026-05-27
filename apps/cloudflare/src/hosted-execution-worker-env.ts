@@ -1,4 +1,7 @@
 import {
+  assertHostedRuntimeProcessingTimeoutMs,
+} from "@murphai/hosted-execution/contracts";
+import {
   type HostedExecutionBaseUrlNormalizationOptions,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -71,6 +74,15 @@ export function readHostedExecutionWorkerEnvironment(
     idleCheckpointDelayMs,
     runnerTimeoutMs,
   });
+  const webControlTimeoutMs = parsePositiveInteger(
+    normalizeHostedExecutionString(source.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS),
+    30_000,
+    "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
+  );
+  assertHostedRuntimeProcessingTimeoutMs(
+    webControlTimeoutMs,
+    "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
+  );
 
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
@@ -127,11 +139,7 @@ export function readHostedExecutionWorkerEnvironment(
     ),
     runnerIdleTtlMs,
     runnerTimeoutMs,
-    webControlTimeoutMs: parsePositiveInteger(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS),
-      30_000,
-      "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
-    ),
+    webControlTimeoutMs,
   };
 }
 
@@ -182,9 +190,13 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
     return fallback;
   }
 
-  const parsed = Number.parseInt(value, 10);
+  if (!/^[0-9]+$/u.test(value)) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
 
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new TypeError(`${label} must be a positive integer.`);
   }
 

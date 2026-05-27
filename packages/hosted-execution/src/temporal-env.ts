@@ -1,4 +1,5 @@
 import {
+  assertHostedRuntimeProcessingTimeoutMs,
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
 } from "./contracts.ts";
 import {
@@ -7,6 +8,8 @@ import {
 
 export {
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+  MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
 } from "./contracts.ts";
 
 export const HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS = "localhost:7233";
@@ -108,6 +111,10 @@ export function readHostedRuntimeEnsureProcessingTimeouts(
     readOptionalEnv(source, "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS"),
     DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
     MAX_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+    "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS",
+  );
+  assertHostedRuntimeProcessingTimeoutMs(
+    ensureRuntimeProcessingHttpTimeoutMs,
     "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS",
   );
   const ensureRuntimeProcessingStartToCloseTimeoutMs =

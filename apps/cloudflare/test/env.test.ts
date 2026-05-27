@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+} from "@murphai/hosted-execution/contracts";
+import {
   filterHostedRunnerSecrets,
   isHostedRunnerSecretKeyAllowed,
 } from "../src/hosted-env-policy.js";
@@ -206,12 +209,44 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.webControlTimeoutMs).toBe(45_000);
   });
 
+  it("rejects hosted-web control timeouts that cannot leave the response margin", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: String(
+          HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+        ),
+      })),
+    ).toThrow(
+      `HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS must be greater than ${HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS}.`,
+    );
+  });
+
   it("reads the runner readiness timeout when configured", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "45000",
     }));
 
     expect(environment.runnerReadyTimeoutMs).toBe(45_000);
+  });
+
+  it("rejects partial numeric Worker timing environment values", () => {
+    const invalidTimingValues = {
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000abc",
+      HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: "3abc",
+      HOSTED_EXECUTION_RETRY_DELAY_MS: "30000abc",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000abc",
+      HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000abc",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000abc",
+      HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000abc",
+    } as const;
+
+    for (const [key, value] of Object.entries(invalidTimingValues)) {
+      expect(() =>
+        readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
+          [key]: value,
+        })),
+      ).toThrow(`${key} must be a positive integer.`);
+    }
   });
 
   it("defaults the runner idle lifecycle to five minutes", () => {
