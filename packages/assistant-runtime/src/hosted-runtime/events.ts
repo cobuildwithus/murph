@@ -64,6 +64,10 @@ const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   "assistant.codex.app_server_timing";
+const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
+  "murph.assistant-codex-action-diagnostics.v1";
+const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE =
+  "assistant.codex.action_diagnostics";
 const HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -153,6 +157,13 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "thread-started",
   "turn-completed",
   "turn-started",
+]);
+const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
+  "command.execution",
+  "dynamic.tool.call",
+  "file.change",
+  "mcp.tool.call",
+  "web.search",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
@@ -253,6 +264,39 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS = [
 const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
   "codexResumeFailureOutputArrayLengths",
   "codexResumeFailureOutputStringLengths",
+] as const;
+const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_BOOLEAN_KEYS = [
+  "codexActionThreadIdPresent",
+  "codexActionTurnIdPresent",
+] as const;
+const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
+  "codexActionCachedInputUnitMax",
+  "codexActionCommandCount",
+  "codexActionCompletedCount",
+  "codexActionDurationMsMax",
+  "codexActionDurationMsTotal",
+  "codexActionDynamicToolCallCount",
+  "codexActionEventCount",
+  "codexActionFailedCount",
+  "codexActionFileChangeCount",
+  "codexActionFinalCachedInputUnit",
+  "codexActionFinalInputUnit",
+  "codexActionFinalOutputUnit",
+  "codexActionFinalReasoningOutputUnit",
+  "codexActionFinalTotalUnit",
+  "codexActionInputUnitMax",
+  "codexActionMcpToolCallCount",
+  "codexActionOutputItemCount",
+  "codexActionOutputUnitMax",
+  "codexActionProviderActionCount",
+  "codexActionReasoningOutputUnitMax",
+  "codexActionStartedCount",
+  "codexActionTotalUnitMax",
+  "codexActionUsageSampleCount",
+  "codexActionWebSearchCount",
+] as const;
+const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
+  "codexActionSlowDurationMs",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "activeTurnHistoryPresent",
@@ -674,6 +718,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: appServerTimingDiagnostic,
       message: "Hosted assistant Codex app-server timing captured.",
+    };
+  }
+
+  const actionDiagnostic =
+    readHostedAssistantCodexActionDiagnosticTrace(event);
+  if (actionDiagnostic) {
+    return {
+      details: actionDiagnostic,
+      message: "Hosted assistant Codex action diagnostics captured.",
     };
   }
 
@@ -1197,6 +1250,67 @@ function readHostedAssistantCodexAppServerTimingTrace(
     readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingTurnIdPresent"),
   );
 
+  return details;
+}
+
+function readHostedAssistantCodexActionDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA
+    || type !== ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexActionTraceType: "action-diagnostics",
+    providerTraceKind: "codex.action_diagnostics",
+    schema: ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
+  };
+
+  for (const key of HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNumberArray(record, key),
+    );
+  }
+  for (const key of [
+    "codexActionKinds",
+    "codexActionSlowKinds",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticAllowedStringArray(
+        record,
+        key,
+        HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES,
+      ),
+    );
+  }
   return details;
 }
 
