@@ -543,6 +543,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             checkpointReason: "import",
             deferCheckpoint: true,
             input: baseRunnerInput,
+            lanes: ["conversation"],
             requestId,
           }),
       ),
