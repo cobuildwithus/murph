@@ -913,10 +913,13 @@ async function runSystemMailboxMaintenancePhase(input: {
     shouldYieldBackgroundMaintenance: phaseInput.shouldYieldBackgroundMaintenance ?? null,
     vaultRoot: phaseInput.restored.vaultRoot,
   });
+  const shouldYieldAfterSystemMailboxPreparation =
+    phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const initialProviderCleanupCheckpoint =
     await readHostedProviderCleanupCheckpoint(phaseInput.restored.vaultRoot);
   const initialProviderCleanupDue =
-    isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
+    !shouldYieldAfterSystemMailboxPreparation
+    && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
   if (!systemMailboxPreparation) {
     return {
       continueAssistantLane: false,
@@ -926,8 +929,11 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
 
   const shouldRunDirtyDeviceSyncWorkSource =
-    !("item" in systemMailboxPreparation)
-    || systemMailboxPreparation.item.routeAction !== "run-device-sync-wake";
+    !shouldYieldAfterSystemMailboxPreparation
+    && (
+      !("item" in systemMailboxPreparation)
+      || systemMailboxPreparation.item.routeAction !== "run-device-sync-wake"
+    );
   const dirtyDeviceSyncMetrics = shouldRunDirtyDeviceSyncWorkSource
     ? await runHostedDeviceSyncWakeLane({
         deviceSyncPort: phaseInput.runtime.platform.deviceSyncPort ?? null,
@@ -943,7 +949,8 @@ async function runSystemMailboxMaintenancePhase(input: {
       })
     : null;
   const systemMailboxDeliveryEffects =
-    systemMailboxPreparation.status === "processed"
+    !shouldYieldAfterSystemMailboxPreparation
+      && systemMailboxPreparation.status === "processed"
       && systemMailboxPreparation.item.routeAction === "dispatch-assistant-notification"
       ? await collectHostedAssistantDeliverySideEffects({
         includeBackgroundDueIntents: true,
@@ -1036,7 +1043,8 @@ async function runSystemMailboxMaintenancePhase(input: {
 
   return {
     continueAssistantLane:
-      shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
+      shouldYieldAfterSystemMailboxPreparation
+      || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
     result: {
       ...(shouldRunPostSystemCheckpoint
