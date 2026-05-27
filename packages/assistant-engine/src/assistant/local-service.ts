@@ -528,7 +528,7 @@ export async function sendAssistantMessageLocal(
             providerRequestOrdinal,
             resolvedSession: currentSession,
             turnCreatedAt: currentUserTurn.turnCreatedAt,
-            turnProgress,
+            turnProgress: providerRequestOrdinal === 0 ? turnProgress : null,
             turnId: currentUserTurn.turnId,
           })
           if (providerOutcome.kind === 'failed_terminal') {

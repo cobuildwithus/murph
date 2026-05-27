@@ -519,6 +519,10 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Late follow up',
   )
+  expect(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.turnProgress)
+    .toBeTruthy()
+  expect(mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.turnProgress)
+    .toBeNull()
   assert.deepEqual(
     mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
       .resumeState,
