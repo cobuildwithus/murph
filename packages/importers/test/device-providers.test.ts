@@ -1043,7 +1043,7 @@ test("prepareDeviceProviderSnapshotImport synthesizes Garmin date-bucket timesta
   assert.equal(cycleDay?.timeZone, "America/Los_Angeles");
 });
 
-test("prepareDeviceProviderSnapshotImport rounds Garmin duration fields before they reach integer-only canonical records", async () => {
+test("prepareDeviceProviderSnapshotImport rounds Garmin duration fields before integer-only compact facts", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
     snapshot: {

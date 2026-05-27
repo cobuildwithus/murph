@@ -1,6 +1,6 @@
 # Remove unused canonical wearable records
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -61,9 +61,18 @@ Updated: 2026-05-27
 
 ## Verification
 
-- Commands to run:
+- Passed:
+- `pnpm --dir packages/importers exec vitest run test/wearable-evidence.test.ts test/device-providers-junction.test.ts test/device-providers.test.ts test/strava.test.ts --config vitest.config.ts --no-coverage`
+- `pnpm --dir packages/device-syncd exec vitest run test/oura-provider.test.ts --config vitest.config.ts --no-coverage`
+- `pnpm --dir packages/query exec vitest run --config vitest.config.ts --no-coverage test/wearables-normalized-surfaces.test.ts test/wearables-source-health-final.test.ts`
+- `pnpm --dir packages/core exec vitest run test/device-import.test.ts --config vitest.config.ts --no-coverage`
 - `pnpm typecheck`
-- `bash scripts/workspace-verify.sh test:diff <touched files>`
-- Focused package tests if the diff-aware lane is not specific enough.
-- Expected outcomes:
-- Checks pass, or unrelated pre-existing failures are called out with exact failing targets.
+- `pnpm test:smoke`
+- `git diff --check` on touched files
+- Required audits:
+- `security-privacy-review`: no findings.
+- `coverage-write`: no findings.
+- `task-finish-review`: fixed stale app tsconfig alias, active plan references, and metric-doc wording found by the review.
+- Known unrelated blocker:
+- `bash scripts/workspace-verify.sh test:diff <touched files>` broadened to `packages/cli` and failed there because the CLI harness could not resolve `packages/runtime-state/dist/hosted-bundle-ref.js` and then timed out/faulted several CLI-list tests. The wearable/importer/query/device-syncd focused checks above passed.
+Completed: 2026-05-27
