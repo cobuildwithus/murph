@@ -32,6 +32,7 @@ import {
 const localConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "auto",

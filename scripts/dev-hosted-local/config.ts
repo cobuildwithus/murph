@@ -37,6 +37,7 @@ export function resolveHostedLocalDevConfig(
   return {
     databaseUrlOverride: env.MURPH_DEV_DATABASE_URL?.trim() || null,
     forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
+    forceResetLocalTemporal: env.MURPH_DEV_FORCE_RESET_TEMPORAL === "1",
     linqWebhookPublicUrl: env.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim() || null,
     linqWebhookTunnelConfigPath:
       env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim()
@@ -210,6 +211,7 @@ export function printHelp(): void {
       "Optional environment overrides:",
       "  MURPH_DEV_DATABASE_URL=...          Override the local hosted stack database URL",
       "  MURPH_DEV_FORCE_RESET_LOCAL_DB=1    Reset a local loopback Postgres database before `prisma db push` (used by hosted-local e2e)",
+      "  MURPH_DEV_FORCE_RESET_TEMPORAL=1    Stop local Temporal dev server/worker residue before startup (used by `pnpm dev:reset`)",
       "  HOSTED_ASSISTANT_PROVIDER=openai  Required hosted assistant provider for local hosted dev",
       "  OPENAI_API_KEY=...                 Required OpenAI key for hosted runner Codex app-server access",
       "  MURPH_DEV_USE_VERCEL_DATABASE_URL=1 Use the pulled Vercel development DATABASE_URL instead of the default local database",

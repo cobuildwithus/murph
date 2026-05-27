@@ -209,6 +209,27 @@ export async function startHostedLocalTemporalRuntime(input: {
   }
 }
 
+export async function waitForHostedLocalTemporalPortRelease(input: {
+  host: string;
+  port: number;
+  signal?: AbortSignal;
+  timeoutMs: number;
+}): Promise<void> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < input.timeoutMs) {
+    throwIfAbortSignalAborted(input.signal);
+    if (!(await canConnect(input.host, input.port))) {
+      return;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(
+    `Timed out waiting for local Temporal at ${input.host}:${input.port} to stop.`,
+  );
+}
+
 function normalizeHostedLocalClientBaseUrl(baseUrl: string): string {
   const url = new URL(baseUrl);
   if (url.hostname === "0.0.0.0") {

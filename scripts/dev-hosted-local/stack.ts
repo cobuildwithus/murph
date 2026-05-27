@@ -77,6 +77,7 @@ import {
 import {
   buildHostedLocalTemporalRuntimeEnv,
   startHostedLocalTemporalRuntime,
+  waitForHostedLocalTemporalPortRelease,
   type HostedLocalTemporalRuntime,
 } from "./temporal.ts";
 import type {
@@ -162,6 +163,11 @@ export async function startHostedLocalDevStack(input: {
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
+  await maybeResetHostedLocalTemporalDevState({
+    abortSignal: input.abortSignal,
+    config,
+    stderrTarget: input.stderrTarget,
+  });
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
   const hostedRunnerLocalBuildId = buildHostedRunnerLocalBuildId(
@@ -1837,6 +1843,72 @@ function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>
   return value === "1" || value === "true" || value === "yes";
 }
 
+async function maybeResetHostedLocalTemporalDevState(input: {
+  abortSignal?: AbortSignal;
+  config: HostedLocalDevConfig;
+  stderrTarget?: NodeJS.WritableStream;
+}): Promise<void> {
+  if (!input.config.forceResetLocalTemporal || input.config.temporal.mode === "disabled") {
+    return;
+  }
+
+  if (input.config.temporal.mode === "external") {
+    throw new Error(
+      "MURPH_DEV_FORCE_RESET_TEMPORAL=1 only supports local Temporal modes. Set MURPH_DEV_TEMPORAL=managed or auto, or unset the reset flag.",
+    );
+  }
+
+  const stderrTarget = input.stderrTarget ?? process.stderr;
+  stderrTarget.write("[setup] Resetting local Temporal dev server and worker residue.\n");
+  terminateKnownHostedLocalProcessResidue({
+    config: input.config,
+    owned: {
+      cloudflareWorker: false,
+      healthCommons: false,
+      linqTunnel: false,
+      stripe: false,
+      temporalServer: true,
+      temporalWorker: true,
+      web: false,
+    },
+    signal: "SIGTERM",
+    stripeForwardUrl: null,
+  });
+
+  try {
+    await waitForHostedLocalTemporalPortRelease({
+      host: input.config.temporal.host,
+      port: input.config.temporal.port,
+      signal: input.abortSignal,
+      timeoutMs: 2_500,
+    });
+  } catch (error) {
+    if (input.abortSignal?.aborted) {
+      throw error;
+    }
+    terminateKnownHostedLocalProcessResidue({
+      config: input.config,
+      owned: {
+        cloudflareWorker: false,
+        healthCommons: false,
+        linqTunnel: false,
+        stripe: false,
+        temporalServer: true,
+        temporalWorker: true,
+        web: false,
+      },
+      signal: "SIGKILL",
+      stripeForwardUrl: null,
+    });
+    await waitForHostedLocalTemporalPortRelease({
+      host: input.config.temporal.host,
+      port: input.config.temporal.port,
+      signal: input.abortSignal,
+      timeoutMs: 5_000,
+    });
+  }
+}
+
 function resolveHostedLocalChildShutdownSignal(signal: NodeJS.Signals): NodeJS.Signals {
   return signal === "SIGINT" ? "SIGTERM" : signal;
 }
@@ -1856,6 +1928,7 @@ export function terminateKnownHostedLocalProcessResidue(input: {
   const linqTunnelConfigPath = resolveRepoRelativeChildArg(
     input.config.linqWebhookTunnelConfigPath,
   );
+  const repoRootPattern = escapeRegExp(repoRoot);
   const patterns = [
     ...(input.owned.cloudflareWorker
       ? [
@@ -1887,6 +1960,12 @@ export function terminateKnownHostedLocalProcessResidue(input: {
     ...(!input.owned.temporalServer
       ? []
       : [`temporal server start-dev .*--port ${temporal.port}`]),
+    ...(!input.owned.temporalWorker
+      ? []
+      : [
+        "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker",
+        `${repoRootPattern}.*node_modules.*tsx.*src/worker\\.ts`,
+      ]),
     ...(input.stripeForwardUrl === null || !input.owned.stripe
       ? []
       : [`stripe listen --forward-to ${escapeRegExp(input.stripeForwardUrl)}`]),

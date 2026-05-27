@@ -1,6 +1,7 @@
 export interface HostedLocalDevConfig {
   databaseUrlOverride: string | null;
   forceResetLocalDatabase: boolean;
+  forceResetLocalTemporal: boolean;
   linqWebhookPublicUrl: string | null;
   linqWebhookTunnelConfigPath: string;
   linqWebhookTunnelMode: "auto" | "disabled" | "required";
