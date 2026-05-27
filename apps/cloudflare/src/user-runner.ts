@@ -1127,6 +1127,7 @@ export class HostedUserRunner {
         finishedAt: new Date().toISOString(),
         token,
       });
+      await this.syncWatchdogAlarm(failed.record);
       if (input.acceptedProcessingAttempt && failed.failed) {
         await this.recordAcceptedRuntimeAttemptFailureBestEffort({
           error,
@@ -1135,7 +1136,6 @@ export class HostedUserRunner {
           workspaceVersion,
         });
       }
-      await this.syncWatchdogAlarm(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -1277,8 +1277,9 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
-          workspaceAttemptId: input.token.attemptId,
+          orchestrationAttemptIdPresent:
+            input.executionInput.orchestrationAttemptId.length > 0,
+          workspaceAttemptIdPresent: input.token.attemptId.length > 0,
           workspaceReason: input.executionInput.reason,
           workspaceVersion: input.workspaceVersion,
         },
@@ -1943,8 +1944,9 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
-          workspaceAttemptId: input.token.attemptId,
+          orchestrationAttemptIdPresent:
+            input.executionInput.orchestrationAttemptId.length > 0,
+          workspaceAttemptIdPresent: input.token.attemptId.length > 0,
           workspaceReason: input.executionInput.reason,
           workspaceVersion: input.workspaceVersion,
         },

@@ -76,6 +76,12 @@ describe("hosted orchestration control contracts", () => {
       source: "test",
     })).toThrow("Hosted runtime manual-run signal must not include source.");
 
+    expect(() => parseHostedRuntimeSignal({
+      kind: "runtime_recheck_requested",
+      payload: {},
+      source: "runner",
+    })).toThrow("Hosted runtime recheck signal must not include payload.");
+
     for (const field of [
       "body",
       "headers",

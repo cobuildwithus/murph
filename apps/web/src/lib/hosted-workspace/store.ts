@@ -769,17 +769,17 @@ export async function listHostedRuntimeLogs(input: {
   return rows.map((row) => projectHostedRuntimeLog(row));
 }
 
-export async function hasRecentAcceptedRuntimeAttemptFailureLog(input: {
-  excludeIds?: readonly string[];
+export async function readAcceptedRuntimeAttemptFailureSignalOwnerLogId(input: {
   prisma?: HostedWorkspaceStoreClient;
   since: Date;
   userId: string;
-}): Promise<boolean> {
+}): Promise<string | null> {
   const prisma = input.prisma ?? getPrisma();
-  const excludedIds = (input.excludeIds ?? [])
-    .map((id) => normalizeNullableString(id))
-    .filter((id): id is string => id !== null);
   const row = await prisma.hostedRuntimeLog.findFirst({
+    orderBy: [
+      { createdAt: "asc" },
+      { id: "asc" },
+    ],
     select: {
       id: true,
     },
@@ -792,18 +792,11 @@ export async function hasRecentAcceptedRuntimeAttemptFailureLog(input: {
         HOSTED_RUNTIME_LOG_EVENT_CODES,
         "Hosted runtime log eventCode",
       ),
-      ...(excludedIds.length > 0
-        ? {
-            id: {
-              notIn: excludedIds,
-            },
-          }
-        : {}),
       userId: requireNonEmptyString(input.userId, "Hosted runtime log userId"),
     },
   });
 
-  return row !== null;
+  return row?.id ?? null;
 }
 
 export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorkspaceRecord {
