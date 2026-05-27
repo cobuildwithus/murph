@@ -58,7 +58,7 @@ export function throwIfProviderRequestAborted(signal?: AbortSignal | null): void
   throw readAbortReason(signal);
 }
 
-export function isProviderAbortError(error: unknown, signal?: AbortSignal | null): boolean {
+export function isProviderParentAbortError(error: unknown, signal?: AbortSignal | null): boolean {
   if (signal) {
     if (!signal.aborted || isProviderTimeoutReason(signal.reason)) {
       return false;
