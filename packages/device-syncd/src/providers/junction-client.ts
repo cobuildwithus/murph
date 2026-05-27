@@ -8,6 +8,7 @@ import {
   createProviderRequestAbortSignal,
   isProviderAbortError,
   isProviderTimeoutError,
+  normalizeProviderAbortError,
   throwIfProviderRequestAborted,
   waitForProviderRetryDelay,
 } from "./request-abort.ts";
@@ -469,11 +470,16 @@ export class JunctionClient {
       } catch (error) {
         lastError = error;
 
+        if (isProviderAbortError(error, requestAbort.signal)) {
+          throw normalizeProviderAbortError(error, requestAbort.signal);
+        }
+
         if (
-          (options.signal ? isProviderAbortError(error, options.signal) : false)
-          || isProviderAbortError(error, requestAbort.signal)
+          !requestAbort.signal.aborted
+          && options.signal
+          && isProviderAbortError(error, options.signal)
         ) {
-          throw error;
+          throw normalizeProviderAbortError(error, options.signal);
         }
 
         if (isDeviceSyncError(error)) {

@@ -9,6 +9,7 @@ import {
 import {
   createProviderRequestAbortSignal,
   isProviderAbortError,
+  normalizeProviderAbortError,
   throwIfProviderRequestAborted,
   waitForProviderRetryDelay,
 } from "./request-abort.ts";
@@ -52,7 +53,7 @@ export async function parseResponseBody(response: Response, signal?: AbortSignal
     return body;
   } catch (error) {
     if (isProviderAbortError(error, signal)) {
-      throw error;
+      throw normalizeProviderAbortError(error, signal);
     }
 
     throwIfProviderRequestAborted(signal);
@@ -221,6 +222,20 @@ export async function postOAuthTokenRequest<T>(input: {
     }
 
     return (await response.json()) as T;
+  } catch (error) {
+    if (isProviderAbortError(error, requestAbort.signal)) {
+      throw normalizeProviderAbortError(error, requestAbort.signal);
+    }
+
+    if (
+      !requestAbort.signal.aborted
+      && input.signal
+      && isProviderAbortError(error, input.signal)
+    ) {
+      throw normalizeProviderAbortError(error, input.signal);
+    }
+
+    throw error;
   } finally {
     requestAbort.cleanup();
   }
@@ -525,6 +540,20 @@ export async function fetchBearerJson<T>(input: {
     }
 
     return (await response.json()) as T;
+  } catch (error) {
+    if (isProviderAbortError(error, requestAbort.signal)) {
+      throw normalizeProviderAbortError(error, requestAbort.signal);
+    }
+
+    if (
+      !requestAbort.signal.aborted
+      && input.signal
+      && isProviderAbortError(error, input.signal)
+    ) {
+      throw normalizeProviderAbortError(error, input.signal);
+    }
+
+    throw error;
   } finally {
     requestAbort.cleanup();
   }
