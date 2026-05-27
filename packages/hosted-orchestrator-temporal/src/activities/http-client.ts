@@ -36,6 +36,13 @@ const HOSTED_WEB_CALLBACK_SIGNING_ALGORITHM: EcdsaParams = {
   hash: "SHA-256",
   name: "ECDSA",
 };
+const RESERVED_UNSIGNED_ORCHESTRATOR_HEADERS = new Set([
+  HOSTED_EXECUTION_NONCE_HEADER,
+  HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
+  HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  HOSTED_EXECUTION_USER_ID_HEADER,
+].map((header) => header.toLowerCase()));
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -58,7 +65,6 @@ export interface HostedOrchestratorJsonRequest<TResponse> {
   body?: string;
   boundUserId?: string;
   fetchImpl?: typeof fetch;
-  headers?: Readonly<Record<string, string>>;
   label: string;
   method: "GET" | "POST";
   parse: (value: unknown) => TResponse;
@@ -66,6 +72,7 @@ export interface HostedOrchestratorJsonRequest<TResponse> {
   search?: string | null;
   signing?: HostedWebCallbackSigningEnvironment | null;
   timeoutMs: number;
+  unsignedHeaders?: Readonly<Record<string, string>>;
 }
 
 const privateKeyCache = new Map<string, Promise<CryptoKey>>();
@@ -183,7 +190,13 @@ export async function requestHostedOrchestratorJson<TResponse>(
     headers.set(HOSTED_EXECUTION_USER_ID_HEADER, request.boundUserId);
   }
 
-  for (const [key, value] of Object.entries(request.headers ?? {})) {
+  for (const [key, value] of Object.entries(request.unsignedHeaders ?? {})) {
+    if (RESERVED_UNSIGNED_ORCHESTRATOR_HEADERS.has(key.toLowerCase())) {
+      throw nonRetryableActivityError(
+        "hosted_orchestrator_reserved_unsigned_header",
+        `Hosted orchestrator ${request.label} request cannot set reserved unsigned header ${key}.`,
+      );
+    }
     headers.set(key, value);
   }
 

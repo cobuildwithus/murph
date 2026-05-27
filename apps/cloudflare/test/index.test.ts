@@ -1637,6 +1637,74 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
+    it("accepts runtime ensure-processing requests without timeout metadata", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+              source: "device_sync_recovery",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        source: "device_sync_recovery",
+        userId: "test-user",
+      });
+    });
+
+    it("rejects invalid runtime ensure-processing timeout headers before calling the Durable Object", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+              source: "device_sync_recovery",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]: "not-a-timeout",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        code: "invalid_request",
+        error: "Invalid request.",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
     it("starts runtime processing without an active fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));

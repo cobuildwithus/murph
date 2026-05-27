@@ -60,7 +60,7 @@ export async function ensureRuntimeProcessing(
         {
           body: JSON.stringify(cloudflareRequest),
           boundUserId: parsedRequest.userId,
-          headers: {
+          unsignedHeaders: {
             [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
               String(cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs),
           },
