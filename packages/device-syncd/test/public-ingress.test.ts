@@ -28,6 +28,7 @@ import type {
 } from "../src/types.ts";
 import {
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+  classifyDeviceSyncWebhookAcceptanceMode,
   getDeviceSyncAccountOAuthTokens,
 } from "../src/types.ts";
 
@@ -411,7 +412,7 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     accessToken: "<REDACTED_ACCESS_TOKEN_2>",
   });
   const defaultVerifyAndParseWebhook: DeviceWebhookHandler["verifyAndParseWebhook"] = async () => ({
-    acceptanceMode: "level_dirty_hint",
+    acceptanceMode: "durable_webhook_work",
     externalAccountId: "demo-abc",
     eventType: "demo.updated",
     traceId: "trace-1",
@@ -536,10 +537,14 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
       : verifyAndParseWebhook
         ? {
             webhookHandler: {
-              verifyAndParseWebhook: async (context) => ({
-                acceptanceMode: "level_dirty_hint",
-                ...await verifyAndParseWebhook(context),
-              }),
+              verifyAndParseWebhook: async (context) => {
+                const parsed = await verifyAndParseWebhook(context);
+                return {
+                  ...parsed,
+                  acceptanceMode: parsed.acceptanceMode
+                    ?? classifyDeviceSyncWebhookAcceptanceMode(parsed.jobs),
+                };
+              },
             },
           }
         : {}),
@@ -1939,7 +1944,15 @@ test("public ingress can complete verified unknown-account webhook traces withou
             externalAccountId: "demo-race",
             eventType: "demo.updated",
             traceId: "trace-orphan",
-            jobs: [],
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-04-10T00:00:00.000Z",
+                  windowEnd: "2026-04-11T00:00:00.000Z",
+                },
+              },
+            ],
             unknownAccountAction: "accept",
           };
         },
@@ -1993,7 +2006,15 @@ test("public ingress accepts provider-requested unknown-account webhooks without
             externalAccountId: "demo-race",
             eventType: "demo.updated",
             traceId: "trace-orphan",
-            jobs: [],
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-04-10T00:00:00.000Z",
+                  windowEnd: "2026-04-11T00:00:00.000Z",
+                },
+              },
+            ],
             unknownAccountAction: "accept",
           };
         },
@@ -2137,7 +2158,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
     {
       traceId: scopeWebhookTraceId("demo", "demo-abc", "trace-summary"),
       webhook: {
-        acceptanceMode: "level_dirty_hint",
+        acceptanceMode: "durable_webhook_work",
         eventType: "demo.updated",
         jobs: [
           {
@@ -2169,7 +2190,15 @@ test("public ingress passes the same stripped webhook summary into accepted orph
             traceId: "trace-summary-unknown",
             occurredAt: "2026-04-11T12:59:00.000Z",
             resourceCategory: "  sleep  ",
-            jobs: [],
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-04-10T00:00:00.000Z",
+                  windowEnd: "2026-04-11T00:00:00.000Z",
+                },
+              },
+            ],
             unknownAccountAction: "accept",
           };
         },
@@ -2300,7 +2329,15 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
             externalAccountId: "demo-abc",
             eventType: "demo.updated",
             traceId: "trace-already-dirty",
-            jobs: [],
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-04-10T00:00:00.000Z",
+                  windowEnd: "2026-04-11T00:00:00.000Z",
+                },
+              },
+            ],
           };
         },
       }),
@@ -2712,7 +2749,7 @@ test("public ingress hashes unknown external account ids before logging them", a
     externalAccountIdHash: sha256Text("demo-unknown"),
     eventType: "demo.updated",
     traceId: scopeWebhookTraceId("demo", "demo-unknown", "trace-unknown-account"),
-    acceptanceMode: "level_dirty_hint",
+    acceptanceMode: "durable_webhook_work",
     unknownAccountAction: "retry",
     unknownWebhookHookConfigured: false,
   });
@@ -3281,7 +3318,15 @@ test("public ingress releases unknown-account webhook traces when the unknown ho
             externalAccountId: "demo-late",
             eventType: "demo.updated",
             traceId: "trace-release-on-error",
-            jobs: [],
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-04-10T00:00:00.000Z",
+                  windowEnd: "2026-04-11T00:00:00.000Z",
+                },
+              },
+            ],
             unknownAccountAction: "accept",
           };
         },
