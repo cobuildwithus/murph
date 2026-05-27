@@ -1600,7 +1600,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake marks background maintenance yield after late assistant input import", async () => {
+  test("runtime wake interrupts background maintenance after late assistant input import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -1614,6 +1614,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const yieldStates: boolean[] = [];
+    const backgroundDeviceSyncJobStarts: string[] = [];
+    let assistantPhaseCompleted = false;
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
@@ -1652,6 +1654,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase(input) {
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          backgroundDeviceSyncJobStarts.push("job-1");
           items.push(createMailboxItem({
             id: "mailbox_item_runner_yield_late",
             laneSeq: "2",
@@ -1663,6 +1666,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             input.shouldYieldBackgroundMaintenance?.() === true
           );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          if (input.shouldYieldBackgroundMaintenance?.() !== true) {
+            backgroundDeviceSyncJobStarts.push("job-2");
+          }
+          assistantPhaseCompleted = true;
           return {
             checkpointReason: "canonical_runtime_commit",
             progressed: true,
@@ -1675,6 +1682,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(backgroundDeviceSyncJobStarts, ["job-1"]);
+      assert.equal(assistantPhaseCompleted, true);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
