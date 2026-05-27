@@ -28,3 +28,6 @@ The active `patched("hosted-user-runtime-ensure-runtime-processing-v1")` marker 
 ## Status
 
 Implementation complete; live source now uses only `ensure-processing`, with the active Temporal patch marker retained for replay compatibility of histories that already saw it.
+Status: completed
+Updated: 2026-05-27
+Completed: 2026-05-27
