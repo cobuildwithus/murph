@@ -51,6 +51,9 @@ describe("hosted orchestration control contracts", () => {
       {
         kind: "mailbox_lag_observed",
       },
+      {
+        kind: "runtime_recheck_requested",
+      },
     ];
 
     for (const signal of signals) {

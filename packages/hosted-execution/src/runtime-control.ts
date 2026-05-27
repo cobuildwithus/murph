@@ -725,6 +725,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "outbox.ambiguous",
   "outbox.delivery_finished",
   "outbox.receipt_checkpointed",
+  "runner.accepted_attempt_failed",
   "runner.error",
   "runner.idle",
   "runner.lease_superseded",

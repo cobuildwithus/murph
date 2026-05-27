@@ -76,6 +76,11 @@ export interface SignalHostedManualRunInput {
   userId: string;
 }
 
+export interface SignalHostedRuntimeRecheckInput {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  userId: string;
+}
+
 export type HostedDeviceSyncRecoverySignalIntent =
   | "device-sync-dirty-recovery"
   | "device-sync-reconcile-recovery";
@@ -169,6 +174,19 @@ export async function signalHostedManualRunRuntime(
     client: input.client,
     kind: "runtime.manual-requested",
     source: "manual",
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedRuntimeRecheckRuntime(
+  input: SignalHostedRuntimeRecheckInput,
+): Promise<HostedRuntimeSignalResult> {
+  return signalHostedUserRuntimeWorkflow({
+    client: input.client,
+    ensureWorkspace: false,
+    signal: parseHostedRuntimeSignal({
+      kind: "runtime_recheck_requested",
+    }),
     userId: input.userId,
   });
 }

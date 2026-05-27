@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
+  hasRecentAcceptedRuntimeAttemptFailureLog,
   publishHostedBrowserVaultReplicaRef,
   publishLatestBrowserVaultReplicaRefTx,
   recordHostedRuntimeLogTx,
@@ -1168,6 +1169,39 @@ describe("hosted workspace store", () => {
 });
 
 describe("hosted runtime log store", () => {
+  it("checks recent same-user same-event logs while excluding current log ids", async () => {
+    const findFirst = vi.fn<HostedRuntimeLogFindFirst>(async () => ({ id: "runtime_log_prior" }));
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: {
+        findFirst,
+      },
+    }) as Parameters<typeof hasRecentAcceptedRuntimeAttemptFailureLog>[0]["prisma"];
+
+    const result = await hasRecentAcceptedRuntimeAttemptFailureLog({
+      excludeIds: ["runtime_log_current", "", "runtime_log_current_2"],
+      prisma,
+      since: new Date("2026-05-27T12:34:00.000Z"),
+      userId: "member_workspace_1",
+    });
+
+    expect(result).toBe(true);
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        createdAt: {
+          gte: new Date("2026-05-27T12:34:00.000Z"),
+        },
+        eventCode: "runner.accepted_attempt_failed",
+        id: {
+          notIn: ["runtime_log_current", "runtime_log_current_2"],
+        },
+        userId: "member_workspace_1",
+      },
+    });
+  });
+
   it("inserts parser-accepted structured log fields", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({
@@ -1649,10 +1683,27 @@ interface HostedRuntimeLogCreateArgs {
   };
 }
 
+interface HostedRuntimeLogFindFirstArgs {
+  select: {
+    id: true;
+  };
+  where: {
+    createdAt: {
+      gte: Date;
+    };
+    eventCode: string;
+    id?: {
+      notIn: string[];
+    };
+    userId: string;
+  };
+}
+
 type HostedWorkspaceUpdateMany = (args: HostedWorkspaceUpdateManyArgs) => Promise<{ count: number }>;
 type HostedWorkspaceFindUnique = (args: HostedWorkspaceFindUniqueArgs) => Promise<HostedWorkspaceRow | null>;
 type HostedWorkspaceUpsert = (args: HostedWorkspaceUpsertArgs) => Promise<HostedWorkspaceRow>;
 type HostedRuntimeLogCreate = (args: HostedRuntimeLogCreateArgs) => Promise<HostedRuntimeLogRow>;
+type HostedRuntimeLogFindFirst = (args: HostedRuntimeLogFindFirstArgs) => Promise<{ id: string } | null>;
 
 function buildHostedWorkspaceRow(
   overrides: Partial<HostedWorkspaceRow> = {},

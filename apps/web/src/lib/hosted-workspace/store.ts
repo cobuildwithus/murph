@@ -769,6 +769,43 @@ export async function listHostedRuntimeLogs(input: {
   return rows.map((row) => projectHostedRuntimeLog(row));
 }
 
+export async function hasRecentAcceptedRuntimeAttemptFailureLog(input: {
+  excludeIds?: readonly string[];
+  prisma?: HostedWorkspaceStoreClient;
+  since: Date;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const excludedIds = (input.excludeIds ?? [])
+    .map((id) => normalizeNullableString(id))
+    .filter((id): id is string => id !== null);
+  const row = await prisma.hostedRuntimeLog.findFirst({
+    select: {
+      id: true,
+    },
+    where: {
+      createdAt: {
+        gte: input.since,
+      },
+      eventCode: requireAllowedString(
+        "runner.accepted_attempt_failed",
+        HOSTED_RUNTIME_LOG_EVENT_CODES,
+        "Hosted runtime log eventCode",
+      ),
+      ...(excludedIds.length > 0
+        ? {
+            id: {
+              notIn: excludedIds,
+            },
+          }
+        : {}),
+      userId: requireNonEmptyString(input.userId, "Hosted runtime log userId"),
+    },
+  });
+
+  return row !== null;
+}
+
 export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorkspaceRecord {
   return {
     browserVaultReplicaRef: record.browserVaultReplicaRef,
