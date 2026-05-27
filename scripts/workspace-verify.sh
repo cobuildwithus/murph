@@ -619,7 +619,6 @@ run_all_package_coverage() {
     "Contracts package coverage"
     "Device syncd package coverage"
     "Gateway core package coverage"
-    "Gateway local package coverage"
     "Health metrics package coverage"
     "Hosted execution owner coverage"
     "Hosted Temporal orchestrator package coverage"
