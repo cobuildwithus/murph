@@ -295,6 +295,27 @@ describe("hosted orchestration demand", () => {
     );
   });
 
+  it.each([
+    "alarm",
+    "assistant",
+    "assistant_due",
+    "device-sync.reconcile",
+    "mailbox",
+  ] as const)("logs known workspace wake reason %s", async (nextWakeReason) => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:58:00.000Z",
+      nextWakeReason,
+    }));
+
+    const response = await demandRoute.GET(requestForDemand(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy.mock.calls[0]?.[1]).toMatchObject({
+      workspaceNextWakeReason: nextWakeReason,
+    });
+  });
+
   it("can evaluate demand with a read-only usage gate for status diagnostics", async () => {
     const { readHostedRuntimeDemand } = await import(
       "@/src/lib/hosted-orchestration/runtime-demand"

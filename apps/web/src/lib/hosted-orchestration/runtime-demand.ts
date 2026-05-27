@@ -504,6 +504,7 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
     case "assistant_due":
     case "device-sync.reconcile":
     case "mailbox":
+      return reason;
     default:
       return "other";
   }
