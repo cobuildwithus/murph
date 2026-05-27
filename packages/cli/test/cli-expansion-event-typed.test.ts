@@ -297,6 +297,7 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(shownObservation.ok, true)
     assert.equal(requireData(shownObservation).entity.kind, 'observation')
     assert.equal(requireData(shownObservation).entity.data.metric, 'resting-heart-rate')
+    assert.equal(requireData(shownObservation).entity.data.queryVisibility, 'default')
     assert.equal(requireData(shownObservation).entity.data.value, 55)
     assert.equal(requireData(shownObservation).entity.data.unit, 'bpm')
 

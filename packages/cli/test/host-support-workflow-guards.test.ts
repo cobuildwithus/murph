@@ -54,7 +54,6 @@ describe('host support workflow guards', () => {
       'packages/device-syncd',
       'packages/cli',
       'packages/gateway-core',
-      'packages/gateway-local',
       'packages/hosted-execution',
       'packages/importers',
       'packages/inbox-services',

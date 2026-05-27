@@ -23,12 +23,6 @@
       "path": "../operator-config"
     },
     {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../gateway-local"
-    },
-    {
       "path": "../hosted-execution"
     },
     {

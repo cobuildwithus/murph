@@ -1,6 +1,5 @@
 import { assistantLocalStateDescriptors } from "./assistant-local-state-descriptors.ts";
 import { deviceSyncLocalStateDescriptors } from "./device-sync-local-state-descriptors.ts";
-import { gatewayLocalStateDescriptors } from "./gateway-local-state-descriptors.ts";
 import { inboxLocalStateDescriptors } from "./inbox-local-state-descriptors.ts";
 import { parserLocalStateDescriptors } from "./parser-local-state-descriptors.ts";
 import { queryLocalStateDescriptors } from "./query-local-state-descriptors.ts";
@@ -13,6 +12,5 @@ export const vaultLocalStatePathDescriptors: readonly VaultLocalStatePathDescrip
   ...deviceSyncLocalStateDescriptors,
   ...parserLocalStateDescriptors,
   ...queryLocalStateDescriptors,
-  ...gatewayLocalStateDescriptors,
   ...writeOperationLocalStateDescriptors,
 ] as const;

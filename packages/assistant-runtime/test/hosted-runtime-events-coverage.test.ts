@@ -30,17 +30,6 @@ vi.mock("@murphai/assistant-engine", async () => {
   };
 });
 
-vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
-  assistantGatewayLocalMessageSender: Symbol("assistantGatewayLocalMessageSender"),
-  assistantGatewayLocalProjectionSourceReader: Symbol(
-    "assistantGatewayLocalProjectionSourceReader",
-  ),
-}));
-
-vi.mock("@murphai/gateway-local", () => ({
-  sendGatewayMessageLocal: vi.fn(),
-}));
-
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
 }));

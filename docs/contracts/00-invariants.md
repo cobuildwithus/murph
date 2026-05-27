@@ -56,7 +56,6 @@
   - `assistant-runtime`
   - `assistantd`
   - `operator-config`
-  - `gateway-local`
   - `messaging-ingress`
   - `vault-usecases`
   - `assistant-cli`

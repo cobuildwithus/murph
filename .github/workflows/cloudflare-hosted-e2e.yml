@@ -74,6 +74,9 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
+
       - name: Run device connect hosted E2E
         shell: bash
         run: |
@@ -128,6 +131,9 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
 
       - name: Run Linq delivery hosted E2E
         shell: bash
@@ -184,6 +190,9 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
+
       - name: Run Linq scheduled reminder hosted E2E
         shell: bash
         run: |
@@ -238,6 +247,9 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
 
       - name: Run idle checkpoint deferred progress hosted E2E
         shell: bash
@@ -360,6 +372,9 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
 
       - name: Run Telegram delivery hosted E2E
         shell: bash

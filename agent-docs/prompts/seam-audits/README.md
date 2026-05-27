@@ -30,7 +30,6 @@ Each prompt is intentionally short: use one file as the starting prompt for a de
 - [17-inbox-services.md](./17-inbox-services.md)
 - [18-parsers.md](./18-parsers.md)
 - [19-gateway-core.md](./19-gateway-core.md)
-- [20-gateway-local.md](./20-gateway-local.md)
 - [21-assistant-engine-codex-runtime.md](./21-assistant-engine-codex-runtime.md)
 - [22-assistant-engine-state-store.md](./22-assistant-engine-state-store.md)
 - [23-assistant-engine-automation-delivery.md](./23-assistant-engine-automation-delivery.md)

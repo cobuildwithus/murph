@@ -69,18 +69,17 @@ If the legacy path still needs to exist, it should stay a re-export, not a fork.
 
 ### 5. Keep gateway delivery target kinds owned by gateway-core where the same route semantics are reused
 
-**Seam:** `packages/gateway-core/src/contracts.ts`, `packages/gateway-core/src/local-runtime.ts`, `packages/gateway-core/src/routes.ts`, `packages/assistant-runtime/src/hosted-email.ts`
+**Seam:** `packages/gateway-core/src/contracts.ts`, `packages/gateway-core/src/routes.ts`, `packages/assistant-runtime/src/hosted-email.ts`
 
-The same outbound delivery-target semantics (`explicit`, `participant`, `thread`) and binding kinds (`participant`, `thread`) were being restated in gateway-local runtime records, gateway route helpers, and assistant-runtime hosted email parsing.
+The same outbound delivery-target semantics (`explicit`, `participant`, `thread`) and binding kinds (`participant`, `thread`) were being restated in gateway route helpers and assistant-runtime hosted email parsing.
 Those are all the same routing concept, but not all of them were pointing back at the gateway owner types.
 
 This patch:
 
-- reuses `GatewayDeliveryTargetKind` in `packages/gateway-core/src/local-runtime.ts`
 - reuses `GatewayReplyRouteKind` for the internal route helper inputs in `packages/gateway-core/src/routes.ts`
 - reuses `gatewayDeliveryTargetKindValues` / `GatewayDeliveryTargetKind` in `packages/assistant-runtime/src/hosted-email.ts`
 
-**Why this is simpler:** one more outbound target kind can now flow through gateway-local runtime and hosted email request parsing without hand-updating multiple literal unions.
+**Why this is simpler:** one more outbound target kind can now flow through hosted email request parsing without hand-updating multiple literal unions.
 
 **Main refactor risk:** gateway-core should stay the owner only for the shared route-kind vocabulary.
 Do not pull hosted-execution side-effect policy or channel-specific send rules into that package just to chase total dedupe.

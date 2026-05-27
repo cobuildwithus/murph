@@ -78,7 +78,6 @@ function createPaths() {
     deviceSyncRuntimeRoot: '/vault/.runtime/operations/device-sync',
     deviceSyncStderrLogPath: '/vault/.runtime/operations/device-sync/stderr.log',
     deviceSyncStdoutLogPath: '/vault/.runtime/operations/device-sync/stdout.log',
-    gatewayDbPath: '/vault/.runtime/projections/gateway.sqlite',
     runtimeRoot: '/vault/.runtime',
     operationalRoot: '/vault/.runtime/operations',
     projectionsRoot: '/vault/.runtime/projections',

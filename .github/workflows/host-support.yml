@@ -119,8 +119,8 @@ jobs:
             packages: packages/core packages/query packages/vault-usecases
           - shard: device-inbox-runtime
             packages: packages/device-syncd packages/inboxd packages/importers packages/runtime-state
-          - shard: assistant-gateway-hosted
-            packages: packages/assistant-cli packages/assistantd packages/gateway-local packages/hosted-execution
+          - shard: assistant-hosted
+            packages: packages/assistant-cli packages/assistantd packages/hosted-execution
           - shard: small-packages
             packages: packages/cloudflare-hosted-control packages/contracts packages/gateway-core packages/inbox-services packages/messaging-ingress packages/openclaw-plugin packages/parsers
     steps:

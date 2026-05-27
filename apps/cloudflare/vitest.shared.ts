@@ -34,7 +34,6 @@ export const cloudflareVitestAliases = [
       "@murphai/core": "packages/core/src/index.ts",
       "@murphai/device-syncd": "packages/device-syncd/src/index.ts",
       "@murphai/gateway-core": "packages/gateway-core/src/index.ts",
-      "@murphai/gateway-local": "packages/gateway-local/src/index.ts",
       "@murphai/health-metrics": "packages/health-metrics/src/index.ts",
       "@murphai/hosted-execution": "packages/hosted-execution/src/index.ts",
       "@murphai/hosted-local-harness": "packages/hosted-local-harness/package.json",

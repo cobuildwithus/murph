@@ -24,7 +24,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a private hosted Temporal worker in `packages/hosted-orchestrator-temporal`,
   with a root Render Background Worker Blueprint for production orchestration
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
-- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
+- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
 
 ## Install
 
@@ -137,7 +137,6 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI.                                                |
 | `packages/setup-cli`         | Workspace-private CLI-only onboarding, host setup, and setup-wizard package.                                                               |
 | `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
-| `packages/gateway-local`     | Workspace-private local vault-backed gateway runtime and projection store.                                                                 |
 | `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths.                                                       |
 | `packages/assistantd`        | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane.                                          |
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |

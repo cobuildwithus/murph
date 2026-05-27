@@ -152,12 +152,11 @@ const wrapperCases = [
     ],
   ],
   [
-    'index',
+      'index',
     assistantEngineIndex,
     [
       'runAssistantAutomation',
       'sanitizeChildProcessEnv',
-      'assistantGatewayLocalProjectionSourceReader',
       'deliverAssistantMessage',
     ],
   ],
