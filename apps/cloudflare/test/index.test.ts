@@ -1718,6 +1718,36 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
     });
 
+    it("returns a stable code for invalid runtime ensure-processing requests", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+              source: "unsupported-source",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        code: "invalid_request",
+        error: "Invalid request.",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
     it("starts the container without an active fence and returns runtime_completed", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));

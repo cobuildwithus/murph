@@ -164,11 +164,27 @@ export type HostedWorkspaceRunnerAssistantPhaseResult =
     });
 
 export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
+  afterDurableCheckpoint?: HostedWorkspaceDurableCheckpointEffects | null;
   checkpointReason: HostedWorkspaceCheckpointReason;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
 }
+
+export interface HostedWorkspaceDurableCheckpointEffectResult {
+  nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
+}
+
+export type HostedWorkspaceDurableCheckpointEffect =
+  () => Promise<HostedWorkspaceDurableCheckpointEffectResult | null | void>
+    | HostedWorkspaceDurableCheckpointEffectResult
+    | null
+    | void;
+
+export type HostedWorkspaceDurableCheckpointEffects =
+  | HostedWorkspaceDurableCheckpointEffect
+  | readonly HostedWorkspaceDurableCheckpointEffect[];
 
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
@@ -215,6 +231,7 @@ interface HostedMailboxPostCheckpointEffectsResult {
 const HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS = 15_000;
 
 export interface HostedWorkspaceRunnerResult {
+  afterDurableCheckpoint: readonly HostedWorkspaceDurableCheckpointEffect[];
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
@@ -321,6 +338,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 ): Promise<HostedWorkspaceRunnerResult> {
   assertHostedWorkspaceRunnerUser(input);
 
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect[] = [];
   const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
     input.checkpointRequestBuilder,
   );
@@ -366,6 +384,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
     });
     return {
+      afterDurableCheckpoint,
       assistantPhaseResult: null,
       initialMailboxImport,
       latestMailboxImport: checkpointRequestSession.latestMailboxImport()
@@ -446,6 +465,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           assistantPhaseResult,
           postCheckpoint,
         });
+        appendHostedWorkspaceDurableCheckpointEffect({
+          effects: afterDurableCheckpoint,
+          postCheckpoint,
+        });
       } catch (error) {
         if (
           error instanceof HostedMailboxImportCheckpointConflictError
@@ -477,6 +500,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   return {
+    afterDurableCheckpoint,
     assistantPhaseResult,
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
@@ -1310,6 +1334,23 @@ function mergeDeferredPostCheckpointWake(input: {
 
   input.assistantPhaseResult.nextWakeAt = input.postCheckpoint.nextWakeAt ?? null;
   input.assistantPhaseResult.nextWakeReason = input.postCheckpoint.nextWakeReason ?? null;
+}
+
+function appendHostedWorkspaceDurableCheckpointEffect(input: {
+  effects: HostedWorkspaceDurableCheckpointEffect[];
+  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
+}): void {
+  const effect = input.postCheckpoint.afterDurableCheckpoint ?? null;
+  if (!effect) {
+    return;
+  }
+  input.effects.push(...listHostedWorkspaceDurableCheckpointEffects(effect));
+}
+
+function listHostedWorkspaceDurableCheckpointEffects(
+  effect: HostedWorkspaceDurableCheckpointEffects,
+): HostedWorkspaceDurableCheckpointEffect[] {
+  return typeof effect === "function" ? [effect] : [...effect];
 }
 
 async function writeHostedForegroundCheckpointDeferredLog(input: {

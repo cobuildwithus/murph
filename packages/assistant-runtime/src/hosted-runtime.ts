@@ -53,6 +53,8 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   importHostedMailboxForWorkspaceRunner,
   runHostedWorkspaceUntilIdleOrBudget,
+  type HostedWorkspaceDurableCheckpointEffect,
+  type HostedWorkspaceDurableCheckpointEffectResult,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
 } from "./hosted-runtime/workspace-runner.ts";
@@ -755,10 +757,44 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     let result: HostedWorkspaceRunnerResult;
     let runtimeStateDirty = false;
+    const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    let durableCheckpointWakeAt: string | null = null;
+    let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
     const markIdleCheckpointDeadlineAfterDirtyWork = () => {
       idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
+    };
+    const runDurableCheckpointEffectsBestEffort = async (): Promise<void> => {
+      const effects = pendingDurableCheckpointEffects.splice(0);
+      for (const effect of effects) {
+        try {
+          const effectResult = await effect();
+          const effectWake = readHostedWorkspaceDurableCheckpointEffectWake(effectResult);
+          if (effectWake.nextWakeAt) {
+            const selectedWake = selectEarliestHostedRuntimeWake([
+              {
+                at: durableCheckpointWakeAt,
+                reason: durableCheckpointWakeReason,
+              },
+              {
+                at: effectWake.nextWakeAt,
+                reason: effectWake.nextWakeReason,
+              },
+            ]);
+            durableCheckpointWakeAt = selectedWake.nextWakeAt;
+            durableCheckpointWakeReason = selectedWake.nextWakeReason;
+          }
+        } catch (error) {
+          emitPhaseLog({
+            error,
+            input,
+            requestId,
+            stage: "workspace.checkpoint.durable_effect",
+            status: "fail",
+          });
+        }
+      }
     };
     try {
       result = await runForegroundPass({
@@ -766,6 +802,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         requestId,
         workspace: workspaceRead.workspace,
       });
+      pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
       runtimeStateDirty ||= result.runtimeStateDirty;
       if (result.runtimeStateDirty) {
         markIdleCheckpointDeadlineAfterDirtyWork();
@@ -793,6 +830,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           requestId: `${requestId}:${wakeInput.requestIdKind}:${idleWakeOrdinal}`,
           workspace: passWorkspace,
         });
+        pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
         if (result.runtimeStateDirty) {
           markIdleCheckpointDeadlineAfterDirtyWork();
         }
@@ -907,6 +945,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stage: "workspace.checkpoint.idle_shutdown",
           status: "done",
         });
+        await runDurableCheckpointEffectsBestEffort();
         checkpointMetadata.expectedWorkspaceVersion = checkpoint.workspace.version;
         checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
         checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
@@ -921,6 +960,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestId: `${requestId}:checkpoint-wake:${idleWakeOrdinal}`,
             workspace: checkpoint.workspace,
           });
+          pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
           idleCheckpointStartByMs = result.runtimeStateDirty
             ? Date.now() + idleCheckpointDelayMs
             : null;
@@ -944,18 +984,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const refreshRequestedImmediateWake =
           browserVaultRefresh.status === "deferred_runtime_wake";
+        const checkpointReturnWake = selectEarliestHostedRuntimeWake([
+          {
+            at: checkpoint.workspace.nextWakeAt ?? null,
+            reason: checkpoint.workspace.nextWakeReason ?? null,
+          },
+          {
+            at: durableCheckpointWakeAt,
+            reason: durableCheckpointWakeReason,
+          },
+        ]);
+        const checkpointReturnWakePresent = Object.hasOwn(checkpoint.workspace, "nextWakeAt")
+          || durableCheckpointWakeAt !== null;
         const invocationResult = {
           ...(refreshRequestedImmediateWake
             ? { nextWakeAt: new Date().toISOString() }
-            : checkpoint.workspace.nextWakeAt === undefined
+            : !checkpointReturnWakePresent
             ? {}
-            : { nextWakeAt: checkpoint.workspace.nextWakeAt ?? null }),
+            : { nextWakeAt: checkpointReturnWake.nextWakeAt ?? null }),
           redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
           status: refreshRequestedImmediateWake
             ? "scheduled" as const
             : resolveHostedWorkspaceInvocationStatus({
                 mailboxBudgetExhausted: mailboxBudgetExhausted(),
-                nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+                nextWakeAt: checkpointReturnWake.nextWakeAt ?? null,
               }),
         };
         emitPhaseLog({
@@ -1050,6 +1102,7 @@ const HOSTED_RUNTIME_PHASE_NAMES = [
   "mailbox.import.initial",
   "runtime",
   "runtime.return",
+  "workspace.checkpoint.durable_effect",
   "workspace.checkpoint.idle_shutdown",
   "workspace.read",
   "workspace.restore",
@@ -1909,5 +1962,24 @@ function selectEarliestHostedRuntimeWake(
   return {
     nextWakeAt: selected.at,
     nextWakeReason: selected.reason,
+  };
+}
+
+function readHostedWorkspaceDurableCheckpointEffectWake(
+  result: HostedWorkspaceDurableCheckpointEffectResult | null | void,
+): {
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+} {
+  if (!result?.nextWakeAt) {
+    return {
+      nextWakeAt: null,
+      nextWakeReason: null,
+    };
+  }
+
+  return {
+    nextWakeAt: result.nextWakeAt,
+    nextWakeReason: result.nextWakeReason ?? null,
   };
 }

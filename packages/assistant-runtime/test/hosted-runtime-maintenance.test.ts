@@ -1229,6 +1229,104 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("yields before dirty control-plane fetch when foreground input is waiting", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    const shouldYield = vi.fn(() => true);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => null,
+      runSchedulerOnce,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_yield_before_dirty_fetch",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      { shouldYield },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: true,
+    });
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(runSchedulerOnce).not.toHaveBeenCalled();
+    expect(drainWorker).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses dirty ack and schedules retry when foreground input arrives after dirty fetch", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      runSchedulerOnce,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map(),
+      localToHostedAccountIds: new Map(),
+      observedTokenVersions: new Map(),
+      pendingDirtyAck: {
+        connectionId: "dsc_yield_after_fetch",
+        nextWakeAt: null,
+        processedRevision: "41",
+      },
+      snapshot: {
+        connections: [],
+        schema: "murph.hosted-device-sync-runtime-snapshot.v1",
+      },
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_yield_after_dirty_fetch",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      { shouldYield },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: true,
+    });
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(runSchedulerOnce).not.toHaveBeenCalled();
+    expect(drainWorker).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("yields device-sync worker draining between jobs when requested", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -1262,16 +1360,16 @@ describe("runHostedDeviceSyncPass", () => {
     );
 
     assert.deepEqual(result, {
-      nextWakeAt: "2026-04-08T02:00:00.000Z",
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
       postCheckpointRecord: null,
       processedJobs: 1,
-      skipped: false,
+      skipped: true,
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledWith(1);
-    expect(shouldYield).toHaveBeenCalledTimes(2);
-    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(shouldYield).toHaveBeenCalled();
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
 

@@ -69,6 +69,7 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import type {
+  HostedWorkspaceDurableCheckpointEffect,
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
@@ -573,7 +574,7 @@ export async function runHostedWorkspaceAssistantPhase(
             afterCheckpoint: async () => {
               assertHostedAssistantPhaseLiveness(input.signal);
               const deviceSyncPostCheckpoint = assistantMetrics.postCheckpointRecord
-                ? await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+                ? deferHostedDeviceSyncDirtyPostCheckpointRecord({
                     record: assistantMetrics.postCheckpointRecord,
                     runtime: input.runtime,
                   })
@@ -595,23 +596,20 @@ export async function runHostedWorkspaceAssistantPhase(
                 && !terminalLinqCleanupDue
               ) {
                 return {
+                  ...(deviceSyncPostCheckpoint
+                    ? { afterDurableCheckpoint: deviceSyncPostCheckpoint.afterDurableCheckpoint }
+                    : {}),
                   checkpointReason: "assistant_runtime_commit",
                   nextWakeAt: baseNextWakeAt,
                   nextWakeReason: baseNextWake.reason,
                   redactedStatus: {
-                    hostedDeviceSyncDirtyAckRecorded: deviceSyncPostCheckpoint?.recorded ?? false,
-                    hostedDeviceSyncDirtyStillPending: deviceSyncPostCheckpoint?.stillDirty ?? false,
+                    ...(deviceSyncPostCheckpoint?.redactedStatus ?? {}),
                     nextWakeAt: baseNextWakeAt,
                   },
                 };
               }
-              const redactedStatus = deviceSyncPostCheckpoint
-                ? {
-                    hostedDeviceSyncDirtyAckRecorded: deviceSyncPostCheckpoint.recorded,
-                    hostedDeviceSyncDirtyStillPending: deviceSyncPostCheckpoint.stillDirty,
-                  }
-                : null;
               return await drainHostedPostCheckpointDelivery({
+                afterDurableCheckpoint: deviceSyncPostCheckpoint?.afterDurableCheckpoint ?? null,
                 assistantDeliveryEffects: deliveryEffects,
                 baseNextWake,
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
@@ -620,7 +618,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   checkpoint: providerCleanupCheckpoint,
                   mode: "drain",
                 },
-                redactedStatus,
+                redactedStatus: deviceSyncPostCheckpoint?.redactedStatus ?? null,
                 wake,
               });
             },
@@ -811,14 +809,72 @@ function mergeHostedAssistantPhasePostCheckpoint(
     previous.redactedStatus,
     current.redactedStatus,
   );
+  const afterDurableCheckpoint = composeHostedAssistantPhaseDurableCheckpointEffects(
+    previous.afterDurableCheckpoint ?? null,
+    current.afterDurableCheckpoint ?? null,
+  );
 
   return {
+    ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
     checkpointReason: current.checkpointReason,
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
       : {}),
     ...(redactedStatus ? { redactedStatus } : {}),
+  };
+}
+
+function composeHostedAssistantPhaseDurableCheckpointEffects(
+  first: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null,
+  second: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null,
+): HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null {
+  const effects = [
+    ...listHostedAssistantPhaseDurableCheckpointEffects(first),
+    ...listHostedAssistantPhaseDurableCheckpointEffects(second),
+  ];
+  if (effects.length === 0) {
+    return null;
+  }
+  return effects;
+}
+
+function listHostedAssistantPhaseDurableCheckpointEffects(
+  effect: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null,
+): HostedWorkspaceDurableCheckpointEffect[] {
+  if (!effect) {
+    return [];
+  }
+  return typeof effect === "function" ? [effect] : [...effect];
+}
+
+interface DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
+  afterDurableCheckpoint: NonNullable<
+    HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"]
+  >;
+  nextWakeAt: string | null;
+  redactedStatus: HostedRuntimeRedactedJson;
+}
+
+function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
+  typeof recordHostedDeviceSyncDirtyPostCheckpointRecord
+>[0]): DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
+  return {
+    afterDurableCheckpoint: async () => {
+      const result = await recordHostedDeviceSyncDirtyPostCheckpointRecord(input);
+      return result.nextWakeAt
+        ? {
+            nextWakeAt: result.nextWakeAt,
+            nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+          }
+        : null;
+    },
+    nextWakeAt: input.record.nextWakeAt ?? null,
+    redactedStatus: {
+      hostedDeviceSyncDirtyAckDeferred: true,
+      hostedDeviceSyncDirtyAckRecorded: false,
+      hostedDeviceSyncDirtyStillPending: true,
+    },
   };
 }
 
@@ -1112,7 +1168,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       vaultRoot: input.input.restored.vaultRoot,
     });
     const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics?.postCheckpointRecord
-      ? await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+      ? deferHostedDeviceSyncDirtyPostCheckpointRecord({
           record: input.dirtyDeviceSyncMetrics.postCheckpointRecord,
           runtime: input.input.runtime,
         })
@@ -1136,10 +1192,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     const statusNextWakeAt = statusNextWake.at;
     const statusNextWakeReason = statusNextWake.reason;
     const dirtyRedactedStatus: HostedRuntimeRedactedJson = dirtyPostCheckpoint
-      ? {
-          hostedDeviceSyncDirtyAckRecorded: dirtyPostCheckpoint.recorded,
-          hostedDeviceSyncDirtyStillPending: dirtyPostCheckpoint.stillDirty,
-        }
+      ? dirtyPostCheckpoint.redactedStatus
       : {};
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
@@ -1153,6 +1206,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     });
     if (input.systemMailboxDeliveryEffects.length > 0 || input.initialProviderCleanupDue) {
       return await drainHostedPostCheckpointDelivery({
+        afterDurableCheckpoint: dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
         assistantDeliveryEffects: input.systemMailboxDeliveryEffects,
         baseNextWake: {
           at: statusNextWakeAt,
@@ -1175,6 +1229,9 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       });
     }
     return {
+      ...(dirtyPostCheckpoint
+        ? { afterDurableCheckpoint: dirtyPostCheckpoint.afterDurableCheckpoint }
+        : {}),
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: statusNextWakeAt,
       nextWakeReason: statusNextWakeReason,
@@ -1187,7 +1244,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   }
 
   const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics?.postCheckpointRecord
-    ? await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+    ? deferHostedDeviceSyncDirtyPostCheckpointRecord({
         record: input.dirtyDeviceSyncMetrics.postCheckpointRecord,
         runtime: input.input.runtime,
       })
@@ -1204,6 +1261,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt, "assistant"),
     ]);
     return await drainHostedPostCheckpointDelivery({
+      afterDurableCheckpoint: dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
       assistantDeliveryEffects: [],
       baseNextWake,
       checkpointReason: "provider_cleanup",
@@ -1212,12 +1270,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         checkpoint: input.initialProviderCleanupCheckpoint,
         mode: "drain",
       },
-      redactedStatus: dirtyPostCheckpoint
-        ? {
-            hostedDeviceSyncDirtyAckRecorded: dirtyPostCheckpoint.recorded,
-            hostedDeviceSyncDirtyStillPending: dirtyPostCheckpoint.stillDirty,
-          }
-        : null,
+      redactedStatus: dirtyPostCheckpoint?.redactedStatus ?? null,
       wake: input.wake,
     });
   }
@@ -1236,12 +1289,14 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   ]);
   const dirtyNextWakeAt = dirtyNextWake.at;
   return {
+    ...(dirtyPostCheckpoint
+      ? { afterDurableCheckpoint: dirtyPostCheckpoint.afterDurableCheckpoint }
+      : {}),
     checkpointReason: "assistant_runtime_commit",
     nextWakeAt: dirtyNextWakeAt,
     nextWakeReason: dirtyNextWake.reason,
     redactedStatus: {
-      hostedDeviceSyncDirtyAckRecorded: dirtyPostCheckpoint.recorded,
-      hostedDeviceSyncDirtyStillPending: dirtyPostCheckpoint.stillDirty,
+      ...dirtyPostCheckpoint.redactedStatus,
       nextWakeAt: dirtyNextWakeAt,
     },
   };
@@ -1496,7 +1551,7 @@ async function runForegroundAssistantReplyPhase(input: {
           afterCheckpoint: async () => {
             assertHostedAssistantPhaseLiveness(input.input.signal);
             const deviceSyncPostCheckpoint = input.assistantMetrics.postCheckpointRecord
-              ? await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+              ? deferHostedDeviceSyncDirtyPostCheckpointRecord({
                   record: input.assistantMetrics.postCheckpointRecord,
                   runtime: input.input.runtime,
                 })
@@ -1514,17 +1569,20 @@ async function runForegroundAssistantReplyPhase(input: {
             const baseNextWakeAt = baseNextWake.at;
             if (deliveryEffects.length === 0) {
               return {
+                ...(deviceSyncPostCheckpoint
+                  ? { afterDurableCheckpoint: deviceSyncPostCheckpoint.afterDurableCheckpoint }
+                  : {}),
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: baseNextWakeAt,
                 nextWakeReason: baseNextWake.reason,
                 redactedStatus: {
-                  hostedDeviceSyncDirtyAckRecorded: deviceSyncPostCheckpoint?.recorded ?? false,
-                  hostedDeviceSyncDirtyStillPending: deviceSyncPostCheckpoint?.stillDirty ?? false,
+                  ...(deviceSyncPostCheckpoint?.redactedStatus ?? {}),
                   nextWakeAt: baseNextWakeAt,
                 },
               };
             }
             return await drainHostedPostCheckpointDelivery({
+              afterDurableCheckpoint: deviceSyncPostCheckpoint?.afterDurableCheckpoint ?? null,
               assistantDeliveryEffects: deliveryEffects,
               baseNextWake,
               checkpointReason: "outbox_receipt",
@@ -1532,12 +1590,7 @@ async function runForegroundAssistantReplyPhase(input: {
               providerCleanup: {
                 mode: "defer",
               },
-              redactedStatus: deviceSyncPostCheckpoint
-                ? {
-                    hostedDeviceSyncDirtyAckRecorded: deviceSyncPostCheckpoint.recorded,
-                    hostedDeviceSyncDirtyStillPending: deviceSyncPostCheckpoint.stillDirty,
-                  }
-                : null,
+              redactedStatus: deviceSyncPostCheckpoint?.redactedStatus ?? null,
               wake: input.wake,
             });
           },
@@ -1564,6 +1617,7 @@ async function runForegroundAssistantReplyPhase(input: {
 }
 
 async function drainHostedPostCheckpointDelivery(input: {
+  afterDurableCheckpoint?: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffects;
   baseNextWake: HostedRuntimeWakeCandidate;
   checkpointReason: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["checkpointReason"];
@@ -1642,6 +1696,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   }
 
   return {
+    ...(input.afterDurableCheckpoint ? { afterDurableCheckpoint: input.afterDurableCheckpoint } : {}),
     checkpointReason: input.checkpointReason,
     nextWakeAt: postNextWakeAt,
     nextWakeReason: postNextWake.reason,

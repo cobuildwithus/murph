@@ -1509,7 +1509,11 @@ async function handleRuntimeEnsureProcessingRoute(
       phase: "failed",
       userId,
     });
-    throw error;
+    const classified = classifyPublicRouteError(error);
+    return json({
+      code: "invalid_request",
+      error: classified.error,
+    }, classified.status);
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId);
