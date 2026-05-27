@@ -239,6 +239,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'pnpm-workspace.yaml'),
       'utf8',
     )
+    const reviewGptConfig = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
+      'utf8',
+    )
     const removedScripts = [
       'review:gpt:full',
       'review:gpt:protocol',
@@ -273,11 +277,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.88')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.88')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.90')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.90')
     expect(pnpmWorkspace).not.toContain('patchedDependencies:')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
+    expect(reviewGptConfig).toContain('repo_context_url="https://github.com/cobuildwithus/murph"')
+    expect(reviewGptConfig).toContain('attach_artifacts=0')
+    expect(reviewGptConfig).toContain('app_connector="github"')
+    expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)

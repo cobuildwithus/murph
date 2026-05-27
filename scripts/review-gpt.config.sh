@@ -6,8 +6,8 @@ managed_browser_profile="${managed_browser_profile:-Default}"
 managed_browser_port="${managed_browser_port:-9442}"
 
 name_prefix="murph-chatgpt-audit"
-snapshot_attachment_name="murph-review-gpt.repo-snapshot.zip"
 repo_context_url="https://github.com/cobuildwithus/murph"
+attach_artifacts=0
 include_tests=0
 include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
