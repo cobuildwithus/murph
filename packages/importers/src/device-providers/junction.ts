@@ -185,47 +185,6 @@ const WORKOUT_METRICS: readonly MetricDescriptor[] = [
   { metric: "max-heart-rate", unit: "bpm", title: "Junction workout max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr"] },
 ];
 
-const TIMESERIES_OBSERVATION_METRICS: Readonly<Record<string, MetricDescriptor>> = Object.freeze({
-  steps: {
-    metric: "daily-steps",
-    unit: "count",
-    title: "Junction steps",
-    paths: ["value", "steps", "step_count", "daily_steps"],
-  },
-  heartrate: {
-    metric: "average-heart-rate",
-    unit: "bpm",
-    title: "Junction heart rate",
-    paths: ["value", "heartRate", "heart_rate", "heartrate", "averageHeartRate", "average_heart_rate"],
-  },
-  hrv: {
-    metric: "hrv",
-    unit: "ms",
-    title: "Junction HRV",
-    paths: ["value", "hrv", "hrvRmssd", "hrv_rmssd", "rmssd"],
-  },
-  respiratory_rate: {
-    metric: "respiratory-rate",
-    unit: "breaths_per_minute",
-    title: "Junction respiratory rate",
-    paths: ["value", "respiratoryRate", "respiratory_rate", "breathingRate", "breathing_rate"],
-  },
-  blood_oxygen: {
-    metric: "spo2",
-    unit: "%",
-    title: "Junction blood oxygen",
-    paths: ["value", "spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"],
-  },
-  calories_active: {
-    metric: "active-calories",
-    unit: "kcal",
-    title: "Junction active calories",
-    paths: ["value", "calories", "calories_active", "activeCalories", "active_calories"],
-  },
-  distance: { metric: "distance", unit: "m", title: "Junction distance", paths: ["value", "distance", "distanceMeters", "distance_meters"] },
-  weight: { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["value", "bodyWeight", "body_weight", "weightKg", "weight_kg", "weight"] },
-});
-
 type JunctionSleepStage = "awake" | "light" | "deep" | "rem";
 
 const SLEEP_STAGE_VALUE_PATHS = Object.freeze([
@@ -396,9 +355,7 @@ function normalizeTimeseries(
   context: NormalizationContext,
 ): void {
   for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
-    const entries = timeseriesResourceEntries(resource, payload);
     const resourceSlug = slugify(resource, "timeseries");
-    const observationDescriptor = TIMESERIES_OBSERVATION_METRICS[resource];
     pushRawArtifact(
       context.rawArtifacts,
       createRawArtifact(
@@ -407,56 +364,6 @@ function normalizeTimeseries(
         buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
-
-    if (!observationDescriptor) {
-      continue;
-    }
-
-    entries.forEach(({ entry, originFallback }, index) => {
-      const resourceContext = buildResourceContext({
-        entry,
-        originFallback,
-        resource,
-        resourceSlug,
-        identityKind: "timeseries",
-        index,
-        fallbackArtifactRole: `junction-timeseries-${resourceSlug}`,
-        context,
-      });
-
-      if (!resourceContext) {
-        return;
-      }
-
-      const value = firstNumberFromPaths(entry, observationDescriptor.paths);
-      const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
-
-      if (value === undefined || !timestamp.occurredAt) {
-        return;
-      }
-
-      context.events.push(stripUndefined({
-        kind: "observation",
-        occurredAt: timestamp.occurredAt,
-        recordedAt: timestamp.recordedAt,
-        dayKey: timestamp.dayKey,
-        timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
-        source: "device",
-        title: observationDescriptor.title,
-        rawArtifactRoles: resourceContext.rawArtifactRoles,
-        externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, observationDescriptor.metric),
-        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-        fields: {
-          metric: observationDescriptor.metric,
-          unit: resolveTimeseriesObservationUnit(
-            resource,
-            firstStringFromPaths(entry, ["unit"]),
-            observationDescriptor.unit,
-          ),
-          value,
-        },
-      }));
-    });
   }
 }
 
@@ -1270,11 +1177,6 @@ function resourceEntries(payload: unknown): JunctionResourceEntry[] {
   return normalized ? expandResourceEntry(normalized) : [];
 }
 
-function timeseriesResourceEntries(resource: string, payload: unknown): JunctionResourceEntry[] {
-  const grouped = flattenGroupedTimeseriesEntries(resource, payload);
-  return grouped ?? resourceEntries(payload);
-}
-
 function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
   return collectSleepStageIntervalEntries(entry);
 }
@@ -1301,43 +1203,6 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
 
     return collectSleepStageIntervalEntries(nested);
   });
-}
-
-function flattenGroupedTimeseriesEntries(resource: string, payload: unknown): JunctionResourceEntry[] | null {
-  const envelope = asPlainObject(payload);
-  const groups = asPlainObject(envelope?.groups);
-  if (!groups) {
-    return null;
-  }
-
-  const entries: JunctionResourceEntry[] = [];
-
-  for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
-    for (const rawGroup of asArray(rawGroups)) {
-      const group = asPlainObject(rawGroup);
-      if (!group) {
-        continue;
-      }
-
-      for (const rawSample of asArray(group.data)) {
-        const sample = asPlainObject(rawSample);
-        if (!sample) {
-          continue;
-        }
-
-        entries.push({
-          entry: sample,
-          originFallback: {
-            ...group,
-            groupedSourceSlug: sourceSlug,
-            junctionResource: resource,
-          },
-        });
-      }
-    }
-  }
-
-  return entries;
 }
 
 function expandResourceEntry(value: unknown): JunctionResourceEntry[] {
@@ -1386,66 +1251,6 @@ function listAllowedResourceKeys(
   allowlist: ReadonlySet<string>,
 ): string[] {
   return allowedResourceEntries(resources, allowlist).map(([resource]) => resource);
-}
-
-function resolveTimeseriesObservationUnit(
-  resource: string,
-  unit: string | undefined,
-  fallback: string,
-): string {
-  const normalized = unit?.trim().toLowerCase();
-  if (!normalized) {
-    return fallback;
-  }
-
-  switch (resource) {
-    case "blood_oxygen":
-      return [
-        "%",
-        "percent",
-        "percentage",
-        "spo2",
-        "sp_o2",
-        "sp-o2",
-        "blood_oxygen",
-        "oxygen_saturation",
-        "spo2_percent",
-      ].includes(normalized)
-        ? "%"
-        : fallback;
-    case "heartrate":
-      return normalized === "bpm" ? "bpm" : fallback;
-    case "hrv":
-      return ["ms", "millisecond", "milliseconds", "rmssd"].includes(normalized)
-        ? "ms"
-        : fallback;
-    case "calories_active":
-      return [
-        "cal",
-        "calorie",
-        "calories",
-        "kcal",
-        "kilocalorie",
-        "kilocalories",
-      ].includes(normalized)
-        ? "kcal"
-        : fallback;
-    case "respiratory_rate":
-      return [
-        "bpm",
-        "rpm",
-        "breaths/min",
-        "breaths/minute",
-        "breaths per minute",
-        "breaths_per_minute",
-      ].includes(normalized)
-        ? "breaths_per_minute"
-        : fallback;
-    case "steps":
-      return normalized === "count" ? "count" : fallback;
-    default:
-      return unit ?? fallback;
-  }
 }
 
 function firstSleepStageFromPaths(source: PlainObject | undefined, paths: readonly string[]): JunctionSleepStage | undefined {

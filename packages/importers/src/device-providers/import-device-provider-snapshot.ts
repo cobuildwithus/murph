@@ -132,12 +132,10 @@ export async function prepareDeviceProviderSnapshotImport(
     cursor: request.cursor,
     signatureVerified: request.signatureVerified,
   });
-  const payloadForCore = omitDefaultJunctionTimeseriesEvents(payloadWithLegacyRawRole);
-
   return stripUndefined({
-    ...payloadForCore,
+    ...payloadWithLegacyRawRole,
     rawArtifacts: [
-      ...(payloadForCore.rawArtifacts ?? []),
+      ...(payloadWithLegacyRawRole.rawArtifacts ?? []),
       buildRawReceiptArtifact(rawReceipt),
     ],
     provenance: stripUndefined({
@@ -151,27 +149,6 @@ export async function prepareDeviceProviderSnapshotImport(
       normalizerVersion: request.normalizerVersion,
     }),
   });
-}
-
-function omitDefaultJunctionTimeseriesEvents(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
-  const filteredEvents = (payload.events ?? []).filter((event) => !isJunctionTimeseriesObservationEvent(event));
-
-  if (filteredEvents.length === (payload.events ?? []).length) {
-    return payload;
-  }
-
-  return stripUndefined({
-    ...payload,
-    events: filteredEvents,
-  });
-}
-
-function isJunctionTimeseriesObservationEvent(event: NonNullable<DeviceBatchImportPayload["events"]>[number]): boolean {
-  return (
-    event.kind === "observation" &&
-    event.externalRef?.system === "junction" &&
-    (event.rawArtifactRoles ?? []).some((role) => role.startsWith("junction-timeseries-"))
-  );
 }
 
 function attachSingleLegacyRawArtifactRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
