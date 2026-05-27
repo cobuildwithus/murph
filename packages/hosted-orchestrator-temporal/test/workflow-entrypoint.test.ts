@@ -19,6 +19,7 @@ const workflowInfo = vi.fn(() => ({
 }));
 const proxyActivities = vi.fn(() => ({
   ensureRuntimeProcessing,
+  prewarmRuntimeContainer,
   readRuntimeDemand,
 }));
 const readRuntimeDemand = vi.fn(async (): Promise<HostedRuntimeDemand> => ({
@@ -28,8 +29,19 @@ const readRuntimeDemand = vi.fn(async (): Promise<HostedRuntimeDemand> => ({
   workspace: null,
 }));
 const ensureRuntimeProcessing = vi.fn();
+const prewarmRuntimeContainer = vi.fn();
+
+class MockCancellationScope {
+  cancel = vi.fn();
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    return await fn();
+  }
+}
 
 vi.mock("@temporalio/workflow", () => ({
+  ActivityCancellationType: { ABANDON: "ABANDON" },
+  CancellationScope: MockCancellationScope,
   condition,
   continueAsNew,
   defineQuery,

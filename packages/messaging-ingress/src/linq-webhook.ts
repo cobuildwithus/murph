@@ -24,6 +24,16 @@ export interface LinqMessageReceivedEvent extends LinqWebhookEvent {
   data: LinqMessageReceivedData;
 }
 
+export interface LinqTypingIndicatorStartedEvent extends LinqWebhookEvent {
+  event_type: "chat.typing_indicator.started";
+  data: LinqTypingIndicatorStartedData;
+}
+
+export interface LinqTypingIndicatorStartedData {
+  chat_id: string;
+  service?: "iMessage" | "SMS" | "RCS" | string | null;
+}
+
 export interface LinqMessageReceivedData {
   chat_id: string;
   chat?: LinqChatInfo | null;
@@ -373,6 +383,41 @@ export function parseLinqMessageReceivedEvent(
   return parseNormalizedLinqMessageReceivedEventData(event, data);
 }
 
+export function parseLinqTypingIndicatorStartedEvent(
+  event: LinqWebhookEvent,
+): LinqTypingIndicatorStartedEvent {
+  if (event.event_type !== "chat.typing_indicator.started") {
+    throw new TypeError("Linq webhook event does not contain a supported chat.typing_indicator.started payload.");
+  }
+
+  const data = toLinqObjectRecord(event.data, "Linq chat.typing_indicator.started data");
+  const chat = data.chat === undefined || data.chat === null
+    ? null
+    : parseOptionalChatInfo(data.chat);
+  const chatId =
+    normalizeNullableString(data.chat_id)
+    ?? normalizeNullableString(chat?.id);
+
+  if (!chatId) {
+    throw new TypeError("Linq chat.typing_indicator.started chat_id is required.");
+  }
+
+  return {
+    ...event,
+    created_at: normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at"),
+    event_type: "chat.typing_indicator.started",
+    webhook_version: normalizeNullableString(event.webhook_version ?? null) ?? undefined,
+    trace_id: normalizeNullableString(event.trace_id ?? null),
+    partner_id: normalizeNullableString(event.partner_id ?? null),
+    data: {
+      chat_id: chatId,
+      service: normalizeNullableString(data.service)
+        ?? normalizeNullableString(chat?.owner_handle?.service)
+        ?? undefined,
+    },
+  };
+}
+
 export function buildLinqMessageText(
   parts: ReadonlyArray<LinqMessagePart> | null | undefined,
 ): string | null {
@@ -416,6 +461,18 @@ export function resolveLinqWebhookOccurredAt(event: LinqMessageReceivedEvent): s
   }
 
   return occurredAt;
+}
+
+export function resolveLinqTypingIndicatorOccurredAt(
+  event: LinqTypingIndicatorStartedEvent,
+): string {
+  const occurredAt = normalizeTextValue(event.created_at);
+
+  if (!occurredAt) {
+    throw new TypeError("Linq typing indicator occurredAt is required.");
+  }
+
+  return toIsoTimestamp(occurredAt);
 }
 
 export function minimizeLinqWebhookEvent(event: LinqWebhookEvent): Record<string, unknown> {

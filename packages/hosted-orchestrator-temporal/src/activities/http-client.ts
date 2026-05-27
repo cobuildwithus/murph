@@ -15,6 +15,7 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 import {
+  HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -81,7 +82,8 @@ export interface HostedTemporalActivityObservation {
   activity:
     | "runHostedDeviceSyncRecoverySweep"
     | "readRuntimeDemand"
-    | "ensureRuntimeProcessing";
+    | "ensureRuntimeProcessing"
+    | "prewarmRuntimeContainer";
   orchestrationAttemptId?: string | null;
   reason?: string | null;
   userId: string;
@@ -395,14 +397,22 @@ function readHostedTemporalActivityResultDetails(
 
   const resultKind = typeof value.kind === "string" ? value.kind : null;
   return {
-    resultAction: resultKind === "runtime_processing_accepted"
-      ? readKnownString(
-        value.action,
-        HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
-      )
-      : null,
+    resultAction: readHostedTemporalActivityResultAction(resultKind, value.action),
     resultKind,
   };
+}
+
+function readHostedTemporalActivityResultAction(
+  resultKind: string | null,
+  value: unknown,
+): string | null {
+  if (resultKind === "runtime_processing_accepted") {
+    return readKnownString(value, HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS);
+  }
+  if (resultKind === "runtime_prewarm_accepted") {
+    return readKnownString(value, HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS);
+  }
+  return null;
 }
 
 function isHostedTemporalActivityResultRecord(

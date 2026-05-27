@@ -106,6 +106,7 @@ export interface RunnerContainerEnsureReadyForProcessingInput {
 }
 
 export interface RunnerContainerEnsureReadyForProcessingResult {
+  action?: "already_warm" | "started";
   kind: "ready";
 }
 
@@ -301,11 +302,11 @@ export class RunnerContainer extends Container {
       };
       this.currentLogContext = logContext;
       try {
-        await this.ensureContainerReady(
+        const action = await this.ensureContainerReady(
           input,
           AbortSignal.timeout(input.timeoutMs),
         );
-        return { kind: "ready" };
+        return { action, kind: "ready" };
       } finally {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
@@ -881,7 +882,7 @@ export class RunnerContainer extends Container {
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
-  ): Promise<true> {
+  ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
@@ -905,7 +906,7 @@ export class RunnerContainer extends Container {
           phase: "container.ready",
           userId: input.userId,
         });
-        return true;
+        return "already_warm";
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -995,7 +996,7 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    return true;
+    return "started";
   }
 
   private async ensureSmokeContainerReady(timeoutMs: number): Promise<void> {

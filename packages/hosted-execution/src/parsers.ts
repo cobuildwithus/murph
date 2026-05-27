@@ -135,6 +135,8 @@ export {
   parseHostedRuntimeDemandRequest,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
+  parseHostedRuntimePrewarmRequest,
+  parseHostedRuntimePrewarmResponse,
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
