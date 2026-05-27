@@ -310,7 +310,6 @@ model HostedMember {
   emailAuthorization        HostedMemberEmailAuthorization?
   hostedMailboxItems        HostedMailboxItem[]
   hostedMailboxPayloads     HostedMailboxPayload[]
-  hostedIngressLatencyTraces HostedIngressLatencyTrace[]
   hostedMailboxLaneCounters HostedMailboxLaneCounter[]
   hostedWorkspace           HostedWorkspace?
   hostedRuntimeLogs         HostedRuntimeLog[]
@@ -500,7 +499,6 @@ model HostedIngressLatencyTrace {
   providerRequestOrdinal   Int?              @map("provider_request_ordinal")
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
-  member                   HostedMember      @relation(fields: [userId], references: [id], onDelete: Cascade)
   mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
 
   @@unique([userId, mailboxItemId])

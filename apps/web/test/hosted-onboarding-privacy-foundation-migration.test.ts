@@ -243,6 +243,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedIngressLatencyTraceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026052700_hosted_ingress_latency_trace/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -275,6 +282,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026051900_device_connection_due_reconcile_sweep_idx",
       "2026052400_device_connection_refresh_lease",
       "2026052600_device_sync_dirty_payload",
+      "2026052700_hosted_ingress_latency_trace",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -422,6 +430,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncDirtyPayloadMigrationSql).toContain("ON DELETE CASCADE");
     expect(deviceSyncDirtyPayloadMigrationSql).toContain(
       'CREATE INDEX "device_sync_dirty_payload_user_id_connection_id_dirty_revis_idx"',
+    );
+    expect(hostedIngressLatencyTraceMigrationSql).toContain(
+      'CREATE TABLE "hosted_ingress_latency_trace"',
+    );
+    expect(hostedIngressLatencyTraceMigrationSql).toContain(
+      'FOREIGN KEY ("user_id", "mailbox_item_id")',
+    );
+    expect(hostedIngressLatencyTraceMigrationSql).toContain(
+      'REFERENCES "hosted_mailbox_item"("user_id", "id")',
+    );
+    expect(hostedIngressLatencyTraceMigrationSql).not.toContain(
+      'REFERENCES "hosted_member"("id")',
     );
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');

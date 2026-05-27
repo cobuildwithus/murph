@@ -19,11 +19,6 @@ CREATE TABLE "hosted_ingress_latency_trace" (
   "updated_at" TIMESTAMP(3) NOT NULL,
 
   CONSTRAINT "hosted_ingress_latency_trace_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "hosted_ingress_latency_trace_user_id_fkey"
-    FOREIGN KEY ("user_id")
-    REFERENCES "hosted_member"("id")
-    ON DELETE CASCADE
-    ON UPDATE CASCADE,
   CONSTRAINT "hosted_ingress_latency_trace_user_id_mailbox_item_id_fkey"
     FOREIGN KEY ("user_id", "mailbox_item_id")
     REFERENCES "hosted_mailbox_item"("user_id", "id")

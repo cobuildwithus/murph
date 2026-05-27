@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 
-import {
-  readHostedIngressLatencyDashboard,
-  type HostedIngressLatencyDashboard,
-} from "@/src/lib/hosted-runtime-latency/store";
+import { readHostedIngressLatencyDashboard } from "@/src/lib/hosted-runtime-latency/store";
 import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   type HostedIngressLatencySource,
