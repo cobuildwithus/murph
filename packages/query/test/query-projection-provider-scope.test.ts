@@ -167,6 +167,31 @@ test("runtime all-provider wearable source health recomputes provider staleness"
     );
     await rebuildQueryProjection(vaultRoot);
 
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
+    try {
+      const alphaSourceHealthRow = database
+        .prepare(`
+          SELECT id, summary_json AS summaryJson
+          FROM query_wearable_summaries
+          WHERE provider_scope_key = 'providers:alpha'
+            AND summary_kind = 'source_health'
+          LIMIT 1
+        `)
+        .get() as { id: string; summaryJson: string } | undefined;
+
+      assert.ok(alphaSourceHealthRow);
+      const alphaSourceHealthSummary = JSON.parse(alphaSourceHealthRow.summaryJson);
+      alphaSourceHealthSummary.notes = [
+        ...(alphaSourceHealthSummary.notes ?? []),
+        "Synthetic stored source-health note that must not survive recomposition.",
+      ];
+      database
+        .prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?")
+        .run(JSON.stringify(alphaSourceHealthSummary), alphaSourceHealthRow.id);
+    } finally {
+      database.close();
+    }
+
     const alphaOnlySourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
       providers: ["alpha"],
     });
@@ -186,11 +211,19 @@ test("runtime all-provider wearable source health recomputes provider staleness"
     assert.equal(alphaOnlySourceHealth[0]?.stalenessVsNewestDays, 0);
     assert.equal(alphaBetaSourceHealthByProvider.get("alpha")?.stalenessVsNewestDays, 2);
     assert.equal(alphaBetaSourceHealthByProvider.get("beta")?.stalenessVsNewestDays, 0);
+    assert.equal(
+      alphaBetaSourceHealthByProvider.get("alpha")?.notes.some((note) => note.includes("must not survive")),
+      false,
+    );
     assert.equal(alphaSourceHealth?.lastDate, "2026-03-18");
     assert.equal(alphaSourceHealth?.stalenessVsNewestDays, 2);
     assert.equal(
       alphaSourceHealth?.notes.some((note) => note.includes("trails the newest wearable source by 2 days")),
       true,
+    );
+    assert.equal(
+      alphaSourceHealth?.notes.some((note) => note.includes("must not survive")),
+      false,
     );
     assert.equal(betaSourceHealth?.lastDate, "2026-03-20");
     assert.equal(betaSourceHealth?.stalenessVsNewestDays, 0);
@@ -323,6 +356,24 @@ test("provider-scoped wearable projection rows use resolved public providers", a
         },
         {
           schemaVersion: "murph.event.v1",
+          id: "evt_direct_garmin_steps",
+          kind: "observation",
+          occurredAt: "2026-04-03T06:00:00Z",
+          recordedAt: "2026-04-03T06:01:00Z",
+          dayKey: "2026-04-03",
+          source: "device",
+          title: "Direct Garmin steps",
+          metric: "steps",
+          value: 6800,
+          unit: "count",
+          externalRef: {
+            system: "garmin",
+            resourceType: "daily_activity",
+            resourceId: "garmin-daily-activity-2026-04-03",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
           id: "evt_source_instance_only_steps",
           kind: "observation",
           occurredAt: "2026-04-03T08:00:00Z",
@@ -396,7 +447,8 @@ test("provider-scoped wearable projection rows use resolved public providers", a
 
     assert.equal(garminActivity.length, 1);
     assert.equal(garminActivity[0]?.steps.selection.provider, "garmin");
-    assert.equal(garminActivity[0]?.steps.selection.value, 7200);
+    assert.equal(garminActivity[0]?.steps.selection.value, 6800);
+    assert.equal(garminActivity[0]?.steps.confidence.candidateCount, 2);
     assert.deepEqual(junctionActivity, []);
     assert.equal(unknownActivity.length, 1);
     assert.equal(unknownActivity[0]?.steps.selection.provider, "unknown");
