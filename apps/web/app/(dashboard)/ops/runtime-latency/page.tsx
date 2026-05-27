@@ -46,70 +46,138 @@ export default async function RuntimeLatencyOpsPage({
     windowHours: readPositiveIntegerSearchParam(resolvedSearchParams.windowHours, 24),
   });
   const metricScope = dashboard.truncated ? "sampled" : null;
+  const completedPercent = dashboard.totalAcceptedCount > 0
+    ? Math.round((dashboard.completedCount / dashboard.totalAcceptedCount) * 100)
+    : null;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Ops
-          </span>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Hosted runtime latency
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {dashboard.source} mailbox accepted to provider start, {dashboard.window.hours}h window.
-            {" "}
-            {dashboard.truncated
-              ? `Showing metrics from newest ${formatInteger(dashboard.readLimit)} accepted rows.`
-              : "Showing complete window metrics."}
-          </p>
+    <div className="flex flex-col gap-8">
+      <header className="border-b border-border/70 pb-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl">
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-chart-5">
+              Ops notebook
+            </span>
+            <h1 className="mt-2 font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
+              Hosted runtime latency
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+              {dashboard.source} mailbox accepted to provider start, measured over the last{" "}
+              {dashboard.window.hours} hours.{" "}
+              {dashboard.truncated
+                ? `Metrics use the newest ${formatInteger(dashboard.readLimit)} accepted rows.`
+                : "Metrics use the complete window."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <SummaryChip label="Source" value={dashboard.source} />
+            <SummaryChip label="Window end" value={formatDateTime(dashboard.window.end)} />
+            <SummaryChip
+              label="Read"
+              value={dashboard.truncated ? `Newest ${formatInteger(dashboard.readLimit)}` : "Complete"}
+            />
+          </div>
         </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          {formatDateTime(dashboard.window.end)}
+      </header>
+
+      <section aria-labelledby="runtime-latency-distribution-title" className="flex flex-col gap-4">
+        <SectionHeading
+          title="Provider start distribution"
+          description="End-to-end wait from mailbox accepted to first provider generation signal."
+          id="runtime-latency-distribution-title"
+        />
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <Metric label={metricLabel("p50", metricScope)} value={formatMs(dashboard.percentileMs.p50)} />
+          <Metric label={metricLabel("p95", metricScope)} value={formatMs(dashboard.percentileMs.p95)} />
+          <Metric
+            emphasis
+            label={metricLabel("p99", metricScope)}
+            value={formatMs(dashboard.percentileMs.p99)}
+          />
+          <Metric label={metricLabel("accepted", metricScope)} value={formatInteger(dashboard.totalAcceptedCount)} />
+          <Metric
+            helper={completedPercent === null ? null : `${formatInteger(completedPercent)}% of accepted`}
+            label={metricLabel("completed", metricScope)}
+            value={formatInteger(dashboard.completedCount)}
+          />
+          <Metric label={metricLabel("in flight", metricScope)} value={formatInteger(dashboard.recentInFlightCount)} />
         </div>
-      </div>
-
-      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Metric label={metricLabel("p50", metricScope)} value={formatMs(dashboard.percentileMs.p50)} />
-        <Metric label={metricLabel("p95", metricScope)} value={formatMs(dashboard.percentileMs.p95)} />
-        <Metric label={metricLabel("p99", metricScope)} value={formatMs(dashboard.percentileMs.p99)} />
-        <Metric label={metricLabel("accepted", metricScope)} value={formatInteger(dashboard.totalAcceptedCount)} />
-        <Metric label={metricLabel("completed", metricScope)} value={formatInteger(dashboard.completedCount)} />
-        <Metric label={metricLabel("in flight", metricScope)} value={formatInteger(dashboard.recentInFlightCount)} />
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3">
-        <Metric
-          label={metricLabel("accepted to signal p50", metricScope)}
-          value={formatMs(dashboard.stageLatencyMs.acceptedToTemporalSignalP50)}
+      <section aria-labelledby="runtime-latency-stage-title" className="flex flex-col gap-4">
+        <SectionHeading
+          title="Pipeline stages"
+          description="P50 stage timing isolates queue handoff, staging, and provider wait."
+          id="runtime-latency-stage-title"
         />
-        <Metric
-          label={metricLabel("accepted to staged p50", metricScope)}
-          value={formatMs(dashboard.stageLatencyMs.acceptedToStagedP50)}
-        />
-        <Metric
-          label={metricLabel("staged to provider p50", metricScope)}
-          value={formatMs(dashboard.stageLatencyMs.stagedToProviderStartP50)}
-        />
+        <div className="grid overflow-hidden rounded-xl border border-border/70 bg-card/90 md:grid-cols-3">
+          <StageMetric
+            label={metricLabel("accepted to signal p50", metricScope)}
+            value={formatMs(dashboard.stageLatencyMs.acceptedToTemporalSignalP50)}
+          />
+          <StageMetric
+            label={metricLabel("accepted to staged p50", metricScope)}
+            value={formatMs(dashboard.stageLatencyMs.acceptedToStagedP50)}
+          />
+          <StageMetric
+            label={metricLabel("staged to provider p50", metricScope)}
+            value={formatMs(dashboard.stageLatencyMs.stagedToProviderStartP50)}
+          />
+        </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-4">
-        <Metric label={metricLabel("missing staged", metricScope)} value={formatInteger(dashboard.missingStagedCount)} />
-        <Metric label={metricLabel("missing provider", metricScope)} value={formatInteger(dashboard.missingProviderStartCount)} />
-        <Metric label={metricLabel("staged missing provider", metricScope)} value={formatInteger(dashboard.stagedButMissingProviderCount)} />
-        <Metric label={metricLabel("invalid negative", metricScope)} value={formatInteger(dashboard.invalidNegativeLatencyCount)} />
+      <section aria-labelledby="runtime-latency-quality-title" className="flex flex-col gap-4">
+        <SectionHeading
+          title="Trace quality"
+          description="Rows that need attention before percentile math can be trusted."
+          id="runtime-latency-quality-title"
+        />
+        <div className="grid gap-3 md:grid-cols-4">
+          <Metric
+            label={metricLabel("missing staged", metricScope)}
+            tone={dashboard.missingStagedCount > 0 ? "warning" : "default"}
+            value={formatInteger(dashboard.missingStagedCount)}
+          />
+          <Metric
+            label={metricLabel("missing provider", metricScope)}
+            tone={dashboard.missingProviderStartCount > 0 ? "warning" : "default"}
+            value={formatInteger(dashboard.missingProviderStartCount)}
+          />
+          <Metric
+            label={metricLabel("staged missing provider", metricScope)}
+            tone={dashboard.stagedButMissingProviderCount > 0 ? "warning" : "default"}
+            value={formatInteger(dashboard.stagedButMissingProviderCount)}
+          />
+          <Metric
+            label={metricLabel("invalid negative", metricScope)}
+            tone={dashboard.invalidNegativeLatencyCount > 0 ? "warning" : "default"}
+            value={formatInteger(dashboard.invalidNegativeLatencyCount)}
+          />
+        </div>
       </section>
 
-      <section className="rounded-lg border border-border bg-background">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-sm font-medium text-foreground">Slow rows</h2>
-          <span className="font-mono text-xs text-muted-foreground">
+      <section
+        aria-labelledby="runtime-latency-slow-rows-title"
+        className="overflow-hidden rounded-xl border border-border/70 bg-card/90"
+      >
+        <div className="flex flex-col gap-2 border-b border-border/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chart-5">
+              Outliers
+            </span>
+            <h2
+              className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground"
+              id="runtime-latency-slow-rows-title"
+            >
+              Slow rows
+            </h2>
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             {dashboard.truncated ? `first ${dashboard.readLimit}` : "complete read"}
           </span>
         </div>
-        <Table>
-          <TableHeader>
+        <Table className="text-[13px]">
+          <TableHeader className="bg-muted/30">
             <TableRow>
               <TableHead>Row</TableHead>
               <TableHead>Mailbox accepted</TableHead>
@@ -123,11 +191,11 @@ export default async function RuntimeLatencyOpsPage({
             {dashboard.recentSlowRows.length > 0
               ? dashboard.recentSlowRows.map((row) => (
                   <TableRow key={row.rowLabel}>
-                    <TableCell className="font-mono text-xs">{row.rowLabel}</TableCell>
+                    <TableCell className="font-mono text-xs text-foreground">{row.rowLabel}</TableCell>
                     <TableCell className="font-mono text-xs">
                       {formatDateTime(row.acceptedAt)}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs">
+                    <TableCell className="text-right font-serif text-base font-semibold tabular-nums text-foreground">
                       {formatMs(row.acceptedToProviderStartMs)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
@@ -143,7 +211,7 @@ export default async function RuntimeLatencyOpsPage({
                 ))
               : (
                   <TableRow>
-                    <TableCell className="text-sm text-muted-foreground" colSpan={6}>
+                    <TableCell className="px-5 py-8 text-sm text-muted-foreground" colSpan={6}>
                       No completed rows in this window.
                     </TableCell>
                   </TableRow>
@@ -155,16 +223,83 @@ export default async function RuntimeLatencyOpsPage({
   );
 }
 
-function Metric(input: {
+function SectionHeading(input: {
+  description: string;
+  id: string;
+  title: string;
+}) {
+  return (
+    <div>
+      <h2
+        className="font-serif text-xl font-semibold tracking-tight text-foreground"
+        id={input.id}
+      >
+        {input.title}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+        {input.description}
+      </p>
+    </div>
+  );
+}
+
+function SummaryChip(input: {
   label: string;
   value: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-background px-4 py-3">
+    <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2">
+      <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
+        {input.label}
+      </div>
+      <div className="mt-1 font-mono text-[11px] font-medium text-foreground">
+        {input.value}
+      </div>
+    </div>
+  );
+}
+
+function Metric(input: {
+  emphasis?: boolean;
+  helper?: string | null;
+  label: string;
+  tone?: "default" | "warning";
+  value: string;
+}) {
+  const tone = input.tone ?? "default";
+  const valueClassName = tone === "warning"
+    ? "text-chart-4"
+    : input.emphasis
+      ? "text-primary"
+      : "text-foreground";
+
+  return (
+    <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 px-4 py-4">
       <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
         {input.label}
       </div>
-      <div className="mt-2 font-mono text-xl font-semibold text-foreground">
+      <div className={`mt-2 min-w-0 break-words font-serif text-3xl font-semibold leading-none tracking-tight tabular-nums ${valueClassName}`}>
+        {input.value}
+      </div>
+      {input.helper ? (
+        <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+          {input.helper}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StageMetric(input: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0 border-b border-border/70 px-5 py-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {input.label}
+      </div>
+      <div className="mt-3 font-serif text-2xl font-semibold leading-none tracking-tight tabular-nums text-foreground">
         {input.value}
       </div>
     </div>
