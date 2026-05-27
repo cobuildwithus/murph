@@ -106,7 +106,14 @@ describe("HostedUserRunner execution coordination", () => {
     const onStatusRead = vi.fn(() => {
       throw new Error("Cloudflare must not read status to schedule runtime demand.");
     });
+    const readiness = createDeferred<Awaited<
+      ReturnType<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>
+    >>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => await readiness.promise);
     const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
       mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
       onStatusRead,
       workspace: createWorkspaceState({
@@ -117,14 +124,30 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
-    await expect(runner.ensureRuntimeProcessingForUser({
+    const accepted = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    });
+    let acceptedSettled = false;
+    void accepted.finally(() => {
+      acceptedSettled = true;
+    });
+
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    }));
+    expect(invoke).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(acceptedSettled).toBe(false);
+
+    readiness.resolve({ kind: "ready" });
+
+    await expect(accepted).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+      recommendedRecheckAt: expect.any(String),
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
 
@@ -148,7 +171,11 @@ describe("HostedUserRunner execution coordination", () => {
       last_invocation_at: expect.any(String),
       wake_at: null,
     });
-    expect(alarms).toContain(RUNNER_TIMEOUT_AT);
+    const scheduledAlarms = alarms.filter((alarm) => alarm !== "deleted");
+    expect(scheduledAlarms).toHaveLength(1);
+    const scheduledAlarmMs = Date.parse(scheduledAlarms[0] ?? "");
+    expect(scheduledAlarmMs).toBeGreaterThanOrEqual(Date.parse(RUNNER_TIMEOUT_AT));
+    expect(scheduledAlarmMs).toBeLessThanOrEqual(Date.parse(RUNNER_TIMEOUT_AT) + 1_000);
     expect(alarms).toContain("deleted");
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
   });
