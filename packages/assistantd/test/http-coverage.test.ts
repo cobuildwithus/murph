@@ -107,43 +107,9 @@ const TEST_SESSION: Awaited<ReturnType<AssistantLocalService['getSession']>> = {
   turnCount: 0,
 }
 
-function createGatewayServiceMock(): AssistantLocalService['gateway'] {
-  return {
-    fetchAttachments: async () => [],
-    getConversation: async () => null,
-    listConversations: async () => ({
-      conversations: [],
-      nextCursor: null,
-    }),
-    listOpenPermissions: async () => [],
-    pollEvents: async (input) => ({
-      events: [],
-      nextCursor: input?.cursor ?? 0,
-      live: true,
-    }),
-    readMessages: async () => ({
-      messages: [],
-      nextCursor: null,
-    }),
-    respondToPermission: async () => null,
-    sendMessage: async (input) => ({
-      sessionKey: input.sessionKey,
-      messageId: 'gwcm_http_test',
-      queued: false,
-      delivery: null,
-    }),
-    waitForEvents: async (input) => ({
-      events: [],
-      nextCursor: input?.cursor ?? 0,
-      live: true,
-    }),
-  }
-}
-
 function createAssistantServiceMock(): AssistantLocalService {
   return {
     drainOutbox: async () => ({ attempted: 0, failed: 0, queued: 0, sent: 0 }),
-    gateway: createGatewayServiceMock(),
     getCronJob: async () => TEST_CRON_JOB,
     getCronStatus: async () => ({
       dueJobs: 0,

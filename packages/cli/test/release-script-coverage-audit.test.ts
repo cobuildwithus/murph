@@ -945,7 +945,6 @@ exit 1
         '@murphai/assistantd',
         '@murphai/core',
         '@murphai/device-syncd',
-        '@murphai/gateway-local',
         '@murphai/importers',
         '@murphai/inbox-services',
         '@murphai/inboxd',
@@ -1062,11 +1061,9 @@ exit 1
     expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
     expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
     expect(cliPackageJson.dependencies?.['@murphai/device-syncd']).toBe('workspace:*')
-    expect(cliPackageJson.dependencies?.['@murphai/gateway-local']).toBe('workspace:*')
     expect(cliPackageJson.dependencies?.['@murphai/messaging-ingress']).toBe('workspace:*')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
-    expect(cliPackageJson.bundleDependencies).toContain('@murphai/gateway-local')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)

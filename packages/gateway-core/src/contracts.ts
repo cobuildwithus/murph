@@ -258,32 +258,6 @@ export const gatewayRespondToPermissionInputSchema = z
   })
   .strict()
 
-export interface GatewayService {
-  fetchAttachments(
-    input: GatewayFetchAttachmentsInput,
-  ): Promise<GatewayAttachment[]>
-  getConversation(
-    input: GatewayGetConversationInput,
-  ): Promise<GatewayConversation | null>
-  listConversations(
-    input?: GatewayListConversationsInput,
-  ): Promise<GatewayListConversationsResult>
-  listOpenPermissions(
-    input?: GatewayListOpenPermissionsInput,
-  ): Promise<GatewayPermissionRequest[]>
-  pollEvents(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>
-  readMessages(
-    input: GatewayReadMessagesInput,
-  ): Promise<GatewayReadMessagesResult>
-  respondToPermission(
-    input: GatewayRespondToPermissionInput,
-  ): Promise<GatewayPermissionRequest | null>
-  sendMessage(input: GatewaySendMessageInput): Promise<GatewaySendMessageResult>
-  waitForEvents(
-    input?: GatewayWaitForEventsInput,
-  ): Promise<GatewayPollEventsResult>
-}
-
 export type GatewayAttachment = z.infer<typeof gatewayAttachmentSchema>
 export type GatewayConversation = z.infer<typeof gatewayConversationSchema>
 export type GatewayConversationTitleSource =

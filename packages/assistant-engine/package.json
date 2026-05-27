@@ -71,10 +71,6 @@
       "types": "./dist/child-process-env.d.ts",
       "default": "./dist/child-process-env.js"
     },
-    "./gateway-local-adapter": {
-      "types": "./dist/gateway-local-adapter.d.ts",
-      "default": "./dist/gateway-local-adapter.js"
-    },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"

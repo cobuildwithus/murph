@@ -21,14 +21,8 @@ import {
 } from '@murphai/assistant-engine'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import {
-  assistantGatewayLocalMessageSender,
-  assistantGatewayLocalProjectionSourceReader,
-} from '@murphai/assistant-engine/gateway-local-adapter'
 import type { RunAssistantAutomationInput } from '@murphai/assistant-engine/assistant-automation'
 import type { AssistantOutboxDispatchMode } from '@murphai/assistant-engine/assistant-outbox'
-import { createLocalGatewayService } from '@murphai/gateway-local'
-import type { GatewayService } from '@murphai/gateway-core'
 import { createAssistantdVaultMismatchError } from './errors.js'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
@@ -69,7 +63,6 @@ export interface AssistantLocalOpenConversationResult {
 }
 
 export interface AssistantLocalService {
-  gateway: GatewayService
   drainOutbox(input?: {
     limit?: number
     now?: string | null
@@ -202,13 +195,8 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
   ensureAssistantDaemonClientDisabled()
 
   const inboxServices = createIntegratedInboxServices()
-  const gateway = createLocalGatewayService(vaultRoot, {
-    messageSender: assistantGatewayLocalMessageSender,
-    sourceReader: assistantGatewayLocalProjectionSourceReader,
-  })
 
   return {
-    gateway,
     drainOutbox: async (input) =>
       runAssistantdLocalCall(() =>
         drainAssistantOutbox({

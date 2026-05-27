@@ -6,7 +6,7 @@ description: One-pass seam audit prompt for @murphai/gateway-core
 
 ## Scope
 
-- `packages/gateway-core/src/{contracts.ts,opaque-ids.ts,routes.ts,reply-routes.ts,snapshot.ts,event-log.ts,local-runtime.ts}`
+- `packages/gateway-core/src/{contracts.ts,opaque-ids.ts,routes.ts,reply-routes.ts,snapshot.ts,event-log.ts}`
 - `packages/gateway-core/README.md`
 - directly coupled `packages/gateway-core/test/**`
 

@@ -38,9 +38,6 @@
       "path": "./packages/gateway-core"
     },
     {
-      "path": "./packages/gateway-local"
-    },
-    {
       "path": "./packages/core/tsconfig.build.json"
     },
     {

@@ -24,7 +24,6 @@ export const INBOX_CONFIG_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PA
 export const INBOX_STATE_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/state.json`;
 export const INBOX_PROMOTIONS_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/promotions.json`;
 export const DEVICE_SYNC_DB_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/device-sync/state.sqlite`;
-export const GATEWAY_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/gateway.sqlite`;
 export const DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/device-sync`;
 export const DEVICE_SYNC_LAUNCHER_STATE_RELATIVE_PATH = `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/launcher.json`;
 export const DEVICE_SYNC_STDOUT_LOG_RELATIVE_PATH = `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/stdout.log`;
@@ -47,7 +46,6 @@ export interface RuntimePaths {
   inboxStatePath: string;
   inboxPromotionsPath: string;
   deviceSyncDbPath: string;
-  gatewayDbPath: string;
   deviceSyncRuntimeRoot: string;
   deviceSyncLauncherStatePath: string;
   deviceSyncStdoutLogPath: string;
@@ -81,14 +79,6 @@ export type DeviceSyncRuntimePaths = Pick<
   | "deviceSyncStderrLogPath"
 >;
 
-export type GatewayRuntimePaths = Pick<
-  RuntimePaths,
-  | "absoluteVaultRoot"
-  | "runtimeRoot"
-  | "projectionsRoot"
-  | "gatewayDbPath"
->;
-
 export type ParserRuntimePaths = Pick<
   RuntimePaths,
   | "absoluteVaultRoot"
@@ -118,24 +108,12 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
     inboxStatePath: path.join(absoluteVaultRoot, INBOX_STATE_RELATIVE_PATH),
     inboxPromotionsPath: path.join(absoluteVaultRoot, INBOX_PROMOTIONS_RELATIVE_PATH),
     deviceSyncDbPath: path.join(absoluteVaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
-    gatewayDbPath: path.join(absoluteVaultRoot, GATEWAY_DB_RELATIVE_PATH),
     deviceSyncRuntimeRoot: path.join(absoluteVaultRoot, DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH),
     deviceSyncLauncherStatePath: path.join(absoluteVaultRoot, DEVICE_SYNC_LAUNCHER_STATE_RELATIVE_PATH),
     deviceSyncStdoutLogPath: path.join(absoluteVaultRoot, DEVICE_SYNC_STDOUT_LOG_RELATIVE_PATH),
     deviceSyncStderrLogPath: path.join(absoluteVaultRoot, DEVICE_SYNC_STDERR_LOG_RELATIVE_PATH),
     parserRuntimeRoot: path.join(absoluteVaultRoot, PARSER_RUNTIME_DIRECTORY_RELATIVE_PATH),
     parserToolchainConfigPath: path.join(absoluteVaultRoot, PARSER_TOOLCHAIN_CONFIG_RELATIVE_PATH),
-  };
-}
-
-export function resolveGatewayRuntimePaths(vaultRoot: string): GatewayRuntimePaths {
-  const runtimePaths = resolveRuntimePaths(vaultRoot);
-
-  return {
-    absoluteVaultRoot: runtimePaths.absoluteVaultRoot,
-    runtimeRoot: runtimePaths.runtimeRoot,
-    projectionsRoot: runtimePaths.projectionsRoot,
-    gatewayDbPath: runtimePaths.gatewayDbPath,
   };
 }
 
