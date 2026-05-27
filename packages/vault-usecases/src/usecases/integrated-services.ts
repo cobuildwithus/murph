@@ -120,6 +120,7 @@ import { toVaultCliError } from "./vault-usecase-helpers.js"
 const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
   "candidateId",
   "candidates",
+  "dataOrigin",
   "externalRef",
   "paths",
   "recordIds",

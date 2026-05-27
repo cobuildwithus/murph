@@ -1,5 +1,6 @@
 import type { VaultReadModel } from "./read-model.ts";
 import { createVaultReadModel } from "./read-model.ts";
+import { isDefaultProjectedQueryEntity } from "./query-visibility.ts";
 import { readVaultSourceTolerant } from "./vault-source.ts";
 
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
@@ -16,13 +17,12 @@ export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
 export async function readVaultTolerant(
   vaultRoot: string,
 ): Promise<VaultReadModel> {
-  const { loadProjectedVaultSourceTolerant } = await import("./query-projection.ts");
-  const snapshot = await loadProjectedVaultSourceTolerant(vaultRoot);
+  const snapshot = await readVaultSourceTolerant(vaultRoot);
 
   return createVaultReadModel({
     vaultRoot,
     metadata: snapshot.metadata,
-    entities: snapshot.entities,
+    entities: snapshot.entities.filter(isDefaultProjectedQueryEntity),
   });
 }
 

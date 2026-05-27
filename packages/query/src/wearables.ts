@@ -73,6 +73,16 @@ import type {
   WearableSourceHealthSummary,
   WearableSummaryConfidence,
   WearableSummaryFilters,
+  ProjectedWearableActivitySummary,
+  ProjectedWearableBodyStateSummary,
+  ProjectedWearableDaySummary,
+  ProjectedWearableDriftSummary,
+  ProjectedWearableLatestSummary,
+  ProjectedWearableMetricLatestSummary,
+  ProjectedWearableMetricTrendSummary,
+  ProjectedWearableRecoverySummary,
+  ProjectedWearableSleepSummary,
+  ProjectedWearableSourceHealthSummary,
 } from "./wearables/types.ts";
 import {
   ACTIVITY_METRIC_KEYS,
@@ -114,6 +124,19 @@ export type {
   WearableSourceHealthSummary,
   WearableSummaryConfidence,
   WearableSummaryFilters,
+  ProjectedWearableActivitySummary,
+  ProjectedWearableBodyStateSummary,
+  ProjectedWearableDaySummary,
+  ProjectedWearableDriftSummary,
+  ProjectedWearableLatestSummary,
+  ProjectedWearableMetricLatestSummary,
+  ProjectedWearableMetricSelection,
+  ProjectedWearableMetricTrendPoint,
+  ProjectedWearableMetricTrendSummary,
+  ProjectedWearableRecoverySummary,
+  ProjectedWearableResolvedMetric,
+  ProjectedWearableSleepSummary,
+  ProjectedWearableSourceHealthSummary,
 } from "./wearables/types.ts";
 
 export function listWearableActivityDays(
@@ -588,7 +611,15 @@ export interface WearableSummaryBundle {
   sourceHealth: WearableSourceHealth[];
 }
 
-function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): WearableSummaryBundle {
+export interface ProjectedWearableSummaryBundle {
+  activityDays: ProjectedWearableActivitySummary[];
+  bodyStateDays: ProjectedWearableBodyStateSummary[];
+  recoveryDays: ProjectedWearableRecoverySummary[];
+  sleepNights: ProjectedWearableSleepSummary[];
+  sourceHealth: ProjectedWearableSourceHealthSummary[];
+}
+
+export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): WearableSummaryBundle {
   const activityDays = listWearableActivityDaysFromDataset(dataset);
   const sleepNights = listWearableSleepNightsFromDataset(dataset);
   const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
@@ -978,6 +1009,14 @@ export function summarizeWearableLatest(
 }
 
 export function summarizeWearableLatestFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableFilters,
+): ProjectedWearableLatestSummary | null;
+export function summarizeWearableLatestFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableFilters,
+): WearableLatestSummary | null;
+export function summarizeWearableLatestFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableFilters = {},
 ): WearableLatestSummary | null {
@@ -997,6 +1036,16 @@ export function summarizeWearableMetricLatest(
 }
 
 export function summarizeWearableMetricLatestFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  metric: string,
+  filters?: WearableMetricSummaryFilters,
+): ProjectedWearableMetricLatestSummary | null;
+export function summarizeWearableMetricLatestFromBundle(
+  bundle: WearableSummaryBundle,
+  metric: string,
+  filters?: WearableMetricSummaryFilters,
+): WearableMetricLatestSummary | null;
+export function summarizeWearableMetricLatestFromBundle(
   bundle: WearableSummaryBundle,
   metric: string,
   filters: WearableMetricSummaryFilters = {},
@@ -1012,6 +1061,16 @@ export function summarizeWearableMetricTrend(
   return summarizeWearableMetricTrendFromBundle(buildWearableSummaryBundle(vault, filters), metric, filters);
 }
 
+export function summarizeWearableMetricTrendFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  metric: string,
+  filters?: WearableMetricSummaryFilters,
+): ProjectedWearableMetricTrendSummary | null;
+export function summarizeWearableMetricTrendFromBundle(
+  bundle: WearableSummaryBundle,
+  metric: string,
+  filters?: WearableMetricSummaryFilters,
+): WearableMetricTrendSummary | null;
 export function summarizeWearableMetricTrendFromBundle(
   bundle: WearableSummaryBundle,
   metric: string,
@@ -1040,6 +1099,14 @@ export function explainWearableDrift(
   return explainWearableDriftFromBundle(buildWearableSummaryBundle(vault, filters), filters);
 }
 
+export function explainWearableDriftFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableMetricSummaryFilters,
+): ProjectedWearableDriftSummary | null;
+export function explainWearableDriftFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableMetricSummaryFilters,
+): WearableDriftSummary | null;
 export function explainWearableDriftFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableMetricSummaryFilters = {},
@@ -1131,6 +1198,14 @@ export function summarizeWearableSleep(
 }
 
 export function summarizeWearableSleepFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): ProjectedWearableSleepSummary[];
+export function summarizeWearableSleepFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): WearableSleepSummary[];
+export function summarizeWearableSleepFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableSummaryFilters = {},
 ): WearableSleepSummary[] {
@@ -1144,6 +1219,14 @@ export function summarizeWearableActivity(
   return summarizeWearableActivityFromBundle(buildWearableSummaryBundle(vault, filters), filters);
 }
 
+export function summarizeWearableActivityFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): ProjectedWearableActivitySummary[];
+export function summarizeWearableActivityFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): WearableActivitySummary[];
 export function summarizeWearableActivityFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableSummaryFilters = {},
@@ -1159,6 +1242,14 @@ export function summarizeWearableRecovery(
 }
 
 export function summarizeWearableRecoveryFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): ProjectedWearableRecoverySummary[];
+export function summarizeWearableRecoveryFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): WearableRecoverySummary[];
+export function summarizeWearableRecoveryFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableSummaryFilters = {},
 ): WearableRecoverySummary[] {
@@ -1173,6 +1264,14 @@ export function summarizeWearableBodyState(
 }
 
 export function summarizeWearableBodyStateFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): ProjectedWearableBodyStateSummary[];
+export function summarizeWearableBodyStateFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): WearableBodyStateSummary[];
+export function summarizeWearableBodyStateFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableSummaryFilters = {},
 ): WearableBodyStateSummary[] {
@@ -1186,6 +1285,14 @@ export function summarizeWearableSourceHealth(
   return summarizeWearableSourceHealthFromBundle(buildWearableSummaryBundle(vault, filters), filters);
 }
 
+export function summarizeWearableSourceHealthFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): ProjectedWearableSourceHealthSummary[];
+export function summarizeWearableSourceHealthFromBundle(
+  bundle: WearableSummaryBundle,
+  filters?: WearableSummaryFilters,
+): WearableSourceHealthSummary[];
 export function summarizeWearableSourceHealthFromBundle(
   bundle: WearableSummaryBundle,
   filters: WearableSummaryFilters = {},
@@ -1207,6 +1314,14 @@ export function summarizeWearableDay(
   );
 }
 
+export function summarizeWearableDayFromBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  date: string,
+): ProjectedWearableDaySummary | null;
+export function summarizeWearableDayFromBundle(
+  bundle: WearableSummaryBundle,
+  date: string,
+): WearableDaySummary | null;
 export function summarizeWearableDayFromBundle(
   bundle: WearableSummaryBundle,
   date: string,

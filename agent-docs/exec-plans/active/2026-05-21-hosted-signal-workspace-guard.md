@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-05-21
-Updated: 2026-05-21
+Updated: 2026-05-27
 
 ## Goal
 
@@ -10,8 +10,10 @@ Updated: 2026-05-21
   mailbox append signals must create the hosted workspace for active users,
   explicit workspace auto-creation must stay active-member gated, account
   deletion should terminate the workflow before web row deletion, non-retryable
-  Activity failures should stop 30s workflow retries, and duplicated Activity
-  env integer parsing should reject malformed suffixes.
+  Activity failures should stop 30s workflow retries, duplicated Activity
+  env integer parsing should reject malformed suffixes, accepted runtime wake
+  counting should be explicit, and device-sync recovery should stop self-waking
+  the same active runtime after a bounded number of accepted wakes.
 
 ## Success criteria
 
@@ -28,6 +30,12 @@ Updated: 2026-05-21
   signal instead of retrying every 30 seconds, with Temporal patching guarding
   existing histories.
 - Activity HTTP env integer parsing accepts only full positive digit strings.
+- The first accepted wake for a runtime records a same-runtime wake count of
+  `1` for new histories while pre-patch histories keep replay-compatible count
+  behavior.
+- Device-sync recovery stops preserving its explicit recovery flag after
+  repeated accepted wakes for the same runtime instead of looping on the same
+  active runtime.
 - Required verification and completion workflow checks run, or any unrelated
   blockers are recorded precisely.
 
@@ -45,6 +53,8 @@ Updated: 2026-05-21
   - `packages/hosted-orchestrator-temporal/src/activities/http-client.ts`
   - `packages/hosted-orchestrator-temporal/test/ensure-runtime-processing.test.ts`
   - `packages/hosted-orchestrator-temporal/test/read-runtime-demand.test.ts`
+  - `agent-docs/references/hosted-temporal-orchestration.md`
+  - `agent-docs/index.md`
 - Out of scope:
   - Temporal workflow command ordering.
   - Cloudflare execution adapter behavior.
@@ -89,9 +99,13 @@ Updated: 2026-05-21
 6. Make non-retryable Activity failures wait for a signal at the workflow layer
    with Temporal patching.
 7. Make Activity HTTP env positive integer parsing strict.
-8. Run focused hosted orchestration tests and required broader verification.
-9. Run completion audits required by the high-risk repo workflow.
-10. Inspect diff for privacy leakage, close the plan, and create a scoped commit
+8. Fix accepted runtime wake count semantics and bound same-runtime device-sync
+   recovery wake loops.
+9. Document bounded device-sync accepted-wake behavior in the hosted Temporal
+   ADR.
+10. Run focused hosted orchestration tests and required broader verification.
+11. Run completion audits required by the high-risk repo workflow.
+12. Inspect diff for privacy leakage, close the plan, and create a scoped commit
    if safe.
 
 ## Decisions
@@ -104,6 +118,9 @@ Updated: 2026-05-21
 - Use a Temporal patch marker for the non-retryable failure wait change so old
   histories continue to replay against the previous timer behavior until they
   drain or continue as new.
+- Use a Temporal patch marker for same-runtime wake count semantics and the
+  device-sync recovery wake cap so old histories keep their previous timer
+  command shape.
 
 ## Verification
 
@@ -121,9 +138,24 @@ Updated: 2026-05-21
 - Results so far:
   - PASS: `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-orchestration-signal-runtime.test.ts apps/web/test/hosted-account-data-service.test.ts apps/web/test/hosted-orchestration-workflow-termination.test.ts`
   - PASS: `pnpm exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts test/worker.test.ts test/ensure-runtime-processing.test.ts test/read-runtime-demand.test.ts`
+  - PASS: `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts`
+  - PASS: `pnpm --dir packages/hosted-orchestrator-temporal typecheck`
+  - PASS: `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts test/worker.test.ts test/ensure-runtime-processing.test.ts test/read-runtime-demand.test.ts`
+  - PASS: `bash scripts/workspace-verify.sh test:diff packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts agent-docs/references/hosted-temporal-orchestration.md agent-docs/index.md`
+  - PASS: `pnpm test:smoke`
+  - PASS: `pnpm docs:drift`
   - PASS: `git diff --check`
+  - PASS: security/privacy review subagent; no findings.
+  - PASS: coverage-write subagent added an `already_running` first accepted
+    wake regression test and the rerun checks above passed.
+  - PASS: final task-finish review subagent; no findings.
+  - BLOCKED: `pnpm typecheck` failed in unrelated active query/vault-usecases
+    work. The latest failure is `packages/vault-usecases/src/query-runtime.ts`
+    importing projected wearable summary type names that are not exported by
+    `@murphai/query`. Earlier attempts failed on active `packages/query`
+    projection refactor symbols. This task did not touch those files.
+  - BLOCKED: `pnpm verify:acceptance` fails at the same workspace typecheck
+    stage for the unrelated query/vault-usecases exported wearable type drift.
   - PENDING: `pnpm hosted-local e2e temporal-orchestration` exited before the
     test body while waiting on shared workspace artifact locks from concurrent
     verification work.
-  - PENDING: `pnpm typecheck` and `pnpm verify:acceptance` are intentionally
-    deferred while other workspace verification is active.

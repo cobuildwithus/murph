@@ -4,17 +4,17 @@ import type {
 } from "./query-projection-types.ts";
 import type { SearchFilters, SearchResult } from "./search-shared.ts";
 import type {
-  WearableActivitySummary,
-  WearableBodyStateSummary,
-  WearableDaySummary,
-  WearableDriftSummary,
-  WearableLatestSummary,
-  WearableMetricLatestSummary,
+  ProjectedWearableActivitySummary,
+  ProjectedWearableBodyStateSummary,
+  ProjectedWearableDaySummary,
+  ProjectedWearableDriftSummary,
+  ProjectedWearableLatestSummary,
+  ProjectedWearableMetricLatestSummary,
+  ProjectedWearableMetricTrendSummary,
+  ProjectedWearableRecoverySummary,
+  ProjectedWearableSleepSummary,
+  ProjectedWearableSourceHealthSummary,
   WearableMetricSummaryFilters,
-  WearableMetricTrendSummary,
-  WearableRecoverySummary,
-  WearableSleepSummary,
-  WearableSourceHealthSummary,
   WearableSummaryFilters,
 } from "./wearables.ts";
 
@@ -225,6 +225,20 @@ export {
   summarizeWearableSourceHealthFromBundle,
 } from "./wearables.ts";
 export type {
+  ProjectedWearableActivitySummary,
+  ProjectedWearableBodyStateSummary,
+  ProjectedWearableDaySummary,
+  ProjectedWearableDriftSummary,
+  ProjectedWearableLatestSummary,
+  ProjectedWearableMetricLatestSummary,
+  ProjectedWearableMetricSelection,
+  ProjectedWearableMetricTrendPoint,
+  ProjectedWearableMetricTrendSummary,
+  ProjectedWearableRecoverySummary,
+  ProjectedWearableResolvedMetric,
+  ProjectedWearableSleepSummary,
+  ProjectedWearableSourceHealthSummary,
+  ProjectedWearableSummaryBundle,
   WearableActivityDay,
   WearableActivitySummary,
   WearableAssistantSummary,
@@ -506,7 +520,7 @@ export async function summarizeWearableDayRuntime(
   vaultRoot: string,
   date: string,
   filters: Omit<WearableSummaryFilters, "date" | "from" | "to"> = {},
-): Promise<WearableDaySummary | null> {
+): Promise<ProjectedWearableDaySummary | null> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableDayRuntime(vaultRoot, date, filters);
 }
@@ -514,7 +528,7 @@ export async function summarizeWearableDayRuntime(
 export async function summarizeWearableLatestRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
-): Promise<WearableLatestSummary | null> {
+): Promise<ProjectedWearableLatestSummary | null> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableLatestRuntime(vaultRoot, filters);
 }
@@ -523,7 +537,7 @@ export async function summarizeWearableMetricLatestRuntime(
   vaultRoot: string,
   metric: string,
   filters: WearableMetricSummaryFilters = {},
-): Promise<WearableMetricLatestSummary | null> {
+): Promise<ProjectedWearableMetricLatestSummary | null> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableMetricLatestRuntime(vaultRoot, metric, filters);
 }
@@ -532,7 +546,7 @@ export async function summarizeWearableMetricTrendRuntime(
   vaultRoot: string,
   metric: string,
   filters: WearableMetricSummaryFilters = {},
-): Promise<WearableMetricTrendSummary | null> {
+): Promise<ProjectedWearableMetricTrendSummary | null> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableMetricTrendRuntime(vaultRoot, metric, filters);
 }
@@ -540,7 +554,7 @@ export async function summarizeWearableMetricTrendRuntime(
 export async function explainWearableDriftRuntime(
   vaultRoot: string,
   filters: WearableMetricSummaryFilters = {},
-): Promise<WearableDriftSummary | null> {
+): Promise<ProjectedWearableDriftSummary | null> {
   const mod = await import("./query-projection.ts");
   return mod.explainWearableDriftRuntime(vaultRoot, filters);
 }
@@ -548,7 +562,7 @@ export async function explainWearableDriftRuntime(
 export async function summarizeWearableSleepRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
-): Promise<WearableSleepSummary[]> {
+): Promise<ProjectedWearableSleepSummary[]> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSleepRuntime(vaultRoot, filters);
 }
@@ -556,7 +570,7 @@ export async function summarizeWearableSleepRuntime(
 export async function summarizeWearableActivityRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
-): Promise<WearableActivitySummary[]> {
+): Promise<ProjectedWearableActivitySummary[]> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableActivityRuntime(vaultRoot, filters);
 }
@@ -564,7 +578,7 @@ export async function summarizeWearableActivityRuntime(
 export async function summarizeWearableBodyStateRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
-): Promise<WearableBodyStateSummary[]> {
+): Promise<ProjectedWearableBodyStateSummary[]> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableBodyStateRuntime(vaultRoot, filters);
 }
@@ -572,7 +586,7 @@ export async function summarizeWearableBodyStateRuntime(
 export async function summarizeWearableRecoveryRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
-): Promise<WearableRecoverySummary[]> {
+): Promise<ProjectedWearableRecoverySummary[]> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableRecoveryRuntime(vaultRoot, filters);
 }
@@ -580,7 +594,7 @@ export async function summarizeWearableRecoveryRuntime(
 export async function summarizeWearableSourceHealthRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
-): Promise<WearableSourceHealthSummary[]> {
+): Promise<ProjectedWearableSourceHealthSummary[]> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSourceHealthRuntime(vaultRoot, filters);
 }

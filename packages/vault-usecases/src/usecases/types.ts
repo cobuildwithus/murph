@@ -534,6 +534,7 @@ export interface WearableDayFiltersResult {
 export type WearablePublicProvenanceKey =
   | "candidateId"
   | "candidates"
+  | "dataOrigin"
   | "externalRef"
   | "paths"
   | "recordIds"
