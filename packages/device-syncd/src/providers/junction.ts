@@ -927,6 +927,11 @@ export function createJunctionDeviceSyncProvider(
       });
       await projectJunctionSources(context, sourceProviders);
     } catch (error) {
+      if (context.signal?.aborted) {
+        throw error;
+      }
+
+      context.throwIfAborted?.();
       context.logger.warn?.(
         "Junction source projection skipped after direct webhook import.",
         describeJunctionSourceProjectionFailure(error),

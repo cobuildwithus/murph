@@ -1433,7 +1433,7 @@ test("device sync service persists refreshed tokens before yielding provider job
     providers: [
       createFakeProvider({
         async refreshTokens(_account, options): Promise<ProviderAuthTokens> {
-          assert.ok(options?.signal);
+          assert.equal(options?.signal ?? null, null);
           refreshCalls += 1;
           yieldRequested = true;
           return {

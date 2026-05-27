@@ -926,17 +926,15 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   skipped: boolean;
 } {
   return {
-    nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(input.wake),
+    nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
     postCheckpointRecord: null,
     processedJobs: input.processedJobs,
     skipped: true,
   };
 }
 
-function resolveHostedDeviceSyncYieldRetryAt(wake: HostedRuntimeEvent): string {
-  const occurredAtMs = Date.parse(wake.occurredAt);
-  const baseMs = Number.isFinite(occurredAtMs) ? occurredAtMs : Date.now();
-  return new Date(baseMs + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
+function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {
+  return new Date(now.getTime() + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
 }
 
 async function drainHostedDeviceSyncWorker(input: {

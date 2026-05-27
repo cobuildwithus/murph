@@ -6,6 +6,8 @@ import { normalizeString } from "../shared.ts";
 import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
 import {
   createProviderRequestAbortSignal,
+  isProviderAbortError,
+  isProviderTimeoutError,
   throwIfProviderRequestAborted,
   waitForProviderRetryDelay,
 } from "./request-abort.ts";
@@ -436,8 +438,11 @@ export class JunctionClient {
           body: body ? JSON.stringify(body) : undefined,
           signal: requestAbort.signal,
         });
+        throwIfProviderRequestAborted(requestAbort.signal);
 
         if (options.optional404 && response.status === 404) {
+          await response.body?.cancel().catch(() => undefined);
+          throwIfProviderRequestAborted(requestAbort.signal);
           return null as T;
         }
 
@@ -464,11 +469,18 @@ export class JunctionClient {
       } catch (error) {
         lastError = error;
 
+        if (
+          (options.signal ? isProviderAbortError(error, options.signal) : false)
+          || isProviderAbortError(error, requestAbort.signal)
+        ) {
+          throw error;
+        }
+
         if (isDeviceSyncError(error)) {
           if (!error.retryable || attempt >= attempts) {
             throw error;
           }
-        } else if (attempt >= attempts || isDeviceSyncAbortError(error)) {
+        } else if (attempt >= attempts || isProviderTimeoutError(error, requestAbort.signal)) {
           break;
         }
 
@@ -958,9 +970,4 @@ function parseRetryAfterMs(value: string): number | null {
   }
 
   return Math.max(parsed - Date.now(), 0);
-}
-
-function isDeviceSyncAbortError(error: unknown): boolean {
-  return error instanceof DOMException
-    && (error.name === "AbortError" || error.name === "TimeoutError");
 }

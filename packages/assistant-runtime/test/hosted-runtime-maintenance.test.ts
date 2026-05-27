@@ -98,6 +98,19 @@ function createMaintenanceDeviceSyncPortStub() {
   };
 }
 
+async function withHostedMaintenanceNow<T>(
+  now: string,
+  callback: () => Promise<T>,
+): Promise<T> {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date(now));
+    return await callback();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
@@ -1242,19 +1255,22 @@ describe("runHostedDeviceSyncPass", () => {
       runSchedulerOnce,
     });
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_yield_before_dirty_fetch",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-      { shouldYield },
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:00:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_yield_before_dirty_fetch",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        { shouldYield },
+      ),
     );
 
     assert.deepEqual(result, {
@@ -1299,19 +1315,22 @@ describe("runHostedDeviceSyncPass", () => {
       },
     });
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_yield_after_dirty_fetch",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-      { shouldYield },
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:00:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_yield_after_dirty_fetch",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        { shouldYield },
+      ),
     );
 
     assert.deepEqual(result, {
@@ -1342,21 +1361,24 @@ describe("runHostedDeviceSyncPass", () => {
       runSchedulerOnce,
     });
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_yield_device_sync",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-      {
-        shouldYield,
-      },
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:00:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_yield_device_sync",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        {
+          shouldYield,
+        },
+      ),
     );
 
     assert.deepEqual(result, {
@@ -1388,25 +1410,28 @@ describe("runHostedDeviceSyncPass", () => {
       runSchedulerOnce,
     });
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_yield_device_sync_due_now",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-      {
-        shouldYield,
-      },
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:01:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_yield_device_sync_due_now",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        {
+          shouldYield,
+        },
+      ),
     );
 
     assert.deepEqual(result, {
-      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      nextWakeAt: "2026-04-08T00:01:30.000Z",
       postCheckpointRecord: null,
       processedJobs: 1,
       skipped: true,
