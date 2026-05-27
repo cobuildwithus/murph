@@ -586,6 +586,74 @@ test("wearable source health reports excluded records when provider provenance i
   }
 });
 
+test("wearable runtime source health date filters use provider coverage intervals", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-source-health-interval-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_source_health_interval_early",
+          kind: "observation",
+          occurredAt: "2026-03-08T07:00:00Z",
+          recordedAt: "2026-03-08T07:05:00Z",
+          dayKey: "2026-03-08",
+          source: "device",
+          title: "Oura steps early",
+          metric: "steps",
+          value: 4_800,
+          unit: "count",
+          externalRef: {
+            system: "oura",
+            resourceType: "daily_activity",
+            resourceId: "activity_early",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_source_health_interval_late",
+          kind: "observation",
+          occurredAt: "2026-03-12T07:00:00Z",
+          recordedAt: "2026-03-12T07:05:00Z",
+          dayKey: "2026-03-12",
+          source: "device",
+          title: "Oura steps late",
+          metric: "steps",
+          value: 5_200,
+          unit: "count",
+          externalRef: {
+            system: "oura",
+            resourceType: "daily_activity",
+            resourceId: "activity_late",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
+      date: "2026-03-10",
+    });
+    const day = await summarizeWearableDayRuntime(vaultRoot, "2026-03-10");
+
+    assert.equal(sourceHealth.length, 1);
+    assert.equal(sourceHealth[0]?.provider, "oura");
+    assert.equal(sourceHealth[0]?.firstDate, "2026-03-08");
+    assert.equal(sourceHealth[0]?.lastDate, "2026-03-12");
+    assert.equal(day?.sourceHealth[0]?.provider, "oura");
+    assert.deepEqual(day?.providers, ["oura"]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("wearable metric ranking balances specificity and recency ahead of provider preference alone", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-scored-metrics-"));
 

@@ -1070,37 +1070,41 @@ function wearableSummaryBundleFromRows(
   };
 
   for (const row of rows) {
-    if (!wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)) {
-      continue;
-    }
-
     switch (row.summaryKind) {
-      case "activity": {
-        const summary = parseJsonValue<WearableActivitySummary | null>(row.summaryJson, null);
-        if (summary) bundle.activityDays.push(summary);
-        break;
-      }
-      case "body_state": {
-        const summary = parseJsonValue<WearableBodyStateSummary | null>(row.summaryJson, null);
-        if (summary) bundle.bodyStateDays.push(summary);
-        break;
-      }
-      case "recovery": {
-        const summary = parseJsonValue<WearableRecoverySummary | null>(row.summaryJson, null);
-        if (summary) bundle.recoveryDays.push(summary);
-        break;
-      }
-      case "sleep": {
-        const summary = parseJsonValue<WearableSleepSummary | null>(row.summaryJson, null);
-        if (summary) bundle.sleepNights.push(summary);
-        break;
-      }
       case "source_health": {
         const summary = parseJsonValue<WearableSourceHealthSummary | null>(row.summaryJson, null);
         if (summary && wearableSourceHealthMatchesDateFilters(summary, filters)) {
           bundle.sourceHealth.push(summary);
         }
         break;
+      }
+      default: {
+        if (!wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)) {
+          break;
+        }
+
+        switch (row.summaryKind) {
+          case "activity": {
+            const summary = parseJsonValue<WearableActivitySummary | null>(row.summaryJson, null);
+            if (summary) bundle.activityDays.push(summary);
+            break;
+          }
+          case "body_state": {
+            const summary = parseJsonValue<WearableBodyStateSummary | null>(row.summaryJson, null);
+            if (summary) bundle.bodyStateDays.push(summary);
+            break;
+          }
+          case "recovery": {
+            const summary = parseJsonValue<WearableRecoverySummary | null>(row.summaryJson, null);
+            if (summary) bundle.recoveryDays.push(summary);
+            break;
+          }
+          case "sleep": {
+            const summary = parseJsonValue<WearableSleepSummary | null>(row.summaryJson, null);
+            if (summary) bundle.sleepNights.push(summary);
+            break;
+          }
+        }
       }
     }
   }
