@@ -254,13 +254,17 @@ function expectDurableDirtyWakeAppended(input: {
 } = {}) {
   const call = mocks.appendHostedMailboxEnvelope.mock.calls[input.callIndex ?? 0]?.[0];
   const envelope = call?.envelope;
+  const connectionId = input.connectionId ?? "dsc_123";
   const provider = input.provider ?? "oura";
   const revision = input.revision ?? "1";
+  const expectedEventId = buildHostedDeviceSyncDirtyWakeDedupeKey({
+    connectionId,
+    dirtyRevision: BigInt(revision),
+    provider,
+  });
   expect(envelope).toEqual(expect.objectContaining({
-    connectionId: input.connectionId ?? "dsc_123",
-    eventId: expect.stringMatching(
-      new RegExp(`^device-sync:dirty:v1:provider:${provider}:connection:[0-9a-f]{16}:revision:${revision}$`, "u"),
-    ),
+    connectionId,
+    eventId: expectedEventId,
     kind: "device-sync.wake",
     provider,
     reason: "webhook_hint",
@@ -326,6 +330,7 @@ import {
 } from "@/src/lib/device-sync/control-plane";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncDirtyWakeDedupeKey,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
@@ -2764,11 +2769,13 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(consoleWarn).toHaveBeenCalledWith(
       "Rejecting hosted device-sync webhook without an owner mapping.",
       expect.objectContaining({
-        connectionId: "dsc_123",
+        connectionFingerprint: "a".repeat(16),
         provider: "oura",
-        traceId: "trace_123",
+        traceIdPresent: true,
       }),
     );
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("dsc_123");
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("trace_123");
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();

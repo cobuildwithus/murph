@@ -419,9 +419,9 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 
   if (!ownerId) {
     console.warn("Rejecting hosted device-sync webhook without an owner mapping.", {
-      connectionId: input.account.id,
+      connectionFingerprint: sha256Hex(input.account.id).slice(0, 16),
       provider: input.account.provider,
-      traceId,
+      traceIdPresent: traceId !== null,
     });
 
     throw deviceSyncError({
@@ -601,7 +601,7 @@ export function buildHostedDeviceSyncDirtyWakeDedupeKey(input: {
 
 export async function appendHostedDeviceSyncDirtyWake(input: {
   connectionId: string;
-  dedupeKey?: string | null;
+  dirtyRevision: bigint;
   eventType?: string | null;
   occurredAt: string;
   provider: string;
@@ -617,7 +617,11 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
     connectionId: input.connectionId,
     occurredAt: input.occurredAt,
     provider: input.provider,
-    dedupeKey: input.dedupeKey ?? null,
+    dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
+      connectionId: input.connectionId,
+      dirtyRevision: input.dirtyRevision,
+      provider: input.provider,
+    }),
     eventType: input.eventType ?? null,
     resourceCategory: input.resourceCategory ?? null,
     traceId: input.traceId ?? null,
