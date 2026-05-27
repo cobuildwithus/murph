@@ -67,6 +67,7 @@ vi.mock("./runtime.ts", () => ({
 const baseConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",

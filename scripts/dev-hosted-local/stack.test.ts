@@ -43,6 +43,7 @@ class CapturingWritable extends Writable {
 const defaultConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  forceResetLocalTemporal: false,
   linqWebhookPublicUrl: null,
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",
@@ -205,6 +206,7 @@ const buildHostedLocalTemporalRuntimeEnv = vi.fn((input: {
 const startHostedLocalTemporalRuntime = vi.fn<
   (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
 >(async () => null);
+const waitForHostedLocalTemporalPortRelease = vi.fn(async () => {});
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(async () => {
@@ -331,6 +333,7 @@ vi.mock("./minio.ts", () => ({
 vi.mock("./temporal.ts", () => ({
   buildHostedLocalTemporalRuntimeEnv,
   startHostedLocalTemporalRuntime,
+  waitForHostedLocalTemporalPortRelease,
 }));
 
 vi.mock("./runtime.ts", () => ({
@@ -404,6 +407,7 @@ describe("hosted local dev stack", () => {
   afterEach(() => {
     vi.clearAllMocks();
     runCommand.mockImplementation(async () => {});
+    waitForHostedLocalTemporalPortRelease.mockResolvedValue(undefined);
     vi.unstubAllEnvs();
   });
 
@@ -582,6 +586,50 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("force-resets local Temporal residue before starting the stack", async () => {
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      forceResetLocalTemporal: true,
+      temporal: {
+        ...defaultConfig.temporal,
+        mode: "managed",
+        port: 7234,
+      },
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+    const stderrTarget = new CapturingWritable();
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+      stderrTarget,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(stderrTarget.text()).toContain("Resetting local Temporal dev server and worker residue.");
+    expect(waitForHostedLocalTemporalPortRelease).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      port: 7234,
+      signal: undefined,
+      timeoutMs: 2_500,
+    });
+    expect(spawnSync.mock.calls.map(([, args]) => args)).toEqual(
+      expect.arrayContaining([
+        ["-SIGTERM", "-f", "temporal server start-dev .*--port 7234"],
+        ["-SIGTERM", "-f", "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker"],
+        [
+          "-SIGTERM",
+          "-f",
+          expect.stringContaining("node_modules.*tsx.*src/worker\\.ts"),
+        ],
+      ]),
+    );
   });
 
   it("starts managed Temporal as part of the hosted-local process model", async () => {
@@ -1047,7 +1095,14 @@ describe("hosted local dev stack", () => {
         stripeForwardUrl: "http://localhost:3000/api/hosted-onboarding/stripe/webhook",
       });
 
-      expect(spawnSync).not.toHaveBeenCalled();
+      expect(spawnSync.mock.calls.map(([, args]) => args)).toEqual([
+        ["-SIGTERM", "-f", "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker"],
+        [
+          "-SIGTERM",
+          "-f",
+          expect.stringContaining("node_modules.*tsx.*src/worker\\.ts"),
+        ],
+      ]);
 
       spawnSync.mockClear();
       terminateKnownHostedLocalProcessResidue({
@@ -1088,6 +1143,12 @@ describe("hosted local dev stack", () => {
           "cloudflared tunnel --no-autoupdate --config.*\\.tmp/cloudflared-linq-webhook\\.yml.*run.*dev",
         ],
         ["-SIGKILL", "-f", "temporal server start-dev .*--port 7234"],
+        ["-SIGKILL", "-f", "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker"],
+        [
+          "-SIGKILL",
+          "-f",
+          expect.stringContaining("node_modules.*tsx.*src/worker\\.ts"),
+        ],
         [
           "-SIGKILL",
           "-f",
@@ -1723,6 +1784,7 @@ describe("hosted local dev stack", () => {
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       forceResetLocalDatabase: true,
+      forceResetLocalTemporal: false,
     });
 
     const { startHostedLocalDevStack } = await import("./stack.ts");
