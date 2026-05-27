@@ -35,9 +35,21 @@ export async function normalizeAttachmentForStorage(
   const sharp = (await import("sharp")).default;
 
   try {
-    const output = await sharp(input.bytes, {
+    const image = sharp(input.bytes, {
       limitInputPixels: IMAGE_NORMALIZATION_MAX_INPUT_PIXELS,
-    })
+    });
+    const metadata = await image.metadata();
+
+    if (typeof metadata.pages === "number" && metadata.pages > 1) {
+      return {
+        bytes: input.bytes,
+        fileName: input.fileName,
+        mediaType: input.mediaType,
+        normalized: false,
+      };
+    }
+
+    const output = await image
       .rotate()
       .resize({
         width: IMAGE_NORMALIZATION_MAX_EDGE_PX,
