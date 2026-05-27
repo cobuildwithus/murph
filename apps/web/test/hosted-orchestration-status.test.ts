@@ -90,11 +90,8 @@ describe("hosted orchestration status route", () => {
       browserVaultRefreshRequested: false,
       deviceSyncRecoveryRequested: true,
       decisionSource: "status",
-      ignoredWorkspaceWakeKey: "8:2026-05-21T12:05:00.000Z:assistant_due",
       lagRecoveryObserved: true,
       manualRunRequested: true,
-      runtimeResultWakeAt: "2026-05-21T12:01:00.000Z",
-      runtimeResultWakeReason: "runtime.failed",
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -150,11 +147,8 @@ describe("hosted orchestration status route", () => {
       browserVaultRefreshRequested: false,
       deviceSyncRecoveryRequested: false,
       decisionSource: "status",
-      ignoredWorkspaceWakeKey: null,
       lagRecoveryObserved: false,
       manualRunRequested: false,
-      runtimeResultWakeAt: null,
-      runtimeResultWakeReason: null,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -234,7 +228,6 @@ describe("hosted orchestration status route", () => {
     delete oldStatus.lastOrchestrationAttemptId;
     delete oldStatus.lastRuntimeAttemptId;
     delete oldStatus.lastRuntimeStatus;
-    delete oldStatus.legacyRuntimeFailedWithoutNextWakeCount;
     delete oldStatus.sameRuntimeWakeAcceptedCount;
     mocks.queryWorkflowStatus.mockResolvedValue(oldStatus);
 
@@ -252,7 +245,6 @@ describe("hosted orchestration status route", () => {
       lastOrchestrationAttemptId: null,
       lastRuntimeAttemptId: null,
       lastRuntimeStatus: null,
-      legacyRuntimeFailedWithoutNextWakeCount: 0,
       sameRuntimeWakeAcceptedCount: 0,
     });
   });
@@ -345,11 +337,8 @@ describe("hosted orchestration status route", () => {
       browserVaultRefreshRequested: false,
       deviceSyncRecoveryRequested: false,
       decisionSource: "status",
-      ignoredWorkspaceWakeKey: null,
       lagRecoveryObserved: false,
       manualRunRequested: false,
-      runtimeResultWakeAt: null,
-      runtimeResultWakeReason: null,
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -479,10 +468,9 @@ function buildRunnerStatusProjection() {
 function buildWorkflowStatus() {
   return {
     browserVaultRefreshRequested: false,
-    currentWaitReason: "runtime_failed_recheck",
-    currentWaitUntil: "2026-05-21T12:01:00.000Z",
+    currentWaitReason: "runtime_wake_recheck",
+    currentWaitUntil: "2026-05-21T12:04:00.000Z",
     deviceSyncRecoveryRequested: true,
-    ignoredWorkspaceWakeKey: "8:2026-05-21T12:05:00.000Z:assistant_due",
     invalidSignalCount: 0,
     lagRecoveryObserved: true,
     lastDemandKind: "run",
@@ -490,12 +478,12 @@ function buildWorkflowStatus() {
     lastDemandSource: "manual",
     lastExecutionAt: "2026-05-21T11:59:45.000Z",
     lastExecutionErrorCode: null,
-    lastExecutionKind: "runtime_completed",
+    lastExecutionKind: "runtime_processing_accepted",
     lastInvalidSignalErrorCode: null,
     lastMailboxLagLaneCount: 1,
     lastOrchestrationAttemptId: "orchestration_attempt_1",
     lastRuntimeAttemptId: "runtime_attempt_1",
-    lastRuntimeStatus: "failed",
+    lastRuntimeStatus: "scheduled",
     latestMailboxPointer: {
       lane: "conversation",
       laneSeq: "6",
@@ -504,9 +492,6 @@ function buildWorkflowStatus() {
     },
     mailboxSignalCount: 2,
     manualRunRequested: true,
-    legacyRuntimeFailedWithoutNextWakeCount: 1,
-    runtimeResultWakeAt: "2026-05-21T12:01:00.000Z",
-    runtimeResultWakeReason: "runtime.failed",
     sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 4,
     userId: MEMBER_ID,

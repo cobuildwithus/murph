@@ -39,10 +39,6 @@ export const GET = withJsonError(async (
       request,
       "deviceSyncRecoveryRequested",
     ),
-    ignoredWorkspaceWakeKey: readHostedOrchestrationNullableQueryString(
-      request,
-      "ignoredWorkspaceWakeKey",
-    ),
     lagRecoveryObserved: readHostedOrchestrationQueryFlag(
       request,
       "lagRecoveryObserved",
@@ -50,14 +46,6 @@ export const GET = withJsonError(async (
     manualRunRequested: readHostedOrchestrationQueryFlag(
       request,
       "manualRunRequested",
-    ),
-    runtimeResultWakeAt: readHostedOrchestrationNullableQueryString(
-      request,
-      "runtimeResultWakeAt",
-    ),
-    runtimeResultWakeReason: readHostedOrchestrationNullableQueryString(
-      request,
-      "runtimeResultWakeReason",
     ),
     userId: routeUserId,
   });
@@ -99,12 +87,4 @@ function readHostedOrchestrationQueryFlag(
     httpStatus: 400,
     message: "Hosted orchestration query flag is invalid.",
   });
-}
-
-function readHostedOrchestrationNullableQueryString(
-  request: Request,
-  name: string,
-): string | null {
-  const value = new URL(request.url).searchParams.get(name);
-  return value && value.trim().length > 0 ? value : null;
 }

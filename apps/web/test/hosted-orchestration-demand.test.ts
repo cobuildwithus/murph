@@ -160,13 +160,10 @@ describe("hosted orchestration demand", () => {
         demandReason: "manual",
         demandSource: "manual",
         deviceSyncRecoveryRequested: false,
-        ignoredWorkspaceWakeKeyPresent: false,
         lagRecoveryObserved: false,
         mailboxLagLaneCount: 2,
         manualRunRequested: true,
         retryAtPresent: false,
-        runtimeResultWakeAtPresent: false,
-        runtimeResultWakeReason: null,
         schema: "murph.hosted-runtime.demand-decision.v1",
         usageGateRequired: true,
         usageGateStatus: "allowed",
@@ -282,11 +279,7 @@ describe("hosted orchestration demand", () => {
     }));
 
     const response = await demandRoute.GET(
-      requestForDemand(
-        `?manualRunRequested=1&runtimeResultWakeAt=2026-05-20T12%3A00%3A00.000Z&runtimeResultWakeReason=${
-          encodeURIComponent(unsafeWakeReason)
-        }`,
-      ),
+      requestForDemand("?manualRunRequested=1"),
       routeContext(),
     );
 
@@ -294,7 +287,6 @@ describe("hosted orchestration demand", () => {
     expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
     const loggedMetadata = consoleInfoSpy.mock.calls[0]?.[1];
     expect(loggedMetadata).toMatchObject({
-      runtimeResultWakeReason: "other",
       workspaceNextWakeReason: "other",
     });
     expect(JSON.stringify(loggedMetadata)).not.toContain(UNSAFE_SENTINEL);
@@ -340,9 +332,7 @@ describe("hosted orchestration demand", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(null);
 
     const response = await demandRoute.GET(
-      requestForDemand(
-        "?manualRunRequested=1&runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
-      ),
+      requestForDemand("?manualRunRequested=1"),
       routeContext(),
     );
     const demand = parseHostedRuntimeDemand(await response.json());
@@ -370,13 +360,10 @@ describe("hosted orchestration demand", () => {
         demandReason: null,
         demandSource: null,
         deviceSyncRecoveryRequested: false,
-        ignoredWorkspaceWakeKeyPresent: false,
         lagRecoveryObserved: false,
         mailboxLagLaneCount: 0,
         manualRunRequested: true,
         retryAtPresent: false,
-        runtimeResultWakeAtPresent: true,
-        runtimeResultWakeReason: null,
         schema: "murph.hosted-runtime.demand-decision.v1",
         usageGateRequired: false,
         usageGateStatus: "not_required",
@@ -397,9 +384,7 @@ describe("hosted orchestration demand", () => {
     }));
 
     const response = await demandRoute.GET(
-      requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
-      ),
+      requestForDemand(),
       routeContext(),
     );
     const demand = parseHostedRuntimeDemand(await response.json());
@@ -448,97 +433,7 @@ describe("hosted orchestration demand", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("gates maintenance runtime-result wakes that mask model-capable workspace wakes", async () => {
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:30.000Z",
-      nextWakeReason: "assistant_due",
-      version: "8",
-    }));
-
-    const response = await demandRoute.GET(
-      requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z&runtimeResultWakeReason=device-sync.reconcile",
-      ),
-      routeContext(),
-    );
-    const demand = parseHostedRuntimeDemand(await response.json());
-
-    expect(demand).toMatchObject({
-      kind: "blocked",
-      reason: "ai_usage_denied",
-      retryAt: null,
-      workspace: {
-        nextWakeAt: "2026-05-20T11:59:30.000Z",
-        nextWakeReason: "assistant_due",
-        version: "8",
-      },
-    });
-    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-    });
-  });
-
-  it("suppresses only the same stale workspace wake key", async () => {
-    const nextWakeAt = "2026-05-20T11:58:00.000Z";
-    const ignoredWorkspaceWakeKey = `4:${nextWakeAt}:assistant_due`;
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt,
-      nextWakeReason: "assistant_due",
-    }));
-
-    const response = await demandRoute.GET(
-      requestForDemand(
-        `?ignoredWorkspaceWakeKey=${encodeURIComponent(ignoredWorkspaceWakeKey)}`,
-      ),
-      routeContext(),
-    );
-    const demand = parseHostedRuntimeDemand(await response.json());
-
-    expect(demand).toEqual({
-      kind: "idle",
-      mailboxLag: [
-        {
-          importedSeq: "0",
-          lag: "0",
-          lane: "system",
-          maxSeq: "0",
-        },
-        {
-          importedSeq: "0",
-          lag: "0",
-          lane: "conversation",
-          maxSeq: "0",
-        },
-      ],
-      nextWakeAt: null,
-      workspace: {
-        nextWakeAt,
-        nextWakeReason: "assistant_due",
-        version: "4",
-      },
-    });
-    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
-
-    const manualResponse = await demandRoute.GET(
-      requestForDemand(
-        `?manualRunRequested=1&ignoredWorkspaceWakeKey=${
-          encodeURIComponent(ignoredWorkspaceWakeKey)
-        }`,
-      ),
-      routeContext(),
-    );
-    const manualDemand = parseHostedRuntimeDemand(await manualResponse.json());
-
-    expect(manualDemand).toMatchObject({
-      kind: "run",
-      reason: "manual",
-      source: "manual",
-    });
-  });
-
-  it("runs due workspace wake when the wake key is not ignored", async () => {
+  it("runs due workspace wakes", async () => {
     const nextWakeAt = "2026-05-20T11:58:00.000Z";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt,
@@ -685,26 +580,6 @@ describe("hosted orchestration demand", () => {
       nextWakeAt: "2026-05-20T11:58:00.000Z",
       nextWakeReason: "device-sync.reconcile",
     }));
-    const runtimeResultResponse = await demandRoute.GET(
-      requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z&runtimeResultWakeReason=device-sync.reconcile",
-      ),
-      routeContext(),
-    );
-    const runtimeResultDemand = parseHostedRuntimeDemand(
-      await runtimeResultResponse.json(),
-    );
-
-    expect(runtimeResultDemand).toMatchObject({
-      kind: "run",
-      source: "runtime_result_wake",
-    });
-    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
-
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:58:00.000Z",
-      nextWakeReason: "device-sync.reconcile",
-    }));
     const workspaceResponse = await demandRoute.GET(
       requestForDemand(),
       routeContext(),
@@ -714,63 +589,6 @@ describe("hosted orchestration demand", () => {
     expect(workspaceDemand).toMatchObject({
       kind: "run",
       source: "workspace_wake",
-    });
-    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
-  });
-
-  it("gates reasonless runtime-result wakes by default", async () => {
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
-
-    const response = await demandRoute.GET(
-      requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
-      ),
-      routeContext(),
-    );
-    const demand = parseHostedRuntimeDemand(await response.json());
-
-    expect(demand).toMatchObject({
-      kind: "blocked",
-      reason: "ai_usage_denied",
-      retryAt: null,
-    });
-    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-    });
-  });
-
-  it("ignores retired legacy compaction runtime-result wakes", async () => {
-    const response = await demandRoute.GET(
-      requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z&runtimeResultWakeReason=legacy-wearable-receipt-compaction-v1",
-      ),
-      routeContext(),
-    );
-    const demand = parseHostedRuntimeDemand(await response.json());
-
-    expect(demand).toEqual({
-      kind: "idle",
-      mailboxLag: [
-        {
-          importedSeq: "0",
-          lag: "0",
-          lane: "system",
-          maxSeq: "0",
-        },
-        {
-          importedSeq: "0",
-          lag: "0",
-          lane: "conversation",
-          maxSeq: "0",
-        },
-      ],
-      nextWakeAt: null,
-      workspace: {
-        nextWakeAt: null,
-        nextWakeReason: null,
-        version: "4",
-      },
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
@@ -871,23 +689,21 @@ describe("hosted orchestration demand", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("returns the earliest future runtime or workspace wake while idle", async () => {
+  it("returns the future workspace wake while idle", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:03:00.000Z",
       nextWakeReason: "assistant_due",
     }));
 
     const response = await demandRoute.GET(
-      requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T12%3A01%3A00.000Z",
-      ),
+      requestForDemand(),
       routeContext(),
     );
     const demand = parseHostedRuntimeDemand(await response.json());
 
     expect(demand).toMatchObject({
       kind: "idle",
-      nextWakeAt: "2026-05-20T12:01:00.000Z",
+      nextWakeAt: "2026-05-20T12:03:00.000Z",
     });
   });
 

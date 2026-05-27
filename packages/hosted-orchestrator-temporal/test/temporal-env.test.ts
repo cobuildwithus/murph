@@ -140,19 +140,18 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
 });
 
 describe("readHostedUserRuntimeWorkflowOptions", () => {
-  it("includes an explicit failed-runtime completion recheck delay", () => {
+  it("reads shared workflow timing options", () => {
     expect(readHostedUserRuntimeWorkflowOptions({})).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
       readRuntimeDemandStartToCloseTimeoutMs: 10_000,
-      runtimeCompletedFailureRecheckDelayMs: 30_000,
     });
   });
 
-  it("reads the failed-runtime completion recheck delay from env", () => {
+  it("reads the ensure-processing timeout from env", () => {
     expect(readHostedUserRuntimeWorkflowOptions({
-      HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
     })).toMatchObject({
-      runtimeCompletedFailureRecheckDelayMs: 45_000,
+      ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
     });
   });
 });

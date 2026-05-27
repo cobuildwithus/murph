@@ -17,7 +17,7 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 
 Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves the upstream payloads as raw artifacts, and only promotes fields that fit the current canonical device batch surface. High-frequency provider telemetry should remain raw evidence unless it is reduced to compact display-grade events or metric facts.
 
-The wearable raw ingest envelope is only a receipt: it stores the payload hash and the raw artifact roles for replay/audit, but it must not store another copy of the provider payload. Raw provider data belongs in the adapter's raw artifacts, and product/query surfaces should consume canonical records or derived metric read models instead.
+The wearable raw ingest envelope is only a receipt: it stores the payload hash and the raw artifact roles for replay/audit, but it must not store another copy of the provider payload. Raw provider data belongs in the adapter's raw artifacts, and product/query surfaces should consume compact events, metric facts, or derived metric read models instead.
 
 If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. This keeps replay evidence in the raw-artifact layer instead of falling back to payload-bearing envelopes.
 

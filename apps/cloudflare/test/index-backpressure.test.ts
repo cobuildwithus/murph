@@ -54,7 +54,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
     const stub = {
       bindUser: vi.fn(async (userId: string) => ({ userId })),
-      ensureRuntimeExecutionForUser: vi.fn(),
+      ensureRuntimeProcessingForUser: vi.fn(),
       runnerStatus: vi.fn(),
     };
     const env = {
@@ -77,7 +77,7 @@ describe("cloudflare worker queue backpressure routes", () => {
 
     expect(runResponse.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("exposes runtime write-fence methods for deploy smoke on the user runner durable object", async () => {
@@ -145,13 +145,13 @@ describe("cloudflare worker queue backpressure routes", () => {
       throw new Error(`Unexpected fetch during Cloudflare backpressure test: ${url.origin}${url.pathname}`);
     });
 
-    await expect(harness.durableObject.ensureRuntimeExecutionForUser({
+    await expect(harness.durableObject.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "backpressure-active-fence-test",
       reason: "nudge",
       userId: "member_123",
-    })).rejects.toMatchObject({
-      name: "HostedRuntimeExecutionRetryableError",
-      retryable: true,
+    })).resolves.toMatchObject({
+      kind: "retry_later",
+      retryAt: expect.any(String),
     });
     const state = await stateStore.readState();
 

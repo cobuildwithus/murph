@@ -84,36 +84,6 @@ describe("observeHostedTemporalActivity", () => {
     );
   });
 
-  it("logs legacy ensure-execution observations while the fallback remains", async () => {
-    await expect(observeHostedTemporalActivity({
-      activity: "ensureCloudflareExecution",
-      orchestrationAttemptId: "orchestration_attempt_legacy",
-      reason: "retry",
-      userId: "member_test",
-    }, async () => ({
-      action: "started",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_legacy",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
-    }))).resolves.toMatchObject({
-      kind: "runtime_completed",
-    });
-
-    expect(activityLog.info).toHaveBeenCalledWith(
-      "Hosted Temporal activity completed.",
-      expect.objectContaining({
-        activity: "ensureCloudflareExecution",
-        orchestrationAttemptId: "orchestration_attempt_legacy",
-        reason: "retry",
-        resultAction: null,
-        resultKind: "runtime_completed",
-        userIdPresent: true,
-      }),
-    );
-  });
-
   it("does not log free-form result detail strings", async () => {
     const unsafeResultDetail = "unsafe prompt payload transcript secret";
 

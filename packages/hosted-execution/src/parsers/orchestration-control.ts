@@ -1,22 +1,17 @@
 import {
   HOSTED_WORKSPACE_INVOCATION_REASONS,
-  HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxLaneLag,
   type HostedWorkspaceInvocationReason,
-  type HostedWorkspaceInvocationStatus,
 } from "../runtime-control.ts";
 import {
   HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS,
   HOSTED_RUNTIME_DEMAND_KINDS,
-  HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
   type HostedRuntimeDemandWorkspaceProjection,
-  type HostedRuntimeEnsureExecutionRequest,
-  type HostedRuntimeEnsureExecutionResponse,
   type HostedRuntimeEnsureProcessingRequest,
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimeSignal,
@@ -34,15 +29,6 @@ import {
 import {
   parseHostedMailboxLane,
 } from "./runtime-control.ts";
-
-const HOSTED_RUNTIME_LEGACY_PROCESSING_RETRY_REASONS = [
-  "missing_container_binding",
-  "container_rpc_error",
-  "container_rpc_timeout",
-  "active_child_rejected",
-  "start_not_confirmed",
-  "stale_fence_replacement_race",
-] as const;
 
 export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
   const record = requireObject(value, "Hosted runtime signal");
@@ -129,11 +115,8 @@ export function parseHostedRuntimeDemandRequest(
   assertExactKeys(record, "Hosted runtime demand request", [
     "browserVaultRefreshRequested",
     "deviceSyncRecoveryRequested",
-    "ignoredWorkspaceWakeKey",
     "lagRecoveryObserved",
     "manualRunRequested",
-    "runtimeResultWakeAt",
-    "runtimeResultWakeReason",
     "userId",
   ]);
 
@@ -154,14 +137,6 @@ export function parseHostedRuntimeDemandRequest(
             "Hosted runtime demand request deviceSyncRecoveryRequested",
           ),
         }),
-    ...(record.ignoredWorkspaceWakeKey === undefined
-      ? {}
-      : {
-          ignoredWorkspaceWakeKey: readOptionalNullableWorkspaceWakeKey(
-            record.ignoredWorkspaceWakeKey,
-            "Hosted runtime demand request ignoredWorkspaceWakeKey",
-          ),
-        }),
     ...(record.lagRecoveryObserved === undefined
       ? {}
       : {
@@ -176,22 +151,6 @@ export function parseHostedRuntimeDemandRequest(
           manualRunRequested: requireBoolean(
             record.manualRunRequested,
             "Hosted runtime demand request manualRunRequested",
-          ),
-        }),
-    ...(record.runtimeResultWakeAt === undefined
-      ? {}
-      : {
-          runtimeResultWakeAt: readOptionalNullableIsoTimestamp(
-            record.runtimeResultWakeAt,
-            "Hosted runtime demand request runtimeResultWakeAt",
-          ),
-        }),
-    ...(record.runtimeResultWakeReason === undefined
-      ? {}
-      : {
-          runtimeResultWakeReason: readRequiredNullableBoundedString(
-            record.runtimeResultWakeReason,
-            "Hosted runtime demand request runtimeResultWakeReason",
           ),
         }),
     userId: requireOpaqueIdentifier(record.userId, "Hosted runtime demand request userId"),
@@ -294,27 +253,6 @@ export function parseHostedRuntimeDemand(value: unknown): HostedRuntimeDemand {
   }
 }
 
-export function parseHostedRuntimeEnsureExecutionRequest(
-  value: unknown,
-): HostedRuntimeEnsureExecutionRequest {
-  const record = requireObject(value, "Hosted runtime ensure-execution request");
-  assertExactKeys(record, "Hosted runtime ensure-execution request", [
-    "orchestrationAttemptId",
-    "reason",
-  ]);
-
-  return {
-    orchestrationAttemptId: requireOpaqueIdentifier(
-      record.orchestrationAttemptId,
-      "Hosted runtime ensure-execution request orchestrationAttemptId",
-    ),
-    reason: parseHostedWorkspaceInvocationReason(
-      record.reason,
-      "Hosted runtime ensure-execution request reason",
-    ),
-  };
-}
-
 export function parseHostedRuntimeEnsureProcessingRequest(
   value: unknown,
 ): HostedRuntimeEnsureProcessingRequest {
@@ -343,80 +281,6 @@ export function parseHostedRuntimeEnsureProcessingRequest(
           ),
         }),
   };
-}
-
-export function parseHostedRuntimeEnsureExecutionResponse(
-  value: unknown,
-): HostedRuntimeEnsureExecutionResponse {
-  const record = requireObject(value, "Hosted runtime ensure-execution response");
-  const kind = parseAllowedString(
-    record.kind,
-    "Hosted runtime ensure-execution response kind",
-    HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
-  );
-
-  switch (kind) {
-    case "runtime_completed": {
-      assertExactKeys(record, "Hosted runtime completed response", [
-        "action",
-        "kind",
-        "runtimeAttemptId",
-        "runtimeResultNextWakeAt",
-        "runtimeResultNextWakeReason",
-        "runtimeStatus",
-      ]);
-
-      return {
-        action: parseAllowedString(
-          record.action,
-          "Hosted runtime completed response action",
-          ["started", "replaced"] as const,
-        ),
-        kind,
-        runtimeAttemptId: requireOpaqueIdentifier(
-          record.runtimeAttemptId,
-          "Hosted runtime completed response runtimeAttemptId",
-        ),
-        runtimeResultNextWakeAt: readRequiredNullableIsoTimestamp(
-          record.runtimeResultNextWakeAt,
-          "Hosted runtime completed response runtimeResultNextWakeAt",
-        ),
-        runtimeResultNextWakeReason: readRequiredNullableBoundedString(
-          record.runtimeResultNextWakeReason,
-          "Hosted runtime completed response runtimeResultNextWakeReason",
-        ),
-        runtimeStatus: parseHostedWorkspaceInvocationStatus(
-          record.runtimeStatus,
-          "Hosted runtime completed response runtimeStatus",
-        ),
-      };
-    }
-    case "runtime_wake_sent": {
-      assertExactKeys(record, "Hosted runtime wake-sent response", [
-        "kind",
-        "recommendedRecheckAt",
-        "runtimeAttemptId",
-      ]);
-
-      return {
-        kind,
-        recommendedRecheckAt: readRequiredNullableIsoTimestamp(
-          record.recommendedRecheckAt,
-          "Hosted runtime wake-sent response recommendedRecheckAt",
-        ),
-        runtimeAttemptId: requireOpaqueIdentifier(
-          record.runtimeAttemptId,
-          "Hosted runtime wake-sent response runtimeAttemptId",
-        ),
-      };
-    }
-    default: {
-      const exhaustive: never = kind;
-      throw new TypeError(
-        `Unsupported hosted runtime ensure-execution response kind: ${String(exhaustive)}.`,
-      );
-    }
-  }
 }
 
 export function parseHostedRuntimeEnsureProcessingResponse(
@@ -458,18 +322,8 @@ export function parseHostedRuntimeEnsureProcessingResponse(
     case "retry_later": {
       assertExactKeys(record, "Hosted runtime processing retry-later response", [
         "kind",
-        "reason",
         "retryAt",
       ]);
-      if (Object.prototype.hasOwnProperty.call(record, "reason")) {
-        // Deploy-skew compatibility only: old Cloudflare workers included a
-        // retry cause here. The shared Temporal contract drops it.
-        parseAllowedString(
-          record.reason,
-          "Hosted runtime processing retry-later legacy response reason",
-          HOSTED_RUNTIME_LEGACY_PROCESSING_RETRY_REASONS,
-        );
-      }
 
       return {
         kind,
@@ -555,13 +409,6 @@ function parseHostedWorkspaceInvocationReason(
   return parseAllowedString(value, label, HOSTED_WORKSPACE_INVOCATION_REASONS);
 }
 
-function parseHostedWorkspaceInvocationStatus(
-  value: unknown,
-  label: string,
-): HostedWorkspaceInvocationStatus {
-  return parseAllowedString(value, label, HOSTED_WORKSPACE_INVOCATION_STATUSES);
-}
-
 function requireOpaqueIdentifier(value: unknown, label: string): string {
   const text = requireString(value, label);
 
@@ -614,16 +461,6 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
   return text;
 }
 
-function readOptionalNullableIsoTimestamp(
-  value: unknown,
-  label: string,
-): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return readNullableIsoTimestamp(value, label);
-}
-
 function readRequiredNullableIsoTimestamp(value: unknown, label: string): string | null {
   if (value === undefined) {
     throw new TypeError(`${label} must be a string or null.`);
@@ -638,27 +475,6 @@ function readRequiredIsoTimestamp(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a string.`);
   }
   return timestamp;
-}
-
-function readOptionalNullableWorkspaceWakeKey(
-  value: unknown,
-  label: string,
-): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return readNullableWorkspaceWakeKey(value, label);
-}
-
-function readNullableWorkspaceWakeKey(value: unknown, label: string): string | null {
-  const text = readNullableString(value, label);
-  if (text === null) {
-    return null;
-  }
-  if (text.length > 512 || text.trim() !== text || /[\u0000-\u001F\u007F]/u.test(text)) {
-    throw new TypeError(`${label} must be a bounded workspace wake key.`);
-  }
-  return text;
 }
 
 function readRequiredNullableBoundedString(value: unknown, label: string): string | null {

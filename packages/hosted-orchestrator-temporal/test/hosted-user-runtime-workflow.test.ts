@@ -4,19 +4,14 @@ import type {
   HostedRuntimeDemand,
   HostedRuntimeDemandRequest,
   HostedRuntimeDemandWorkspaceProjection,
-  HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingResponse,
   HostedRuntimeSignal,
   HostedUserRuntimeWorkflowInput,
 } from "../src/index.js";
 import {
   createHostedUserRuntimeWorkflowMachine,
-  createWorkspaceWakeKey,
-  HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
-  HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+  HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
   HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
-  HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-  normalizeHostedUserRuntimeWorkflowOptions,
   type HostedUserRuntimeWorkflowMachine,
   type HostedUserRuntimeWorkflowRuntime,
 } from "../src/workflows/hosted-user-runtime.js";
@@ -107,40 +102,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.demandRequests[1].manualRunRequested).toBe(false);
   });
 
-  it("clears due runtime-result wake state after processing is accepted", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    const runtimeResultWakeAt = isoAfter(-1);
-    runtime.demands.push((request) => {
-      expect(request.runtimeResultWakeAt).toBe(runtimeResultWakeAt);
-      return runDemand({ source: "runtime_result_wake" });
-    });
-    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
-    runtime.demands.push((request) => {
-      expect(request.runtimeResultWakeAt).toBeNull();
-      return idleDemand(null);
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 2 },
-      state: {
-        ...emptyCarryForwardState(),
-        runtimeResultWakeAt,
-        runtimeResultWakeReason: "assistant",
-      },
-      userId: "member_test",
-    });
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.waits).toEqual([45_000, null]);
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(continued.state).toMatchObject({
-      lastDemandKind: "idle",
-      runtimeResultWakeAt: null,
-      runtimeResultWakeReason: null,
-    });
-  });
-
   it("lets a signal interrupt processing accepted recheck wait", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
@@ -191,28 +152,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(2);
   });
 
-  it("passes carried runtime result wake time and reason into demand reads", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    const runtimeResultNextWakeAt = isoAfter(300_000);
-    runtime.demands.push((request) => {
-      expect(request.runtimeResultWakeAt).toBe(runtimeResultNextWakeAt);
-      expect(request.runtimeResultWakeReason).toBe("assistant");
-      return idleDemand(isoAfter(600_000));
-    });
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...emptyCarryForwardState(),
-        runtimeResultWakeAt: runtimeResultNextWakeAt,
-        runtimeResultWakeReason: "assistant",
-      },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-  });
-
   it("records accepted runtime processing status", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({
@@ -231,54 +170,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     const continued = await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([11_000, null]);
-    expect(machine.readStatus()).toMatchObject({
-      runtimeFailedWithoutNextWakeCount: 0,
-      sameRuntimeWakeSentCount: 0,
-    });
     expect(continued.state).toMatchObject({
       lastExecutionKind: "runtime_processing_accepted",
       lastRuntimeAttemptId: "runtime_attempt_test",
       lastRuntimeStatus: "scheduled",
-    });
-  });
-
-  it("keeps the legacy ensure-execution branch observable while the patch fallback remains", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.ensureRuntimeProcessingEnabled = false;
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.legacyExecutions.push(legacyRuntimeCompleted({
-      runtimeStatus: "failed",
-    }));
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toEqual([]);
-    expect(runtime.legacyExecutionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        reason: "manual",
-        userId: "member_test",
-      },
-    ]);
-    expect(runtime.waits).toEqual([
-      HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-    ]);
-    expect(continued.state).toMatchObject({
-      lastExecutionKind: "runtime_completed",
-      lastRuntimeAttemptId: "legacy_runtime_attempt_test",
-      lastRuntimeStatus: "failed",
-      legacyRuntimeFailedWithoutNextWakeCount: 1,
-      manualRunRequested: false,
-      runtimeResultWakeAt: isoAfter(
-        HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-      ),
-      runtimeResultWakeReason: "runtime.failed",
     });
   });
 
@@ -413,41 +308,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     );
   });
 
-  it("passes runtimeResultWakeAt through so demand can prefer runtime_result_wake over workspace wake", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    const runtimeResultWakeAt = isoAfter(-1);
-    const workspace = workspaceProjection({
-      nextWakeAt: isoAfter(-1),
-      version: "workspace-version-1",
-    });
-    runtime.demands.push((request) => {
-      expect(request.runtimeResultWakeAt).toBe(runtimeResultWakeAt);
-      expect(request.runtimeResultWakeReason).toBe("assistant");
-      return runDemand({
-        source: "runtime_result_wake",
-        workspace,
-      });
-    });
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...emptyCarryForwardState(),
-        runtimeResultWakeAt,
-        runtimeResultWakeReason: "assistant",
-      },
-      userId: "member_test",
-    });
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toHaveLength(1);
-    expect(runtime.continuedInput?.state?.lastDemandSource).toBe(
-      "runtime_result_wake",
-    );
-  });
-
   it("does not suppress workspace wakes after processing is merely accepted", async () => {
     const runtime = new FakeWorkflowRuntime();
     const workspace = workspaceProjection({
@@ -469,7 +329,9 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.demandRequests[1].ignoredWorkspaceWakeKey).toBeNull();
+    expect(runtime.demandRequests[1]).toMatchObject({
+      userId: "member_test",
+    });
   });
 
   it("does not clear a signal that arrives while demand is awaited", async () => {
@@ -517,7 +379,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
-  it("does not reapply ignored workspace wake key after a signal arrives during execution", async () => {
+  it("keeps signals that arrive during workspace-wake processing pending", async () => {
     const runtime = new FakeWorkflowRuntime();
     let machine: HostedUserRuntimeWorkflowMachine | null = null;
     const workspace = workspaceProjection({
@@ -544,7 +406,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.demandRequests[1]).toMatchObject({
-      ignoredWorkspaceWakeKey: null,
       manualRunRequested: true,
     });
     expect(runtime.executionRequests).toHaveLength(2);
@@ -591,10 +452,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
-      state: {
-        ...emptyCarryForwardState(),
-        ignoredWorkspaceWakeKey: "workspace-version:2026-05-20T12:00:00.000Z:assistant",
-      },
       userId: "member_test",
     });
     machine.applySignal({
@@ -608,7 +465,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     expect(runtime.demandRequests[0]).toMatchObject({
       deviceSyncRecoveryRequested: true,
-      ignoredWorkspaceWakeKey: null,
       lagRecoveryObserved: true,
     });
   });
@@ -884,8 +740,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       state: {
         ...emptyCarryForwardState(),
         mailboxSignalCount: 3,
-        runtimeResultWakeAt: isoAfter(300_000),
-        runtimeResultWakeReason: "assistant",
       },
       userId: "member_test",
     });
@@ -897,8 +751,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       state: expect.objectContaining({
         lastDemandKind: "idle",
         mailboxSignalCount: 0,
-        runtimeResultWakeAt: isoAfter(300_000),
-        runtimeResultWakeReason: "assistant",
         signalVersion: 0,
       }),
       userId: "member_test",
@@ -935,59 +787,16 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
-  it.each([630_000, 660_000])(
-    "upgrades the legacy ensure-execution timeout %i before the first processing activity",
-    (legacyTimeoutMs) => {
-      expect(normalizeHostedUserRuntimeWorkflowOptions({
-        ensureCloudflareExecutionStartToCloseTimeoutMs: legacyTimeoutMs,
-      })).toMatchObject({
-        ensureCloudflareExecutionStartToCloseTimeoutMs: legacyTimeoutMs,
-        ensureRuntimeProcessingStartToCloseTimeoutMs:
-          HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-      });
-    },
-  );
-
-  it.each([630_000, 660_000])(
-    "upgrades the legacy ensure-execution timeout %i when continuing as new",
-    async (legacyTimeoutMs) => {
-      const runtime = new FakeWorkflowRuntime();
-      runtime.suggestContinueAsNew = true;
-
-      const machine = createMachine(runtime, {
-        options: {
-          continueAsNewAfterIterations: 100,
-          ensureCloudflareExecutionStartToCloseTimeoutMs: legacyTimeoutMs,
-        },
-        userId: "member_test",
-      });
-
-      const continued = await runUntilContinueAsNew(machine);
-
-      expect(continued.options).toMatchObject({
-        continueAsNewAfterIterations: 100,
-        ensureRuntimeProcessingStartToCloseTimeoutMs:
-          HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-      });
-      expect(continued.options).not.toHaveProperty(
-        "ensureCloudflareExecutionStartToCloseTimeoutMs",
-      );
-    },
-  );
-
 });
 
 function normalizedContinuedOptions(
   overrides: Partial<NonNullable<HostedUserRuntimeWorkflowInput["options"]>>,
 ): NonNullable<HostedUserRuntimeWorkflowInput["options"]> {
   return {
-    activeWakeRecheckDelayMs: HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
     continueAsNewAfterIterations: 500,
     ensureRuntimeProcessingStartToCloseTimeoutMs:
-      HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
     readRuntimeDemandStartToCloseTimeoutMs: 10_000,
-    runtimeCompletedFailureRecheckDelayMs:
-      HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
     ...overrides,
   };
 }
@@ -1007,9 +816,6 @@ type ExecutionInput = Parameters<
 type ExecutionHandler = (
   request: ExecutionInput,
 ) => HostedRuntimeEnsureProcessingResponse | Promise<HostedRuntimeEnsureProcessingResponse>;
-type LegacyExecutionHandler = (
-  request: ExecutionInput,
-) => HostedRuntimeEnsureExecutionResponse | Promise<HostedRuntimeEnsureExecutionResponse>;
 type RunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
 
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
@@ -1018,10 +824,6 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly demands: Array<DemandHandler | HostedRuntimeDemand> = [];
   readonly executionRequests: ExecutionInput[] = [];
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
-  readonly legacyExecutionRequests: ExecutionInput[] = [];
-  readonly legacyExecutions:
-    Array<LegacyExecutionHandler | HostedRuntimeEnsureExecutionResponse> = [];
-  ensureRuntimeProcessingEnabled = true;
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
   signalOnlyNonRetryableFailureWaitEnabled = true;
@@ -1038,17 +840,6 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return this.suggestContinueAsNew;
   }
 
-  async ensureCloudflareExecution(
-    request: ExecutionInput,
-  ): Promise<HostedRuntimeEnsureExecutionResponse> {
-    this.legacyExecutionRequests.push(request);
-    const next = this.legacyExecutions.shift();
-    if (!next) {
-      throw new Error("Unexpected ensureCloudflareExecution call.");
-    }
-    return typeof next === "function" ? next(request) : next;
-  }
-
   async ensureRuntimeProcessing(
     request: ExecutionInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
@@ -1058,10 +849,6 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
       throw new Error("Unexpected ensureRuntimeProcessing call.");
     }
     return typeof next === "function" ? next(request) : next;
-  }
-
-  useEnsureRuntimeProcessing(): boolean {
-    return this.ensureRuntimeProcessingEnabled;
   }
 
   nowMs(): number {
@@ -1081,6 +868,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useSignalOnlyWaitForNonRetryableFailure(): boolean {
     return this.signalOnlyNonRetryableFailureWaitEnabled;
+  }
+
+  useEnsureRuntimeProcessingPatch(): void {
+    return;
   }
 
   uuid(): string {
@@ -1128,7 +919,6 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     currentWaitReason: null,
     currentWaitUntil: null,
     deviceSyncRecoveryRequested: false,
-    ignoredWorkspaceWakeKey: null,
     invalidSignalCount: 0,
     lagRecoveryObserved: false,
     lastOrchestrationAttemptId: null,
@@ -1145,9 +935,6 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     latestMailboxPointer: null,
     mailboxSignalCount: 0,
     manualRunRequested: false,
-    legacyRuntimeFailedWithoutNextWakeCount: 0,
-    runtimeResultWakeAt: null,
-    runtimeResultWakeReason: null,
     sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 0,
   };
@@ -1243,25 +1030,6 @@ function retryLater(retryAt: string): HostedRuntimeEnsureProcessingResponse {
   return {
     kind: "retry_later",
     retryAt,
-  };
-}
-
-function legacyRuntimeCompleted(
-  input: Partial<
-    Extract<
-      HostedRuntimeEnsureExecutionResponse,
-      { kind: "runtime_completed" }
-    >
-  > = {},
-): HostedRuntimeEnsureExecutionResponse {
-  return {
-    action: input.action ?? "started",
-    kind: "runtime_completed",
-    runtimeAttemptId:
-      input.runtimeAttemptId ?? "legacy_runtime_attempt_test",
-    runtimeResultNextWakeAt: input.runtimeResultNextWakeAt ?? null,
-    runtimeResultNextWakeReason: input.runtimeResultNextWakeReason ?? null,
-    runtimeStatus: input.runtimeStatus ?? "idle",
   };
 }
 

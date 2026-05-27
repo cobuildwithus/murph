@@ -257,7 +257,7 @@ interface DeviceSampleInput extends LooseRecord {
   sample?: unknown;
 }
 
-interface DenseDeviceSamplePolicyInput extends LooseRecord {
+interface DenseDeviceTelemetryPolicyInput extends LooseRecord {
   allowDenseDebugSamples?: boolean;
   retention?: string;
 }
@@ -271,7 +271,9 @@ interface ImportDeviceBatchInput {
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
   rawArtifacts?: readonly DeviceRawArtifactInput[];
-  denseSamplePolicy?: DenseDeviceSamplePolicyInput;
+  denseTelemetryPolicy?: DenseDeviceTelemetryPolicyInput;
+  /** @deprecated Use denseTelemetryPolicy. */
+  denseSamplePolicy?: DenseDeviceTelemetryPolicyInput;
   provenance?: Record<string, unknown>;
 }
 
@@ -2059,12 +2061,13 @@ export async function importDeviceBatch({
   events = [],
   samples = [],
   rawArtifacts = [],
+  denseTelemetryPolicy,
   denseSamplePolicy,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
   assertDenseDeviceTelemetryPolicy({
     observationEventCount: countDenseDeviceObservationEvents(events),
-    policy: denseSamplePolicy,
+    policy: denseTelemetryPolicy ?? denseSamplePolicy,
     sampleCount: Array.isArray(samples) ? samples.length : 0,
   });
   const vault = await loadVault({ vaultRoot });
@@ -2177,7 +2180,7 @@ export async function importDeviceBatch({
 
 function assertDenseDeviceTelemetryPolicy(input: {
   observationEventCount: number;
-  policy?: DenseDeviceSamplePolicyInput;
+  policy?: DenseDeviceTelemetryPolicyInput;
   sampleCount: number;
 }): void {
   if (
@@ -2217,16 +2220,33 @@ function isDenseDeviceObservationInput(event: DeviceEventInput): boolean {
     return false;
   }
 
-  const fields = event.fields && typeof event.fields === "object" && !Array.isArray(event.fields)
-    ? event.fields as Record<string, unknown>
-    : {};
-  const metric = fields.metric ?? event.metric;
-  const value = fields.value ?? event.value;
+  const metric = readDeviceObservationField(event, "metric");
+  const value = readDeviceObservationField(event, "value");
 
   return (
     typeof metric === "string" &&
     typeof value === "number" &&
     Number.isFinite(value) &&
-    (event.externalRef !== undefined || event.dataOrigin !== undefined)
+    !isDisplayGradeDeviceObservationInput(event)
   );
+}
+
+function readDeviceObservationField(event: DeviceEventInput, key: string): unknown {
+  const fields = event.fields && typeof event.fields === "object" && !Array.isArray(event.fields)
+    ? event.fields as Record<string, unknown>
+    : {};
+
+  return fields[key] ?? event[key];
+}
+
+function isDisplayGradeDeviceObservationInput(event: DeviceEventInput): boolean {
+  return (
+    normalizedDeviceObservationString(readDeviceObservationField(event, "visibility")) === "display" ||
+    normalizedDeviceObservationString(readDeviceObservationField(event, "queryVisibility")) === "default" ||
+    readDeviceObservationField(event, "canonicalFact") === true
+  );
+}
+
+function normalizedDeviceObservationString(value: unknown): string | null {
+  return typeof value === "string" ? value.trim().toLowerCase() : null;
 }

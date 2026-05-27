@@ -204,13 +204,12 @@ describe("hosted web Temporal signal client", () => {
     }))).toThrow("HOSTED_TEMPORAL_TLS_ENABLED must be true or false.");
   });
 
-  it("includes an explicit failed-runtime completion recheck workflow option", () => {
+  it("includes shared hosted runtime workflow options", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions(buildProcessEnv({
-      HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
     }))).toEqual({
-      ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
+      ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
       readRuntimeDemandStartToCloseTimeoutMs: 10_000,
-      runtimeCompletedFailureRecheckDelayMs: 45_000,
     });
   });
 });

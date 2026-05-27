@@ -9,15 +9,8 @@ const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
 const MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 10_000;
 const MAX_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 30_000;
-const DEFAULT_HOSTED_LEGACY_ENSURE_EXECUTION_RUNNER_TIMEOUT_MS = 600_000;
-const MAX_HOSTED_LEGACY_ENSURE_EXECUTION_RUNNER_TIMEOUT_MS = 3_600_000;
-const DEFAULT_HOSTED_LEGACY_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS = 30_000;
-const MAX_HOSTED_LEGACY_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS = 300_000;
-const HOSTED_LEGACY_ENSURE_EXECUTION_ACTIVITY_REPORTING_SLACK_MS = 30_000;
-const MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
-export const HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS = 5_000;
-const DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
-const MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 3_600_000;
+const MAX_HOSTED_RUNTIME_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
+export const HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS = 5_000;
 
 export type HostedRuntimeTemporalEnvSource =
   Readonly<Record<string, string | undefined>>;
@@ -50,12 +43,6 @@ export interface HostedRuntimeTemporalTlsConfig {
 export interface HostedRuntimeTemporalWorkflowOptions {
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
   readRuntimeDemandStartToCloseTimeoutMs: number;
-  runtimeCompletedFailureRecheckDelayMs: number;
-}
-
-export interface HostedRuntimeEnsureCloudflareExecutionTimeouts {
-  ensureCloudflareExecutionHttpTimeoutMs: number;
-  ensureCloudflareExecutionStartToCloseTimeoutMs: number;
 }
 
 export interface HostedRuntimeEnsureProcessingTimeouts {
@@ -105,15 +92,6 @@ export function readHostedRuntimeTemporalWorkflowOptions(
       MAX_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,
       "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS",
     ),
-    runtimeCompletedFailureRecheckDelayMs: parseBoundedPositiveInteger(
-      readOptionalEnv(
-        source,
-        "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS",
-      ),
-      DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-      MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-      "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS",
-    ),
   };
 }
 
@@ -128,11 +106,11 @@ export function readHostedRuntimeEnsureProcessingTimeouts(
   );
   const ensureRuntimeProcessingStartToCloseTimeoutMs =
     ensureRuntimeProcessingHttpTimeoutMs
-    + HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS;
+    + HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS;
   if (
     !Number.isSafeInteger(ensureRuntimeProcessingStartToCloseTimeoutMs)
     || ensureRuntimeProcessingStartToCloseTimeoutMs
-      > MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
+      > MAX_HOSTED_RUNTIME_PROCESSING_START_TO_CLOSE_TIMEOUT_MS
   ) {
     throw new TypeError(
       "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS plus Temporal reporting slack must be less than or equal to 3600000.",
@@ -142,42 +120,6 @@ export function readHostedRuntimeEnsureProcessingTimeouts(
   return {
     ensureRuntimeProcessingHttpTimeoutMs,
     ensureRuntimeProcessingStartToCloseTimeoutMs,
-  };
-}
-
-export function readHostedRuntimeEnsureCloudflareExecutionTimeouts(
-  source: HostedRuntimeTemporalEnvSource = process.env,
-): HostedRuntimeEnsureCloudflareExecutionTimeouts {
-  const runnerTimeoutMs = parseBoundedPositiveInteger(
-    readOptionalEnv(source, "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS"),
-    DEFAULT_HOSTED_LEGACY_ENSURE_EXECUTION_RUNNER_TIMEOUT_MS,
-    MAX_HOSTED_LEGACY_ENSURE_EXECUTION_RUNNER_TIMEOUT_MS,
-    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-  );
-  const timeoutMarginMs = parseBoundedPositiveInteger(
-    readOptionalEnv(source, "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS"),
-    DEFAULT_HOSTED_LEGACY_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
-    MAX_HOSTED_LEGACY_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS,
-    "HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS",
-  );
-  const ensureCloudflareExecutionHttpTimeoutMs = runnerTimeoutMs + timeoutMarginMs;
-  const ensureCloudflareExecutionStartToCloseTimeoutMs =
-    ensureCloudflareExecutionHttpTimeoutMs
-    + HOSTED_LEGACY_ENSURE_EXECUTION_ACTIVITY_REPORTING_SLACK_MS;
-
-  if (
-    !Number.isSafeInteger(ensureCloudflareExecutionStartToCloseTimeoutMs)
-    || ensureCloudflareExecutionStartToCloseTimeoutMs
-      > MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
-  ) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS plus legacy Temporal ensure-execution margins must be less than or equal to 3600000.",
-    );
-  }
-
-  return {
-    ensureCloudflareExecutionHttpTimeoutMs,
-    ensureCloudflareExecutionStartToCloseTimeoutMs,
   };
 }
 

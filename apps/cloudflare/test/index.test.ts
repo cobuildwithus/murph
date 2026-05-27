@@ -1500,7 +1500,7 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("passes the test run-until-idle reason to the Durable Object", async () => {
@@ -1560,53 +1560,7 @@ describe("cloudflare worker routes", () => {
   });
 
   describe("hosted runtime control", () => {
-    it("maps runtime ensure-execution route calls to the Durable Object adapter", async () => {
-      const stub = createUserRunnerStub({
-        ensureRuntimeExecutionForUser: vi.fn(async () => ({
-          action: "started" as const,
-          kind: "runtime_completed" as const,
-          runtimeAttemptId: "runtime-attempt-test",
-          runtimeResultNextWakeAt: "2026-04-27T00:03:00.000Z",
-          runtimeResultNextWakeReason: "assistant",
-          runtimeStatus: "idle" as const,
-        })),
-      });
-      const env = createWorkerEnv(stub);
-
-      const response = await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-            body: JSON.stringify({
-              orchestrationAttemptId: "orchestration-attempt-test",
-              reason: "nudge",
-            }),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          }),
-          env,
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        action: "started",
-        kind: "runtime_completed",
-        runtimeAttemptId: "runtime-attempt-test",
-        runtimeResultNextWakeAt: "2026-04-27T00:03:00.000Z",
-        runtimeResultNextWakeReason: "assistant",
-        runtimeStatus: "idle",
-      });
-      expect(stub.ensureRuntimeExecutionForUser).toHaveBeenCalledWith({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
-        userId: "test-user",
-      });
-    });
-
-    it("rejects OIDC-only runtime ensure-execution route calls", async () => {
+    it("does not expose the removed runtime ensure-execution route", async () => {
       const stub = createUserRunnerStub();
       const env = createWorkerEnv(stub);
 
@@ -1624,53 +1578,11 @@ describe("cloudflare worker routes", () => {
         env,
       );
 
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({
-        error: "Unauthorized",
+        error: "Not found",
       });
-      expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
-    });
-
-    it("accepts signed Temporal runtime ensure-execution route calls", async () => {
-      const stub = createUserRunnerStub({
-        ensureRuntimeExecutionForUser: vi.fn(async () => ({
-          action: "started" as const,
-          kind: "runtime_completed" as const,
-          runtimeAttemptId: "runtime-attempt-test",
-          runtimeResultNextWakeAt: null,
-          runtimeResultNextWakeReason: null,
-          runtimeStatus: "idle" as const,
-        })),
-      });
-      const env = createWorkerEnv(stub);
-
-      const response = await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-            body: JSON.stringify({
-              orchestrationAttemptId: "orchestration-attempt-test",
-              reason: "nudge",
-            }),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          }),
-          env,
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
-        kind: "runtime_completed",
-        runtimeAttemptId: "runtime-attempt-test",
-      });
-      expect(stub.ensureRuntimeExecutionForUser).toHaveBeenCalledWith({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
-        userId: "test-user",
-      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("maps runtime ensure-processing route calls to the Durable Object adapter", async () => {
@@ -1715,7 +1627,6 @@ describe("cloudflare worker routes", () => {
         source: "device_sync_recovery",
         userId: "test-user",
       });
-      expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
     });
 
     it("returns a stable code for invalid runtime ensure-processing requests", async () => {
@@ -1748,7 +1659,7 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
-    it("starts the container without an active fence and returns runtime_completed", async () => {
+    it("starts runtime processing without an active fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
@@ -1760,7 +1671,7 @@ describe("cloudflare worker routes", () => {
         }],
       });
 
-      const response = await runner.ensureRuntimeExecutionForUser({
+      const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
         userId: "test-user",
@@ -1768,19 +1679,22 @@ describe("cloudflare worker routes", () => {
 
       expect(response).toEqual({
         action: "started",
-        kind: "runtime_completed",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-04-27T00:00:59.000Z",
         runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
-        runtimeResultNextWakeAt: runtimeNextWakeAt,
-        runtimeResultNextWakeReason: "assistant",
-        runtimeStatus: "idle",
       });
+      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
       expect(invoke).toHaveBeenCalledOnce();
       expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
         reason: "nudge",
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(waitUntil).not.toHaveBeenCalled();
+      expect(waitUntil).toHaveBeenCalledOnce();
+      const background = waitUntil.mock.calls[0]?.[0];
+      if (background instanceof Promise) {
+        await background;
+      }
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: null,
         backoff_until: null,
@@ -1792,7 +1706,7 @@ describe("cloudflare worker routes", () => {
       expect(alarms).not.toContain(runtimeNextWakeAt);
     });
 
-    it("sends a payloadless wake for an active fence and returns runtime_wake_sent", async () => {
+    it("sends a payloadless wake for an active fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
@@ -1807,14 +1721,15 @@ describe("cloudflare worker routes", () => {
       });
       expect(token).not.toBeNull();
 
-      const response = await runner.ensureRuntimeExecutionForUser({
+      const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
         userId: "test-user",
       });
 
       expect(response).toEqual({
-        kind: "runtime_wake_sent",
+        action: "woken",
+        kind: "runtime_processing_accepted",
         recommendedRecheckAt: "2026-04-27T00:00:59.000Z",
         runtimeAttemptId: token?.attemptId,
       });
@@ -1851,14 +1766,15 @@ describe("cloudflare worker routes", () => {
       });
       expect(oldToken).not.toBeNull();
 
-      const response = await runner.ensureRuntimeExecutionForUser({
+      const response = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
         userId: "test-user",
       });
 
       expect(response).toMatchObject({
-        kind: "runtime_wake_sent",
+        action: "already_running",
+        kind: "runtime_processing_accepted",
         runtimeAttemptId: oldToken?.attemptId,
       });
       expect(ensureProcessing).toHaveBeenCalledOnce();
@@ -1879,7 +1795,7 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    it("throws retryable errors for unknown active wakes and preserves the fence", async () => {
+    it("returns retry_later for unconfirmed active wakes and preserves the fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const { invoke, runner, sql } = createRuntimeControlRunnerHarness({
@@ -1894,14 +1810,13 @@ describe("cloudflare worker routes", () => {
       });
       expect(token).not.toBeNull();
 
-      await expect(runner.ensureRuntimeExecutionForUser({
+      await expect(runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
         userId: "test-user",
-      })).rejects.toMatchObject({
-        name: "HostedRuntimeExecutionRetryableError",
-        reason: "container-rpc-timeout",
-        retryable: true,
+      })).resolves.toEqual({
+        kind: "retry_later",
+        retryAt: "2026-04-27T00:00:10.000Z",
       });
 
       expect(invoke).not.toHaveBeenCalled();
@@ -1912,151 +1827,15 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    it("clears transport-failed fences without writing wake_at or backoff_until", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const transportError = new Error("container transport failed");
-      const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
-        invocationResults: [transportError],
-      });
-
-      await expect(runner.ensureRuntimeExecutionForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
-        userId: "test-user",
-      })).rejects.toThrow("container transport failed");
-
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: null,
-        backoff_until: null,
-        failure_count: 1,
-        wake_at: null,
-      });
-      expect(alarms).toContain("2026-04-27T00:01:00.000Z");
-      expect(alarms).toContain("deleted");
-    });
-
-    it("does not turn post-completion alarm cleanup failure into transport failure", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
-      const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
-        deleteAlarmError: new Error("alarm cleanup failed"),
-        invocationResults: [{
-          nextWakeAt: runtimeNextWakeAt,
-          nextWakeReason: "assistant",
-          status: "idle",
-        }],
-      });
-
-      await expect(runner.ensureRuntimeExecutionForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
-        userId: "test-user",
-      })).resolves.toEqual({
-        action: "started",
-        kind: "runtime_completed",
-        runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
-        runtimeResultNextWakeAt: runtimeNextWakeAt,
-        runtimeResultNextWakeReason: "assistant",
-        runtimeStatus: "idle",
-      });
-
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: null,
-        backoff_until: null,
-        failure_count: 0,
-        wake_at: null,
-      });
-      expect(alarms).toEqual(["2026-04-27T00:01:00.000Z"]);
-    });
-
-    it("does not turn stale post-invoke completion recording into transport failure", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
-      const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
-        afterInvocationResult: ({ sql: testSql }) => {
-          testSql.exec(
-            `UPDATE runner_meta
-             SET active_attempt_id = ?,
-                 active_generation = ?,
-                 active_kind = ?,
-                 active_started_at = ?,
-                 active_expires_at = ?
-             WHERE singleton = 1`,
-            "runtime-write-replacement",
-            99,
-            "runtime",
-            "2026-04-27T00:00:30.000Z",
-            "2026-04-27T00:02:00.000Z",
-          );
-        },
-        invocationResults: [{
-          nextWakeAt: runtimeNextWakeAt,
-          nextWakeReason: "assistant",
-          status: "idle",
-        }],
-      });
-
-      await expect(runner.ensureRuntimeExecutionForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
-        userId: "test-user",
-      })).resolves.toEqual({
-        action: "started",
-        kind: "runtime_completed",
-        runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
-        runtimeResultNextWakeAt: runtimeNextWakeAt,
-        runtimeResultNextWakeReason: "assistant",
-        runtimeStatus: "idle",
-      });
-
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: "runtime-write-replacement",
-        backoff_until: null,
-        failure_count: 0,
-        wake_at: null,
-      });
-      expect(alarms).toContain("2026-04-27T00:02:00.000Z");
-    });
   });
 
-  it("rejects malformed runtime ensure-execution requests before calling the Durable Object", async () => {
+  it("requires the bound-user auth header on runtime ensure-processing requests", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
       await signWebCallbackControlRequest(
-        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-          body: JSON.stringify({
-            orchestrationAttemptId: "orchestration-attempt-test",
-            reason: "unsupported",
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        }),
-        env,
-      ),
-      env,
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Invalid request.",
-    });
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
-  });
-
-  it("requires the bound-user auth header on runtime ensure-execution requests", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signWebCallbackControlRequest(
-        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
           body: JSON.stringify({
             orchestrationAttemptId: "orchestration-attempt-test",
             reason: "nudge",
@@ -2078,7 +1857,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the route user.",
     });
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("does not expose the removed browser-vault refresh route", async () => {
@@ -2098,7 +1877,7 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("deletes hosted runner user data without queuing a new invocation", async () => {
@@ -2148,7 +1927,7 @@ describe("cloudflare worker routes", () => {
       userId: "member_123",
     });
     expect(stub.deleteHostedUserData).toHaveBeenCalledWith("member_123");
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("rejects user-data deletion route/user mismatches before touching the Durable Object", async () => {
@@ -2205,7 +1984,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -2921,11 +2700,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
         userScopedSkipReason: null,
       },
       userId,
-    })),
-    ensureRuntimeExecutionForUser: vi.fn(async () => ({
-      kind: "runtime_wake_sent" as const,
-      recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
     })),
     ensureRuntimeProcessingForUser: vi.fn(async () => ({
       action: "woken" as const,

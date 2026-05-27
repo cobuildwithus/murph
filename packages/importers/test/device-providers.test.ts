@@ -15,6 +15,7 @@ import {
   type DeviceProviderAdapter,
   type DeviceProviderSnapshotImportPayload,
   type NormalizedDeviceBatch,
+  type WearableRawIngestReceipt,
 } from "../src/index.ts";
 import {
   makeNormalizedDeviceBatch,
@@ -56,6 +57,14 @@ function makeTestDeviceProviderAdapter<TSnapshot>(
     },
     ...adapter,
   };
+}
+
+function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
+  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
+  assert.ok(artifact);
+  const receipt = artifact.content as WearableRawIngestReceipt;
+  assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
+  return receipt;
 }
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -1563,19 +1572,22 @@ test("prepareDeviceProviderSnapshotImport routes Junction floating timeseries en
   });
 
   const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
-  const canonicalWeight = payload.canonicalWearableRecords?.find((record) =>
-    record.kind === "observation" && record.metric === "weightKg"
+  const weightArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role === "junction-timeseries-weight"
   );
 
   assert.equal(weightEvent, undefined);
-  assert.equal(canonicalWeight?.occurredAt, "2026-03-16T00:00:00.000Z");
-  assert.equal(canonicalWeight?.recordedAt, "2026-03-16T00:00:00.000Z");
-  assert.equal(canonicalWeight?.dayKey, "2026-03-15");
-  assert.equal(canonicalWeight?.source.externalRef?.resourceType, "junction-apple-health-weight");
-  assert.match(canonicalWeight?.source.externalRef?.resourceId ?? "", /^weight-[0-9a-f]{16}$/u);
-  assert.deepEqual(canonicalWeight?.source.rawArtifactRoles, ["junction-timeseries-weight"]);
-  assert.equal(canonicalWeight?.source.origin?.timestampSemantics, "floating");
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-weight"), true);
+  assert.ok(weightArtifact);
+  assert.deepEqual(weightArtifact.content, [
+    {
+      day: "2026-03-15",
+      source: {
+        provider: "apple-health",
+        type: "watch",
+      },
+      value: 72.4,
+    },
+  ]);
 });
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
@@ -1677,16 +1689,12 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
     },
   ]);
   assert.equal(Object.hasOwn(calls[0] ?? {}, "snapshot"), false);
-  assert.equal(calls[0]?.rawIngestReceipts?.length, 1);
-  assert.equal(calls[0]?.canonicalWearableRecords?.length, 1);
+  assert.equal(Object.hasOwn(calls[0] ?? {}, "rawIngestReceipts"), false);
+  assert.equal(Object.hasOwn(calls[0] ?? {}, "canonicalWearableRecords"), false);
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"));
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
-  assert.equal(
-    calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
-    false,
-  );
   const fallbackRawArtifact = calls[0]?.rawArtifacts?.find((artifact) => artifact.role === "provider-snapshot");
-  const rawReceipt = calls[0]?.rawIngestReceipts?.[0];
+  const rawReceipt = readRawReceiptArtifact(calls[0] as DeviceBatchImportPayload);
   assert.deepEqual(fallbackRawArtifact?.content, {
     importedAt: "2026-03-16T12:05:00.000Z",
   });
@@ -1725,7 +1733,7 @@ test("importDeviceProviderSnapshot does not let adapters bypass the dense sample
         },
       );
       const normalized: NormalizedDeviceBatch & {
-        denseSamplePolicy: {
+        denseTelemetryPolicy: {
           allowDenseDebugSamples: true;
           retention: "debug_temporary";
         };
@@ -1733,7 +1741,7 @@ test("importDeviceProviderSnapshot does not let adapters bypass the dense sample
         provider: "polar",
         source: "device",
         samples,
-        denseSamplePolicy: {
+        denseTelemetryPolicy: {
           allowDenseDebugSamples: true,
           retention: "debug_temporary",
         },

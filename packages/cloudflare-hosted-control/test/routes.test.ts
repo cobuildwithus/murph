@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlRuntimeEnsureExecutionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -22,9 +21,6 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlUserStatusPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/status",
     );
-    expect(buildCloudflareHostedControlRuntimeEnsureExecutionPath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/runtime/ensure-execution",
-    );
     expect(buildCloudflareHostedControlRuntimeEnsureProcessingPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/runtime/ensure-processing",
     );
@@ -37,7 +33,6 @@ describe("cloudflare hosted control routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
       buildCloudflareHostedControlUserDataDeletionPath,
-      buildCloudflareHostedControlRuntimeEnsureExecutionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
@@ -53,12 +48,6 @@ describe("cloudflare hosted control routes", () => {
       matchCloudflareHostedControlUserRoutePath(
         "browserVaultSession",
         buildCloudflareHostedControlBrowserVaultSessionPath(userId),
-      ),
-    ).toEqual({ userId: encodedUserId });
-    expect(
-      matchCloudflareHostedControlUserRoutePath(
-        "runtimeEnsureExecution",
-        buildCloudflareHostedControlRuntimeEnsureExecutionPath(userId),
       ),
     ).toEqual({ userId: encodedUserId });
     expect(
@@ -87,7 +76,6 @@ describe("cloudflare hosted control routes", () => {
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
-      runtimeEnsureExecution: { method: "POST", suffix: "runtime/ensure-execution" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
       status: { method: "GET", suffix: "status" },
       userDataDelete: { method: "POST", suffix: "account-data/delete" },
@@ -135,7 +123,6 @@ describe("cloudflare hosted control routes", () => {
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
-      "buildCloudflareHostedControlRuntimeEnsureExecutionPath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
@@ -143,7 +130,6 @@ describe("cloudflare hosted control routes", () => {
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
-      buildCloudflareHostedControlRuntimeEnsureExecutionPath: expect.any(Function),
       buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
       matchCloudflareHostedControlUserRoutePath: expect.any(Function),

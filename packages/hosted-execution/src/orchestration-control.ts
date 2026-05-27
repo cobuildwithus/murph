@@ -2,7 +2,6 @@ import type {
   HostedMailboxLane,
   HostedMailboxLaneLag,
   HostedWorkspaceInvocationReason,
-  HostedWorkspaceInvocationStatus,
 } from "./runtime-control.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
@@ -59,19 +58,8 @@ export interface HostedRuntimeMailboxPointer {
 export interface HostedRuntimeDemandRequest {
   browserVaultRefreshRequested?: boolean;
   deviceSyncRecoveryRequested?: boolean;
-  ignoredWorkspaceWakeKey?: string | null;
   lagRecoveryObserved?: boolean;
   manualRunRequested?: boolean;
-  /**
-   * Legacy `ensure-execution` runtime-completion projection. Normal
-   * `ensure-processing` orchestration observes durable web demand/status instead.
-   */
-  runtimeResultWakeAt?: string | null;
-  /**
-   * Legacy `ensure-execution` runtime-completion projection. Normal
-   * `ensure-processing` orchestration observes durable web demand/status instead.
-   */
-  runtimeResultWakeReason?: string | null;
   userId: string;
 }
 
@@ -89,7 +77,6 @@ export const HOSTED_RUNTIME_DEMAND_RUN_SOURCES = [
   "browser_vault_refresh",
   "device_sync_recovery",
   "workspace_wake",
-  "runtime_result_wake",
   "lag_recovery",
 ] as const;
 
@@ -134,46 +121,11 @@ export type HostedRuntimeDemand =
       workspace: HostedRuntimeDemandWorkspaceProjection | null;
     };
 
-/**
- * @deprecated Legacy replay/deploy-skew command. New orchestration uses
- * `HostedRuntimeEnsureProcessingRequest`.
- */
-export interface HostedRuntimeEnsureExecutionRequest {
+export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
-}
-
-export interface HostedRuntimeEnsureProcessingRequest
-  extends HostedRuntimeEnsureExecutionRequest {
   source?: HostedRuntimeDemandRunSource | null;
 }
-
-export const HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS = [
-  "runtime_completed",
-  "runtime_wake_sent",
-] as const;
-
-export type HostedRuntimeEnsureExecutionResponseKind =
-  (typeof HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS)[number];
-
-/**
- * @deprecated Legacy replay/deploy-skew response. Normal `ensure-processing`
- * returns `HostedRuntimeEnsureProcessingResponse`.
- */
-export type HostedRuntimeEnsureExecutionResponse =
-  | {
-      action: "started" | "replaced";
-      kind: "runtime_completed";
-      runtimeAttemptId: string;
-      runtimeResultNextWakeAt: string | null;
-      runtimeResultNextWakeReason: string | null;
-      runtimeStatus: HostedWorkspaceInvocationStatus;
-    }
-  | {
-      kind: "runtime_wake_sent";
-      recommendedRecheckAt: string | null;
-      runtimeAttemptId: string;
-    };
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [
   "runtime_processing_accepted",
@@ -212,7 +164,6 @@ export const HOSTED_RUNTIME_CURRENT_WAIT_REASONS = [
   "execution_failure_retry",
   "processing_retry_later",
   "runtime_wake_recheck",
-  "runtime_failed_recheck",
   "non_retryable_signal_only",
 ] as const;
 
@@ -221,13 +172,11 @@ export type HostedRuntimeCurrentWaitReason =
   | null;
 
 export type HostedRuntimeLastExecutionKind =
-  | HostedRuntimeEnsureExecutionResponseKind
   | HostedRuntimeEnsureProcessingResponseKind
   | "failed"
   | null;
 
 export type HostedRuntimeLastRuntimeStatus =
-  | HostedWorkspaceInvocationStatus
   | "retry_later"
   | "scheduled"
   | null;
@@ -237,7 +186,6 @@ export interface HostedRuntimeWorkflowState {
   currentWaitReason: HostedRuntimeCurrentWaitReason;
   currentWaitUntil: string | null;
   deviceSyncRecoveryRequested: boolean;
-  ignoredWorkspaceWakeKey: string | null;
   invalidSignalCount: number;
   lagRecoveryObserved: boolean;
   lastOrchestrationAttemptId: string | null;
@@ -254,17 +202,6 @@ export interface HostedRuntimeWorkflowState {
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
   mailboxSignalCount: number;
   manualRunRequested: boolean;
-  legacyRuntimeFailedWithoutNextWakeCount: number;
-  /**
-   * Legacy `ensure-execution` runtime-completion projection. Normal
-   * `ensure-processing` orchestration observes durable web demand/status instead.
-   */
-  runtimeResultWakeAt: string | null;
-  /**
-   * Legacy `ensure-execution` runtime-completion projection. Normal
-   * `ensure-processing` orchestration observes durable web demand/status instead.
-   */
-  runtimeResultWakeReason: string | null;
   sameRuntimeWakeAcceptedCount: number;
   signalVersion: number;
   userId: string;

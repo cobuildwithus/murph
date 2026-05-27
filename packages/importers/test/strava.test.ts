@@ -59,9 +59,6 @@ describe("Strava importer adapter", () => {
       ]),
     );
     expect(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:"))).toBe(true);
-    expect(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:"))).toBe(false);
-    expect(payload.rawIngestReceipts?.length).toBe(1);
-    expect(payload.canonicalWearableRecords?.some((record) => record.kind === "session")).toBe(true);
 
     const sessionEvent = payload.events?.find((event) => event.kind === "activity_session");
     expect(sessionEvent).toMatchObject({

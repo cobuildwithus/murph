@@ -52,11 +52,6 @@ const HOSTED_RUNTIME_WORKSPACE_WAKE_REASONS = new Set<string>([
   "mailbox",
 ]);
 
-const HOSTED_RUNTIME_RESULT_WAKE_REASONS = new Set<string>([
-  ...HOSTED_RUNTIME_WORKSPACE_WAKE_REASONS,
-  "runtime.failed",
-]);
-
 type HostedRuntimeDemandUsageGateStatus =
   | HostedRuntimeUsageGateCheck["status"]
   | "not_required";
@@ -158,14 +153,11 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
   const run = selectHostedRuntimeRunDemand({
     browserVaultRefreshRequested: input.browserVaultRefreshRequested === true,
     deviceSyncRecoveryRequested: input.deviceSyncRecoveryRequested === true,
-    ignoredWorkspaceWakeKey: input.ignoredWorkspaceWakeKey ?? null,
     lagRecoveryObserved: input.lagRecoveryObserved === true,
     mailboxLag: input.mailboxLag,
     manualRunRequested: input.manualRunRequested === true,
     now,
     pendingSystemMailboxKind: input.pendingSystemMailboxKind ?? null,
-    runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
-    runtimeResultWakeReason: input.runtimeResultWakeReason ?? null,
     workspace,
   });
 
@@ -176,8 +168,6 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
         mailboxLag: input.mailboxLag,
         nextWakeAt: readEarliestFutureWakeAt({
           now,
-          runtimeResultWakeAt: input.runtimeResultWakeAt ?? null,
-          runtimeResultWakeReason: input.runtimeResultWakeReason ?? null,
           workspace,
         }),
         workspace,
@@ -205,7 +195,6 @@ async function buildHostedRuntimeDemandDecision(input: HostedRuntimeDemandReques
     {
       mailboxLag: input.mailboxLag,
       now,
-      runtimeResultWakeReason: input.runtimeResultWakeReason ?? null,
       workspace,
     },
   );
@@ -286,26 +275,11 @@ function buildHostedRuntimeBlockedDemand(input: {
   });
 }
 
-export function buildHostedRuntimeWorkspaceWakeKey(
-  workspace: HostedRuntimeDemandWorkspaceProjection | null,
-): string | null {
-  if (!workspace?.nextWakeAt) {
-    return null;
-  }
-
-  return [
-    workspace.version ?? "0",
-    workspace.nextWakeAt,
-    workspace.nextWakeReason ?? "",
-  ].join(":");
-}
-
 export function hostedRuntimeDemandNeedsAiUsageGate(
   source: HostedRuntimeDemandRunSource,
   input: {
     mailboxLag: readonly HostedMailboxLaneLag[];
     now: Date;
-    runtimeResultWakeReason: string | null;
     workspace: HostedRuntimeDemandWorkspaceProjection | null;
   },
 ): boolean {
@@ -319,35 +293,17 @@ export function hostedRuntimeDemandNeedsAiUsageGate(
     );
   }
 
-  if (source === "runtime_result_wake") {
-    if (
-      isHostedRuntimeWakeDue(input.workspace?.nextWakeAt ?? null, input.now)
-      && isHostedRuntimeModelCapableWorkspaceWakeReason(
-        input.workspace?.nextWakeReason ?? null,
-      )
-    ) {
-      return true;
-    }
-
-    return hostedRuntimeResultWakeNeedsAiUsageGate(
-      input.runtimeResultWakeReason,
-    );
-  }
-
   return HOSTED_RUNTIME_AI_USAGE_SOURCES.has(source);
 }
 
 function selectHostedRuntimeRunDemand(input: {
   browserVaultRefreshRequested: boolean;
   deviceSyncRecoveryRequested: boolean;
-  ignoredWorkspaceWakeKey: string | null;
   lagRecoveryObserved: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   manualRunRequested: boolean;
   now: Date;
   pendingSystemMailboxKind: HostedMailboxKind | null;
-  runtimeResultWakeAt: string | null;
-  runtimeResultWakeReason: string | null;
   workspace: HostedRuntimeDemandWorkspaceProjection | null;
 }): {
   reason: HostedWorkspaceInvocationReason;
@@ -397,22 +353,10 @@ function selectHostedRuntimeRunDemand(input: {
   }
 
   if (
-    isHostedRuntimeWakeDue(input.runtimeResultWakeAt, input.now)
-    && isHostedRuntimeResultWakeReasonActive(input.runtimeResultWakeReason ?? null)
-  ) {
-    return {
-      reason: "retry",
-      source: "runtime_result_wake",
-    };
-  }
-
-  if (
     isHostedRuntimeWakeDue(input.workspace?.nextWakeAt ?? null, input.now)
     && isHostedRuntimeWorkspaceWakeReasonActive(
       input.workspace?.nextWakeReason ?? null,
     )
-    && buildHostedRuntimeWorkspaceWakeKey(input.workspace)
-      !== input.ignoredWorkspaceWakeKey
   ) {
     return {
       reason: "nudge",
@@ -461,28 +405,16 @@ function isHostedRuntimeWorkspaceWakeReasonActive(
   return reason !== null && HOSTED_RUNTIME_WORKSPACE_WAKE_REASONS.has(reason);
 }
 
-function isHostedRuntimeResultWakeReasonActive(reason: string | null): boolean {
-  return reason === null || HOSTED_RUNTIME_RESULT_WAKE_REASONS.has(reason);
-}
-
 function readEarliestFutureWakeAt(input: {
   now: Date;
-  runtimeResultWakeAt: string | null;
-  runtimeResultWakeReason: string | null;
   workspace: HostedRuntimeDemandWorkspaceProjection | null;
 }): string | null {
-  const runtimeResultWakeAt = isHostedRuntimeResultWakeReasonActive(
-    input.runtimeResultWakeReason,
-  )
-    ? input.runtimeResultWakeAt
-    : null;
   const workspaceWakeAt = isHostedRuntimeWorkspaceWakeReasonActive(
     input.workspace?.nextWakeReason ?? null,
   )
     ? input.workspace?.nextWakeAt ?? null
     : null;
   const candidates = [
-    runtimeResultWakeAt,
     workspaceWakeAt,
   ].filter((wakeAt): wakeAt is string =>
     isHostedRuntimeWakeFuture(wakeAt, input.now)
@@ -544,19 +476,11 @@ function emitHostedRuntimeDemandDecision(decision: {
     demandSource: decision.demand.kind === "run" ? decision.demand.source : null,
     deviceSyncRecoveryRequested:
       decision.request.deviceSyncRecoveryRequested === true,
-    ignoredWorkspaceWakeKeyPresent:
-      Boolean(decision.request.ignoredWorkspaceWakeKey),
     lagRecoveryObserved: decision.request.lagRecoveryObserved === true,
     mailboxLagLaneCount: decision.demand.mailboxLag.length,
     manualRunRequested: decision.request.manualRunRequested === true,
     retryAtPresent:
       decision.demand.kind === "blocked" && decision.demand.retryAt !== null,
-    runtimeResultWakeAtPresent: Boolean(decision.request.runtimeResultWakeAt),
-    runtimeResultWakeReason: describeHostedRuntimeWakeReasonForLog(
-      decision.request.runtimeResultWakeReason === undefined
-        ? null
-        : decision.request.runtimeResultWakeReason,
-    ),
     schema: HOSTED_RUNTIME_DEMAND_DECISION_LOG_SCHEMA,
     usageGateRequired: decision.usageGateRequired,
     usageGateStatus: decision.usageGateStatus,
@@ -580,8 +504,6 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
     case "assistant_due":
     case "device-sync.reconcile":
     case "mailbox":
-    case "runtime.failed":
-      return reason;
     default:
       return "other";
   }
@@ -591,15 +513,6 @@ function isHostedRuntimeModelCapableWorkspaceWakeReason(
   reason: string | null,
 ): boolean {
   return reason === "assistant" || reason === "assistant_due";
-}
-
-function hostedRuntimeResultWakeNeedsAiUsageGate(
-  reason: string | null,
-): boolean {
-  if (reason === "device-sync.reconcile" || reason === "mailbox") {
-    return false;
-  }
-  return true;
 }
 
 function isHostedRuntimeWakeDue(value: string | null, now: Date): boolean {

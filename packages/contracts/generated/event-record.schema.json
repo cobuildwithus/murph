@@ -2772,8 +2772,24 @@
           "type": "string",
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
         },
+        "queryVisibility": {
+          "type": "string",
+          "enum": [
+            "default"
+          ]
+        },
         "value": {
           "type": "number"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "display"
+          ]
+        },
+        "canonicalFact": {
+          "type": "boolean",
+          "const": true
         },
         "unit": {
           "type": "string",

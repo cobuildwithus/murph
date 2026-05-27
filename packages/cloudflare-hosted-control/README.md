@@ -16,5 +16,4 @@ target sequence, or web-owned turn adoption state.
 Normal webhook and app paths commit durable demand in web-owned storage and
 signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
 returns `runtime_processing_accepted` or `retry_later` and owns runner start,
-wake, watchdog, and cleanup. Legacy `ensure-execution`/`runtime_completed`
-behavior is compatibility only.
+wake, watchdog, and cleanup.

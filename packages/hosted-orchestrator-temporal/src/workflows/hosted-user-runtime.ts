@@ -16,9 +16,7 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
-  type HostedRuntimeDemandWorkspaceProjection,
   type HostedRuntimeCurrentWaitReason,
-  type HostedRuntimeEnsureExecutionResponse,
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimeSignal,
   type HostedRuntimeWorkflowState,
@@ -29,22 +27,14 @@ import type {
   HostedUserRuntimeWorkflowOptions,
 } from "../workflow-types.js";
 
-export const HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS = 65_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
 export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
-const HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUTS_MS =
-  [630_000, 660_000] as const;
-export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 15_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
-export const HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
-export const HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
-export const HOSTED_USER_RUNTIME_MIN_ACTIVE_WAKE_RECHECK_DELAY_MS = 5_000;
-export const HOSTED_USER_RUNTIME_MAX_ACTIVE_WAKE_RECHECK_DELAY_MS = 3_600_000;
+export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
 export const HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 30_000;
-export const HOSTED_USER_RUNTIME_MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 3_600_000;
-export const HOSTED_USER_RUNTIME_MIN_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 1_000;
 export const HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 1_000;
 const HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH =
   "hosted-user-runtime-non-retryable-failure-signal-wait-v1";
@@ -72,14 +62,6 @@ export async function hostedUserRuntimeWorkflow(
     },
     startToCloseTimeout: options.readRuntimeDemandStartToCloseTimeoutMs,
   });
-  const legacyExecutionActivities = proxyActivities<typeof activities>({
-    retry: {
-      initialInterval: "2 seconds",
-      maximumAttempts: 6,
-      maximumInterval: "1 minute",
-    },
-    startToCloseTimeout: options.ensureCloudflareExecutionStartToCloseTimeoutMs,
-  });
   const processingActivities = proxyActivities<typeof activities>({
     retry: {
       initialInterval: "2 seconds",
@@ -93,11 +75,10 @@ export async function hostedUserRuntimeWorkflow(
       nextInput,
     ),
     continueAsNewSuggested: () => workflowInfo().continueAsNewSuggested,
-    ensureCloudflareExecution: legacyExecutionActivities.ensureCloudflareExecution,
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
-    useEnsureRuntimeProcessing: () =>
+    useEnsureRuntimeProcessingPatch: () =>
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
@@ -120,11 +101,6 @@ export async function hostedUserRuntimeWorkflow(
 export interface HostedUserRuntimeWorkflowRuntime {
   continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never>;
   continueAsNewSuggested(): boolean;
-  ensureCloudflareExecution(input: {
-    orchestrationAttemptId: string;
-    reason: HostedRuntimeRunDemand["reason"];
-    userId: string;
-  }): Promise<HostedRuntimeEnsureExecutionResponse>;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     reason: HostedRuntimeRunDemand["reason"];
@@ -133,7 +109,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
   readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
-  useEnsureRuntimeProcessing(): boolean;
+  useEnsureRuntimeProcessingPatch(): void;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -150,28 +126,14 @@ type HostedRuntimeMailboxSignal = Extract<
 
 export interface HostedUserRuntimeWorkflowMachine {
   applySignal(signal: unknown): void;
-  readStatus(): HostedRuntimeWorkflowStatusQuery;
+  readStatus(): HostedRuntimeWorkflowState;
   run(): Promise<void>;
 }
 
-type HostedRuntimeWorkflowStatusQuery = HostedRuntimeWorkflowState & {
-  /**
-   * @deprecated Deploy-skew alias for older web status readers.
-   */
-  runtimeFailedWithoutNextWakeCount: number;
-  /**
-   * @deprecated Deploy-skew alias for older web status readers.
-   */
-  sameRuntimeWakeSentCount: number;
-};
-
 interface NormalizedWorkflowOptions {
-  activeWakeRecheckDelayMs: number;
   continueAsNewAfterIterations: number;
-  ensureCloudflareExecutionStartToCloseTimeoutMs: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
   readRuntimeDemandStartToCloseTimeoutMs: number;
-  runtimeCompletedFailureRecheckDelayMs: number;
 }
 
 export function createHostedUserRuntimeWorkflowMachine(
@@ -183,12 +145,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
 
-  const readStatus = (): HostedRuntimeWorkflowStatusQuery => ({
-    ...state,
-    runtimeFailedWithoutNextWakeCount:
-      state.legacyRuntimeFailedWithoutNextWakeCount,
-    sameRuntimeWakeSentCount: state.sameRuntimeWakeAcceptedCount,
-  });
+  const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
   const applySignal = (rawSignal: unknown): void => {
     let signal: HostedRuntimeSignal;
@@ -211,27 +168,22 @@ export function createHostedUserRuntimeWorkflowMachine(
           mailboxItemId: signal.mailboxItemId,
           source: signal.source,
         };
-        state.ignoredWorkspaceWakeKey = null;
         break;
       }
       case "manual_run_requested": {
         state.manualRunRequested = true;
-        state.ignoredWorkspaceWakeKey = null;
         break;
       }
       case "browser_vault_refresh_requested": {
         state.browserVaultRefreshRequested = true;
-        state.ignoredWorkspaceWakeKey = null;
         break;
       }
       case "device_sync_recovery_requested": {
         state.deviceSyncRecoveryRequested = true;
-        state.ignoredWorkspaceWakeKey = null;
         break;
       }
       case "mailbox_lag_observed": {
         state.lagRecoveryObserved = true;
-        state.ignoredWorkspaceWakeKey = null;
         break;
       }
       default: {
@@ -261,11 +213,8 @@ export function createHostedUserRuntimeWorkflowMachine(
         demand = await runtime.readRuntimeDemand({
           browserVaultRefreshRequested: state.browserVaultRefreshRequested,
           deviceSyncRecoveryRequested: state.deviceSyncRecoveryRequested,
-          ignoredWorkspaceWakeKey: state.ignoredWorkspaceWakeKey,
           lagRecoveryObserved: state.lagRecoveryObserved,
           manualRunRequested: state.manualRunRequested,
-          runtimeResultWakeAt: state.runtimeResultWakeAt,
-          runtimeResultWakeReason: state.runtimeResultWakeReason,
           userId: input.userId,
         });
       } catch (error) {
@@ -321,26 +270,19 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       const versionBeforeExecution = state.signalVersion;
-      let execution: HostedRuntimeEnsureExecutionResponse | HostedRuntimeEnsureProcessingResponse;
+      let execution: HostedRuntimeEnsureProcessingResponse;
       const orchestrationAttemptId = runtime.uuid();
       state.lastOrchestrationAttemptId = orchestrationAttemptId;
       try {
-        if (runtime.useEnsureRuntimeProcessing()) {
-          execution = await runtime.ensureRuntimeProcessing({
-            orchestrationAttemptId,
-            reason: demand.reason,
-            ...(demand.source === "device_sync_recovery"
-              ? { source: demand.source }
-              : {}),
-            userId: input.userId,
-          });
-        } else {
-          execution = await runtime.ensureCloudflareExecution({
-            orchestrationAttemptId,
-            reason: demand.reason,
-            userId: input.userId,
-          });
-        }
+        runtime.useEnsureRuntimeProcessingPatch();
+        execution = await runtime.ensureRuntimeProcessing({
+          orchestrationAttemptId,
+          reason: demand.reason,
+          ...(demand.source === "device_sync_recovery"
+            ? { source: demand.source }
+            : {}),
+          userId: input.userId,
+        });
       } catch (error) {
         state.lastExecutionAt = isoNow(runtime);
         state.lastExecutionErrorCode = readExecutionErrorCode(error);
@@ -406,54 +348,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      if (execution.kind === "runtime_completed") {
-        const failureRetryAt = recordLegacyRuntimeCompletionWake(
-          runtime,
-          state,
-          execution,
-          options.runtimeCompletedFailureRecheckDelayMs,
-        );
-
-        if (!signalArrivedDuringExecution) {
-          if (demand.source === "workspace_wake") {
-            state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
-          }
-          clearConsumedFlagsAfterRun(state, demand.source);
-          if (failureRetryAt !== null) {
-            await waitUntilTimestampOrSignal(
-              runtime,
-              failureRetryAt,
-              state.signalVersion,
-              state,
-              "runtime_failed_recheck",
-            );
-          }
-        }
-        continue;
-      }
-
-      if (execution.kind === "runtime_wake_sent") {
-        state.lastRuntimeAttemptId = execution.runtimeAttemptId;
-        state.lastRuntimeStatus = "scheduled";
-        if (signalArrivedDuringExecution) {
-          continue;
-        }
-        if (demand.source === "workspace_wake") {
-          state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
-        }
-        clearConsumedFlagsAfterRun(state, demand.source);
-        const versionBeforeWakeWait = state.signalVersion;
-        await waitUntilTimestampOrSignal(
-          runtime,
-          execution.recommendedRecheckAt
-            ?? new Date(
-              runtime.nowMs() + options.activeWakeRecheckDelayMs,
-            ).toISOString(),
-          versionBeforeWakeWait,
-          state,
-          "runtime_wake_recheck",
-        );
-      }
     }
   };
 
@@ -462,52 +356,6 @@ export function createHostedUserRuntimeWorkflowMachine(
     readStatus,
     run,
   };
-}
-
-export function createWorkspaceWakeKey(
-  workspace: HostedRuntimeDemandWorkspaceProjection | null,
-): string | null {
-  if (!workspace?.nextWakeAt) {
-    return null;
-  }
-
-  return [
-    workspace.version ?? "0",
-    workspace.nextWakeAt,
-    workspace.nextWakeReason ?? "",
-  ].join(":");
-}
-
-function recordLegacyRuntimeCompletionWake(
-  runtime: HostedUserRuntimeWorkflowRuntime,
-  state: HostedRuntimeWorkflowState,
-  execution: Extract<
-    HostedRuntimeEnsureExecutionResponse,
-    { kind: "runtime_completed" }
-  >,
-  runtimeCompletedFailureRecheckDelayMs: number,
-): string | null {
-  state.lastRuntimeAttemptId = execution.runtimeAttemptId;
-  state.lastRuntimeStatus = execution.runtimeStatus;
-  state.sameRuntimeWakeAcceptedCount = 0;
-  if (
-    execution.runtimeStatus === "failed"
-    && execution.runtimeResultNextWakeAt === null
-  ) {
-    const retryAt = new Date(
-      runtime.nowMs() + runtimeCompletedFailureRecheckDelayMs,
-    ).toISOString();
-    state.legacyRuntimeFailedWithoutNextWakeCount += 1;
-    state.runtimeResultWakeAt = retryAt;
-    state.runtimeResultWakeReason = "runtime.failed";
-    return retryAt;
-  }
-
-  state.runtimeResultWakeAt = execution.runtimeResultNextWakeAt;
-  state.runtimeResultWakeReason = execution.runtimeResultNextWakeAt
-    ? execution.runtimeResultNextWakeReason
-    : null;
-  return null;
 }
 
 function recordRuntimeProcessingAccepted(
@@ -539,7 +387,6 @@ function createInitialWorkflowState(
     currentWaitUntil: null,
     deviceSyncRecoveryRequested:
       carryForward?.deviceSyncRecoveryRequested ?? false,
-    ignoredWorkspaceWakeKey: carryForward?.ignoredWorkspaceWakeKey ?? null,
     invalidSignalCount: carryForward?.invalidSignalCount ?? 0,
     lagRecoveryObserved: carryForward?.lagRecoveryObserved ?? false,
     lastOrchestrationAttemptId: carryForward?.lastOrchestrationAttemptId ?? null,
@@ -556,81 +403,34 @@ function createInitialWorkflowState(
     latestMailboxPointer: carryForward?.latestMailboxPointer ?? null,
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
     manualRunRequested: carryForward?.manualRunRequested ?? false,
-    legacyRuntimeFailedWithoutNextWakeCount:
-      carryForward?.legacyRuntimeFailedWithoutNextWakeCount
-        ?? readLegacyCarryForwardSafeInteger(
-          carryForward,
-          "runtimeFailedWithoutNextWakeCount",
-        )
-        ?? 0,
-    runtimeResultWakeAt: carryForward?.runtimeResultWakeAt ?? null,
-    runtimeResultWakeReason: carryForward?.runtimeResultWakeReason ?? null,
     sameRuntimeWakeAcceptedCount:
-      carryForward?.sameRuntimeWakeAcceptedCount
-        ?? readLegacyCarryForwardSafeInteger(
-          carryForward,
-          "sameRuntimeWakeSentCount",
-        )
-        ?? 0,
+      carryForward?.sameRuntimeWakeAcceptedCount ?? 0,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };
-}
-
-function readLegacyCarryForwardSafeInteger(
-  carryForward: HostedUserRuntimeWorkflowCarryForwardState | undefined,
-  key: string,
-): number | null {
-  if (!carryForward) {
-    return null;
-  }
-
-  const value = Reflect.get(carryForward, key);
-  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
 
 export function normalizeHostedUserRuntimeWorkflowOptions(
   options: HostedUserRuntimeWorkflowOptions | undefined,
 ): NormalizedWorkflowOptions {
   return {
-    activeWakeRecheckDelayMs: normalizePositiveIntegerOption({
-      fallback: HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
-      max: HOSTED_USER_RUNTIME_MAX_ACTIVE_WAKE_RECHECK_DELAY_MS,
-      min: HOSTED_USER_RUNTIME_MIN_ACTIVE_WAKE_RECHECK_DELAY_MS,
-      value: options?.activeWakeRecheckDelayMs,
-    }),
     continueAsNewAfterIterations: normalizePositiveIntegerOption({
       fallback: HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD,
       max: HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD,
       min: 1,
       value: options?.continueAsNewAfterIterations,
     }),
-    ensureCloudflareExecutionStartToCloseTimeoutMs: normalizePositiveIntegerOption({
-      fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-      max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-      min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-      value: options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
-    }),
     ensureRuntimeProcessingStartToCloseTimeoutMs: normalizePositiveIntegerOption({
-      fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-      max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
+      max: HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-      value: normalizeEnsureRuntimeProcessingTimeoutOption(
-        options?.ensureRuntimeProcessingStartToCloseTimeoutMs
-          ?? options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
-      ),
+      value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
     }),
     readRuntimeDemandStartToCloseTimeoutMs: normalizePositiveIntegerOption({
       fallback: HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
       max: HOSTED_USER_RUNTIME_MAX_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
       value: options?.readRuntimeDemandStartToCloseTimeoutMs,
-    }),
-    runtimeCompletedFailureRecheckDelayMs: normalizePositiveIntegerOption({
-      fallback: HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-      max: HOSTED_USER_RUNTIME_MAX_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-      min: HOSTED_USER_RUNTIME_MIN_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
-      value: options?.runtimeCompletedFailureRecheckDelayMs,
     }),
   };
 }
@@ -640,36 +440,17 @@ function normalizeContinueAsNewOptions(
 ): HostedUserRuntimeWorkflowOptions {
   const normalized = normalizeHostedUserRuntimeWorkflowOptions(options);
   const ensureRuntimeProcessingStartToCloseTimeoutMs = normalizePositiveIntegerOption({
-    fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-    max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+    fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
+    max: HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
     min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-    value: normalizeEnsureRuntimeProcessingTimeoutOption(
-      options?.ensureRuntimeProcessingStartToCloseTimeoutMs
-        ?? options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
-    ),
+    value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs,
   });
   return {
-    activeWakeRecheckDelayMs: normalized.activeWakeRecheckDelayMs,
     continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
     ensureRuntimeProcessingStartToCloseTimeoutMs,
     readRuntimeDemandStartToCloseTimeoutMs:
       normalized.readRuntimeDemandStartToCloseTimeoutMs,
-    runtimeCompletedFailureRecheckDelayMs:
-      normalized.runtimeCompletedFailureRecheckDelayMs,
   };
-}
-
-function normalizeEnsureRuntimeProcessingTimeoutOption(
-  value: number | undefined,
-): number | undefined {
-  if (
-    value !== undefined
-    && HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUTS_MS
-      .includes(value as 630_000 | 660_000)
-  ) {
-    return HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS;
-  }
-  return value;
 }
 
 function normalizePositiveIntegerOption(input: {
@@ -743,7 +524,7 @@ function clearSatisfiedFlags(
 function clearConsumedFlagsAfterRun(
   state: HostedRuntimeWorkflowState,
   source: HostedRuntimeRunDemand["source"],
-  execution?: HostedRuntimeEnsureExecutionResponse | HostedRuntimeEnsureProcessingResponse,
+  execution?: HostedRuntimeEnsureProcessingResponse,
 ): void {
   switch (source) {
     case "mailbox_backlog": {
@@ -777,11 +558,6 @@ function clearConsumedFlagsAfterRun(
       return;
     }
     case "workspace_wake": {
-      return;
-    }
-    case "runtime_result_wake": {
-      state.runtimeResultWakeAt = null;
-      state.runtimeResultWakeReason = null;
       return;
     }
     default: {

@@ -18,7 +18,6 @@ import {
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
-  readHostedRuntimeEnsureCloudflareExecutionTimeouts,
   readHostedRuntimeEnsureProcessingTimeouts,
 } from "@murphai/hosted-execution/temporal-env";
 import { log } from "@temporalio/activity";
@@ -44,7 +43,6 @@ export interface HostedOrchestratorTemporalActivityEnvironment {
   cloudflareHostedControlBaseUrl: string;
   cloudflareHostedControlSigning: HostedWebCallbackSigningEnvironment;
   deviceSyncRecoverySweepTimeoutMs: number;
-  ensureCloudflareExecutionHttpTimeoutMs: number;
   ensureRuntimeProcessingHttpTimeoutMs: number;
   hostedWebBaseUrl: string;
   hostedWebCallbackSigning: HostedWebCallbackSigningEnvironment;
@@ -75,8 +73,7 @@ export interface HostedTemporalActivityObservation {
   activity:
     | "runHostedDeviceSyncRecoverySweep"
     | "readRuntimeDemand"
-    | "ensureRuntimeProcessing"
-    | "ensureCloudflareExecution";
+    | "ensureRuntimeProcessing";
   orchestrationAttemptId?: string | null;
   reason?: string | null;
   userId: string;
@@ -87,8 +84,6 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
 ): HostedOrchestratorTemporalActivityEnvironment {
   const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
-  const ensureCloudflareExecutionTimeouts =
-    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -98,8 +93,6 @@ export function readHostedOrchestratorTemporalActivityEnvironment(
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
     deviceSyncRecoverySweepTimeoutMs:
       readHostedDeviceSyncRecoverySweepTimeoutMs(source),
-    ensureCloudflareExecutionHttpTimeoutMs:
-      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
     ensureRuntimeProcessingHttpTimeoutMs:
       ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
     hostedWebBaseUrl: requireWebOriginBaseUrl(
@@ -122,13 +115,10 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
   HostedOrchestratorTemporalActivityEnvironment,
   | "cloudflareHostedControlBaseUrl"
   | "cloudflareHostedControlSigning"
-  | "ensureCloudflareExecutionHttpTimeoutMs"
   | "ensureRuntimeProcessingHttpTimeoutMs"
 > {
   const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
-  const ensureCloudflareExecutionTimeouts =
-    readHostedRuntimeEnsureCloudflareExecutionTimeouts(source);
 
   return {
     cloudflareHostedControlBaseUrl: requireControlBaseUrl(
@@ -136,8 +126,6 @@ export function readHostedOrchestratorTemporalCloudflareEnvironment(
       "CLOUDFLARE_HOSTED_CONTROL_BASE_URL",
     ),
     cloudflareHostedControlSigning: readHostedWebCallbackSigningEnvironment(source),
-    ensureCloudflareExecutionHttpTimeoutMs:
-      ensureCloudflareExecutionTimeouts.ensureCloudflareExecutionHttpTimeoutMs,
     ensureRuntimeProcessingHttpTimeoutMs:
       ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingHttpTimeoutMs,
   };

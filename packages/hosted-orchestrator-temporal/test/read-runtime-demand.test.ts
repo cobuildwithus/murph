@@ -39,11 +39,8 @@ describe("readRuntimeDemand", () => {
     await expect(readRuntimeDemand({
       browserVaultRefreshRequested: true,
       deviceSyncRecoveryRequested: true,
-      ignoredWorkspaceWakeKey: "7:2026-05-20T12:00:00.000Z:assistant",
       lagRecoveryObserved: true,
       manualRunRequested: true,
-      runtimeResultWakeAt: "2026-05-20T12:01:00.000Z",
-      runtimeResultWakeReason: "assistant",
       userId: "member_test",
     })).resolves.toEqual(demand);
 
@@ -60,13 +57,6 @@ describe("readRuntimeDemand", () => {
     expect(url.searchParams.get("browserVaultRefreshRequested")).toBe("1");
     expect(url.searchParams.get("deviceSyncRecoveryRequested")).toBe("1");
     expect(url.searchParams.get("lagRecoveryObserved")).toBe("1");
-    expect(url.searchParams.get("runtimeResultWakeAt")).toBe(
-      "2026-05-20T12:01:00.000Z",
-    );
-    expect(url.searchParams.get("runtimeResultWakeReason")).toBe("assistant");
-    expect(url.searchParams.get("ignoredWorkspaceWakeKey")).toBe(
-      "7:2026-05-20T12:00:00.000Z:assistant",
-    );
     expect(request.init?.method).toBe("GET");
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_test");
     expect(headers.get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("test-key");

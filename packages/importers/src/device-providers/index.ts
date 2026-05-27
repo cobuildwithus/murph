@@ -88,20 +88,6 @@ export type {
 } from "./provider-descriptors.ts";
 
 export {
-  canonicalizeDeviceBatchPayload,
-} from "./canonical-wearable-records.ts";
-export type {
-  CanonicalWearableObservationRecord,
-  CanonicalWearableRecord,
-  CanonicalWearableRecordKind,
-  CanonicalWearableSampleRecord,
-  CanonicalWearableSchemaVersion,
-  CanonicalWearableSessionRecord,
-  CanonicalWearableSource,
-  CanonicalWearableTombstoneRecord,
-  DeviceDataOrigin,
-} from "./canonical-wearable-records.ts";
-export {
   resolveWearableCanonicalMetricKey,
   resolveWearableMetricCatalogEntry,
   resolveWearableMetricTolerance,

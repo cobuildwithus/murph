@@ -8,6 +8,8 @@ import {
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
+  type DeviceBatchImportPayload,
+  type WearableRawIngestReceipt,
 } from "../src/index.ts";
 
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
@@ -23,6 +25,14 @@ function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workou
       result.success ? undefined : `workout contract paths: ${result.error.issues.map((issue) => issue.path.join(".")).join(", ")}`,
     );
   }
+}
+
+function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
+  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
+  assert.ok(artifact);
+  const receipt = artifact.content as WearableRawIngestReceipt;
+  assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
+  return receipt;
 }
 
 test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
@@ -233,20 +243,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
 
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"));
 
-  const canonicalRecords = payload.canonicalWearableRecords ?? [];
-  assert.ok(canonicalRecords.every((record) => record.source.provider === "junction"));
-  assert.ok(canonicalRecords.every((record) => record.source.externalRef?.system === "junction"));
-  assert.ok(canonicalRecords.every((record) => !record.source.externalRef?.resourceType.includes(":")));
-
-  const canonicalStepRecords = canonicalRecords.filter((record) =>
-    record.kind === "observation" && record.metric === "steps"
-  );
-  assert.equal(canonicalStepRecords.length, 2);
-  assert.notEqual(canonicalStepRecords[0]?.source.dataSourceId, canonicalStepRecords[1]?.source.dataSourceId);
-  assert.deepEqual(
-    canonicalStepRecords.map((record) => record.source.origin?.sourceProviderSlug).sort(),
-    ["oura", "withings"],
-  );
+  assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
 test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timestamp and source provenance", () => {
@@ -314,11 +311,9 @@ test("Junction raw receipt hashing treats Date snapshot fields like ISO strings"
     normalizerVersion: "junction-normalizer.v1",
     snapshot: stringSnapshot,
   });
-  const dateReceipt = withDates.rawIngestReceipts?.[0];
-  const stringReceipt = withStrings.rawIngestReceipts?.[0];
+  const dateReceipt = readRawReceiptArtifact(withDates);
+  const stringReceipt = readRawReceiptArtifact(withStrings);
 
-  assert.ok(dateReceipt);
-  assert.ok(stringReceipt);
   assert.equal(dateReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
   assert.equal(dateReceipt.observedAt, "2026-04-22T12:00:00.000Z");
   assert.equal(dateReceipt.payloadHash, stringReceipt.payloadHash);
@@ -676,7 +671,7 @@ test("Junction normalizer flattens grouped timeseries payloads for activity and 
   assert.equal(hrvEvent?.fields?.value, 48);
 });
 
-test("Junction normalizer maps respiratory rate unit aliases to observation units", async () => {
+test("Junction normalizer keeps respiratory rate unit aliases in raw timeseries evidence", async () => {
   const respiratoryRateUnits = [
     undefined,
     "bpm",
@@ -714,12 +709,6 @@ test("Junction normalizer maps respiratory rate unit aliases to observation unit
     });
 
     const event = payload.events?.find((entry) => entry.fields?.metric === "respiratory-rate");
-    const canonicalSample = payload.canonicalWearableRecords?.find((record) =>
-      record.kind === "sample" && record.metric === "respiratoryRate"
-    );
-    const canonicalObservation = payload.canonicalWearableRecords?.find((record) =>
-      record.kind === "observation" && record.metric === "respiratoryRate"
-    );
     const rawRespiratoryRateArtifact = payload.rawArtifacts?.find((artifact) =>
       artifact.role === "junction-timeseries-respiratory-rate"
     );
@@ -728,10 +717,6 @@ test("Junction normalizer maps respiratory rate unit aliases to observation unit
     assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.equal(event, undefined);
-    assert.equal(canonicalSample, undefined);
-    assert.ok(canonicalObservation && canonicalObservation.kind === "observation");
-    assert.equal(canonicalObservation.unit, "breaths_per_minute");
-    assert.equal(canonicalObservation.value, 14.8);
 
     if (unit === undefined) {
       assert.doesNotMatch(rawRespiratoryRateArtifactText, /"unit":/u);
@@ -741,7 +726,7 @@ test("Junction normalizer maps respiratory rate unit aliases to observation unit
   }
 });
 
-test("Junction normalizer maps blood oxygen unit aliases to observation units", async () => {
+test("Junction normalizer keeps blood oxygen unit aliases in raw timeseries evidence", async () => {
   const bloodOxygenUnits = [
     undefined,
     "spo2",
@@ -781,20 +766,9 @@ test("Junction normalizer maps blood oxygen unit aliases to observation units", 
     });
 
     const event = payload.events?.find((entry) => entry.fields?.metric === "spo2");
-    const canonicalSample = payload.canonicalWearableRecords?.find((record) =>
-      record.kind === "sample" && record.metric === "spo2"
-    );
-    const canonicalObservation = payload.canonicalWearableRecords?.find((record) =>
-      record.kind === "observation" && record.metric === "spo2"
-    );
-
     assert.deepEqual(payload.provenance?.timeseriesResources, ["blood_oxygen"]);
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.equal(event, undefined);
-    assert.equal(canonicalSample, undefined);
-    assert.ok(canonicalObservation && canonicalObservation.kind === "observation");
-    assert.equal(canonicalObservation.unit, "%");
-    assert.equal(canonicalObservation.value, 97.2);
   }
 });
 
@@ -872,8 +846,7 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
     },
   });
 
-  const rawReceipt = payload.rawIngestReceipts?.[0];
-  assert.ok(rawReceipt);
+  const rawReceipt = readRawReceiptArtifact(payload);
   const rawReceiptArtifact = payload.rawArtifacts?.find((artifact) =>
     artifact.role === `wearable-raw-receipt:${rawReceipt.id}`
   );
@@ -891,7 +864,6 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   ]);
   assert.equal(rawReceipt.rawArtifactCount, 3);
   assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
-  assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-canonical-records:")), false);
   assert.doesNotMatch(
     rawReceiptText,
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
@@ -945,7 +917,6 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
   );
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
   assert.equal(glucoseSamples.length, 0);
-  assert.deepEqual(payload.canonicalWearableRecords, []);
   assert.ok(glucoseArtifact);
   assert.deepEqual(glucoseArtifact.content, [
     {
@@ -959,10 +930,7 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
       value: 102,
     },
   ]);
-  assert.equal(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
-    false,
-  );
+  assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
 test("Junction importer skips source-specific floating summary records instead of using window fallback", async () => {
@@ -995,12 +963,8 @@ test("Junction importer skips source-specific floating summary records instead o
   const bodyArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-body");
   assert.deepEqual(payload.provenance?.summaryResources, ["body"]);
   assert.deepEqual(payload.events, []);
-  assert.deepEqual(payload.canonicalWearableRecords, []);
   assert.ok(bodyArtifact);
-  assert.equal(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")),
-    false,
-  );
+  assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
 test("Junction normalizer does not use source-specific floating timestamps as window times", () => {
@@ -1367,12 +1331,6 @@ test("Junction hypnogram alias emits canonical sleep-stage records", async () =>
   });
 
   const samples = payload.samples ?? [];
-  const canonicalStageMetrics = (payload.canonicalWearableRecords ?? []).flatMap((record) =>
-    record.kind === "sample" ? [record.metric] : []
-  );
-  const canonicalStageSources = (payload.canonicalWearableRecords ?? []).flatMap((record) =>
-    record.kind === "sample" ? [record.source] : []
-  );
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
   assert.equal(samples.length, 2);
@@ -1385,10 +1343,7 @@ test("Junction hypnogram alias emits canonical sleep-stage records", async () =>
   assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
   assert.ok(samples.every((sample) => sample.dataOrigin?.sourceProviderSlug === "garmin"));
   assert.ok(samples.every((sample) => sample.dataOrigin?.sourceType === "watch"));
-  assert.deepEqual(canonicalStageMetrics.sort(), ["awakeMinutes", "deepMinutes"]);
-  assert.ok(canonicalStageSources.every((source) => source.provider === "junction"));
-  assert.ok(canonicalStageSources.every((source) => source.externalRef?.system === "junction"));
-  assert.ok(canonicalStageSources.every((source) => source.origin?.sourceProviderSlug === "garmin"));
+  assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
 test("Junction normalizer merges canonical and alias resource payloads before import", () => {

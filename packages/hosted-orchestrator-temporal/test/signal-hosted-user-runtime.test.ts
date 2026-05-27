@@ -20,7 +20,6 @@ import {
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
   readRuntimeDemandStartToCloseTimeoutMs: 10_000,
-  runtimeCompletedFailureRecheckDelayMs: 30_000,
 };
 
 describe("hostedUserRuntimeWorkflowId", () => {

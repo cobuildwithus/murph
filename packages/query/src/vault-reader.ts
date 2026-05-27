@@ -16,6 +16,23 @@ export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
 export async function readVaultTolerant(
   vaultRoot: string,
 ): Promise<VaultReadModel> {
+  const { loadProjectedVaultSourceTolerant } = await import("./query-projection.ts");
+  const snapshot = await loadProjectedVaultSourceTolerant(vaultRoot);
+
+  return createVaultReadModel({
+    vaultRoot,
+    metadata: snapshot.metadata,
+    entities: snapshot.entities,
+  });
+}
+
+/**
+ * Explicit raw/debug hydration path. This bypasses the query projection and can
+ * include records intentionally excluded from the default product read model.
+ */
+export async function readVaultRawTolerant(
+  vaultRoot: string,
+): Promise<VaultReadModel> {
   const snapshot = await readVaultSourceTolerant(vaultRoot);
 
   return createVaultReadModel({
