@@ -894,7 +894,10 @@ async function runSystemMailboxMaintenancePhase(input: {
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
-  if (input.hasFreshConversationInput) {
+  if (
+    input.hasFreshConversationInput
+    || input.input.shouldYieldBackgroundMaintenance?.() === true
+  ) {
     return {
       continueAssistantLane: false,
       initialProviderCleanupCheckpoint: null,

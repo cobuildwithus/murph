@@ -164,8 +164,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         id: "mailbox_item_runner_001",
         laneSeq: "1",
       }),
+      createMailboxItem({
+        id: "mailbox_item_runner_system_001",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
     ];
-    const { mailboxPort } = createMailboxPort({ items });
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
@@ -236,6 +243,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint",
         "assistant",
       ]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+      ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
@@ -249,6 +261,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               eventCode: "mailbox.imported",
               leaseGeneration: "1",
               level: "info",
+              mailboxLane: "conversation",
+              mailboxSeqEnd: "1",
+              mailboxSeqStart: "0",
               phase: "import",
               redactedJson: {
                 assistantInputCount: 0,
@@ -262,7 +277,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 conversationSeqStart: "0",
                 fetchedCount: 1,
                 importedCount: 1,
-                laneCount: 2,
+                laneCount: 1,
                 retryableBlockedCount: 0,
                 stateChanged: true,
                 systemSeqEnd: "0",
@@ -299,6 +314,177 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           ],
         },
       ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("imports the system lane after a clean foreground conversation import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedRoutes: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      fetchRequests,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_system_fallback",
+          kind: "device-sync.wake",
+          lane: "system",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let assistantPhaseCalled = false;
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_system_fallback",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedRoutes.push(item.route.action);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_system_fallback",
+        async runAssistantPhase(input) {
+          assistantPhaseCalled = true;
+          assert.equal(input.initialMailboxImport.state.watermarks.conversation, "0");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.deepEqual(importedRoutes, ["run-device-sync-wake"]);
+      assert.equal(assistantPhaseCalled, true);
+      assert.equal(result.initialMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(result.initialMailboxImport.state.watermarks.system, "1");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("late foreground input interrupts maintenance after clean conversation system fallback", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_late_yield_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    const importedRoutes: string[] = [];
+    const importedSeqs: string[] = [];
+    const yieldStates: boolean[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_late_yield_system",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedRoutes.push(item.route.action);
+          if (item.item.lane === "conversation") {
+            importedSeqs.push(item.item.laneSeq);
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(
+                item.item,
+                `late clean-fallback input ${item.item.laneSeq}`,
+              ),
+              vault: vaultRoot,
+            });
+            return {
+              assistantInputId: staged.inputId,
+              status: "imported",
+            };
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_late_yield_system",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_yield_foreground",
+            laneSeq: "1",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedSeqs.includes("1"));
+          await waitForCondition(() =>
+            input.shouldYieldBackgroundMaintenance?.() === true
+          );
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+      ]);
+      assert.deepEqual(importedRoutes, [
+        "run-device-sync-wake",
+        "import-conversation-message",
+      ]);
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1217,9 +1403,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "assistant:replay",
       ]);
       assert.deepEqual(
-        fetchRequests.map((request) =>
-          request.lanes.find((lane) => lane.lane === "conversation")?.importedSeq
-        ),
+        fetchRequests
+          .filter((request) => request.lanes.some((lane) => lane.lane === "conversation"))
+          .map((request) =>
+            request.lanes.find((lane) => lane.lane === "conversation")?.importedSeq
+          ),
         ["0", "1"],
       );
       assert.deepEqual(secondCheckpointRequests.map((request) => request.reason), [
@@ -1295,7 +1483,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         conversationSeqStart: "0",
         fetchedCount: 1,
         importedCount: 0,
-        laneCount: 2,
+        laneCount: 1,
         retryableBlockedCount: 1,
         stateChanged: false,
         systemSeqEnd: "0",
@@ -1550,7 +1738,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
         [
@@ -1689,7 +1876,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
         [
@@ -1815,7 +2001,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
         [

@@ -324,16 +324,33 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
     input.checkpointRequestBuilder,
   );
-  const initialMailboxImport = input.initialMailboxImport
+  let initialMailboxImport = input.initialMailboxImport
     ?? await importHostedMailboxForWorkspaceRunner({
       checkpointRequestBuilder: checkpointRequestSession,
       checkpointReason: "import",
       deferCheckpoint: true,
       input,
+      lanes: input.runAssistantPhase ? ["conversation"] : undefined,
       requestId: input.requestId,
     });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
   markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
+
+  if (
+    input.runAssistantPhase
+    && !hostedMailboxImportHasForegroundConversationWork(initialMailboxImport)
+  ) {
+    initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
+      checkpointRequestBuilder: checkpointRequestSession,
+      checkpointReason: "import",
+      deferCheckpoint: true,
+      input,
+      lanes: ["system"],
+      requestId: input.requestId,
+    });
+    checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
+    markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
+  }
 
   if (input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
@@ -469,6 +486,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       ?? input.workspace,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
+}
+
+function hostedMailboxImportHasForegroundConversationWork(
+  input: HostedMailboxImportCheckpointResult,
+): boolean {
+  return (input.importResult.assistantInputIds?.length ?? 0) > 0
+    || (input.importResult.conversationImportedCount ?? 0) > 0
+    || input.importResult.fetchedCount > 0
+    || input.importResult.blocked.length > 0;
 }
 
 function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): void {

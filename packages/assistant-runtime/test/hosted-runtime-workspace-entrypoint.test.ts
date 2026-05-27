@@ -219,6 +219,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
 
     try {
       process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
@@ -240,7 +241,7 @@ describe("hosted workspace runtime entrypoint", () => {
           throw new Error("Phase-boundary test should not import mailbox items.");
         },
         platform: createPlatform({
-          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          mailboxPort: createMailboxPort({ events: [], fetchRequests, items: [] }),
           workspacePort: createWorkspacePort({
             checkpointRequests: [],
             events: [],
@@ -295,6 +296,14 @@ describe("hosted workspace runtime entrypoint", () => {
         fetchedCount: 0,
         importedCount: 0,
       }));
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
     } finally {
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -2969,6 +2978,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
+        "mailbox.fetch",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
       ]);
@@ -3187,6 +3197,8 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(events, [
         "workspace.read",
+        "mailbox.fetch",
+        "runtime.log:mailbox.imported",
         "mailbox.fetch",
         "runtime.log:mailbox.imported",
         "assistant.phase",
@@ -3476,6 +3488,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch:1",
         "mailbox.fetch:2",
+        "mailbox.fetch:3",
         "import:1",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
@@ -3575,6 +3588,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch:1",
         "mailbox.fetch:2",
+        "mailbox.fetch:3",
         "mailbox.fetchPayload",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
@@ -4764,7 +4778,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 1);
       assert.equal(artifactGetCalls.length, 2);
       assert.equal(artifactGetCalls[0], baseHash);
-      const secondFetch = fetchRequests.at(-1);
+      const secondFetch = fetchRequests
+        .filter((request) => request.lanes.some((lane) => lane.lane === "conversation"))
+        .at(-1);
       assert.ok(secondFetch);
       assert.equal(
         secondFetch.lanes.find((lane) => lane.lane === "conversation")?.importedSeq,
@@ -5809,7 +5825,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.deepEqual(events, ["workspace.read", "mailbox.fetch"]);
+      assert.deepEqual(events, ["workspace.read", "mailbox.fetch", "mailbox.fetch"]);
       assert.deepEqual(result, {
         nextWakeAt,
         redactedStatus: {
@@ -5858,7 +5874,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.deepEqual(events, ["workspace.read", "mailbox.fetch"]);
+      assert.deepEqual(events, ["workspace.read", "mailbox.fetch", "mailbox.fetch"]);
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {
@@ -5921,6 +5937,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(events, [
         "workspace.read",
+        "mailbox.fetch",
         "mailbox.fetch",
       ]);
       assert.deepEqual(checkpointRequests, []);
@@ -6008,6 +6025,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(events, [
         "workspace.read",
+        "mailbox.fetch",
         "mailbox.fetch",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
