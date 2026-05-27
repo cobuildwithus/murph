@@ -211,6 +211,32 @@ export function completeDeviceSyncJobIfOwned(
   return (result.changes ?? 0) > 0;
 }
 
+export function releaseDeviceSyncJobIfOwned(
+  database: DatabaseSync,
+  input: {
+    jobId: string;
+    now: string;
+    workerId: string;
+  },
+): boolean {
+  const result = database.prepare(`
+    update device_job
+    set status = 'queued',
+        available_at = ?,
+        lease_owner = null,
+        lease_expires_at = null,
+        attempts = max(attempts - 1, 0),
+        updated_at = ?
+    where id = ?
+      and status = 'running'
+      and lease_owner = ?
+      and lease_expires_at is not null
+      and lease_expires_at > ?
+  `).run(input.now, input.now, input.jobId, input.workerId, input.now) as { changes: number };
+
+  return (result.changes ?? 0) > 0;
+}
+
 export function failDeviceSyncJob(
   database: DatabaseSync,
   input: {

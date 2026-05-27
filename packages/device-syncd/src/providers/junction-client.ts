@@ -1,11 +1,14 @@
-import { setTimeout as delay } from "node:timers/promises";
-
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 
 import { normalizeJunctionProviderSlug } from "../config/connect-routes.ts";
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
 import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
+import {
+  createProviderRequestAbortSignal,
+  throwIfProviderRequestAborted,
+  waitForProviderRetryDelay,
+} from "./request-abort.ts";
 import {
   buildProviderRequestDiagnostics,
   extractProviderQueryParameterNames,
@@ -53,6 +56,7 @@ export interface JunctionProviderConnection {
 
 export interface JunctionWindowInput {
   resource: string;
+  signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
   userId: string;
   windowStart: string;
@@ -60,12 +64,14 @@ export interface JunctionWindowInput {
 }
 
 export interface JunctionIntrospectionInput {
+  signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
   userId: string;
   userLimit?: number;
 }
 
 export interface JunctionRefreshUserDataInput {
+  signal?: AbortSignal | null;
   timeoutSeconds?: number | null;
   userId: string;
 }
@@ -144,39 +150,48 @@ export class JunctionClient {
     this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async resolveUser(clientUserId: string): Promise<JunctionUser | null> {
+  async resolveUser(
+    clientUserId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<JunctionUser | null> {
     const payload = await this.requestJson<Record<string, unknown> | null>(
       "GET",
       `/v2/user/resolve/${encodeURIComponent(clientUserId)}`,
       undefined,
-      { endpointKind: "junction_user_resolve", optional404: true },
+      { endpointKind: "junction_user_resolve", optional404: true, signal: options.signal ?? null },
     );
 
     return payload ? parseJunctionUser(payload, "Junction resolve user response") : null;
   }
 
-  async createUser(clientUserId: string): Promise<JunctionUser> {
+  async createUser(
+    clientUserId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<JunctionUser> {
     const payload = await this.requestJson<Record<string, unknown>>(
       "POST",
       "/v2/user/",
       {
         client_user_id: clientUserId,
       },
-      { endpointKind: "junction_user_create" },
+      { endpointKind: "junction_user_create", signal: options.signal ?? null },
     );
     return parseJunctionUser(payload, "Junction create user response");
   }
 
-  async createOrResolveUser(clientUserId: string): Promise<JunctionUser> {
-    const resolved = await this.resolveUser(clientUserId);
+  async createOrResolveUser(
+    clientUserId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<JunctionUser> {
+    const resolved = await this.resolveUser(clientUserId, options);
     if (resolved) {
       return resolved;
     }
 
     try {
-      return await this.createUser(clientUserId);
+      return await this.createUser(clientUserId, options);
     } catch (error) {
-      const retryResolved = await this.resolveUser(clientUserId);
+      const retryResolved = await this.resolveUser(clientUserId, options);
       if (retryResolved) {
         return retryResolved;
       }
@@ -189,6 +204,7 @@ export class JunctionClient {
     userId: string;
     callbackUrl: string;
     providerFilter?: readonly string[];
+    signal?: AbortSignal | null;
   }): Promise<JunctionLinkToken> {
     const body: Record<string, unknown> = {
       user_id: input.userId,
@@ -203,7 +219,7 @@ export class JunctionClient {
       "POST",
       "/v2/link/token",
       body,
-      { endpointKind: "junction_link_token_create" },
+      { endpointKind: "junction_link_token_create", signal: input.signal ?? null },
     );
     const linkWebUrl = normalizeString(payload.link_web_url) ?? normalizeString(payload.linkWebUrl);
 
@@ -220,18 +236,22 @@ export class JunctionClient {
     return { linkWebUrl };
   }
 
-  async listUserProviders(userId: string): Promise<JunctionProviderConnection[]> {
+  async listUserProviders(
+    userId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<JunctionProviderConnection[]> {
     const payload = await this.requestJson<unknown>(
       "GET",
       `/v2/user/providers/${encodeURIComponent(userId)}`,
       undefined,
-      { endpointKind: "junction_user_providers" },
+      { endpointKind: "junction_user_providers", signal: options.signal ?? null },
     );
     return parseJunctionProviders(payload);
   }
 
   async deregisterProvider(input: {
     providerSlug: string;
+    signal?: AbortSignal | null;
     userId: string;
   }): Promise<void> {
     const providerSlug = normalizeJunctionProviderSlug(input.providerSlug);
@@ -247,16 +267,19 @@ export class JunctionClient {
       "DELETE",
       `/v2/user/${encodeURIComponent(userId)}/${encodeURIComponent(providerSlug)}`,
       undefined,
-      { endpointKind: "junction_user_provider_deregister" },
+      { endpointKind: "junction_user_provider_deregister", signal: input.signal ?? null },
     );
   }
 
-  async listUserDevices(userId: string): Promise<unknown[]> {
+  async listUserDevices(
+    userId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<unknown[]> {
     const payload = await this.requestJson<unknown>(
       "GET",
       `/v2/user/${encodeURIComponent(userId)}/device`,
       undefined,
-      { endpointKind: "junction_user_devices" },
+      { endpointKind: "junction_user_devices", signal: options.signal ?? null },
     );
     return extractCollectionRecords(payload);
   }
@@ -286,7 +309,7 @@ export class JunctionClient {
       "GET",
       `/v2/introspect/resources?${buildJunctionIntrospectionSearch(input).toString()}`,
       undefined,
-      { endpointKind: "junction_introspect_resources" },
+      { endpointKind: "junction_introspect_resources", signal: input.signal ?? null },
     );
   }
 
@@ -295,7 +318,7 @@ export class JunctionClient {
       "GET",
       `/v2/introspect/historical_pull?${buildJunctionIntrospectionSearch(input).toString()}`,
       undefined,
-      { endpointKind: "junction_introspect_historical_pull" },
+      { endpointKind: "junction_introspect_historical_pull", signal: input.signal ?? null },
     );
   }
 
@@ -311,7 +334,7 @@ export class JunctionClient {
       "POST",
       `/v2/user/refresh/${encodeURIComponent(input.userId)}${suffix}`,
       undefined,
-      { endpointKind: "junction_user_refresh" },
+      { endpointKind: "junction_user_refresh", signal: input.signal ?? null },
     );
   }
 
@@ -355,7 +378,7 @@ export class JunctionClient {
         "GET",
         `${path}?${search.toString()}`,
         undefined,
-        { endpointKind: options.endpointKind },
+        { endpointKind: options.endpointKind, signal: input.signal ?? null },
       );
       records.push(...extractRecords(payload, input.resource));
       pages += 1;
@@ -379,7 +402,7 @@ export class JunctionClient {
     method: "DELETE" | "GET" | "POST",
     path: string,
     body?: Record<string, unknown>,
-    options: { endpointKind?: string; optional404?: boolean } = {},
+    options: { endpointKind?: string; optional404?: boolean; signal?: AbortSignal | null } = {},
   ): Promise<T> {
     const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
     let lastError: unknown;
@@ -397,8 +420,11 @@ export class JunctionClient {
     });
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+      throwIfProviderRequestAborted(options.signal);
+      const requestAbort = createProviderRequestAbortSignal({
+        signal: options.signal ?? null,
+        timeoutMs: this.requestTimeoutMs,
+      });
 
       try {
         const response = await this.fetchImpl(new URL(path.replace(/^\/+/u, ""), this.baseUrl), {
@@ -408,7 +434,7 @@ export class JunctionClient {
             "x-vital-api-key": this.apiKey,
           },
           body: body ? JSON.stringify(body) : undefined,
-          signal: controller.signal,
+          signal: requestAbort.signal,
         });
 
         if (options.optional404 && response.status === 404) {
@@ -419,7 +445,7 @@ export class JunctionClient {
         if (!response.ok) {
           const retryable = method === "GET" && (response.status === 429 || response.status >= 500);
           if (retryable && attempt < attempts) {
-            await delay(resolveRetryDelayMs(response, attempt));
+            await waitForProviderRetryDelay(resolveRetryDelayMs(response, attempt), options.signal);
             continue;
           }
 
@@ -446,9 +472,9 @@ export class JunctionClient {
           break;
         }
 
-        await delay(resolveRetryDelayMs(null, attempt));
+        await waitForProviderRetryDelay(resolveRetryDelayMs(null, attempt), options.signal);
       } finally {
-        clearTimeout(timeout);
+        requestAbort.cleanup();
       }
     }
 
@@ -935,5 +961,6 @@ function parseRetryAfterMs(value: string): number | null {
 }
 
 function isDeviceSyncAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return error instanceof DOMException
+    && (error.name === "AbortError" || error.name === "TimeoutError");
 }

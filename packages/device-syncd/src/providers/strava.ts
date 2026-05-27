@@ -593,12 +593,16 @@ export function createStravaDeviceSyncProvider(
   };
   let webhookSubscriptionClient: StravaWebhookSubscriptionClient | null = null;
 
-  async function postTokenRequest(parameters: Record<string, string>): Promise<StravaTokenResponse> {
+  async function postTokenRequest(
+    parameters: Record<string, string>,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<StravaTokenResponse> {
     return postOAuthTokenRequest<StravaTokenResponse>({
       fetchImpl,
       url: `${authBaseUrl}${STRAVA_TOKEN_PATH}`,
       timeoutMs,
       parameters,
+      signal: options.signal ?? null,
       buildError: (response, body) => {
         const diagnostics = buildOAuthTokenRequestDiagnostics({
           endpointKind: STRAVA_OAUTH_TOKEN_ENDPOINT_KIND,
@@ -623,6 +627,7 @@ export function createStravaDeviceSyncProvider(
     path: string;
     accessToken: string;
     optional?: boolean;
+    signal?: AbortSignal | null;
   }): Promise<T | null> {
     const endpointKind = resolveStravaApiEndpointKind(input.path);
 
@@ -631,6 +636,7 @@ export function createStravaDeviceSyncProvider(
       url: `${apiBaseUrl}${input.path}`,
       accessToken: input.accessToken,
       timeoutMs,
+      signal: input.signal ?? null,
       optional: input.optional,
       buildError: (response, body) =>
         buildStravaApiError(
@@ -834,6 +840,7 @@ export function createStravaDeviceSyncProvider(
           path,
           accessToken,
           optional: options.optional,
+          signal: context.signal ?? null,
         }),
       shouldRefresh: isStravaTokenNearExpiry,
     });
@@ -1043,9 +1050,14 @@ export function createStravaDeviceSyncProvider(
         throw error;
       }
     },
-    async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+    async refreshTokens(
+      account: DeviceSyncAccount,
+      options: { signal?: AbortSignal | null } = {},
+    ): Promise<ProviderAuthTokens> {
       return refreshOAuthTokens({
-        postTokenRequest,
+        postTokenRequest: (parameters) => postTokenRequest(parameters, {
+          signal: options.signal ?? null,
+        }),
         account,
         clientId: config.clientId,
         clientSecret: config.clientSecret,

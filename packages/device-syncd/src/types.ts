@@ -581,7 +581,9 @@ export interface ProviderScheduleResult {
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
+  signal?: AbortSignal;
   shouldYield?(): boolean;
+  throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(snapshot: unknown): Promise<unknown>;
@@ -650,7 +652,7 @@ export interface DeviceSyncProviderDiagnostics {
 export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
-  refreshTokens?(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+  refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
 }
 
@@ -671,7 +673,7 @@ export interface DeviceSyncOAuthAdapter {
     now: string;
   }): string;
   exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
-  refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+  refreshTokens(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
 }
 
 export interface DeviceSyncProvider {

@@ -1,11 +1,16 @@
 import { deviceSyncError } from "../errors.ts";
 import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
-import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, splitScopeList, subtractDays } from "../shared.ts";
+import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, splitScopeList, subtractDays } from "../shared.ts";
 import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import {
   buildProviderResponseDiagnostics,
   inspectProviderErrorBody,
 } from "./provider-diagnostics.ts";
+import {
+  createProviderRequestAbortSignal,
+  throwIfProviderRequestAborted,
+  waitForProviderRetryDelay,
+} from "./request-abort.ts";
 
 import type { DeviceSyncErrorOptions } from "../errors.ts";
 import type {
@@ -32,7 +37,7 @@ interface DeviceSyncOAuthProviderDefinition
   extends Omit<DeviceSyncProvider, "connectionHandler" | "webhookHandler" | "jobExecutor"> {
   buildConnectUrl(input: Parameters<DeviceSyncOAuthAdapter["buildConnectUrl"]>[0]): string;
   exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
-  refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
+  refreshTokens: DeviceSyncOAuthAdapter["refreshTokens"];
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
   verifyAndParseWebhook?(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
@@ -146,16 +151,20 @@ export async function requestWithRefreshAndRetry<T>(input: {
   refresh: () => Promise<unknown>;
   request: () => Promise<T>;
   maxRetries?: number;
+  signal?: AbortSignal | null;
 }): Promise<T> {
   const maxRetries = input.maxRetries ?? 3;
   let attempt = 0;
 
   while (true) {
+    throwIfProviderRequestAborted(input.signal);
+
     if (input.shouldRefresh()) {
       await input.refresh();
     }
 
     try {
+      throwIfProviderRequestAborted(input.signal);
       return await input.request();
     } catch (error) {
       const { retryable, httpStatus } = extractRetryMetadata(error);
@@ -168,7 +177,7 @@ export async function requestWithRefreshAndRetry<T>(input: {
 
       if (retryable && attempt < maxRetries) {
         attempt += 1;
-        await sleep(computeRetryDelayMs(attempt));
+        await waitForProviderRetryDelay(computeRetryDelayMs(attempt), input.signal);
         continue;
       }
 
@@ -182,22 +191,31 @@ export async function postOAuthTokenRequest<T>(input: {
   url: string;
   timeoutMs: number;
   parameters: Record<string, string>;
+  signal?: AbortSignal | null;
   buildError: (response: Response, body: string) => Error;
 }): Promise<T> {
-  const response = await input.fetchImpl(input.url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams(input.parameters),
-    signal: AbortSignal.timeout(input.timeoutMs),
+  const requestAbort = createProviderRequestAbortSignal({
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
   });
+  try {
+    const response = await input.fetchImpl(input.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(input.parameters),
+      signal: requestAbort.signal,
+    });
 
-  if (!response.ok) {
-    throw input.buildError(response, await parseResponseBody(response));
+    if (!response.ok) {
+      throw input.buildError(response, await parseResponseBody(response));
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    requestAbort.cleanup();
   }
-
-  return (await response.json()) as T;
 }
 
 export function isoFromExpiresIn(expiresIn: unknown, now = new Date().toISOString()): string | undefined {
@@ -421,7 +439,7 @@ export async function refreshOAuthTokens<T extends {
 }
 
 export function createRefreshingApiSession(input: {
-  context: Pick<ProviderJobContext, "account" | "refreshAccountTokens">;
+  context: Pick<ProviderJobContext, "account" | "refreshAccountTokens" | "signal">;
   requestJsonWithAccessToken: <T>(
     accessToken: string,
     path: string,
@@ -442,6 +460,7 @@ export function createRefreshingApiSession(input: {
     return requestWithRefreshAndRetry({
       shouldRefresh: () => (input.shouldRefresh ?? isTokenNearExpiry)(currentAccount),
       refresh,
+      signal: input.context.signal ?? null,
       request: () => {
         const tokens = getDeviceSyncAccountOAuthTokens(currentAccount);
         if (!tokens?.accessToken) {
@@ -471,27 +490,36 @@ export async function fetchBearerJson<T>(input: {
   url: string;
   accessToken: string;
   timeoutMs: number;
+  signal?: AbortSignal | null;
   optional?: boolean;
   buildError: (response: Response, body: string) => Error;
 }): Promise<T | null> {
-  const response = await input.fetchImpl(input.url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${input.accessToken}`,
-      Accept: "application/json",
-    },
-    signal: AbortSignal.timeout(input.timeoutMs),
+  const requestAbort = createProviderRequestAbortSignal({
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
   });
+  try {
+    const response = await input.fetchImpl(input.url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        Accept: "application/json",
+      },
+      signal: requestAbort.signal,
+    });
 
-  if (response.status === 404 && input.optional) {
-    return null;
+    if (response.status === 404 && input.optional) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw input.buildError(response, await parseResponseBody(response));
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    requestAbort.cleanup();
   }
-
-  if (!response.ok) {
-    throw input.buildError(response, await parseResponseBody(response));
-  }
-
-  return (await response.json()) as T;
 }
 
 export function buildOAuthConnectUrl(input: {

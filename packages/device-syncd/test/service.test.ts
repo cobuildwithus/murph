@@ -293,6 +293,12 @@ function requireStoredOAuthCredential(
   return account.credential;
 }
 
+function readAccountAccessTokenForTesting(account: DeviceSyncAccount): string | null {
+  return account.credential.kind === "oauth_tokens"
+    ? account.credential.tokens.accessToken
+    : null;
+}
+
 function assertStoredCredentialKind(
   account: StoredDeviceSyncAccount | null | undefined,
   kind: StoredDeviceSyncAccount["credential"]["kind"],
@@ -1306,6 +1312,344 @@ test("device sync service treats token refresh races as cancelled work instead o
   });
 
   close();
+});
+
+test("device sync service aborts and releases provider jobs when foreground work should yield", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-yield");
+  const imports: unknown[] = [];
+  let yieldRequested = false;
+  let executionCount = 0;
+  let providerStartedResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input);
+      return {
+        ok: true,
+      };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          executionCount += 1;
+
+          if (executionCount === 1) {
+            assert.ok(context.signal);
+            providerStartedResolve?.();
+            await new Promise<void>((_resolve, reject) => {
+              const abortTimeout = setTimeout(
+                () => reject(new Error("provider job was not aborted")),
+                1_000,
+              );
+              context.signal?.addEventListener("abort", () => {
+                clearTimeout(abortTimeout);
+                reject(context.signal?.reason ?? new Error("provider job aborted"));
+              }, { once: true });
+            });
+          }
+
+          await context.importSnapshot({
+            accountId: context.account.externalAccountId,
+            importedAt: context.now,
+          });
+          return {};
+        },
+      }),
+    ],
+    importer,
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "yield",
+    });
+
+    const workerPromise = service.runWorkerOnce();
+    await providerStarted;
+    yieldRequested = true;
+    const yieldedJob = await workerPromise;
+
+    assert.equal(yieldedJob?.kind, "backfill");
+    assert.equal(executionCount, 1);
+    assert.equal(imports.length, 0);
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+
+    const releasedJob = yieldedJob ? store.getJobById(yieldedJob.id) : null;
+    assert.equal(releasedJob?.status, "queued");
+    assert.equal(releasedJob?.leaseOwner, null);
+    assert.equal(releasedJob?.leaseExpiresAt, null);
+    assert.equal(releasedJob?.attempts, 0);
+
+    yieldRequested = false;
+    const completedJob = await service.runWorkerOnce();
+
+    assert.equal(completedJob?.id, yieldedJob?.id);
+    assert.equal(executionCount, 2);
+    assert.equal(imports.length, 1);
+    assert.equal(store.getJobById(completedJob!.id)?.status, "succeeded");
+  } finally {
+    close();
+  }
+});
+
+test("device sync service persists refreshed tokens before yielding provider jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-refresh-yield");
+  const imports: unknown[] = [];
+  let yieldRequested = false;
+  let executionCount = 0;
+  let refreshCalls = 0;
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input);
+      return {
+        ok: true,
+      };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createFakeProvider({
+        async refreshTokens(_account, options): Promise<ProviderAuthTokens> {
+          assert.ok(options?.signal);
+          refreshCalls += 1;
+          yieldRequested = true;
+          return {
+            accessToken: "rotated-access-token",
+            refreshToken: "rotated-refresh-token",
+          };
+        },
+        async executeJob(context) {
+          executionCount += 1;
+
+          if (executionCount === 1) {
+            await context.refreshAccountTokens();
+            throw new Error("refresh should yield after persisting rotated tokens");
+          }
+
+          assert.equal(readAccountAccessTokenForTesting(context.account), "rotated-access-token");
+          await context.importSnapshot({
+            accountId: context.account.externalAccountId,
+            importedAt: context.now,
+          });
+          return {};
+        },
+      }),
+    ],
+    importer,
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "refresh-yield",
+    });
+
+    const yieldedJob = await service.runWorkerOnce();
+
+    assert.equal(yieldedJob?.kind, "backfill");
+    assert.equal(executionCount, 1);
+    assert.equal(refreshCalls, 1);
+    assert.equal(imports.length, 0);
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+    assert.equal(store.getJobById(yieldedJob!.id)?.status, "queued");
+
+    yieldRequested = false;
+    const completedJob = await service.runWorkerOnce();
+
+    assert.equal(completedJob?.id, yieldedJob?.id);
+    assert.equal(executionCount, 2);
+    assert.equal(refreshCalls, 1);
+    assert.equal(imports.length, 1);
+    assert.equal(store.getJobById(completedJob!.id)?.status, "succeeded");
+  } finally {
+    close();
+  }
+});
+
+test("device sync service records provider failures even when the job signal has yielded", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-yielded-provider-failure");
+  let yieldRequested = false;
+  let providerStartedResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+      log: {
+        warn() {
+          // The provider failure is asserted through durable job state below.
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          assert.ok(context.signal);
+          providerStartedResolve?.();
+          await new Promise<void>((resolve, reject) => {
+            const abortTimeout = setTimeout(
+              () => reject(new Error("provider job was not yielded")),
+              1_000,
+            );
+            context.signal?.addEventListener("abort", () => {
+              clearTimeout(abortTimeout);
+              resolve();
+            }, { once: true });
+          });
+          throw new DOMException("Provider cancelled independently after yield.", "AbortError");
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "yielded-failure",
+    });
+
+    const workerPromise = service.runWorkerOnce();
+    await providerStarted;
+    yieldRequested = true;
+    const processedJob = await workerPromise;
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(store.getJobById(processedJob!.id)?.status, "dead");
+    assert.equal(store.getJobById(processedJob!.id)?.lastErrorCode, "SYNC_JOB_FAILED");
+    assert.equal(service.listJobFailureDiagnostics()[0]?.details.failureErrorName, "AbortError");
+  } finally {
+    close();
+  }
+});
+
+test("device sync service preserves provider-level yield job results", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-yield-result");
+  let yieldRequested = false;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          yieldRequested = true;
+          assert.equal(context.shouldYield?.(), true);
+          return {
+            nextReconcileAt: "2026-03-18T00:00:00.000Z",
+            scheduledJobs: [
+              {
+                kind: "backfill",
+                payload: {
+                  windowStart: "2026-03-16T00:00:00.000Z",
+                },
+              },
+            ],
+          };
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "provider-yield-result",
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+    const queuedJob = jobs.find((candidate) => candidate.id !== processedJob?.id);
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(jobs.length, 2);
+    assert.equal(store.getJobById(processedJob!.id)?.status, "succeeded");
+    assert.equal(queuedJob?.status, "queued");
+    assert.deepEqual(store.getJobById(queuedJob!.id)?.payload, {
+      windowStart: "2026-03-16T00:00:00.000Z",
+    });
+    assert.equal(store.getAccountById(connected.account.id)?.nextReconcileAt, "2026-03-18T00:00:00.000Z");
+  } finally {
+    close();
+  }
+});
+
+test("device sync worker skips claims while foreground work should yield", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-persistent-yield");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => true,
+    },
+    providers: [createFakeProvider()],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "persistent-yield",
+    });
+
+    assert.equal(await service.runWorkerOnce(), null);
+    assert.equal(await service.drainWorker(5), 0);
+
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0]?.status, "queued");
+    assert.equal(jobs[0]?.attempts, 0);
+  } finally {
+    close();
+  }
 });
 
 test("device sync service dead-letters provider-driven disconnect jobs", async () => {

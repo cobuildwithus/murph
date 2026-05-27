@@ -926,10 +926,7 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   skipped: boolean;
 } {
   return {
-    nextWakeAt: earliestHostedMaintenanceWakeAt(
-      input.service.getNextWakeAt(),
-      resolveHostedDeviceSyncYieldRetryAt(input.wake),
-    ),
+    nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(input.wake),
     postCheckpointRecord: null,
     processedJobs: input.processedJobs,
     skipped: true,
