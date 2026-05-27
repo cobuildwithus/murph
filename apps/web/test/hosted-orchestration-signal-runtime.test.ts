@@ -56,6 +56,7 @@ import {
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
+  signalHostedRuntimePrewarm,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 describe("hosted runtime Temporal signaling", () => {
@@ -230,6 +231,33 @@ describe("hosted runtime Temporal signaling", () => {
       prisma: mocks.prisma,
       userId: "member_123",
     });
+  });
+
+  it("signals typing prewarm without workspace or mailbox demand", async () => {
+    await signalHostedRuntimePrewarm({
+      client: buildClient(),
+      eventId: "linq_event_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      scopeHash: "linq-chat:abc123",
+      userId: "member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          eventId: expect.stringMatching(/^runtime-prewarm:[0-9a-f]{32}$/u),
+          kind: "runtime_prewarm_requested",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+          scopeHash: "linq-chat:abc123",
+          source: "linq.imessage.typing",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
   });
 
   it("dedupes durable device-sync recovery demands by source mailbox item and intent", async () => {

@@ -8,6 +8,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlRuntimePrewarmPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
   matchCloudflareHostedControlUserRoutePath,
@@ -24,6 +25,9 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlRuntimeEnsureProcessingPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/runtime/ensure-processing",
     );
+    expect(buildCloudflareHostedControlRuntimePrewarmPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/runtime/prewarm",
+    );
     expect(buildCloudflareHostedControlUserDataDeletionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/account-data/delete",
     );
@@ -34,6 +38,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlBrowserVaultSessionPath,
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+      buildCloudflareHostedControlRuntimePrewarmPath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
       expect(() => buildPath("  \t")).toThrow("Cloudflare hosted control userId must not be blank.");
@@ -58,6 +63,12 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
+        "runtimePrewarm",
+        buildCloudflareHostedControlRuntimePrewarmPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
         "userDataDelete",
         buildCloudflareHostedControlUserDataDeletionPath(userId),
       ),
@@ -77,6 +88,7 @@ describe("cloudflare hosted control routes", () => {
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
+      runtimePrewarm: { method: "POST", suffix: "runtime/prewarm" },
       status: { method: "GET", suffix: "status" },
       userDataDelete: { method: "POST", suffix: "account-data/delete" },
     });
@@ -124,6 +136,7 @@ describe("cloudflare hosted control routes", () => {
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
+      "buildCloudflareHostedControlRuntimePrewarmPath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
       "matchCloudflareHostedControlUserRoutePath",

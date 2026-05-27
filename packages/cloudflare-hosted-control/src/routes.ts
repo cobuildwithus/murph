@@ -12,6 +12,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "runtime/ensure-processing",
   },
+  runtimePrewarm: {
+    method: "POST",
+    suffix: "runtime/prewarm",
+  },
   userDataDelete: {
     method: "POST",
     suffix: "account-data/delete",
@@ -33,6 +37,10 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
 
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
+}
+
+export function buildCloudflareHostedControlRuntimePrewarmPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("runtimePrewarm", userId);
 }
 
 export function buildCloudflareHostedControlUserDataDeletionPath(userId: string): string {

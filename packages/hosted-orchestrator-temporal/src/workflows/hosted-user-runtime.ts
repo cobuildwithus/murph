@@ -1,4 +1,6 @@
 import {
+  ActivityCancellationType,
+  CancellationScope,
   condition,
   continueAsNew,
   defineQuery,
@@ -14,10 +16,13 @@ import type * as activities from "../activities/index.js";
 import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+  HOSTED_RUNTIME_PREWARM_SOURCE,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
   type HostedRuntimeCurrentWaitReason,
   type HostedRuntimeEnsureProcessingResponse,
+  type HostedRuntimePrewarmResponse,
+  type HostedRuntimePrewarmSource,
   type HostedRuntimeSignal,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -31,6 +36,7 @@ export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 5
 export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS = 5_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
@@ -44,6 +50,8 @@ const HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH =
   "hosted-user-runtime-same-runtime-wake-count-v1";
 const HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH =
   "hosted-user-runtime-recheck-signal-v1";
+const HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH =
+  "hosted-user-runtime-prewarm-signal-v1";
 export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
@@ -75,6 +83,18 @@ export async function hostedUserRuntimeWorkflow(
     },
     startToCloseTimeout: options.ensureRuntimeProcessingStartToCloseTimeoutMs,
   });
+  const prewarmActivities = proxyActivities<typeof activities>({
+    cancellationType: ActivityCancellationType.ABANDON,
+    retry: {
+      initialInterval: "1 second",
+      maximumAttempts: 2,
+      maximumInterval: "5 seconds",
+    },
+    startToCloseTimeout: Math.min(
+      options.ensureRuntimeProcessingStartToCloseTimeoutMs,
+      HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
+    ),
+  });
   const machine = createHostedUserRuntimeWorkflowMachine(input, {
     continueAsNew: async (nextInput) => continueAsNew<typeof hostedUserRuntimeWorkflow>(
       nextInput,
@@ -83,8 +103,32 @@ export async function hostedUserRuntimeWorkflow(
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
+    startRuntimePrewarm: (prewarmInput) => {
+      const scope = new CancellationScope();
+      return {
+        cancel: () => scope.cancel(),
+        result: scope.run(() =>
+          prewarmActivities.prewarmRuntimeContainer(prewarmInput)
+        ),
+      };
+    },
+    startSignalWait: (predicate, timeoutMs) => {
+      const scope = new CancellationScope();
+      return {
+        cancel: () => scope.cancel(),
+        result: scope.run(async () => {
+          if (timeoutMs === null) {
+            await condition(predicate);
+            return;
+          }
+          await condition(predicate, timeoutMs);
+        }),
+      };
+    },
     useEnsureRuntimeProcessingPatch: () =>
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
+    useRuntimePrewarmSignalPatch: () =>
+      patched(HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH),
     useSameRuntimeWakeAcceptedCountPatch: () =>
       patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
     useRuntimeRecheckSignalPatch: () =>
@@ -118,7 +162,17 @@ export interface HostedUserRuntimeWorkflowRuntime {
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
   readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
+  startRuntimePrewarm(input: {
+    prewarmAttemptId: string;
+    source: HostedRuntimePrewarmSource;
+    userId: string;
+  }): HostedUserRuntimePrewarmHandle;
+  startSignalWait(
+    predicate: () => boolean,
+    timeoutMs: number | null,
+  ): HostedUserRuntimeSignalWaitHandle;
   useEnsureRuntimeProcessingPatch(): void;
+  useRuntimePrewarmSignalPatch(): boolean;
   useRuntimeRecheckSignalPatch(): boolean;
   useSameRuntimeWakeAcceptedCountPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
@@ -134,6 +188,16 @@ type HostedRuntimeMailboxSignal = Extract<
   HostedRuntimeSignal,
   { kind: "mailbox_appended" }
 >;
+
+export interface HostedUserRuntimePrewarmHandle {
+  cancel(): void;
+  result: Promise<HostedRuntimePrewarmResponse>;
+}
+
+export interface HostedUserRuntimeSignalWaitHandle {
+  cancel(): void;
+  result: Promise<void>;
+}
 
 export interface HostedUserRuntimeWorkflowMachine {
   applySignal(signal: unknown): void;
@@ -174,6 +238,19 @@ export function createHostedUserRuntimeWorkflowMachine(
         return;
       }
       state.signalVersion += 1;
+      return;
+    }
+
+    if (signal.kind === "runtime_prewarm_requested") {
+      if (!runtime.useRuntimePrewarmSignalPatch()) {
+        recordInvalidSignal(state, "TypeError");
+        return;
+      }
+      state.signalVersion += 1;
+      state.prewarmRequested = true;
+      state.prewarmSignalCount += 1;
+      state.latestPrewarmRequestedAt = signal.occurredAt;
+      state.lastPrewarmErrorCode = null;
       return;
     }
 
@@ -268,6 +345,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       recordDemandSummary(state, demand);
 
       if (demand.kind === "blocked") {
+        clearPendingRuntimePrewarm(state);
         await waitUntilTimestampOrSignal(
           runtime,
           demand.retryAt,
@@ -279,6 +357,22 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       if (demand.kind === "idle") {
+        if (state.prewarmRequested) {
+          const demandVersionBeforePrewarm = demandSignalVersion;
+          await runRuntimePrewarmUntilDemandSignal({
+            demandSignalVersionBeforePrewarm: demandVersionBeforePrewarm,
+            getDemandSignalVersion: () => demandSignalVersion,
+            workflowInput: input,
+            runtime,
+            state,
+          });
+          if (demandSignalVersion !== demandVersionBeforePrewarm) {
+            continue;
+          }
+          if (state.signalVersion !== versionBeforeDemand) {
+            continue;
+          }
+        }
         clearSatisfiedFlags(state, versionBeforeDemand);
         await waitUntilTimestampOrSignal(
           runtime,
@@ -295,6 +389,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       let execution: HostedRuntimeEnsureProcessingResponse;
       const orchestrationAttemptId = runtime.uuid();
       state.lastOrchestrationAttemptId = orchestrationAttemptId;
+      clearPendingRuntimePrewarm(state);
       try {
         runtime.useEnsureRuntimeProcessingPatch();
         execution = await runtime.ensureRuntimeProcessing({
@@ -389,6 +484,68 @@ export function createHostedUserRuntimeWorkflowMachine(
     readStatus,
     run,
   };
+}
+
+async function runRuntimePrewarmUntilDemandSignal(input: {
+  demandSignalVersionBeforePrewarm: number;
+  getDemandSignalVersion(): number;
+  runtime: HostedUserRuntimeWorkflowRuntime;
+  state: HostedRuntimeWorkflowState;
+  workflowInput: HostedUserRuntimeWorkflowInput;
+}): Promise<void> {
+  const prewarmAttemptId = input.runtime.uuid();
+  input.state.lastPrewarmAttemptId = prewarmAttemptId;
+  const prewarmHandle = input.runtime.startRuntimePrewarm({
+    prewarmAttemptId,
+    source: HOSTED_RUNTIME_PREWARM_SOURCE,
+    userId: input.workflowInput.userId,
+  });
+  const demandSignalWait = input.runtime.startSignalWait(
+    () =>
+      input.getDemandSignalVersion()
+        !== input.demandSignalVersionBeforePrewarm,
+    null,
+  );
+
+  const outcome = await Promise.race([
+    prewarmHandle.result.then(
+      (result) => ({ kind: "completed" as const, result }),
+      (error: unknown) => ({ error, kind: "failed" as const }),
+    ),
+    demandSignalWait.result.then(
+      () => ({ kind: "demand_signal" as const }),
+      (error: unknown) => ({ error, kind: "wait_failed" as const }),
+    ),
+  ]);
+
+  input.state.prewarmRequested = false;
+
+  if (outcome.kind === "demand_signal") {
+    prewarmHandle.cancel();
+    input.state.lastPrewarmResult = null;
+    input.state.lastPrewarmErrorCode = "abandoned_for_demand";
+    return;
+  }
+
+  demandSignalWait.cancel();
+
+  if (outcome.kind === "wait_failed") {
+    input.state.lastPrewarmResult = "failed";
+    input.state.lastPrewarmErrorCode = readExecutionErrorCode(outcome.error);
+    return;
+  }
+
+  if (outcome.kind === "failed") {
+    input.state.lastPrewarmResult = "failed";
+    input.state.lastPrewarmErrorCode = readExecutionErrorCode(outcome.error);
+    return;
+  }
+
+  input.state.lastPrewarmErrorCode = null;
+  input.state.lastPrewarmResult =
+    outcome.result.kind === "runtime_prewarm_accepted"
+      ? "accepted"
+      : "retry_later";
 }
 
 function recordInvalidSignal(
@@ -489,13 +646,23 @@ function createInitialWorkflowState(
     lastRuntimeAttemptId: carryForward?.lastRuntimeAttemptId ?? null,
     lastRuntimeStatus: carryForward?.lastRuntimeStatus ?? null,
     latestMailboxPointer: carryForward?.latestMailboxPointer ?? null,
+    latestPrewarmRequestedAt: carryForward?.latestPrewarmRequestedAt ?? null,
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
     manualRunRequested: carryForward?.manualRunRequested ?? false,
+    lastPrewarmAttemptId: carryForward?.lastPrewarmAttemptId ?? null,
+    lastPrewarmErrorCode: carryForward?.lastPrewarmErrorCode ?? null,
+    lastPrewarmResult: carryForward?.lastPrewarmResult ?? null,
+    prewarmRequested: carryForward?.prewarmRequested ?? false,
+    prewarmSignalCount: carryForward?.prewarmSignalCount ?? 0,
     sameRuntimeWakeAcceptedCount:
       carryForward?.sameRuntimeWakeAcceptedCount ?? 0,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };
+}
+
+function clearPendingRuntimePrewarm(state: HostedRuntimeWorkflowState): void {
+  state.prewarmRequested = false;
 }
 
 export function normalizeHostedUserRuntimeWorkflowOptions(
@@ -831,6 +998,38 @@ function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
       assertKindOnlySignal(record, "Hosted runtime recheck signal");
       return { kind };
     }
+    case "runtime_prewarm_requested": {
+      assertExactSignalKeys(record, "Hosted runtime prewarm signal", [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "scopeHash",
+        "source",
+      ]);
+      return {
+        eventId: requireOpaqueIdentifier(
+          record.eventId,
+          "Hosted runtime prewarm signal eventId",
+        ),
+        kind,
+        occurredAt: requireIsoTimestamp(
+          record.occurredAt,
+          "Hosted runtime prewarm signal occurredAt",
+        ),
+        ...(record.scopeHash === undefined || record.scopeHash === null
+          ? {}
+          : {
+              scopeHash: requireOpaqueIdentifier(
+                record.scopeHash,
+                "Hosted runtime prewarm signal scopeHash",
+              ),
+            }),
+        source: requirePrewarmSource(
+          record.source,
+          "Hosted runtime prewarm signal source",
+        ),
+      };
+    }
     default:
       throw new TypeError("Hosted runtime signal kind is not supported.");
   }
@@ -887,6 +1086,28 @@ function requireSafeRuntimeSignalSource(value: unknown, label: string): string {
     );
   }
 
+  return text;
+}
+
+function requirePrewarmSource(
+  value: unknown,
+  label: string,
+): HostedRuntimePrewarmSource {
+  const text = requireString(value, label);
+  if (text !== HOSTED_RUNTIME_PREWARM_SOURCE) {
+    throw new TypeError(`${label} is not supported.`);
+  }
+  return HOSTED_RUNTIME_PREWARM_SOURCE;
+}
+
+function requireIsoTimestamp(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(text)
+    || Number.isNaN(Date.parse(text))
+  ) {
+    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+  }
   return text;
 }
 

@@ -5,6 +5,7 @@ import type {
   HostedRuntimeDemandRequest,
   HostedRuntimeDemandWorkspaceProjection,
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimePrewarmResponse,
   HostedRuntimeSignal,
   HostedUserRuntimeWorkflowInput,
 } from "../src/index.js";
@@ -177,6 +178,78 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state?.invalidSignalCount).toBe(1);
     expect(continued.state?.lastInvalidSignalErrorCode).toBe("TypeError");
     expect(continued.state?.signalVersion).toBe(0);
+  });
+
+  it("prewarms the runtime container only while idle", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(idleDemand(null));
+    runtime.prewarms.push({
+      action: "started",
+      kind: "runtime_prewarm_accepted",
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(runtimePrewarmSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.prewarmRequests).toEqual([
+      {
+        prewarmAttemptId: "orchestration-attempt-1",
+        source: "linq.imessage.typing",
+        userId: "member_test",
+      },
+    ]);
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(continued.state).toMatchObject({
+      lastPrewarmAttemptId: "orchestration-attempt-1",
+      lastPrewarmErrorCode: null,
+      lastPrewarmResult: "accepted",
+      prewarmRequested: false,
+      prewarmSignalCount: 1,
+    });
+  });
+
+  it("does not let pending prewarm block a later mailbox demand signal", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    runtime.demands.push(idleDemand(null));
+    runtime.demands.push(runDemand({
+      mailboxLag: [mailboxLag()],
+      source: "mailbox_backlog",
+    }));
+    runtime.executions.push(processingAccepted());
+    runtime.prewarms.push(new Promise<HostedRuntimePrewarmResponse>(() => undefined));
+    runtime.onSignalWait = () => {
+      machine?.applySignal(mailboxSignal());
+      runtime.resolveSignalWaits();
+    };
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(runtimePrewarmSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.prewarmRequests).toHaveLength(1);
+    expect(runtime.prewarmCancelCount).toBe(1);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-2",
+        reason: "nudge",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state).toMatchObject({
+      lastPrewarmErrorCode: "abandoned_for_demand",
+      lastPrewarmResult: null,
+      prewarmRequested: false,
+    });
   });
 
   it("does not retain consumed demand flags when runtime recheck arrives during processing", async () => {
@@ -1126,6 +1199,12 @@ type ExecutionInput = Parameters<
 type ExecutionHandler = (
   request: ExecutionInput,
 ) => HostedRuntimeEnsureProcessingResponse | Promise<HostedRuntimeEnsureProcessingResponse>;
+type PrewarmInput = Parameters<
+  HostedUserRuntimeWorkflowRuntime["startRuntimePrewarm"]
+>[0];
+type PrewarmHandler = (
+  request: PrewarmInput,
+) => HostedRuntimePrewarmResponse | Promise<HostedRuntimePrewarmResponse>;
 type RunDemand = Extract<HostedRuntimeDemand, { kind: "run" }>;
 
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
@@ -1134,6 +1213,11 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly demands: Array<DemandHandler | HostedRuntimeDemand> = [];
   readonly executionRequests: ExecutionInput[] = [];
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
+  onSignalWait: (() => void) | null = null;
+  prewarmCancelCount = 0;
+  readonly prewarmRequests: PrewarmInput[] = [];
+  readonly prewarms: Array<PrewarmHandler | HostedRuntimePrewarmResponse | Promise<HostedRuntimePrewarmResponse>> = [];
+  prewarmSignalPatchEnabled = true;
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
   runtimeRecheckSignalPatchEnabled = true;
@@ -1142,6 +1226,12 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   suggestContinueAsNew = false;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
+  private readonly signalWaits: Array<{
+    cancelled: boolean;
+    predicate: () => boolean;
+    reject(error: unknown): void;
+    resolve(): void;
+  }> = [];
 
   async continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never> {
     this.continuedInput = input;
@@ -1178,6 +1268,63 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return typeof next === "function" ? next(request) : next;
   }
 
+  startRuntimePrewarm(request: PrewarmInput) {
+    this.prewarmRequests.push(request);
+    const next = this.prewarms.shift();
+    if (!next) {
+      throw new Error("Unexpected prewarmRuntimeContainer call.");
+    }
+    const result = Promise.resolve(
+      typeof next === "function" ? next(request) : next,
+    );
+    return {
+      cancel: () => {
+        this.prewarmCancelCount += 1;
+      },
+      result,
+    };
+  }
+
+  startSignalWait(predicate: () => boolean, _timeoutMs: number | null) {
+    this.onSignalWait?.();
+    if (predicate()) {
+      return {
+        cancel: () => undefined,
+        result: Promise.resolve(),
+      };
+    }
+
+    let resolveWait!: () => void;
+    let rejectWait!: (error: unknown) => void;
+    const result = new Promise<void>((resolve, reject) => {
+      resolveWait = resolve;
+      rejectWait = reject;
+    });
+    const wait = {
+      cancelled: false,
+      predicate,
+      reject: rejectWait,
+      resolve: resolveWait,
+    };
+    this.signalWaits.push(wait);
+    return {
+      cancel: () => {
+        wait.cancelled = true;
+        rejectWait(new Error("signal wait cancelled"));
+      },
+      result,
+    };
+  }
+
+  resolveSignalWaits(): void {
+    for (const wait of this.signalWaits) {
+      if (!wait.cancelled && wait.predicate()) {
+        wait.cancelled = true;
+        wait.resolve();
+      }
+    }
+  }
+
   useSignalOnlyWaitForNonRetryableFailure(): boolean {
     return this.signalOnlyNonRetryableFailureWaitEnabled;
   }
@@ -1188,6 +1335,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useRuntimeRecheckSignalPatch(): boolean {
     return this.runtimeRecheckSignalPatchEnabled;
+  }
+
+  useRuntimePrewarmSignalPatch(): boolean {
+    return this.prewarmSignalPatchEnabled;
   }
 
   useSameRuntimeWakeAcceptedCountPatch(): boolean {
@@ -1253,8 +1404,14 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     lastRuntimeAttemptId: null,
     lastRuntimeStatus: null,
     latestMailboxPointer: null,
+    latestPrewarmRequestedAt: null,
     mailboxSignalCount: 0,
     manualRunRequested: false,
+    lastPrewarmAttemptId: null,
+    lastPrewarmErrorCode: null,
+    lastPrewarmResult: null,
+    prewarmRequested: false,
+    prewarmSignalCount: 0,
     sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 0,
   };
@@ -1285,6 +1442,15 @@ function browserVaultSignal(): HostedRuntimeSignal {
 function runtimeRecheckSignal(): HostedRuntimeSignal {
   return {
     kind: "runtime_recheck_requested",
+  };
+}
+
+function runtimePrewarmSignal(): HostedRuntimeSignal {
+  return {
+    eventId: "runtime-prewarm:event-test",
+    kind: "runtime_prewarm_requested",
+    occurredAt: "2026-05-20T11:59:58.000Z",
+    source: "linq.imessage.typing",
   };
 }
 

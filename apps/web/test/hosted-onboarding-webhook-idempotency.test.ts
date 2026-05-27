@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   nudgeHostedRunnerUserBestEffort: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  signalHostedRuntimePrewarm: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedRuntimePrewarm: mocks.signalHostedRuntimePrewarm,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({

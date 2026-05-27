@@ -143,6 +143,13 @@ updates the interval/action when it already exists. Set
 `HOSTED_DEVICE_SYNC_RECONCILER_SCHEDULE_ENABLED=false` only to create or update
 the Schedule in a paused state.
 
+`pnpm dev` / `pnpm hosted-local up` runs this ensure command automatically
+before starting the hosted-local Temporal worker in `auto` and `managed` modes.
+External Temporal namespaces are not mutated by local startup unless
+`MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE=1` is set explicitly. Run the
+command manually only when bringing up an out-of-band Temporal namespace or
+repairing an existing dev session without restarting the stack.
+
 ## Env Contract
 
 Temporal connection:
@@ -156,6 +163,9 @@ Temporal connection:
   the stack to `external`.
 - `MURPH_DEV_TEMPORAL_HOST` / `MURPH_DEV_TEMPORAL_PORT`: local dev server bind
   address for auto/managed hosted-local Temporal.
+- `MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE`: set to `1` only when
+  `pnpm dev` should create/update the device-sync reconciler Schedule in an
+  explicit external Temporal namespace.
 - `HOSTED_TEMPORAL_ADDRESS` / `TEMPORAL_ADDRESS`: Temporal frontend address, for
   example `localhost:7233`.
 - `HOSTED_TEMPORAL_NAMESPACE` / `TEMPORAL_NAMESPACE`: namespace, defaults to

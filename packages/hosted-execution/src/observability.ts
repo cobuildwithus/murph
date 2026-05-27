@@ -2,6 +2,7 @@ export const HOSTED_EXECUTION_LOG_PHASES = [
   "wake.running",
   "container.starting",
   "container.ready",
+  "runtime.prewarm",
   "runtime.starting",
   "checkpoint",
   "outbox",

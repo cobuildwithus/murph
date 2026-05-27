@@ -1808,6 +1808,51 @@ describe("appendHostedDeviceSyncWake", () => {
     }
   });
 
+  it("leaves coalesced level webhooks waiting for the recovery sweeper after the first dirty nudge is missed", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.hasPendingDirtyConnection
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
+
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const controlPlane = new HostedDeviceSyncControlPlane(
+          new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+            body: JSON.stringify({
+              event: "sleep.updated",
+            }),
+            headers: {
+              "content-type": "application/json",
+            },
+            method: "POST",
+          }),
+        );
+
+        await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+          accepted: true,
+        });
+      }
+
+      expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+      expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+      expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
+      expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted device-sync dirty background maintenance signal failed after webhook acceptance.",
+        expect.objectContaining({
+          code: "HOSTED_DEVICE_SYNC_BACKGROUND_MAINTENANCE_SIGNAL_FAILED",
+          traceIdPresent: true,
+          userIdPresent: true,
+        }),
+      );
+    } finally {
+      consoleWarn.mockRestore();
+    }
+  });
+
   it("coalesces a historical webhook burst into one dirty row and one background nudge while the connection stays dirty", async () => {
     let traceIndex = 0;
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {

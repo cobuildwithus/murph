@@ -352,6 +352,7 @@ describe("RunnerContainer", () => {
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({
+      action: "started",
       kind: "ready",
     });
 

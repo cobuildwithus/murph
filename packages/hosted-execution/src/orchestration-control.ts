@@ -22,11 +22,22 @@ export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "device_sync_recovery_requested",
   "mailbox_lag_observed",
   "runtime_recheck_requested",
+  "runtime_prewarm_requested",
 ] as const;
 
 export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[number];
 
 export type HostedRuntimeMailboxSignalSource = string;
+
+export const HOSTED_RUNTIME_PREWARM_SOURCE =
+  "linq.imessage.typing" as const;
+
+export const HOSTED_RUNTIME_PREWARM_SOURCES = [
+  HOSTED_RUNTIME_PREWARM_SOURCE,
+] as const;
+
+export type HostedRuntimePrewarmSource =
+  (typeof HOSTED_RUNTIME_PREWARM_SOURCES)[number];
 
 export type HostedRuntimeSignal =
   | {
@@ -50,6 +61,13 @@ export type HostedRuntimeSignal =
     }
   | {
       kind: "runtime_recheck_requested";
+    }
+  | {
+      eventId: string;
+      kind: "runtime_prewarm_requested";
+      occurredAt: string;
+      scopeHash?: string | null;
+      source: HostedRuntimePrewarmSource;
     };
 
 export interface HostedRuntimeMailboxPointer {
@@ -161,6 +179,38 @@ export type HostedRuntimeEnsureProcessingResponse =
       retryAt: string;
     };
 
+export interface HostedRuntimePrewarmRequest {
+  prewarmAttemptId: string;
+  source: HostedRuntimePrewarmSource;
+}
+
+export const HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS = [
+  "runtime_prewarm_accepted",
+  "retry_later",
+] as const;
+
+export type HostedRuntimePrewarmResponseKind =
+  (typeof HOSTED_RUNTIME_PREWARM_RESPONSE_KINDS)[number];
+
+export const HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS = [
+  "started",
+  "already_warm",
+  "already_running",
+] as const;
+
+export type HostedRuntimePrewarmAcceptedAction =
+  (typeof HOSTED_RUNTIME_PREWARM_ACCEPTED_ACTIONS)[number];
+
+export type HostedRuntimePrewarmResponse =
+  | {
+      action: HostedRuntimePrewarmAcceptedAction;
+      kind: "runtime_prewarm_accepted";
+    }
+  | {
+      kind: "retry_later";
+      retryAt: string;
+    };
+
 export const HOSTED_RUNTIME_CURRENT_WAIT_REASONS = [
   "idle_next_wake",
   "blocked_retry",
@@ -185,6 +235,12 @@ export type HostedRuntimeLastRuntimeStatus =
   | "scheduled"
   | null;
 
+export type HostedRuntimeLastPrewarmResult =
+  | "accepted"
+  | "retry_later"
+  | "failed"
+  | null;
+
 export interface HostedRuntimeWorkflowState {
   browserVaultRefreshRequested: boolean;
   currentWaitReason: HostedRuntimeCurrentWaitReason;
@@ -204,8 +260,14 @@ export interface HostedRuntimeWorkflowState {
   lastRuntimeAttemptId: string | null;
   lastRuntimeStatus: HostedRuntimeLastRuntimeStatus;
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
+  latestPrewarmRequestedAt: string | null;
   mailboxSignalCount: number;
   manualRunRequested: boolean;
+  lastPrewarmAttemptId: string | null;
+  lastPrewarmErrorCode: string | null;
+  lastPrewarmResult: HostedRuntimeLastPrewarmResult;
+  prewarmRequested: boolean;
+  prewarmSignalCount: number;
   sameRuntimeWakeAcceptedCount: number;
   signalVersion: number;
   userId: string;

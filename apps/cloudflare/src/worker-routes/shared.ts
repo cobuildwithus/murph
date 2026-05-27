@@ -6,6 +6,8 @@ import type {
 import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimePrewarmRequest,
+  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedCryptoDomain,
@@ -37,6 +39,11 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;
+  prewarmRuntimeContainerForUser(
+    input: HostedRuntimePrewarmRequest & {
+      userId: string;
+    },
+  ): Promise<HostedRuntimePrewarmResponse>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;

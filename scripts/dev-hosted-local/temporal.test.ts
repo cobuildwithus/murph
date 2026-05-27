@@ -28,6 +28,16 @@ type SpawnSync = (
   error?: Error;
   status: number | null;
 };
+type RunCommand = (
+  command: string,
+  args: string[],
+  input: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    name: "setup";
+    signal?: AbortSignal;
+  },
+) => Promise<void>;
 
 const spawnSyncMock = vi.hoisted(() =>
   vi.fn<SpawnSync>(() => ({
@@ -47,12 +57,16 @@ const spawnChildProcessMock = vi.hoisted(() =>
 const terminateChildProcessAndWaitMock = vi.hoisted(() =>
   vi.fn(async () => {}),
 );
+const runCommandMock = vi.hoisted(() =>
+  vi.fn<RunCommand>(async () => {}),
+);
 
 vi.mock("node:child_process", () => ({
   spawnSync: spawnSyncMock,
 }));
 
 vi.mock("./runtime.ts", () => ({
+  runCommand: runCommandMock,
   spawnChildProcess: spawnChildProcessMock,
   terminateChildProcessAndWait: terminateChildProcessAndWaitMock,
   throwIfAbortSignalAborted: vi.fn((signal?: AbortSignal) => {
@@ -112,6 +126,8 @@ describe("hosted-local Temporal lifecycle", () => {
       name,
       pid: 100,
     }));
+    runCommandMock.mockReset();
+    runCommandMock.mockImplementation(async () => {});
     vi.resetModules();
   });
 
@@ -205,6 +221,128 @@ describe("hosted-local Temporal lifecycle", () => {
     });
   });
 
+  it("starts an external-mode worker without mutating the external Temporal schedule by default", async () => {
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    const runtime = await startHostedLocalTemporalRuntime({
+      cloudflareHostedControlBaseUrl: "http://0.0.0.0:8787",
+      config: {
+        ...baseConfig,
+        temporal: {
+          host: "127.0.0.1",
+          mode: "external",
+          namespace: "hosted-external",
+          port: 7233,
+          taskQueue: "hosted-external-queue",
+        },
+      },
+      env: {
+        HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
+        HOSTED_TEMPORAL_API_KEY: "remote-secret",
+        HOSTED_TEMPORAL_TLS_ENABLED: "true",
+      },
+      hostedWebBaseUrl: "http://localhost:3000",
+    });
+
+    expect(runtime?.serverProcess).toBeNull();
+    expect(runCommandMock).not.toHaveBeenCalled();
+    expect(spawnChildProcessMock).toHaveBeenCalledWith(
+      "temporal-worker",
+      "pnpm",
+      ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
+      expect.objectContaining({
+        CLOUDFLARE_HOSTED_CONTROL_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
+        HOSTED_TEMPORAL_API_KEY: "remote-secret",
+        HOSTED_TEMPORAL_NAMESPACE: "hosted-external",
+        HOSTED_TEMPORAL_TASK_QUEUE: "hosted-external-queue",
+        HOSTED_TEMPORAL_TLS_ENABLED: "true",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
+        TEMPORAL_ADDRESS: "temporal.example.test:7233",
+        TEMPORAL_NAMESPACE: "hosted-external",
+        TEMPORAL_TASK_QUEUE: "hosted-external-queue",
+      }),
+      expect.any(Object),
+    );
+
+    await runtime?.stop();
+    expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ensures the schedule before starting an opted-in external-mode worker with the worker env", async () => {
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    const runtime = await startHostedLocalTemporalRuntime({
+      cloudflareHostedControlBaseUrl: "http://0.0.0.0:8787",
+      config: {
+        ...baseConfig,
+        temporal: {
+          host: "127.0.0.1",
+          mode: "external",
+          namespace: "hosted-external",
+          port: 7233,
+          taskQueue: "hosted-external-queue",
+        },
+      },
+      env: {
+        HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
+        HOSTED_TEMPORAL_API_KEY: "remote-secret",
+        HOSTED_TEMPORAL_TLS_ENABLED: "true",
+        MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE: "1",
+      },
+      hostedWebBaseUrl: "http://localhost:3000",
+    });
+
+    expect(runtime?.serverProcess).toBeNull();
+    expect(runCommandMock).toHaveBeenCalledWith(
+      "pnpm",
+      [
+        "--dir",
+        "packages/hosted-orchestrator-temporal",
+        "temporal:ensure-device-sync-reconciler-schedule",
+      ],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          CLOUDFLARE_HOSTED_CONTROL_BASE_URL: "http://127.0.0.1:8787",
+          HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
+          HOSTED_TEMPORAL_API_KEY: "remote-secret",
+          HOSTED_TEMPORAL_NAMESPACE: "hosted-external",
+          HOSTED_TEMPORAL_TASK_QUEUE: "hosted-external-queue",
+          HOSTED_TEMPORAL_TLS_ENABLED: "true",
+          HOSTED_WEB_BASE_URL: "http://localhost:3000",
+          MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE: "1",
+          TEMPORAL_ADDRESS: "temporal.example.test:7233",
+          TEMPORAL_NAMESPACE: "hosted-external",
+          TEMPORAL_TASK_QUEUE: "hosted-external-queue",
+        }),
+        name: "setup",
+      }),
+    );
+    expect(spawnChildProcessMock).toHaveBeenCalledWith(
+      "temporal-worker",
+      "pnpm",
+      ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
+      expect.objectContaining({
+        CLOUDFLARE_HOSTED_CONTROL_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
+        HOSTED_TEMPORAL_API_KEY: "remote-secret",
+        HOSTED_TEMPORAL_NAMESPACE: "hosted-external",
+        HOSTED_TEMPORAL_TASK_QUEUE: "hosted-external-queue",
+        HOSTED_TEMPORAL_TLS_ENABLED: "true",
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
+        MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE: "1",
+        TEMPORAL_ADDRESS: "temporal.example.test:7233",
+        TEMPORAL_NAMESPACE: "hosted-external",
+        TEMPORAL_TASK_QUEUE: "hosted-external-queue",
+      }),
+      expect.any(Object),
+    );
+    expectScheduleEnsureBeforeWorker();
+
+    await runtime?.stop();
+    expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(1);
+  });
+
   it("starts a managed Temporal server and worker", async () => {
     const port = await reserveLocalTcpPort();
     const server = net.createServer();
@@ -243,6 +381,27 @@ describe("hosted-local Temporal lifecycle", () => {
       const serverCall = spawnChildProcessMock.mock.calls.find(([name]) => name === "temporal-server");
       expect(serverCall?.[3]).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
       expect(runtime?.address).toBe(`127.0.0.1:${port}`);
+      expect(runCommandMock).toHaveBeenCalledWith(
+        "pnpm",
+        [
+          "--dir",
+          "packages/hosted-orchestrator-temporal",
+          "temporal:ensure-device-sync-reconciler-schedule",
+        ],
+        expect.objectContaining({
+          cwd: expect.any(String),
+          env: expect.objectContaining({
+            CLOUDFLARE_HOSTED_CONTROL_BASE_URL: "http://127.0.0.1:8787",
+            HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "local-callback-private",
+            HOSTED_WEB_BASE_URL: "http://localhost:3000",
+            TEMPORAL_ADDRESS: `127.0.0.1:${port}`,
+            TEMPORAL_NAMESPACE: "hosted-managed",
+            TEMPORAL_TASK_QUEUE: "hosted-managed-queue",
+          }),
+          name: "setup",
+          signal: undefined,
+        }),
+      );
       expect(spawnChildProcessMock).toHaveBeenCalledWith(
         "temporal-server",
         "bash",
@@ -269,9 +428,52 @@ describe("hosted-local Temporal lifecycle", () => {
         }),
         expect.any(Object),
       );
+      expectScheduleEnsureBeforeWorker();
 
       await runtime?.stop();
       expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("stops managed Temporal if the schedule ensure command fails before worker startup", async () => {
+    const port = await reserveLocalTcpPort();
+    const server = net.createServer();
+    runCommandMock.mockRejectedValueOnce(new Error("schedule ensure failed"));
+    spawnChildProcessMock.mockImplementation((name) => {
+      if (name === "temporal-server") {
+        server.listen(port, "127.0.0.1");
+      }
+
+      return createBufferedChild({
+        exitCode: null,
+        name,
+        pid: name === "temporal-server" ? 211 : 212,
+      });
+    });
+    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+
+    try {
+      await expect(startHostedLocalTemporalRuntime({
+        cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",
+        config: {
+          ...baseConfig,
+          temporal: {
+            host: "127.0.0.1",
+            mode: "managed",
+            namespace: "hosted-managed",
+            port,
+            taskQueue: "hosted-managed-queue",
+          },
+        },
+        env: {},
+        hostedWebBaseUrl: "http://localhost:3000",
+      })).rejects.toThrow("schedule ensure failed");
+
+      expect(spawnChildProcessMock.mock.calls.some(([name]) => name === "temporal-worker"))
+        .toBe(false);
+      expect(terminateChildProcessAndWaitMock).toHaveBeenCalledTimes(1);
     } finally {
       await closeServer(server);
     }
@@ -331,6 +533,25 @@ describe("hosted-local Temporal lifecycle", () => {
         }),
         expect.any(Object),
       );
+      expect(runCommandMock).toHaveBeenCalledWith(
+        "pnpm",
+        [
+          "--dir",
+          "packages/hosted-orchestrator-temporal",
+          "temporal:ensure-device-sync-reconciler-schedule",
+        ],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            HOSTED_TEMPORAL_TLS_ENABLED: "false",
+            TEMPORAL_ADDRESS: `127.0.0.1:${port}`,
+            TEMPORAL_NAMESPACE: "hosted-auto",
+            TEMPORAL_TASK_QUEUE: "hosted-auto-queue",
+            TEMPORAL_TLS_ENABLED: "false",
+          }),
+          name: "setup",
+        }),
+      );
+      expectScheduleEnsureBeforeWorker();
       for (const [, , options] of spawnSyncMock.mock.calls) {
         const env = (options as { env?: NodeJS.ProcessEnv } | undefined)?.env;
         expect(env).toMatchObject({
@@ -648,6 +869,18 @@ async function closeServer(server: net.Server): Promise<void> {
       }
     });
   });
+}
+
+function expectScheduleEnsureBeforeWorker(): void {
+  const ensureCallOrder = runCommandMock.mock.invocationCallOrder[0];
+  const workerCallIndex = spawnChildProcessMock.mock.calls
+    .findIndex(([name]) => name === "temporal-worker");
+
+  expect(workerCallIndex).toBeGreaterThanOrEqual(0);
+  const workerCallOrder = spawnChildProcessMock.mock.invocationCallOrder[workerCallIndex];
+  expect(ensureCallOrder).toBeDefined();
+  expect(workerCallOrder).toBeDefined();
+  expect(Number(ensureCallOrder)).toBeLessThan(Number(workerCallOrder));
 }
 
 function createBufferedChild(input: {

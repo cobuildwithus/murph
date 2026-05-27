@@ -5,6 +5,7 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+  HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
   type HostedRuntimeDemandWorkspaceProjection,
   type HostedRuntimeSignal,
 } from "../src/orchestration-control.ts";
@@ -19,6 +20,8 @@ import {
   parseHostedRuntimeDemandRequest,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
+  parseHostedRuntimePrewarmRequest,
+  parseHostedRuntimePrewarmResponse,
   parseHostedRuntimeSignal,
 } from "../src/parsers.ts";
 
@@ -54,11 +57,24 @@ describe("hosted orchestration control contracts", () => {
       {
         kind: "runtime_recheck_requested",
       },
+      {
+        eventId: "runtime-prewarm:event-test",
+        kind: "runtime_prewarm_requested",
+        occurredAt: "2026-05-20T12:00:00.000Z",
+        scopeHash: "linq-chat:scope-test",
+        source: "linq.imessage.typing",
+      },
     ];
 
     for (const signal of signals) {
       expect(parseHostedRuntimeSignal(signal)).toEqual(signal);
     }
+  });
+
+  it("keeps typing prewarm out of durable demand sources", () => {
+    expect(HOSTED_RUNTIME_DEMAND_RUN_SOURCES).not.toContain(
+      "linq.imessage.typing",
+    );
   });
 
   it("rejects raw payload-shaped fields in runtime signals", () => {
@@ -318,6 +334,62 @@ describe("hosted orchestration control contracts", () => {
       retryAt: "2026-05-20T12:04:00.000Z",
     })).toThrow(
       "Hosted runtime processing retry-later response must not include reason.",
+    );
+  });
+
+  it("parses prewarm request and response variants without mailbox fields", () => {
+    expect(parseHostedRuntimePrewarmRequest({
+      prewarmAttemptId: "prewarm_attempt_test",
+      source: "linq.imessage.typing",
+    })).toEqual({
+      prewarmAttemptId: "prewarm_attempt_test",
+      source: "linq.imessage.typing",
+    });
+
+    for (const action of [
+      "started",
+      "already_warm",
+      "already_running",
+    ] as const) {
+      expect(parseHostedRuntimePrewarmResponse({
+        action,
+        kind: "runtime_prewarm_accepted",
+      })).toEqual({
+        action,
+        kind: "runtime_prewarm_accepted",
+      });
+    }
+
+    expect(parseHostedRuntimePrewarmResponse({
+      kind: "retry_later",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    })).toEqual({
+      kind: "retry_later",
+      retryAt: "2026-05-20T12:04:00.000Z",
+    });
+  });
+
+  it("rejects mailbox and processing fields in prewarm contracts", () => {
+    expect(() => parseHostedRuntimePrewarmRequest({
+      prewarmAttemptId: "prewarm_attempt_test",
+      reason: "nudge",
+      source: "linq.imessage.typing",
+    })).toThrow("Hosted runtime prewarm request must not include reason.");
+
+    expect(() => parseHostedRuntimePrewarmResponse({
+      action: "already_warm",
+      kind: "runtime_prewarm_accepted",
+      runtimeAttemptId: "runtime_attempt_test",
+    })).toThrow(
+      "Hosted runtime prewarm-accepted response must not include runtimeAttemptId.",
+    );
+
+    expect(() => parseHostedRuntimePrewarmResponse({
+      kind: "retry_later",
+      mailboxLag: [],
+      retryAt: "2026-05-20T12:04:00.000Z",
+    })).toThrow(
+      "Hosted runtime prewarm retry-later response must not include mailboxLag.",
     );
   });
 });

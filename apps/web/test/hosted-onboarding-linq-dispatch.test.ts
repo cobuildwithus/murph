@@ -105,6 +105,10 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
+    signalHostedRuntimePrewarm: vi.fn(async () => ({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    })),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
@@ -204,6 +208,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedRuntimePrewarm: mocks.signalHostedRuntimePrewarm,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -432,6 +437,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: 204,
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+    mocks.signalHostedRuntimePrewarm.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });

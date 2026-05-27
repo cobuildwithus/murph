@@ -181,6 +181,75 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
   });
 
+  it("prewarms the container shell without taking a write fence or invoking runtime work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ action: "started", kind: "ready" }));
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.prewarmRuntimeContainerForUser({
+      prewarmAttemptId: "prewarm_attempt_1",
+      source: "linq.imessage.typing",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      action: "started",
+      kind: "runtime_prewarm_accepted",
+    });
+
+    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await flushWaitUntil();
+  });
+
+  it("treats prewarm during an active runtime fence as already running", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ action: "already_warm", kind: "ready" }));
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+    });
+    await runner.bindUser(TEST_USER_ID);
+    await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "5",
+    });
+
+    await expect(runner.prewarmRuntimeContainerForUser({
+      prewarmAttemptId: "prewarm_attempt_2",
+      source: "linq.imessage.typing",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      action: "already_running",
+      kind: "runtime_prewarm_accepted",
+    });
+
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+  });
+
   it("passes a derived snapshot path diagnostics key without forwarding the raw log secret", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
