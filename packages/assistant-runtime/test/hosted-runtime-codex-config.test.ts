@@ -120,6 +120,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
+  assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[features\]\nplugins = false/u);
@@ -291,6 +292,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
+  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.match(config, /request_max_retries = 0/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);

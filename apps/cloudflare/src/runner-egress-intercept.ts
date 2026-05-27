@@ -89,6 +89,11 @@ const OPENAI_EGRESS_POLICY = [
     method: "GET",
     pathname: "/v1/models",
   },
+  {
+    method: "GET",
+    pathname: "/v1/responses",
+    requiresWebSocketUpgrade: true,
+  },
 ] as const;
 const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "gpt-4.1",
@@ -448,7 +453,7 @@ async function maybeHandleOpenAiRequest(input: {
     return null;
   }
   const { pathnameSuffix } = pathMatch;
-  if (!isAllowedOpenAiRequest(input.request.method, pathnameSuffix)) {
+  if (!isAllowedOpenAiRequest(input.request, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
@@ -468,7 +473,10 @@ async function maybeHandleOpenAiRequest(input: {
     createProviderUpstreamUrl(input.url, pathMatch),
     headers,
   );
-  const endpointKind = readOpenAiCacheDiagnosticEndpointKind(pathnameSuffix);
+  const endpointKind = readOpenAiCacheDiagnosticEndpointKind(
+    input.request.method,
+    pathnameSuffix,
+  );
   if (endpointKind) {
     const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
       ctx: input.ctx ?? null,
@@ -490,8 +498,12 @@ async function maybeHandleOpenAiRequest(input: {
 }
 
 function readOpenAiCacheDiagnosticEndpointKind(
+  method: string,
   pathnameSuffix: string,
 ): HostedOpenAiCacheDiagnosticEndpointKind | null {
+  if (method !== "POST") {
+    return null;
+  }
   if (pathnameSuffix === "/v1/responses") {
     return "responses";
   }
@@ -1653,10 +1665,35 @@ function hostedRuntimeAuthorityHeadersPresent(headers: Headers): boolean {
   return HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES.some((name) => headers.has(name));
 }
 
-function isAllowedOpenAiRequest(method: string, pathname: string): boolean {
+function isAllowedOpenAiRequest(request: Request, pathname: string): boolean {
   return OPENAI_EGRESS_POLICY.some((policy) =>
-    method === policy.method && pathname === policy.pathname
+    request.method === policy.method
+    && pathname === policy.pathname
+    && (!("requiresWebSocketUpgrade" in policy) || isWebSocketUpgradeRequest(request.headers))
   );
+}
+
+function isWebSocketUpgradeRequest(headers: Headers): boolean {
+  const connectionTokens = headers.get("connection")
+    ?.split(",")
+    .map((token) => token.trim().toLowerCase())
+    ?? [];
+  return headers.get("upgrade")?.trim().toLowerCase() === "websocket"
+    && connectionTokens.includes("upgrade")
+    && headers.get("sec-websocket-version")?.trim() === "13"
+    && isValidWebSocketKeyHeader(headers.get("sec-websocket-key"));
+}
+
+function isValidWebSocketKeyHeader(value: string | null): boolean {
+  const normalized = value?.trim() ?? "";
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(normalized)) {
+    return false;
+  }
+  try {
+    return atob(normalized).length === 16;
+  } catch {
+    return false;
+  }
 }
 
 function isAllowedMapboxRequest(method: string, pathname: string): boolean {

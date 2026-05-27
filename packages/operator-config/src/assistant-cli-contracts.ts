@@ -198,6 +198,7 @@ export const assistantCodexModelProviderConfigSchema = z
     baseUrl: z.string().url(),
     envKey: z.string().min(1),
     failureHint: z.string().min(1).optional(),
+    supportsWebSockets: z.boolean().optional(),
     wireApi: z.enum(assistantCodexModelProviderWireApiValues),
   })
   .strict()

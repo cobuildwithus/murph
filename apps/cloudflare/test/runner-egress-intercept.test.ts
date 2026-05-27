@@ -64,6 +64,12 @@ const BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS = {
   ...BOUND_USER_WRITE_FENCE_HEADERS,
   authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
 } as const;
+const OPENAI_WEBSOCKET_HANDSHAKE_HEADERS = {
+  connection: "keep-alive, Upgrade",
+  "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+  "sec-websocket-version": "13",
+  upgrade: "websocket",
+} as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
 
 function testByteLength(value: string): number {
@@ -342,6 +348,50 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has("openai-project")).toBe(false);
     expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
     expect(forwardedRequest.headers.has("x-api-key")).toBe(false);
+  });
+
+  it("injects OpenAI authorization for Responses WebSocket upgrades without body diagnostics", async () => {
+    const waitUntil = vi.fn();
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          ...OPENAI_WEBSOCKET_HANDSHAKE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123--v-version_1", waitUntil },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    expect(waitUntil).not.toHaveBeenCalled();
+    const forwardedRequest = readForwardedRequest(fetchMock);
+    expect(forwardedRequest.method).toBe("GET");
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(forwardedRequest.headers.get("connection")).toBe("keep-alive, Upgrade");
+    expect(forwardedRequest.headers.get("sec-websocket-key")).toBe("dGhlIHNhbXBsZSBub25jZQ==");
+    expect(forwardedRequest.headers.get("sec-websocket-version")).toBe("13");
+    expect(forwardedRequest.headers.get("upgrade")).toBe("websocket");
+    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
   it("rejects OpenAI credential injection without a valid runtime write fence", async () => {
@@ -1273,20 +1323,79 @@ describe("hostedRunnerIntercept", () => {
   it("rejects wrong OpenAI methods on otherwise allowed paths", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        headers: WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
         method: "GET",
       }),
       createInterceptEnv({
         OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects incomplete OpenAI Responses WebSocket upgrade requests", async () => {
+    const cases: Array<{
+      headers: Record<string, string>;
+      name: string;
+    }> = [
+      {
+        name: "missing connection upgrade",
+        headers: {
+          ...OPENAI_WEBSOCKET_HANDSHAKE_HEADERS,
+          connection: "keep-alive",
+        },
+      },
+      {
+        name: "missing websocket version",
+        headers: {
+          connection: "Upgrade",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          upgrade: "websocket",
+        },
+      },
+      {
+        name: "invalid websocket key",
+        headers: {
+          ...OPENAI_WEBSOCKET_HANDSHAKE_HEADERS,
+          "sec-websocket-key": "not-a-valid-websocket-key",
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
+      const validateRuntimeWriteFence = vi.fn(async () => true);
+
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.openai.com/v1/responses", {
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+            ...testCase.headers,
+          },
+          method: "GET",
+        }),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status, testCase.name).toBe(403);
+      expect(validateRuntimeWriteFence, testCase.name).not.toHaveBeenCalled();
+      expect(fetchMock, testCase.name).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("injects Mapbox access tokens only for allowed read-only GET path families without a runtime write fence", async () => {

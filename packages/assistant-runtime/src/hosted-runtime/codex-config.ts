@@ -248,6 +248,7 @@ function resolveHostedCodexModelProviderConfig(input: {
     ...providerConfig,
     id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     baseUrl: url.toString(),
+    supportsWebSockets: false,
   };
 }
 
@@ -312,6 +313,9 @@ export function buildHostedCodexConfigToml(input: {
     `base_url = ${tomlString(input.provider.baseUrl)}`,
     `env_key = ${tomlString(input.provider.envKey)}`,
     `wire_api = ${tomlString(input.provider.wireApi)}`,
+    ...(input.provider.supportsWebSockets
+      ? ["supports_websockets = true"]
+      : []),
     `env_http_headers = ${tomlInlineTable({
       "x-hosted-runner-bound-user-id": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.boundUserId,
       "x-hosted-runtime-attempt-id": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.attemptId,
