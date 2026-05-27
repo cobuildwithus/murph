@@ -12,6 +12,7 @@ import {
   createHostedUserRuntimeWorkflowMachine,
   HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
   HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+  HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT,
   type HostedUserRuntimeWorkflowMachine,
   type HostedUserRuntimeWorkflowRuntime,
 } from "../src/workflows/hosted-user-runtime.js";
@@ -174,6 +175,73 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       lastExecutionKind: "runtime_processing_accepted",
       lastRuntimeAttemptId: "runtime_attempt_test",
       lastRuntimeStatus: "scheduled",
+    });
+  });
+
+  it("starts same-runtime wake accepted counts at one for a new accepted wake", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAccepted({
+      action: "woken",
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(continued.state).toMatchObject({
+      lastRuntimeAttemptId: "runtime_attempt_existing",
+      sameRuntimeWakeAcceptedCount: 1,
+    });
+  });
+
+  it("starts same-runtime already-running accepted counts at one for a new accepted wake", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAccepted({
+      action: "already_running",
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(continued.state).toMatchObject({
+      lastRuntimeAttemptId: "runtime_attempt_existing",
+      sameRuntimeWakeAcceptedCount: 1,
+    });
+  });
+
+  it("keeps zero-based first wake counts for pre-patch histories", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.sameRuntimeWakeAcceptedCountPatchEnabled = false;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAccepted({
+      action: "woken",
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(continued.state).toMatchObject({
+      lastRuntimeAttemptId: "runtime_attempt_existing",
+      sameRuntimeWakeAcceptedCount: 0,
     });
   });
 
@@ -502,6 +570,75 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
   });
 
+  it("pauses device-sync recovery after repeated accepted wakes for the same runtime", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    const state = emptyCarryForwardState();
+    state.deviceSyncRecoveryRequested = true;
+    state.lastRuntimeAttemptId = "runtime_attempt_existing";
+    state.lastRuntimeStatus = "scheduled";
+    state.sameRuntimeWakeAcceptedCount =
+      HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT - 1;
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(processingAccepted({
+      action: "woken",
+      recommendedRecheckAt: isoAfter(45_000),
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+    runtime.demands.push((request) => {
+      expect(request.deviceSyncRecoveryRequested).toBe(false);
+      return idleDemand(null);
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      state,
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000, null]);
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(continued.state).toMatchObject({
+      deviceSyncRecoveryRequested: false,
+      lastRuntimeAttemptId: "runtime_attempt_existing",
+      sameRuntimeWakeAcceptedCount:
+        HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT,
+    });
+  });
+
+  it("keeps pre-patch device-sync recovery wake rechecks on the old timer path", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.sameRuntimeWakeAcceptedCountPatchEnabled = false;
+    const state = emptyCarryForwardState();
+    state.deviceSyncRecoveryRequested = true;
+    state.lastRuntimeAttemptId = "runtime_attempt_existing";
+    state.lastRuntimeStatus = "scheduled";
+    state.sameRuntimeWakeAcceptedCount =
+      HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT - 1;
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(processingAccepted({
+      action: "woken",
+      recommendedRecheckAt: isoAfter(45_000),
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      state,
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000]);
+    expect(continued.state).toMatchObject({
+      deviceSyncRecoveryRequested: true,
+      sameRuntimeWakeAcceptedCount:
+        HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT,
+    });
+  });
+
   it("records malformed raw signals as no-op diagnostics", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(idleDemand(isoAfter(60_000)));
@@ -826,6 +963,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  sameRuntimeWakeAcceptedCountPatchEnabled = true;
   signalOnlyNonRetryableFailureWaitEnabled = true;
   suggestContinueAsNew = false;
   readonly waits: Array<number | null> = [];
@@ -872,6 +1010,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useEnsureRuntimeProcessingPatch(): void {
     return;
+  }
+
+  useSameRuntimeWakeAcceptedCountPatch(): boolean {
+    return this.sameRuntimeWakeAcceptedCountPatchEnabled;
   }
 
   uuid(): string {

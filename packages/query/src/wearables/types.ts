@@ -278,6 +278,70 @@ export interface WearableDriftSummary {
   windowDays: number;
 }
 
+export type ProjectedWearableMetricSelection = Omit<WearableMetricSelection, "paths" | "recordIds"> & {
+  paths: [];
+  recordIds: [];
+};
+
+export type ProjectedWearableResolvedMetric = Omit<WearableResolvedMetric, "candidates" | "selection"> & {
+  candidates: [];
+  selection: ProjectedWearableMetricSelection;
+};
+
+type ProjectWearableSummaryMetrics<TSummary> = {
+  [TKey in keyof TSummary]: TSummary[TKey] extends WearableResolvedMetric
+    ? ProjectedWearableResolvedMetric
+    : TSummary[TKey];
+};
+
+export type ProjectedWearableActivitySummary = ProjectWearableSummaryMetrics<WearableActivitySummary>;
+export type ProjectedWearableSleepSummary = ProjectWearableSummaryMetrics<WearableSleepSummary>;
+export type ProjectedWearableRecoverySummary = ProjectWearableSummaryMetrics<WearableRecoverySummary>;
+export type ProjectedWearableBodyStateSummary = ProjectWearableSummaryMetrics<WearableBodyStateSummary>;
+export type ProjectedWearableSourceHealthSummary = WearableSourceHealthSummary;
+
+export interface ProjectedWearableDaySummary extends Omit<
+  WearableDaySummary,
+  "activity" | "bodyState" | "recovery" | "sleep" | "sourceHealth"
+> {
+  activity: ProjectedWearableActivitySummary | null;
+  bodyState: ProjectedWearableBodyStateSummary | null;
+  recovery: ProjectedWearableRecoverySummary | null;
+  sleep: ProjectedWearableSleepSummary | null;
+  sourceHealth: ProjectedWearableSourceHealthSummary[];
+}
+
+export type ProjectedWearableMetricLatestSummary = Omit<WearableMetricLatestSummary, "paths" | "recordIds"> & {
+  paths: [];
+  recordIds: [];
+};
+
+export type ProjectedWearableMetricTrendPoint = Omit<WearableMetricTrendPoint, "paths" | "recordIds"> & {
+  paths: [];
+  recordIds: [];
+};
+
+export interface ProjectedWearableMetricTrendSummary extends ProjectedWearableMetricLatestSummary {
+  points: ProjectedWearableMetricTrendPoint[];
+}
+
+export interface ProjectedWearableLatestSummary extends Omit<
+  WearableLatestSummary,
+  "activity" | "bodyState" | "day" | "recovery" | "sleep" | "sourceHealth"
+> {
+  activity: ProjectedWearableActivitySummary | null;
+  bodyState: ProjectedWearableBodyStateSummary | null;
+  day: ProjectedWearableDaySummary;
+  recovery: ProjectedWearableRecoverySummary | null;
+  sleep: ProjectedWearableSleepSummary | null;
+  sourceHealth: ProjectedWearableSourceHealthSummary[];
+}
+
+export interface ProjectedWearableDriftSummary extends Omit<WearableDriftSummary, "latest" | "signals"> {
+  latest: ProjectedWearableLatestSummary;
+  signals: ProjectedWearableMetricLatestSummary[];
+}
+
 export interface WearableSleepWindowCandidate {
   candidateId: string;
   dataOrigin?: DeviceDataOrigin | null;

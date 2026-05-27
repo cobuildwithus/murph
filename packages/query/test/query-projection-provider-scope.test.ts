@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { test } from "vitest";
+import {
+  QUERY_DB_RELATIVE_PATH,
+  openSqliteRuntimeDatabase,
+} from "@murphai/runtime-state/node";
 
 import {
   rebuildQueryProjection,
@@ -39,11 +43,33 @@ test("runtime wearable provider filters do not fall back to all-provider summari
     );
     await rebuildQueryProjection(vaultRoot);
 
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+      readOnly: true,
+    });
+    try {
+      const activityScopeRows = database
+        .prepare(`
+          SELECT provider_scope_key AS providerScopeKey
+          FROM query_wearable_summaries
+          WHERE summary_kind = 'activity'
+            AND summary_date = '2026-03-20'
+          ORDER BY provider_scope_key ASC
+        `)
+        .all() as Array<{ providerScopeKey: string }>;
+
+      assert.deepEqual(
+        activityScopeRows.map((row) => row.providerScopeKey),
+        Array.from({ length: 7 }, (_, index) => `providers:wearable${index}`),
+      );
+    } finally {
+      database.close();
+    }
+
     const absentProvider = await summarizeWearableActivityRuntime(vaultRoot, {
       date: "2026-03-20",
       providers: ["absent-provider"],
     });
-    const nonMaterializedProviderPair = await summarizeWearableActivityRuntime(vaultRoot, {
+    const composedProviderPair = await summarizeWearableActivityRuntime(vaultRoot, {
       date: "2026-03-20",
       providers: ["wearable0", "wearable1"],
     });
@@ -53,7 +79,9 @@ test("runtime wearable provider filters do not fall back to all-provider summari
     });
 
     assert.deepEqual(absentProvider, []);
-    assert.deepEqual(nonMaterializedProviderPair, []);
+    assert.equal(composedProviderPair.length, 1);
+    assert.equal(composedProviderPair[0]?.steps.confidence.candidateCount, 2);
+    assert.equal(composedProviderPair[0]?.steps.selection.provider, "wearable0");
     assert.equal(normalizedSingleProvider[0]?.steps.selection.provider, "wearable0");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

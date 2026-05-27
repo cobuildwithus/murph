@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-05-22
+Last verified: 2026-05-27
 
 ## Decision
 
@@ -284,6 +284,15 @@ returning to durable demand recovery; if the original workspace wake remains due
 because the accepted runner failed before checkpointing, demand may select it
 again. Runtime wake and retry facts that matter to product behavior must be
 reflected in durable web/runtime state, not returned as the command result.
+
+Device-sync recovery is the bounded exception to preserving explicit recovery
+wake hints: after several accepted `woken`/`already_running` acknowledgements
+for the same runtime attempt, the per-user workflow clears the coalesced
+recovery flag and lets the normal owner-watchdog recheck read durable demand
+again. This keeps a runtime that never produces the expected recovery progress
+from becoming a low-grade explicit-flag wake loop while leaving web-owned
+mailbox lag and recovery sweeps as the durable source of future nudges.
+
 ## Cloudflare Execution Adapter Contract
 
 Temporal calls a single Cloudflare processing adapter:

@@ -40,6 +40,9 @@ const HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH =
   "hosted-user-runtime-non-retryable-failure-signal-wait-v1";
 const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH =
   "hosted-user-runtime-ensure-runtime-processing-v1";
+const HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH =
+  "hosted-user-runtime-same-runtime-wake-count-v1";
+export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
@@ -80,6 +83,8 @@ export async function hostedUserRuntimeWorkflow(
     readRuntimeDemand: demandActivities.readRuntimeDemand,
     useEnsureRuntimeProcessingPatch: () =>
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
+    useSameRuntimeWakeAcceptedCountPatch: () =>
+      patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -110,6 +115,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   nowMs(): number;
   readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
   useEnsureRuntimeProcessingPatch(): void;
+  useSameRuntimeWakeAcceptedCountPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
   waitForSignalOrTimeout(
@@ -315,11 +321,25 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.signalVersion !== versionBeforeExecution;
 
       if (execution.kind === "runtime_processing_accepted") {
-        recordRuntimeProcessingAccepted(state, execution);
+        const sameRuntimeWakeCountPatchEnabled =
+          runtime.useSameRuntimeWakeAcceptedCountPatch();
+        recordRuntimeProcessingAccepted(state, execution, {
+          countFirstAcceptedWake: sameRuntimeWakeCountPatchEnabled,
+        });
         if (signalArrivedDuringExecution) {
           continue;
         }
+        const deviceSyncRecoveryWakeLimitReached =
+          sameRuntimeWakeCountPatchEnabled
+          && isDeviceSyncRecoveryWakeLimitReached(
+            state,
+            demand.source,
+            execution,
+          );
         clearConsumedFlagsAfterRun(state, demand.source, execution);
+        if (deviceSyncRecoveryWakeLimitReached) {
+          state.deviceSyncRecoveryRequested = false;
+        }
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
@@ -364,16 +384,51 @@ function recordRuntimeProcessingAccepted(
     HostedRuntimeEnsureProcessingResponse,
     { kind: "runtime_processing_accepted" }
   >,
+  options: {
+    countFirstAcceptedWake: boolean;
+  },
 ): void {
+  const wakeAccepted = isRuntimeWakeAcceptedAction(execution.action);
   const sameRuntimeWake =
     state.lastRuntimeAttemptId === execution.runtimeAttemptId
-    && (execution.action === "woken" || execution.action === "already_running");
+    && wakeAccepted;
 
   state.lastRuntimeAttemptId = execution.runtimeAttemptId;
   state.lastRuntimeStatus = "scheduled";
-  state.sameRuntimeWakeAcceptedCount = sameRuntimeWake
-    ? state.sameRuntimeWakeAcceptedCount + 1
-    : 0;
+  if (!wakeAccepted) {
+    state.sameRuntimeWakeAcceptedCount = 0;
+    return;
+  }
+
+  if (sameRuntimeWake) {
+    state.sameRuntimeWakeAcceptedCount += 1;
+    return;
+  }
+
+  state.sameRuntimeWakeAcceptedCount = options.countFirstAcceptedWake ? 1 : 0;
+}
+
+function isDeviceSyncRecoveryWakeLimitReached(
+  state: HostedRuntimeWorkflowState,
+  source: HostedRuntimeRunDemand["source"],
+  execution: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >,
+): boolean {
+  return source === "device_sync_recovery"
+    && isRuntimeWakeAcceptedAction(execution.action)
+    && state.sameRuntimeWakeAcceptedCount
+      >= HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT;
+}
+
+function isRuntimeWakeAcceptedAction(
+  action: Extract<
+    HostedRuntimeEnsureProcessingResponse,
+    { kind: "runtime_processing_accepted" }
+  >["action"],
+): boolean {
+  return action === "woken" || action === "already_running";
 }
 
 function createInitialWorkflowState(

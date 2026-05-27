@@ -4159,6 +4159,9 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
     });
     assert.equal(activitySummaries[0]?.steps.selection.value, 8400);
     assert.equal(activitySummaries[0]?.steps.selection.provider, "garmin");
+    assert.deepEqual(activitySummaries[0]?.steps.candidates, []);
+    assert.deepEqual(activitySummaries[0]?.steps.selection.paths, []);
+    assert.deepEqual(activitySummaries[0]?.steps.selection.recordIds, []);
     assert.doesNotMatch(
       JSON.stringify(activitySummaries[0]?.steps),
       /daily-activity-2026-03-12|evt_dense_provider_steps_01|ledger\/events|externalRef|dataOrigin|candidateId/u,
@@ -4220,7 +4223,7 @@ test("runtime wearable provider filters do not fall back to all-provider summari
       date: "2026-03-20",
       providers: ["absent-provider"],
     });
-    const nonMaterializedProviderPair = await summarizeWearableActivityRuntime(vaultRoot, {
+    const composedProviderPair = await summarizeWearableActivityRuntime(vaultRoot, {
       date: "2026-03-20",
       providers: ["wearable0", "wearable1"],
     });
@@ -4230,7 +4233,9 @@ test("runtime wearable provider filters do not fall back to all-provider summari
     });
 
     assert.deepEqual(absentProvider, []);
-    assert.deepEqual(nonMaterializedProviderPair, []);
+    assert.equal(composedProviderPair.length, 1);
+    assert.equal(composedProviderPair[0]?.steps.confidence.candidateCount, 2);
+    assert.equal(composedProviderPair[0]?.steps.selection.provider, "wearable0");
     assert.equal(singleProvider[0]?.steps.selection.provider, "wearable0");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -4392,7 +4397,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4436,7 +4441,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -4499,7 +4504,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4671,7 +4676,7 @@ test("searchVaultRuntime rebuilds old v4 projections before serving dense or uns
 
     const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 6);
       const denseEntity = reopened
         .prepare(`
           SELECT entity_id AS entityId
