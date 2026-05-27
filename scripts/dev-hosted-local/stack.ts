@@ -163,11 +163,6 @@ export async function startHostedLocalDevStack(input: {
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   assertHostedLocalE2eIsolation(initialEnv, config);
-  await maybeResetHostedLocalTemporalDevState({
-    abortSignal: input.abortSignal,
-    config,
-    stderrTarget: input.stderrTarget,
-  });
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
   const hostedRunnerLocalBuildId = buildHostedRunnerLocalBuildId(
@@ -203,6 +198,12 @@ export async function startHostedLocalDevStack(input: {
     ].join(" "),
     port: config.workerPort,
     protocol: config.workerProtocol,
+  });
+  throwIfAbortSignalAborted(input.abortSignal);
+  await maybeResetHostedLocalTemporalDevState({
+    abortSignal: input.abortSignal,
+    config,
+    stderrTarget: input.stderrTarget,
   });
   throwIfAbortSignalAborted(input.abortSignal);
   const tempDir = tempDirOverride
@@ -727,7 +728,9 @@ export async function startHostedLocalDevStack(input: {
           linqTunnel: linqTunnelProcess !== null,
           stripe: stripeListener !== null,
           temporalServer: temporalRuntime?.serverProcess !== null,
-          temporalWorker: temporalRuntime?.workerProcess !== null,
+          // Child termination already targets this worker. Broad worker residue
+          // sweeps are reserved for explicit local Temporal reset.
+          temporalWorker: false,
           web: webProcess !== null,
         },
         signal: childSignal,
@@ -784,7 +787,9 @@ export async function startHostedLocalDevStack(input: {
               linqTunnel: linqTunnelProcess !== null,
               stripe: stripeListener !== null,
               temporalServer: temporalRuntime?.serverProcess !== null,
-              temporalWorker: temporalRuntime?.workerProcess !== null,
+              // Child termination already targets this worker. Broad worker residue
+              // sweeps are reserved for explicit local Temporal reset.
+              temporalWorker: false,
               web: webProcess !== null,
             },
             signal: "SIGKILL",

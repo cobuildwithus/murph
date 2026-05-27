@@ -632,6 +632,36 @@ describe("hosted local dev stack", () => {
     );
   });
 
+  it("does not reset local Temporal before web port availability is proven", async () => {
+    const configModule = await import("./config.ts");
+    const runtimeModule = await import("./runtime.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      forceResetLocalTemporal: true,
+      temporal: {
+        ...defaultConfig.temporal,
+        mode: "managed",
+      },
+    });
+    vi.mocked(runtimeModule.assertHostedWebPortAvailable).mockRejectedValueOnce(
+      new Error("web port busy"),
+    );
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: process.env,
+    })).rejects.toThrow("web port busy");
+
+    expect(waitForHostedLocalTemporalPortRelease).not.toHaveBeenCalled();
+    expect(
+      spawnSync.mock.calls.some(([, args]) =>
+        args?.[0] === "-SIGTERM"
+        && typeof args[2] === "string"
+        && args[2].includes("temporal")
+      ),
+    ).toBe(false);
+  });
+
   it("starts managed Temporal as part of the hosted-local process model", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("./config.ts");
@@ -701,6 +731,29 @@ describe("hosted local dev stack", () => {
     expect(stack.processes.temporalServer).toBe(temporalServer);
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
+    const pkillArgs = spawnSync.mock.calls
+      .filter(([command]) => command === "pkill")
+      .map(([, args]) => args);
+    expect(pkillArgs).toContainEqual([
+      "-SIGTERM",
+      "-f",
+      "temporal server start-dev .*--port 7243",
+    ]);
+    expect(pkillArgs).not.toContainEqual([
+      "-SIGTERM",
+      "-f",
+      "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker",
+    ]);
+    expect(pkillArgs).not.toContainEqual([
+      "-SIGKILL",
+      "-f",
+      "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker",
+    ]);
+    expect(
+      pkillArgs.some((args) =>
+        typeof args?.[2] === "string" && args[2].includes("tsx.*src/worker")
+      ),
+    ).toBe(false);
   });
 
   it("rejects E2E isolation when a stack would overlap interactive dev defaults", async () => {
