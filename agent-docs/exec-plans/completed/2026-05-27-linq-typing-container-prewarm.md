@@ -1,6 +1,6 @@
 # Linq typing container prewarm
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -74,3 +74,4 @@ Updated: 2026-05-27
   - Broader diff/app verification as practical after inspecting overlap.
 - Expected outcomes:
   - Tests prove typing prewarm does not append mailbox, send read receipts, bind routes, start ensure-processing, or block a later mailbox send while prewarm is pending/in flight.
+Completed: 2026-05-27
