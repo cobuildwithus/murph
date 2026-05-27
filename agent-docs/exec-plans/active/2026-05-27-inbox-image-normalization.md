@@ -62,3 +62,14 @@ before they are hashed, recorded, and stored under `raw/inbox/**`.
 - `pnpm deps:guard`
 - `pnpm typecheck`
 - `pnpm test:diff packages/inboxd`
+
+## Current State
+
+- Added a Node-side attachment storage normalizer for eligible still-image
+  JPEG, PNG, and WebP attachments.
+- Refactored inbox persistence so attachment paths, hashes, byte sizes,
+  envelope input metadata, and ledger attachment metadata are finalized after
+  storage normalization.
+- Added focused tests covering image data, original-path images, non-image
+  pass-through, corrupt-image fail-closed behavior, and parser job enqueue.
+- Focused package test run passed locally; broader verification remains next.
