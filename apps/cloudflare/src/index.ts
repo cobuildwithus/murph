@@ -25,6 +25,7 @@ import type {
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   type HostedExecutionBundleRef,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
@@ -374,7 +375,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async ensureRuntimeProcessingForUser(
-    input: HostedRuntimeEnsureProcessingRequest & { userId: string },
+    input: HostedRuntimeEnsureProcessingRequest & {
+      commandTimeoutMs?: number;
+      userId: string;
+    },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return this.runner.ensureRuntimeProcessingForUser(input);
   }
@@ -1430,6 +1434,7 @@ async function handleRuntimeEnsureProcessingRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   let ensureRequest: HostedRuntimeEnsureProcessingRequest;
+  let commandTimeoutMs: number | null;
   try {
     const payload = await readCachedRequestText(context, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
@@ -1437,6 +1442,7 @@ async function handleRuntimeEnsureProcessingRoute(
     ensureRequest = parseHostedRuntimeEnsureProcessingRequest(
       requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
     );
+    commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -1460,8 +1466,28 @@ async function handleRuntimeEnsureProcessingRoute(
   const stub = context.env.USER_RUNNER.getByName(userId);
   return json(await stub.ensureRuntimeProcessingForUser({
     ...ensureRequest,
+    ...(commandTimeoutMs === null ? {} : { commandTimeoutMs }),
     userId,
   }));
+}
+
+function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {
+  const value = headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER);
+  if (value === null || value.trim().length === 0) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!/^[0-9]+$/u.test(normalized)) {
+    throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
+  }
+
+  return parsed;
 }
 
 

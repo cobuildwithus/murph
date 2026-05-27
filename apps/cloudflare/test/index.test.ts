@@ -47,6 +47,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
@@ -1581,6 +1582,7 @@ describe("cloudflare worker routes", () => {
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]: "10000",
             },
             method: "POST",
           }),
@@ -1598,6 +1600,7 @@ describe("cloudflare worker routes", () => {
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
+        commandTimeoutMs: 10_000,
         reason: "nudge",
         source: "device_sync_recovery",
         userId: "test-user",

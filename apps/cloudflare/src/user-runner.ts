@@ -12,6 +12,9 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+} from "@murphai/hosted-execution/temporal-env";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -98,6 +101,7 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
+const RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
@@ -126,6 +130,7 @@ interface RunnerUserStores {
 }
 
 type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
+  commandTimeoutMs?: number;
   userId: string;
 };
 
@@ -163,6 +168,10 @@ interface PreparedRuntimeInvocation {
   runnerContainerName: string;
   token: RunnerWriteFenceToken;
   workspaceVersion: string;
+}
+
+interface RuntimeProcessingCommandBudget {
+  deadlineAtMs: number;
 }
 
 export interface HostedRunnerStuckInvocationTestResult {
@@ -614,6 +623,10 @@ export class HostedUserRunner {
     action: "started" | "replaced",
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     const runtimeWakeStartedAt = Date.now();
+    const commandBudget = this.createRuntimeProcessingCommandBudget({
+      commandTimeoutMs: input.commandTimeoutMs ?? null,
+      startedAtMs: runtimeWakeStartedAt,
+    });
     const initialRecord = await this.stateStore.readState();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -656,6 +669,7 @@ export class HostedUserRunner {
     let prepared: PreparedRuntimeInvocation;
     try {
       prepared = await this.prepareRuntimeExecutionWithFence({
+        commandBudget,
         input: executionInput,
         token,
       });
@@ -670,6 +684,7 @@ export class HostedUserRunner {
     }
 
     const startupConfirmed = await this.confirmRuntimeContainerStartup({
+      commandBudget,
       input,
       runnerContainerName: prepared.runnerContainerName,
       token: prepared.token,
@@ -745,7 +760,33 @@ export class HostedUserRunner {
     return false;
   }
 
+  private createRuntimeProcessingCommandBudget(input: {
+    commandTimeoutMs: number | null;
+    startedAtMs: number;
+  }): RuntimeProcessingCommandBudget {
+    const effectiveTimeoutMs = Math.min(
+      this.env.webControlTimeoutMs,
+      input.commandTimeoutMs ?? DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+    );
+    return {
+      deadlineAtMs:
+        input.startedAtMs + effectiveTimeoutMs - RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+    };
+  }
+
+  private readRuntimeProcessingCommandStepTimeoutMs(input: {
+    budget: RuntimeProcessingCommandBudget;
+    stepTimeoutMs: number;
+  }): number {
+    const remainingMs = input.budget.deadlineAtMs - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error("Hosted runner runtime processing command budget timed out.");
+    }
+    return Math.max(1, Math.min(input.stepTimeoutMs, remainingMs));
+  }
+
   private async confirmRuntimeContainerStartup(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
     runnerContainerName: string;
     token: RunnerWriteFenceToken;
@@ -778,11 +819,14 @@ export class HostedUserRunner {
       });
     }
 
-    const timeoutMs = Math.min(
-      this.env.runnerTimeoutMs,
-      RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
-    );
     try {
+      const timeoutMs = this.readRuntimeProcessingCommandStepTimeoutMs({
+        budget: input.commandBudget,
+        stepTimeoutMs: Math.min(
+          this.env.runnerTimeoutMs,
+          RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+        ),
+      });
       await container.ensureReadyForProcessing({
         timeoutMs,
         userId: input.input.userId,
@@ -955,10 +999,21 @@ export class HostedUserRunner {
   }
 
   private async prepareRuntimeExecutionWithFence(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
     input: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
   }): Promise<PreparedRuntimeInvocation> {
-    const workspaceRead = await this.readHostedWorkspaceFromWeb(input.input.userId);
+    const workspaceRead = await this.readHostedWorkspaceFromWeb(
+      input.input.userId,
+      {
+        timeoutMs: input.commandBudget
+          ? this.readRuntimeProcessingCommandStepTimeoutMs({
+              budget: input.commandBudget,
+              stepTimeoutMs: this.env.webControlTimeoutMs,
+            })
+          : this.env.webControlTimeoutMs,
+      },
+    );
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.input.userId);
     const workspaceVersion = workspaceRead.workspace?.version ?? "0";
     const token = await this.stateStore.bindWriteFenceWorkspaceVersion({
@@ -966,6 +1021,7 @@ export class HostedUserRunner {
       workspaceVersion,
     });
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
+      commandBudget: input.commandBudget,
       token,
       reason: input.input.reason,
       ...(input.input.source ? { source: input.input.source } : {}),
@@ -1303,6 +1359,7 @@ export class HostedUserRunner {
   }
 
   private async prepareWorkspaceRunnerInvocation(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     source?: HostedRuntimeDemandRunSource;
@@ -1324,6 +1381,14 @@ export class HostedUserRunner {
     const runtimeConfig = await this.buildForegroundRunnerJobRuntimeConfig({
       configSource,
       forwardedEnv,
+      ...(input.commandBudget
+        ? {
+            webControlTimeoutMs: this.readRuntimeProcessingCommandStepTimeoutMs({
+              budget: input.commandBudget,
+              stepTimeoutMs: this.env.webControlTimeoutMs,
+            }),
+          }
+        : {}),
       userId: input.userId,
     });
     const workspaceSnapshotPathHashSecret =
@@ -1408,8 +1473,14 @@ export class HostedUserRunner {
     configSource: Readonly<Record<string, string | undefined>>;
     forwardedEnv: Readonly<Record<string, string>>;
     userId: string;
+    webControlTimeoutMs?: number;
   }): Promise<ReturnType<typeof buildHostedRunnerJobRuntimeConfig>> {
-    const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
+    const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(
+      input.userId,
+      input.webControlTimeoutMs === undefined
+        ? undefined
+        : { webControlTimeoutMs: input.webControlTimeoutMs },
+    );
     const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
     return buildHostedRunnerJobRuntimeConfig({
       configSource: input.configSource,
@@ -1487,34 +1558,55 @@ export class HostedUserRunner {
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
   }
 
-  private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
+  private async ensureRunnerStores(
+    userId?: string,
+    input: { webControlTimeoutMs?: number } = {},
+  ): Promise<RunnerUserStores> {
     const resolvedUserId = userId ?? await this.requireBoundUserId();
-
-    if (
-      this.runnerStores?.userId === resolvedUserId
-      && !this.runtimeCryptoContextLock
-      && !isHostedUserCryptoContextExpired(this.runnerStores.crypto)
-    ) {
-      return this.runnerStores;
+    const cached = this.readReusableRunnerStores(resolvedUserId);
+    if (cached && !this.runtimeCryptoContextLock) {
+      return cached;
     }
 
     return this.withRuntimeCryptoContextLock(async () => {
-      if (
-        this.runnerStores?.userId === resolvedUserId
-        && !isHostedUserCryptoContextExpired(this.runnerStores.crypto)
-      ) {
-        return this.runnerStores;
+      const lockedCached = this.readReusableRunnerStores(resolvedUserId);
+      if (lockedCached) {
+        return lockedCached;
       }
 
-      return this.refreshRunnerStores(resolvedUserId);
+      return this.refreshRunnerStores(resolvedUserId, input);
     });
   }
 
-  private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
+  private readReusableRunnerStores(userId: string): RunnerUserStores | null {
+    return this.runnerStores?.userId === userId
+      && !isHostedUserCryptoContextExpired(this.runnerStores.crypto)
+      ? this.runnerStores
+      : null;
+  }
+
+  private async refreshRunnerStores(
+    userId: string,
+    input: { webControlTimeoutMs?: number } = {},
+  ): Promise<RunnerUserStores> {
+    const stores = await this.createRunnerStores(userId, input);
+    this.runnerStores = stores;
+    return stores;
+  }
+
+  private async createRunnerStores(
+    userId: string,
+    input: { webControlTimeoutMs?: number } = {},
+  ): Promise<RunnerUserStores> {
     const crypto = await requireHostedUserCryptoContextFromEnvironment({
       bucket: this.bucket,
       domain: "runtime",
-      environment: this.env,
+      environment: input.webControlTimeoutMs === undefined
+        ? this.env
+        : {
+            ...this.env,
+            webControlTimeoutMs: input.webControlTimeoutMs,
+          },
       reason: "runner-store-refresh",
       userId,
     });
@@ -1524,8 +1616,6 @@ export class HostedUserRunner {
       runnerSecrets: this.createRunnerSecretsService(crypto),
       userId,
     };
-
-    this.runnerStores = stores;
     return stores;
   }
 
@@ -1679,6 +1769,7 @@ export class HostedUserRunner {
 
   private async readHostedWorkspaceFromWeb(
     userId: string,
+    input: { timeoutMs?: number } = {},
   ): Promise<HostedWorkspaceReadResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -1689,7 +1780,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_WORKSPACE_PATH,
-      timeoutMs: this.env.webControlTimeoutMs,
+      timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
     });
 
     if (!response.ok) {

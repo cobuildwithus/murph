@@ -58,6 +58,7 @@ export interface HostedOrchestratorJsonRequest<TResponse> {
   body?: string;
   boundUserId?: string;
   fetchImpl?: typeof fetch;
+  headers?: Readonly<Record<string, string>>;
   label: string;
   method: "GET" | "POST";
   parse: (value: unknown) => TResponse;
@@ -180,6 +181,10 @@ export async function requestHostedOrchestratorJson<TResponse>(
 
   if (request.boundUserId) {
     headers.set(HOSTED_EXECUTION_USER_ID_HEADER, request.boundUserId);
+  }
+
+  for (const [key, value] of Object.entries(request.headers ?? {})) {
+    headers.set(key, value);
   }
 
   if (request.signing) {
