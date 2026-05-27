@@ -1734,7 +1734,7 @@ test("importDeviceProviderSnapshot does not let adapters bypass the dense sample
       );
       const normalized: NormalizedDeviceBatch & {
         denseTelemetryPolicy: {
-          allowDenseDebugSamples: true;
+          allowDenseDebugTelemetry: true;
           retention: "debug_temporary";
         };
       } = {
@@ -1742,7 +1742,7 @@ test("importDeviceProviderSnapshot does not let adapters bypass the dense sample
         source: "device",
         samples,
         denseTelemetryPolicy: {
-          allowDenseDebugSamples: true,
+          allowDenseDebugTelemetry: true,
           retention: "debug_temporary",
         },
       };
@@ -1766,7 +1766,7 @@ test("importDeviceProviderSnapshot does not let adapters bypass the dense sample
       typeof error === "object"
       && error !== null
       && "code" in error
-      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
+      && error.code === "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED",
   );
 });
 

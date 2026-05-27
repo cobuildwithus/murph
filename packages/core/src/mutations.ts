@@ -80,6 +80,9 @@ import type { DateInput, UnknownRecord } from "./types.ts";
 type EventRecordByKind<K extends EventKind> = Extract<EventRecord, { kind: K }>;
 type LooseRecord = Record<string, unknown>;
 
+const DENSE_DEVICE_TELEMETRY_NOT_ALLOWED_CODE = "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED";
+const DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE = "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED";
+
 const RESERVED_DEVICE_EVENT_FIELD_NAMES = new Set([
   "schemaVersion",
   "id",
@@ -258,6 +261,8 @@ interface DeviceSampleInput extends LooseRecord {
 }
 
 interface DenseDeviceTelemetryPolicyInput extends LooseRecord {
+  allowDenseDebugTelemetry?: boolean;
+  /** @deprecated Use allowDenseDebugTelemetry. */
   allowDenseDebugSamples?: boolean;
   retention?: string;
 }
@@ -2189,17 +2194,18 @@ function assertDenseDeviceTelemetryPolicy(input: {
   ) {
     return;
   }
-  if (
-    input.policy?.allowDenseDebugSamples === true
-    && input.policy.retention === "debug_temporary"
-  ) {
+  const allowDenseDebugTelemetry =
+    input.policy?.allowDenseDebugTelemetry ?? input.policy?.allowDenseDebugSamples;
+  if (allowDenseDebugTelemetry === true && input.policy?.retention === "debug_temporary") {
     return;
   }
 
   throw new VaultError(
-    "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
-    "Device provider imports must keep dense timeseries as raw evidence and emit compact product facts.",
+    DENSE_DEVICE_TELEMETRY_NOT_ALLOWED_CODE,
+    "Device provider imports must keep dense telemetry as raw evidence and emit compact product facts.",
     {
+      codeAliases: [DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE],
+      legacyCode: DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE,
       maxAllowed: MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT,
       observationEventCount: input.observationEventCount,
       sampleCount: input.sampleCount,
