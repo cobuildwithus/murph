@@ -581,13 +581,15 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
   });
 }
 
-function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): {
+export interface WearableSummaryBundle {
   activityDays: WearableActivityDay[];
   bodyStateDays: WearableBodyStateDay[];
   recoveryDays: WearableRecoveryDay[];
   sleepNights: WearableSleepNight[];
   sourceHealth: WearableSourceHealth[];
-} {
+}
+
+function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): WearableSummaryBundle {
   const activityDays = listWearableActivityDaysFromDataset(dataset);
   const sleepNights = listWearableSleepNightsFromDataset(dataset);
   const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
@@ -612,7 +614,12 @@ function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): {
   };
 }
 
-type WearableSummaryBundle = ReturnType<typeof buildWearableSummaryBundleFromDataset>;
+export function buildWearableSummaryBundle(
+  vault: VaultReadModel,
+  filters: WearableFilters = {},
+): WearableSummaryBundle {
+  return buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
+}
 
 interface WearableMetricObservation {
   date: string;
@@ -915,7 +922,6 @@ function collectWearableLatestDateMismatchNote(
 }
 
 function buildWearableLatestSummary(
-  vault: VaultReadModel,
   bundle: WearableSummaryBundle,
   filters: WearableFilters,
 ): WearableLatestSummary | null {
@@ -929,9 +935,7 @@ function buildWearableLatestSummary(
     return null;
   }
 
-  const day = summarizeWearableDay(vault, latestDate, {
-    providers: filters.providers,
-  });
+  const day = summarizeWearableDayFromBundle(bundle, latestDate);
 
   if (!day) {
     return null;
@@ -961,7 +965,7 @@ export function listWearableSourceHealth(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableSourceHealth[] {
-  return buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)).sourceHealth;
+  return buildWearableSummaryBundle(vault, filters).sourceHealth;
 }
 
 export function summarizeWearableLatest(
@@ -969,10 +973,16 @@ export function summarizeWearableLatest(
   filters: WearableFilters = {},
 ): WearableLatestSummary | null {
   return buildWearableLatestSummary(
-    vault,
-    buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)),
+    buildWearableSummaryBundle(vault, filters),
     filters,
   );
+}
+
+export function summarizeWearableLatestFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableFilters = {},
+): WearableLatestSummary | null {
+  return buildWearableLatestSummary(bundle, filters);
 }
 
 export function summarizeWearableMetricLatest(
@@ -981,10 +991,18 @@ export function summarizeWearableMetricLatest(
   filters: WearableMetricSummaryFilters = {},
 ): WearableMetricLatestSummary | null {
   return summarizeWearableMetricFromBundle(
-    buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)),
+    buildWearableSummaryBundle(vault, filters),
     metric,
     filters,
   );
+}
+
+export function summarizeWearableMetricLatestFromBundle(
+  bundle: WearableSummaryBundle,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): WearableMetricLatestSummary | null {
+  return summarizeWearableMetricFromBundle(bundle, metric, filters);
 }
 
 export function summarizeWearableMetricTrend(
@@ -992,7 +1010,14 @@ export function summarizeWearableMetricTrend(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): WearableMetricTrendSummary | null {
-  const bundle = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
+  return summarizeWearableMetricTrendFromBundle(buildWearableSummaryBundle(vault, filters), metric, filters);
+}
+
+export function summarizeWearableMetricTrendFromBundle(
+  bundle: WearableSummaryBundle,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): WearableMetricTrendSummary | null {
   const metricSummary = summarizeWearableMetricFromBundle(bundle, metric, filters);
 
   if (!metricSummary) {
@@ -1013,8 +1038,14 @@ export function explainWearableDrift(
   vault: VaultReadModel,
   filters: WearableMetricSummaryFilters = {},
 ): WearableDriftSummary | null {
-  const bundle = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
-  const latest = buildWearableLatestSummary(vault, bundle, filters);
+  return explainWearableDriftFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+export function explainWearableDriftFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableMetricSummaryFilters = {},
+): WearableDriftSummary | null {
+  const latest = buildWearableLatestSummary(bundle, filters);
 
   if (!latest) {
     return null;
@@ -1097,35 +1128,70 @@ export function summarizeWearableSleep(
   vault: VaultReadModel,
   filters: WearableSummaryFilters = {},
 ): WearableSleepSummary[] {
-  return applyWearableSummaryLimit(listWearableSleepNights(vault, filters), filters.limit);
+  return summarizeWearableSleepFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+export function summarizeWearableSleepFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableSummaryFilters = {},
+): WearableSleepSummary[] {
+  return applyWearableSummaryLimit(bundle.sleepNights, filters.limit);
 }
 
 export function summarizeWearableActivity(
   vault: VaultReadModel,
   filters: WearableSummaryFilters = {},
 ): WearableActivitySummary[] {
-  return applyWearableSummaryLimit(listWearableActivityDays(vault, filters), filters.limit);
+  return summarizeWearableActivityFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+export function summarizeWearableActivityFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableSummaryFilters = {},
+): WearableActivitySummary[] {
+  return applyWearableSummaryLimit(bundle.activityDays, filters.limit);
 }
 
 export function summarizeWearableRecovery(
   vault: VaultReadModel,
   filters: WearableSummaryFilters = {},
 ): WearableRecoverySummary[] {
-  return applyWearableSummaryLimit(listWearableRecoveryDays(vault, filters), filters.limit);
+  return summarizeWearableRecoveryFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+export function summarizeWearableRecoveryFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableSummaryFilters = {},
+): WearableRecoverySummary[] {
+  return applyWearableSummaryLimit(bundle.recoveryDays, filters.limit);
 }
 
 export function summarizeWearableBodyState(
   vault: VaultReadModel,
   filters: WearableSummaryFilters = {},
 ): WearableBodyStateSummary[] {
-  return applyWearableSummaryLimit(listWearableBodyStateDays(vault, filters), filters.limit);
+  return summarizeWearableBodyStateFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+export function summarizeWearableBodyStateFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableSummaryFilters = {},
+): WearableBodyStateSummary[] {
+  return applyWearableSummaryLimit(bundle.bodyStateDays, filters.limit);
 }
 
 export function summarizeWearableSourceHealth(
   vault: VaultReadModel,
   filters: WearableSummaryFilters = {},
 ): WearableSourceHealthSummary[] {
-  return applyWearableSummaryLimit(listWearableSourceHealth(vault, filters), filters.limit);
+  return summarizeWearableSourceHealthFromBundle(buildWearableSummaryBundle(vault, filters), filters);
+}
+
+export function summarizeWearableSourceHealthFromBundle(
+  bundle: WearableSummaryBundle,
+  filters: WearableSummaryFilters = {},
+): WearableSourceHealthSummary[] {
+  return applyWearableSummaryLimit(bundle.sourceHealth, filters.limit);
 }
 
 export function summarizeWearableDay(
@@ -1133,26 +1199,33 @@ export function summarizeWearableDay(
   date: string,
   filters: Omit<WearableSummaryFilters, "date" | "from" | "to"> = {},
 ): WearableDaySummary | null {
+  return summarizeWearableDayFromBundle(
+    buildWearableSummaryBundle(vault, {
+      date,
+      providers: filters.providers,
+    }),
+    date,
+  );
+}
+
+export function summarizeWearableDayFromBundle(
+  bundle: WearableSummaryBundle,
+  date: string,
+): WearableDaySummary | null {
   const normalizedDate = normalizeWearableSummaryDate(date);
   if (!normalizedDate) {
     return null;
   }
 
-  const dayFilters: WearableFilters = {
-    date: normalizedDate,
-    providers: filters.providers,
-  };
-  const {
-    activityDays,
-    bodyStateDays,
-    recoveryDays,
-    sleepNights,
-    sourceHealth,
-  } = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, dayFilters));
-  const sleep = sleepNights[0] ?? null;
-  const activity = activityDays[0] ?? null;
-  const recovery = recoveryDays[0] ?? null;
-  const bodyState = bodyStateDays[0] ?? null;
+  const sleep = bundle.sleepNights.find((summary) => summary.date === normalizedDate) ?? null;
+  const activity = bundle.activityDays.find((summary) => summary.date === normalizedDate) ?? null;
+  const recovery = bundle.recoveryDays.find((summary) => summary.date === normalizedDate) ?? null;
+  const bodyState = bundle.bodyStateDays.find((summary) => summary.date === normalizedDate) ?? null;
+  const sourceHealth = bundle.sourceHealth.filter((entry) =>
+    entry.firstDate === null ||
+    entry.lastDate === null ||
+    (entry.firstDate <= normalizedDate && entry.lastDate >= normalizedDate)
+  );
 
   if (!sleep && !activity && !recovery && !bodyState && sourceHealth.length === 0) {
     return null;

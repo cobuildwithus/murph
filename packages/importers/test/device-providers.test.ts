@@ -1563,14 +1563,18 @@ test("prepareDeviceProviderSnapshotImport routes Junction floating timeseries en
   });
 
   const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
+  const canonicalWeight = payload.canonicalWearableRecords?.find((record) =>
+    record.kind === "observation" && record.metric === "weightKg"
+  );
 
-  assert.equal(weightEvent?.occurredAt, "2026-03-16T00:00:00.000Z");
-  assert.equal(weightEvent?.recordedAt, "2026-03-16T00:00:00.000Z");
-  assert.equal(weightEvent?.dayKey, "2026-03-15");
-  assert.equal(weightEvent?.externalRef?.resourceType, "junction-apple-health-weight");
-  assert.match(weightEvent?.externalRef?.resourceId ?? "", /^weight-[0-9a-f]{16}$/u);
-  assert.deepEqual(weightEvent?.rawArtifactRoles, ["junction-timeseries-weight"]);
-  assert.equal(weightEvent?.dataOrigin?.timestampSemantics, "floating");
+  assert.equal(weightEvent, undefined);
+  assert.equal(canonicalWeight?.occurredAt, "2026-03-16T00:00:00.000Z");
+  assert.equal(canonicalWeight?.recordedAt, "2026-03-16T00:00:00.000Z");
+  assert.equal(canonicalWeight?.dayKey, "2026-03-15");
+  assert.equal(canonicalWeight?.source.externalRef?.resourceType, "junction-apple-health-weight");
+  assert.match(canonicalWeight?.source.externalRef?.resourceId ?? "", /^weight-[0-9a-f]{16}$/u);
+  assert.deepEqual(canonicalWeight?.source.rawArtifactRoles, ["junction-timeseries-weight"]);
+  assert.equal(canonicalWeight?.source.origin?.timestampSemantics, "floating");
   assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-weight"), true);
 });
 

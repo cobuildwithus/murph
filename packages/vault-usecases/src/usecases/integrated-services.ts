@@ -881,8 +881,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableDayInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const summary = query.summarizeWearableDay(readModel, normalized.date, {
+      const summary = await query.summarizeWearableDayRuntime(input.vault, normalized.date, {
         providers:
           normalized.filters.providers.length > 0
             ? normalized.filters.providers
@@ -903,8 +902,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSurfaceInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const summary = query.summarizeWearableLatest(readModel, normalized.queryFilters)
+      const summary = await query.summarizeWearableLatestRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -921,8 +919,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableMetricInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const summary = query.summarizeWearableMetricLatest(readModel, normalized.metric, normalized.queryFilters)
+      const summary = await query.summarizeWearableMetricLatestRuntime(input.vault, normalized.metric, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -939,8 +936,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableMetricInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const summary = query.summarizeWearableMetricTrend(readModel, normalized.metric, normalized.queryFilters)
+      const summary = await query.summarizeWearableMetricTrendRuntime(input.vault, normalized.metric, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -959,8 +955,7 @@ function createIntegratedQueryServices(): QueryServices {
         metric: "drift",
       })
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const summary = query.explainWearableDrift(readModel, normalized.queryFilters)
+      const summary = await query.explainWearableDriftRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: {
@@ -982,8 +977,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const items = query.summarizeWearableSleep(readModel, normalized.queryFilters)
+      const items = await query.summarizeWearableSleepRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -1000,8 +994,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const items = query.summarizeWearableActivity(readModel, normalized.queryFilters)
+      const items = await query.summarizeWearableActivityRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -1018,8 +1011,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const items = query.summarizeWearableBodyState(readModel, normalized.queryFilters)
+      const items = await query.summarizeWearableBodyStateRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -1036,8 +1028,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const items = query.summarizeWearableRecovery(readModel, normalized.queryFilters)
+      const items = await query.summarizeWearableRecoveryRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: normalized.filters,
@@ -1054,8 +1045,7 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(input.vault)
-      const items = query.summarizeWearableSourceHealth(readModel, normalized.queryFilters)
+      const items = await query.summarizeWearableSourceHealthRuntime(input.vault, normalized.queryFilters)
 
       return {
         filters: normalized.filters,

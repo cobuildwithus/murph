@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline";
 
 import {
   validateCurrentVaultMetadata,
@@ -195,14 +197,13 @@ export async function hashCanonicalQuerySources(
 
   digest.update("murph.query-source.v1\0");
   for (const entry of manifest) {
-    const bytes = await readFile(path.join(vaultRoot, entry.relativePath));
-    const contentHash = createHash("sha256").update(bytes).digest("hex");
-    totalBytes += bytes.byteLength;
+    const fileHash = await hashFileContents(path.join(vaultRoot, entry.relativePath));
+    totalBytes += fileHash.byteLength;
     digest.update(entry.relativePath);
     digest.update("\0");
-    digest.update(String(bytes.byteLength));
+    digest.update(String(fileHash.byteLength));
     digest.update("\0");
-    digest.update(contentHash);
+    digest.update(fileHash.hash);
     digest.update("\0");
   }
 
@@ -211,6 +212,26 @@ export async function hashCanonicalQuerySources(
     hash: digest.digest("hex"),
     totalBytes,
   };
+}
+
+function hashFileContents(filePath: string): Promise<{ byteLength: number; hash: string }> {
+  return new Promise((resolve, reject) => {
+    const digest = createHash("sha256");
+    let byteLength = 0;
+    const stream = createReadStream(filePath);
+
+    stream.on("data", (chunk: Buffer) => {
+      byteLength += chunk.byteLength;
+      digest.update(chunk);
+    });
+    stream.on("error", reject);
+    stream.on("end", () => {
+      resolve({
+        byteLength,
+        hash: digest.digest("hex"),
+      });
+    });
+  });
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -682,9 +703,14 @@ async function readJsonlFile(
     payload: QueryRecordData,
   ) => void,
 ): Promise<void> {
-  const contents = await readFile(filePath, "utf8");
+  const lines = createInterface({
+    crlfDelay: Infinity,
+    input: createReadStream(filePath, { encoding: "utf8" }),
+  });
+  let lineNumber = 0;
 
-  for (const [index, rawLine] of contents.split("\n").entries()) {
+  for await (const rawLine of lines) {
+    lineNumber += 1;
     const line = rawLine.trim();
     if (!line) {
       continue;
@@ -692,7 +718,7 @@ async function readJsonlFile(
 
     visit(
       sourcePath,
-      index + 1,
+      lineNumber,
       JSON.parse(line) as QueryRecordData,
     );
   }

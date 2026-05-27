@@ -49,6 +49,10 @@ import {
 import {
   listMetricTargetsRuntime,
   selectMetricGoalProgressRuntime,
+  summarizeWearableActivityRuntime,
+  summarizeWearableDayRuntime,
+  summarizeWearableSleepRuntime,
+  summarizeWearableSourceHealthRuntime,
 } from "../src/query-projection.ts";
 import {
   type CanonicalEntity,
@@ -502,9 +506,8 @@ test("wearable source health keeps provider-scoped evidence when external proven
       "utf8",
     );
 
-    const vault = await readVault(vaultRoot);
-    const sourceHealth = summarizeWearableSourceHealth(vault);
-    const filteredSourceHealth = summarizeWearableSourceHealth(vault, {
+    const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
+    const filteredSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
       providers: ["oura"],
     });
 
@@ -555,13 +558,12 @@ test("wearable source health reports excluded records when provider provenance i
       "utf8",
     );
 
-    const vault = await readVault(vaultRoot);
-    const sourceHealth = summarizeWearableSourceHealth(vault);
-    const filteredSourceHealth = summarizeWearableSourceHealth(vault, {
+    const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
+    const filteredSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
       providers: ["oura"],
     });
-    const summary = summarizeWearableDay(vault, "2026-04-01");
-    const filteredSummary = summarizeWearableDay(vault, "2026-04-01", {
+    const summary = await summarizeWearableDayRuntime(vaultRoot, "2026-04-01");
+    const filteredSummary = await summarizeWearableDayRuntime(vaultRoot, "2026-04-01", {
       providers: ["oura"],
     });
 
@@ -636,8 +638,7 @@ test("wearable metric ranking balances specificity and recency ahead of provider
       "utf8",
     );
 
-    const vault = await readVault(vaultRoot);
-    const sleep = summarizeWearableSleep(vault);
+    const sleep = await summarizeWearableSleepRuntime(vaultRoot);
 
     assert.equal(sleep[0]?.totalSleepMinutes.selection.provider, "garmin");
     assert.equal(
@@ -705,8 +706,7 @@ test("wearable query uses Junction data origin to avoid outranking direct provid
       "utf8",
     );
 
-    const vault = await readVault(vaultRoot);
-    const day = summarizeWearableDay(vault, "2026-04-01");
+    const day = await summarizeWearableDayRuntime(vaultRoot, "2026-04-01");
 
     assert.equal(day?.activity?.steps.selection.provider, "oura");
     assert.equal(day?.activity?.steps.selection.title, "Direct Oura steps");
@@ -767,8 +767,7 @@ test("sleep-window ranking does not treat selected session duration as total sle
       "utf8",
     );
 
-    const vault = await readVault(vaultRoot);
-    const sleep = summarizeWearableSleep(vault);
+    const sleep = await summarizeWearableSleepRuntime(vaultRoot);
 
     assert.equal(sleep[0]?.sleepWindowProvider, "garmin");
     assert.equal(sleep[0]?.provider, "garmin");
@@ -955,8 +954,7 @@ test("sleep total derives from complete asleep stages and prefers direct totals"
       "utf8",
     );
 
-    const vault = await readVault(vaultRoot);
-    const sleep = summarizeWearableSleep(vault);
+    const sleep = await summarizeWearableSleepRuntime(vaultRoot);
     const derivedNight = sleep.find((night) => night.date === "2026-04-01");
     const directNight = sleep.find((night) => night.date === "2026-04-02");
 
@@ -3799,10 +3797,11 @@ test("query projection runtime goal progress resolves stored metric targets and 
   }
 });
 
-test("rebuildQueryProjection ignores dense sample ledgers in default read and search paths", async () => {
+test("rebuildQueryProjection keeps dense provider telemetry out of default read and search paths", async () => {
   const vaultRoot = await createFixtureVault();
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
   const heartRateLedgerPath = path.join(vaultRoot, "ledger/samples/heart_rate/2026/2026-03.jsonl");
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
 
   try {
     const existingLedger = await readFile(heartRateLedgerPath, "utf8");
@@ -3820,6 +3819,27 @@ test("rebuildQueryProjection ignores dense sample ledgers in default read and se
       }),
     );
     await writeFile(heartRateLedgerPath, `${existingLedger.trimEnd()}\n${denseSamples.join("\n")}\n`);
+    await writeFile(
+      eventLedgerPath,
+      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_dense_provider_steps_01",
+        kind: "observation",
+        occurredAt: "2026-03-12T07:00:00Z",
+        recordedAt: "2026-03-12T07:01:00Z",
+        dayKey: "2026-03-12",
+        source: "device",
+        title: "Daily steps",
+        metric: "daily-steps",
+        value: 8400,
+        unit: "count",
+        externalRef: {
+          system: "garmin",
+          resourceType: "daily_activity",
+          resourceId: "daily-activity-2026-03-12",
+        },
+      })}\n`,
+    );
 
     const vault = await readVault(vaultRoot);
     await rebuildQueryProjection(vaultRoot);
@@ -3843,14 +3863,56 @@ test("rebuildQueryProjection ignores dense sample ledgers in default read and se
           WHERE record_type = 'sample' AND kind = 'sample_summary'
         `)
         .get() as { count: number };
+      const denseEventEntityCount = database
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM query_entities
+          WHERE entity_id = 'evt_dense_provider_steps_01'
+        `)
+        .get() as { count: number };
+      const denseEventSearchDocumentCount = database
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM query_search_document
+          WHERE record_id = 'evt_dense_provider_steps_01'
+        `)
+        .get() as { count: number };
+      const wearableSummaryCount = database
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM query_wearable_summaries
+          WHERE provider_scope_key = 'providers:garmin'
+            AND summary_kind = 'activity'
+            AND summary_date = '2026-03-12'
+        `)
+        .get() as { count: number };
+      const ftsContentTable = database
+        .prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'query_search_fts_content'
+        `)
+        .get() as { name: string } | undefined;
 
       assert.equal(vault.samples.length, 0);
+      assert.equal(vault.events.some((event) => event.entityId === "evt_dense_provider_steps_01"), false);
       assert.equal(sampleEntityCount.count, 0);
       assert.equal(samplePointTable, undefined);
       assert.equal(sampleSearchDocumentCount.count, 0);
+      assert.equal(denseEventEntityCount.count, 0);
+      assert.equal(denseEventSearchDocumentCount.count, 0);
+      assert.equal(wearableSummaryCount.count, 1);
+      assert.equal(ftsContentTable, undefined);
     } finally {
       database.close();
     }
+
+    const activitySummaries = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-03-12",
+      providers: ["garmin"],
+    });
+    assert.equal(activitySummaries[0]?.steps.selection.value, 8400);
+    assert.equal(activitySummaries[0]?.steps.selection.provider, "garmin");
 
     await writeFile(
       heartRateLedgerPath,
@@ -3955,7 +4017,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 3);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 4);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -3999,7 +4061,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 3);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 4);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -4062,7 +4124,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 3);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 4);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name

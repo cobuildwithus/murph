@@ -727,9 +727,7 @@ test("Junction normalizer maps respiratory rate unit aliases to observation unit
 
     assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
     assert.equal(payload.samples?.length ?? 0, 0);
-    assert.equal(event?.fields?.unit, "breaths_per_minute");
-    assert.equal(event?.fields?.value, 14.8);
-    assert.equal(event?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.equal(event, undefined);
     assert.equal(canonicalSample, undefined);
     assert.ok(canonicalObservation && canonicalObservation.kind === "observation");
     assert.equal(canonicalObservation.unit, "breaths_per_minute");
@@ -792,9 +790,7 @@ test("Junction normalizer maps blood oxygen unit aliases to observation units", 
 
     assert.deepEqual(payload.provenance?.timeseriesResources, ["blood_oxygen"]);
     assert.equal(payload.samples?.length ?? 0, 0);
-    assert.equal(event?.fields?.unit, "%");
-    assert.equal(event?.fields?.value, 97.2);
-    assert.equal(event?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.equal(event, undefined);
     assert.equal(canonicalSample, undefined);
     assert.ok(canonicalObservation && canonicalObservation.kind === "observation");
     assert.equal(canonicalObservation.unit, "%");

@@ -56,6 +56,16 @@ function createQueryRuntimeStub() {
     summarizeWearableRecovery: vi.fn(async () => undefined),
     summarizeWearableSourceHealth: vi.fn(async () => undefined),
     explainWearableDrift: vi.fn(async () => undefined),
+    summarizeWearableLatestRuntime: vi.fn(async () => undefined),
+    summarizeWearableMetricLatestRuntime: vi.fn(async () => undefined),
+    summarizeWearableMetricTrendRuntime: vi.fn(async () => undefined),
+    summarizeWearableSleepRuntime: vi.fn(async () => undefined),
+    summarizeWearableActivityRuntime: vi.fn(async () => undefined),
+    summarizeWearableBodyStateRuntime: vi.fn(async () => undefined),
+    summarizeWearableDayRuntime: vi.fn(async () => undefined),
+    summarizeWearableRecoveryRuntime: vi.fn(async () => undefined),
+    summarizeWearableSourceHealthRuntime: vi.fn(async () => undefined),
+    explainWearableDriftRuntime: vi.fn(async () => undefined),
     ...createAsyncFunctionRecord(healthQueryRuntimeMethodNames),
   };
 }

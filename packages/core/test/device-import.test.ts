@@ -108,6 +108,44 @@ function buildDenseHeartRateSamples(count: number): Array<{
   });
 }
 
+function buildDenseHeartRateObservations(count: number): Array<{
+  kind: "observation";
+  occurredAt: string;
+  recordedAt: string;
+  title: string;
+  externalRef: {
+    system: string;
+    resourceType: string;
+    resourceId: string;
+  };
+  fields: {
+    metric: string;
+    unit: string;
+    value: number;
+  };
+}> {
+  const startMs = Date.parse("2026-03-16T09:00:00.000Z");
+  return Array.from({ length: count }, (_, index) => {
+    const occurredAt = new Date(startMs + index * 1000).toISOString();
+    return {
+      kind: "observation",
+      occurredAt,
+      recordedAt: occurredAt,
+      title: "Heart rate",
+      externalRef: {
+        system: "wearable-provider",
+        resourceType: "timeseries-heart-rate",
+        resourceId: `day-2026-03-16-${index}`,
+      },
+      fields: {
+        metric: "heart-rate",
+        unit: "bpm",
+        value: 70 + (index % 5),
+      },
+    };
+  });
+}
+
 test("importDeviceBatch rejects dense provider sample firehoses by default", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-dense-samples");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -143,6 +181,26 @@ test("importDeviceBatch dense sample guard does not trust caller-provided source
     (error) =>
       error instanceof VaultError
       && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED",
+  );
+});
+
+test("importDeviceBatch rejects dense provider observation events by default", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dense-events");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      events: buildDenseHeartRateObservations(1001),
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED"
+      && error.details?.observationEventCount === 1001
+      && !JSON.stringify(error).includes("bpm"),
   );
 });
 

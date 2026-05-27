@@ -5,8 +5,7 @@ import { test, vi } from "vitest";
 import { importWithMocks } from "./mock-import.ts";
 
 test("showWearableLatest forwards normalized surface filters to the shared query runtime", async () => {
-  const readModel = { kind: "read-model" };
-  const summarizeWearableLatest = vi.fn(() => ({
+  const summarizeWearableLatestRuntime = vi.fn(async () => ({
     latestDate: "2026-04-04",
     sleep: {
       totalSleepMinutes: {
@@ -30,8 +29,7 @@ test("showWearableLatest forwards normalized surface filters to the shared query
   const loadCoreRuntime = vi.fn();
   const loadImporterRuntime = vi.fn();
   const loadQueryRuntime = vi.fn(async () => ({
-    readVault: vi.fn(async () => readModel),
-    summarizeWearableLatest,
+    summarizeWearableLatestRuntime,
   }));
 
   const integratedServicesModule = await importWithMocks<
@@ -53,7 +51,7 @@ test("showWearableLatest forwards normalized surface filters to the shared query
     providers: [" oura ", "oura"],
   });
 
-  assert.deepEqual(summarizeWearableLatest.mock.calls, [[readModel, {
+  assert.deepEqual(summarizeWearableLatestRuntime.mock.calls, [["./vault", {
     date: "2026-04-04",
     from: undefined,
     to: undefined,
@@ -89,17 +87,15 @@ test("showWearableLatest forwards normalized surface filters to the shared query
 });
 
 test("metric and drift wearable service methods use the shared assistant-aligned method names", async () => {
-  const readModel = { kind: "read-model" };
-  const summarizeWearableMetricLatest = vi.fn(() => ({ metric: "restingHeartRate" }));
-  const summarizeWearableMetricTrend = vi.fn(() => ({ metric: "restingHeartRate", points: [] }));
-  const explainWearableDrift = vi.fn(() => ({ windowDays: 7, signals: [] }));
+  const summarizeWearableMetricLatestRuntime = vi.fn(async () => ({ metric: "restingHeartRate" }));
+  const summarizeWearableMetricTrendRuntime = vi.fn(async () => ({ metric: "restingHeartRate", points: [] }));
+  const explainWearableDriftRuntime = vi.fn(async () => ({ windowDays: 7, signals: [] }));
   const loadCoreRuntime = vi.fn();
   const loadImporterRuntime = vi.fn();
   const loadQueryRuntime = vi.fn(async () => ({
-    readVault: vi.fn(async () => readModel),
-    summarizeWearableMetricLatest,
-    summarizeWearableMetricTrend,
-    explainWearableDrift,
+    summarizeWearableMetricLatestRuntime,
+    summarizeWearableMetricTrendRuntime,
+    explainWearableDriftRuntime,
   }));
 
   const integratedServicesModule = await importWithMocks<
@@ -138,21 +134,21 @@ test("metric and drift wearable service methods use the shared assistant-aligned
     providers: ["oura"],
   });
 
-  assert.deepEqual(summarizeWearableMetricLatest.mock.calls, [[readModel, "rhr", {
+  assert.deepEqual(summarizeWearableMetricLatestRuntime.mock.calls, [["./vault", "rhr", {
     date: undefined,
     from: "2026-04-01",
     to: "2026-04-04",
     providers: ["oura", "garmin"],
     windowDays: 3,
   }]]);
-  assert.deepEqual(summarizeWearableMetricTrend.mock.calls, [[readModel, "rhr", {
+  assert.deepEqual(summarizeWearableMetricTrendRuntime.mock.calls, [["./vault", "rhr", {
     date: undefined,
     from: "2026-04-01",
     to: "2026-04-04",
     providers: ["oura"],
     windowDays: 3,
   }]]);
-  assert.deepEqual(explainWearableDrift.mock.calls, [[readModel, {
+  assert.deepEqual(explainWearableDriftRuntime.mock.calls, [["./vault", {
     date: undefined,
     from: undefined,
     to: undefined,
