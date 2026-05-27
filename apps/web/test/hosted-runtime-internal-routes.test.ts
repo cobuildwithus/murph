@@ -18,10 +18,10 @@ const mocks = vi.hoisted(() => ({
   checkpointHostedWorkspace: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
-  hasRecentAcceptedRuntimeAttemptFailureLog: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
+  readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
@@ -43,10 +43,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
-  hasRecentAcceptedRuntimeAttemptFailureLog:
-    mocks.hasRecentAcceptedRuntimeAttemptFailureLog,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
+  readAcceptedRuntimeAttemptFailureSignalOwnerLogId:
+    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
 }));
@@ -119,7 +119,7 @@ describe("hosted runtime internal web routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
-    mocks.hasRecentAcceptedRuntimeAttemptFailureLog.mockResolvedValue(false);
+    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
@@ -595,7 +595,7 @@ describe("hosted runtime internal web routes", () => {
       },
       userId: "member_routes_1",
     }));
-    expect(mocks.hasRecentAcceptedRuntimeAttemptFailureLog).not.toHaveBeenCalled();
+    expect(mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const rejectedResponse = await runtimeLogRoute.POST(jsonRequest(
@@ -843,6 +843,9 @@ describe("hosted runtime internal web routes", () => {
       userId: "member_routes_1",
       workspaceVersion: "5",
     });
+    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
+      "runtime_log_failure_1",
+    );
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -865,8 +868,7 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
       loggedCount: 1,
     });
-    expect(mocks.hasRecentAcceptedRuntimeAttemptFailureLog).toHaveBeenCalledWith({
-      excludeIds: ["runtime_log_failure_1"],
+    expect(mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId).toHaveBeenCalledWith({
       since: expect.any(Date),
       userId: "member_routes_1",
     });
@@ -875,7 +877,7 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("cooldowns accepted runtime attempt failure recheck signals", async () => {
+  it("cooldowns accepted runtime attempt failure recheck signals behind the owner log", async () => {
     mocks.recordHostedRuntimeLog.mockResolvedValue({
       at: FIXED_NOW,
       attemptId: null,
@@ -896,7 +898,9 @@ describe("hosted runtime internal web routes", () => {
       userId: "member_routes_1",
       workspaceVersion: "5",
     });
-    mocks.hasRecentAcceptedRuntimeAttemptFailureLog.mockResolvedValue(true);
+    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
+      "runtime_log_prior_failure",
+    );
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -943,6 +947,9 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
+    );
+    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
+      "runtime_log_failure_3",
     );
 
     try {

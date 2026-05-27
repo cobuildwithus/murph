@@ -129,6 +129,10 @@ Because the Temporal worker can deploy automatically before the manual
 Cloudflare worker rollout, new Temporal-to-Cloudflare `ensure-processing` fields
 must either be accepted by the currently deployed worker or keep the demand
 pending with `retry_later` until the consumer deployment catches up.
+Web-to-Temporal signal kinds have the same compatibility constraint: add
+workflow `patched()`/version gating for any new signal that changes wait or
+demand behavior, deploy the Temporal worker before web emits that signal, and
+keep old histories replaying the old invalid/no-op signal behavior.
 
 Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work
@@ -166,6 +170,9 @@ durably recorded that metadata-only row, it may send a cooldown-throttled,
 payload-free `runtime_recheck_requested` Temporal signal. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned demand;
 it sets no mailbox, manual, browser-vault, lag, or device-sync demand flag.
+The cooldown elects the earliest recent same-user accepted-failure log as the
+signal owner, so concurrent first-failure callbacks produce at most one
+immediate recheck and cannot all suppress each other.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.

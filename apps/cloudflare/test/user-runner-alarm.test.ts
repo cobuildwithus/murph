@@ -278,14 +278,23 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const { flushWaitUntil, invoke, runner, sql, waitUntilPromises } = createRunnerHarness({
+    let runtimeLogSawDeletedAlarm = false;
+    let harness: ReturnType<typeof createRunnerHarness>;
+    harness = createRunnerHarness({
       invocationResults: [invocationResult.promise],
+      runtimeLogResponse: () => {
+        runtimeLogSawDeletedAlarm = harness.alarms.includes("deleted");
+        return jsonResponse({
+          loggedCount: 1,
+        });
+      },
       workspace: createWorkspaceState({
         nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
         nextWakeReason: "assistant",
         version: "5",
       }),
     });
+    const { flushWaitUntil, invoke, runner, sql, waitUntilPromises } = harness;
     await runner.bindUser(TEST_USER_ID);
 
     await expect(runner.ensureRuntimeProcessingForUser({
@@ -316,6 +325,7 @@ describe("HostedUserRunner execution coordination", () => {
       failure_count: 1,
       last_invocation_at: null,
     });
+    expect(runtimeLogSawDeletedAlarm).toBe(true);
     const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
       .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
     expect(runtimeLogCalls).toHaveLength(1);
@@ -341,6 +351,99 @@ describe("HostedUserRunner execution coordination", () => {
         message: "Hosted runner runtime execution adapter failed.",
       }),
     );
+  });
+
+  it("keeps accepted failure cleanup best-effort when the runtime log callback fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      runtimeLogResponse: () => new Response("unavailable", { status: 503 }),
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    invocationResult.reject(new Error("Hosted container first request failed."));
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      last_invocation_at: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          orchestrationAttemptIdPresent: true,
+          workspaceAttemptIdPresent: true,
+          workspaceVersion: "5",
+        }),
+        message: "Hosted runner accepted runtime attempt failure log write failed.",
+      }),
+    );
+    const failureLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map((call) => call[0])
+      .find((entry) =>
+        entry.message === "Hosted runner accepted runtime attempt failure log write failed"
+      );
+    expect(JSON.stringify(failureLog?.details ?? {})).not.toContain("runtime-write-");
+    expect(JSON.stringify(failureLog?.details ?? {})).not.toContain("test-orchestration-attempt");
+  });
+
+  it("does not emit an accepted failure log when the async attempt no longer owns the fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const active = readRunnerMeta(sql);
+    await runner.finishRuntimeWriteFenceForSmoke({
+      attemptId: active.active_attempt_id ?? "",
+      generation: String(active.active_generation),
+      userId: TEST_USER_ID,
+    });
+
+    invocationResult.reject(new Error("Hosted container first request failed."));
+    await flushWaitUntil();
+
+    const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+    expect(runtimeLogCalls).toHaveLength(0);
   });
 
   it("returns retry_later when processing cannot start without a container binding", async () => {
@@ -1675,6 +1778,7 @@ function createRunnerHarness(input: {
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+  runtimeLogResponse?: () => Promise<Response> | Response;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   workspace?: HostedWorkspaceState | null;
@@ -1736,6 +1840,7 @@ function createRunnerHarness(input: {
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onStatusRead: input.onStatusRead,
     onWorkspaceRead: input.onWorkspaceRead,
+    runtimeLogResponse: input.runtimeLogResponse,
   });
 
   const runner = new HostedUserRunner(
@@ -1899,6 +2004,7 @@ function installWebControlResponses(
     onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
     readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
+    runtimeLogResponse?: () => Promise<Response> | Response;
   } = {},
 ): void {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
@@ -1931,7 +2037,7 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_LOG_PATH) {
-        return jsonResponse({
+        return await hooks.runtimeLogResponse?.() ?? jsonResponse({
           loggedCount: 1,
         });
       }

@@ -283,6 +283,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026052400_device_connection_refresh_lease",
       "2026052600_device_sync_dirty_payload",
       "2026052700_hosted_ingress_latency_trace",
+      "2026052700_hosted_runtime_log_event_cooldown_index",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

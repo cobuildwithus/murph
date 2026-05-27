@@ -596,6 +596,7 @@ model HostedRuntimeLog {
   member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, at])
+  @@index([userId, eventCode, createdAt])
   @@index([level, at])
   @@index([component, at])
   @@map("hosted_runtime_log")

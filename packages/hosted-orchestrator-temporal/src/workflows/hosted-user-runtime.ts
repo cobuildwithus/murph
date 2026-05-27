@@ -42,6 +42,8 @@ const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH =
   "hosted-user-runtime-ensure-runtime-processing-v1";
 const HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH =
   "hosted-user-runtime-same-runtime-wake-count-v1";
+const HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH =
+  "hosted-user-runtime-recheck-signal-v1";
 export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
@@ -85,6 +87,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_PATCH),
     useSameRuntimeWakeAcceptedCountPatch: () =>
       patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
+    useRuntimeRecheckSignalPatch: () =>
+      patched(HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -115,6 +119,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   nowMs(): number;
   readRuntimeDemand(request: HostedRuntimeDemandRequest): Promise<HostedRuntimeDemand>;
   useEnsureRuntimeProcessingPatch(): void;
+  useRuntimeRecheckSignalPatch(): boolean;
   useSameRuntimeWakeAcceptedCountPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
@@ -150,6 +155,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   const continueAsNewOptions = normalizeContinueAsNewOptions(input.options);
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
+  let demandSignalVersion = 0;
 
   const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
@@ -158,12 +164,21 @@ export function createHostedUserRuntimeWorkflowMachine(
     try {
       signal = parseHostedRuntimeSignal(rawSignal);
     } catch (error) {
-      state.invalidSignalCount += 1;
-      state.lastInvalidSignalErrorCode = readExecutionErrorCode(error);
+      recordInvalidSignal(state, readExecutionErrorCode(error));
+      return;
+    }
+
+    if (signal.kind === "runtime_recheck_requested") {
+      if (!runtime.useRuntimeRecheckSignalPatch()) {
+        recordInvalidSignal(state, "TypeError");
+        return;
+      }
+      state.signalVersion += 1;
       return;
     }
 
     state.signalVersion += 1;
+    demandSignalVersion += 1;
 
     switch (signal.kind) {
       case "mailbox_appended": {
@@ -190,9 +205,6 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
       case "mailbox_lag_observed": {
         state.lagRecoveryObserved = true;
-        break;
-      }
-      case "runtime_recheck_requested": {
         break;
       }
       default: {
@@ -279,6 +291,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       const versionBeforeExecution = state.signalVersion;
+      const demandVersionBeforeExecution = demandSignalVersion;
       let execution: HostedRuntimeEnsureProcessingResponse;
       const orchestrationAttemptId = runtime.uuid();
       state.lastOrchestrationAttemptId = orchestrationAttemptId;
@@ -299,7 +312,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = null;
         state.sameRuntimeWakeAcceptedCount = 0;
-        if (state.signalVersion !== versionBeforeExecution) {
+        if (demandSignalVersion !== demandVersionBeforeExecution) {
           continue;
         }
         const retryAt = readActivityFailureRetryAt({
@@ -322,6 +335,8 @@ export function createHostedUserRuntimeWorkflowMachine(
       state.lastExecutionKind = execution.kind;
       const signalArrivedDuringExecution =
         state.signalVersion !== versionBeforeExecution;
+      const demandSignalArrivedDuringExecution =
+        demandSignalVersion !== demandVersionBeforeExecution;
 
       if (execution.kind === "runtime_processing_accepted") {
         const sameRuntimeWakeCountPatchEnabled =
@@ -329,12 +344,15 @@ export function createHostedUserRuntimeWorkflowMachine(
         recordRuntimeProcessingAccepted(state, execution, {
           countFirstAcceptedWake: sameRuntimeWakeCountPatchEnabled,
         });
-        if (signalArrivedDuringExecution) {
+        if (demandSignalArrivedDuringExecution) {
           continue;
         }
         clearConsumedFlagsAfterRun(state, demand.source, execution, {
           deviceSyncRecoveryWakeLimitEnabled: sameRuntimeWakeCountPatchEnabled,
         });
+        if (signalArrivedDuringExecution) {
+          continue;
+        }
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
@@ -350,7 +368,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = "retry_later";
         state.sameRuntimeWakeAcceptedCount = 0;
-        if (signalArrivedDuringExecution) {
+        if (demandSignalArrivedDuringExecution) {
           continue;
         }
         await waitUntilTimestampOrSignal(
@@ -371,6 +389,14 @@ export function createHostedUserRuntimeWorkflowMachine(
     readStatus,
     run,
   };
+}
+
+function recordInvalidSignal(
+  state: HostedRuntimeWorkflowState,
+  errorCode: string,
+): void {
+  state.invalidSignalCount += 1;
+  state.lastInvalidSignalErrorCode = errorCode;
 }
 
 function recordRuntimeProcessingAccepted(

@@ -157,6 +157,60 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
+  it("keeps runtime recheck signals invalid before the patch marker is present", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.runtimeRecheckSignalPatchEnabled = false;
+    runtime.demands.push(idleDemand(isoAfter(60_000)));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    runtime.onWait = () => {
+      machine.applySignal(runtimeRecheckSignal());
+    };
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([60_000]);
+    expect(runtime.demandRequests).toHaveLength(1);
+    expect(continued.state?.invalidSignalCount).toBe(1);
+    expect(continued.state?.lastInvalidSignalErrorCode).toBe("TypeError");
+    expect(continued.state?.signalVersion).toBe(0);
+  });
+
+  it("does not retain consumed demand flags when runtime recheck arrives during processing", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    let machine: HostedUserRuntimeWorkflowMachine | null = null;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(() => {
+      machine?.applySignal(runtimeRecheckSignal());
+      return processingAcceptedWithRecheck(isoAfter(45_000));
+    });
+    runtime.demands.push((request) => {
+      expect(request).toEqual({
+        browserVaultRefreshRequested: false,
+        deviceSyncRecoveryRequested: false,
+        lagRecoveryObserved: false,
+        manualRunRequested: false,
+        userId: "member_test",
+      });
+      return idleDemand(null);
+    });
+
+    machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-processing"));
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(continued.state?.manualRunRequested).toBe(false);
+  });
+
   it("re-reads demand immediately when a signal arrives before processing accepted returns", async () => {
     const runtime = new FakeWorkflowRuntime();
     let machine: HostedUserRuntimeWorkflowMachine | null = null;
@@ -1082,6 +1136,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  runtimeRecheckSignalPatchEnabled = true;
   sameRuntimeWakeAcceptedCountPatchEnabled = true;
   signalOnlyNonRetryableFailureWaitEnabled = true;
   suggestContinueAsNew = false;
@@ -1129,6 +1184,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useEnsureRuntimeProcessingPatch(): void {
     return;
+  }
+
+  useRuntimeRecheckSignalPatch(): boolean {
+    return this.runtimeRecheckSignalPatchEnabled;
   }
 
   useSameRuntimeWakeAcceptedCountPatch(): boolean {
