@@ -8,9 +8,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
-  hasRecentAcceptedRuntimeAttemptFailureLog,
   publishHostedBrowserVaultReplicaRef,
   publishLatestBrowserVaultReplicaRefTx,
+  readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
   recordHostedRuntimeLogTx,
   type HostedRuntimeLogRow,
   type HostedWorkspaceTransactionRunner,
@@ -1169,23 +1169,26 @@ describe("hosted workspace store", () => {
 });
 
 describe("hosted runtime log store", () => {
-  it("checks recent same-user same-event logs while excluding current log ids", async () => {
+  it("selects the earliest recent same-user accepted-failure log as signal owner", async () => {
     const findFirst = vi.fn<HostedRuntimeLogFindFirst>(async () => ({ id: "runtime_log_prior" }));
     const prisma = Object.assign(Object.create(null), {
       hostedRuntimeLog: {
         findFirst,
       },
-    }) as Parameters<typeof hasRecentAcceptedRuntimeAttemptFailureLog>[0]["prisma"];
+    }) as Parameters<typeof readAcceptedRuntimeAttemptFailureSignalOwnerLogId>[0]["prisma"];
 
-    const result = await hasRecentAcceptedRuntimeAttemptFailureLog({
-      excludeIds: ["runtime_log_current", "", "runtime_log_current_2"],
+    const result = await readAcceptedRuntimeAttemptFailureSignalOwnerLogId({
       prisma,
       since: new Date("2026-05-27T12:34:00.000Z"),
       userId: "member_workspace_1",
     });
 
-    expect(result).toBe(true);
+    expect(result).toBe("runtime_log_prior");
     expect(findFirst).toHaveBeenCalledWith({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
       select: {
         id: true,
       },
@@ -1194,9 +1197,6 @@ describe("hosted runtime log store", () => {
           gte: new Date("2026-05-27T12:34:00.000Z"),
         },
         eventCode: "runner.accepted_attempt_failed",
-        id: {
-          notIn: ["runtime_log_current", "runtime_log_current_2"],
-        },
         userId: "member_workspace_1",
       },
     });
@@ -1684,6 +1684,10 @@ interface HostedRuntimeLogCreateArgs {
 }
 
 interface HostedRuntimeLogFindFirstArgs {
+  orderBy: [
+    { createdAt: "asc" },
+    { id: "asc" },
+  ];
   select: {
     id: true;
   };
@@ -1692,9 +1696,6 @@ interface HostedRuntimeLogFindFirstArgs {
       gte: Date;
     };
     eventCode: string;
-    id?: {
-      notIn: string[];
-    };
     userId: string;
   };
 }

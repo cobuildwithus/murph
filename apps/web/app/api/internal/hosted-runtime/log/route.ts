@@ -12,7 +12,7 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  hasRecentAcceptedRuntimeAttemptFailureLog,
+  readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
   recordHostedRuntimeLog,
   type HostedRuntimeLogRecord,
 } from "@/src/lib/hosted-workspace/store";
@@ -65,12 +65,14 @@ async function signalAcceptedRuntimeAttemptFailureBestEffort(input: {
   }
 
   try {
-    const recentFailureAlreadyLogged = await hasRecentAcceptedRuntimeAttemptFailureLog({
-      excludeIds: acceptedFailureLogIds,
+    const signalOwnerLogId = await readAcceptedRuntimeAttemptFailureSignalOwnerLogId({
       since: new Date(Date.now() - ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS),
       userId: input.userId,
     });
-    if (recentFailureAlreadyLogged) {
+    if (
+      signalOwnerLogId === null
+      || !acceptedFailureLogIds.includes(signalOwnerLogId)
+    ) {
       return;
     }
 
