@@ -162,6 +162,7 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_PATTERNS: ReadonlyArray<{
     operation: "runtime_internal_request",
     pattern: /^Hosted runtime internal request to /u,
   },
+  { operation: "runtime_latency_trace", pattern: /^Hosted runtime latency trace$/u },
   { operation: "runtime_log_write", pattern: /^Hosted runtime log write$/u },
   {
     operation: "telegram_file_download",

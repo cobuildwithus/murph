@@ -7,6 +7,8 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceRequest,
+  HostedRuntimeLatencyTraceResponse,
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
   HostedRuntimeIssueExportResponse,
@@ -296,6 +298,10 @@ export interface HostedRuntimeLogPort {
   write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
 }
 
+export interface HostedRuntimeLatencyTracePort {
+  record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
+}
+
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
@@ -303,6 +309,7 @@ export interface HostedRuntimePlatform {
   effectsPort: HostedRuntimeEffectsPort;
   providerFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   runtimeLivenessIntervalMs?: number | null;
@@ -314,9 +321,11 @@ export interface HostedRuntimePlatform {
 }
 
 export type HostedRuntimeIssueRecordResponse = HostedRuntimeIssueExportResponse;
+export type HostedRuntimeLatencyTraceRecordResponse = HostedRuntimeLatencyTraceResponse;
 export type HostedRuntimeUsageRecordResponse = HostedExecutionRuntimeUsageRecordResponse;
 
 export {
   parseHostedRuntimeIssueExportResponse as parseHostedRuntimeIssueRecordResponse,
+  parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/parsers";

@@ -46,6 +46,8 @@ import {
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
+  parseHostedRuntimeLatencyTraceRequest,
+  parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
@@ -604,6 +606,86 @@ describe("hosted runtime control contracts", () => {
       recorded: true,
       usageId: "",
     })).toThrow(/non-empty string/u);
+  });
+
+  it("parses hosted runtime latency trace callbacks with exact safe keys", () => {
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    })).toEqual({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.000Z",
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: null,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.000Z",
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: null,
+        source: "linq",
+        type: "provider_started",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceResponse({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    })).toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:00.000Z",
+        mailboxItemId: "mailbox_item_1",
+        source: "linq",
+        type: "assistant_input_staged",
+        userId: "member_1",
+      },
+    })).toThrow(/userId is not allowed/u);
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: Array.from({ length: 65 }, (_, index) => `input_${index}`),
+        at: "2026-04-26T00:00:01.000Z",
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toThrow(/at most 64 ids/u);
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        message: "raw text",
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toThrow(/message is not allowed/u);
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {

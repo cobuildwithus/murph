@@ -329,6 +329,7 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
   ): void;
+  runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }
 
@@ -470,6 +471,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           recordMessagingReturnTarget: (target) => {
             hostedCliBridgeMessagingReturnTarget = target;
           },
+          runtimeAttemptId: input.request.attemptId,
           signal: runtimeAbortController.signal,
         },
       );
@@ -486,6 +488,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           recordMessagingReturnTarget: (target) => {
             hostedCliBridgeMessagingReturnTarget = target;
           },
+          runtimeAttemptId: input.request.attemptId,
           signal: runtimeAbortController.signal,
         },
       );

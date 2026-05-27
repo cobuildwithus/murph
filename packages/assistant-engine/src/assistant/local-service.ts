@@ -509,6 +509,17 @@ export async function sendAssistantMessageLocal(
                 providerRequestJournal?.inputIds ?? acceptedInputIdsForNextProviderRequest
               acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
             },
+            onProviderRequestStarted: (event) => {
+              if (!currentInput.onProviderRequestStarted) {
+                return
+              }
+              return currentInput.onProviderRequestStarted({
+                acceptedInputIds: providerRequestAcceptedInputIds,
+                providerRequestOrdinal:
+                  event.providerRequestOrdinal ?? providerRequestOrdinal,
+                startedAt: event.startedAt,
+              })
+            },
             route: activeTurnRouteLock ?? route,
             plan: sharedPlan,
             profile: {
@@ -628,6 +639,15 @@ export async function sendAssistantMessageLocal(
               providerRequestAcceptedInputIds =
                 providerRequestJournal?.inputIds ?? accepted.acceptedInputJournal.inputIds
               acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
+              if (currentInput.onProviderRequestStarted) {
+                void Promise.resolve(currentInput.onProviderRequestStarted({
+                  acceptedInputIds: providerRequestAcceptedInputIds,
+                  providerRequestOrdinal,
+                  startedAt: new Date().toISOString(),
+                })).catch(() => {
+                  // Provider-start hooks are diagnostic-only and must not block turns.
+                })
+              }
               continue
             }
             activeTurnHistory = appendAssistantActiveTurnProviderExchange({

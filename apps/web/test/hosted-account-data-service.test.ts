@@ -1455,6 +1455,9 @@ async function createHostedAccountDataExportPrisma(input: {
         },
       ],
     },
+    hostedIngressLatencyTrace: {
+      count,
+    },
     hostedMailboxLaneCounter: {
       count,
       findMany: async () => [

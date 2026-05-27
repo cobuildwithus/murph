@@ -2,6 +2,10 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  recordHostedIngressAcceptedFromMailboxItem,
+  recordHostedIngressTemporalSignalAccepted,
+} from "../hosted-runtime-latency/store";
+import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
@@ -56,6 +60,11 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   }
   const mailboxItemId = input.mailboxItemId;
 
+  await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+    mailboxItemId,
+    source: input.source,
+  });
+
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   try {
     signal = await signalHostedMailboxAppendRuntime({
@@ -76,6 +85,12 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     };
   }
 
+  await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
+    mailboxItemId,
+    source: input.source,
+    userId: input.userId ?? null,
+  });
+
   finishHostedOnboardingTiming(handoffTiming, "temporal-signaled", {
     workflowIdSuffix: toHostedOnboardingLogIdSuffix(signal.workflowId),
   });
@@ -85,4 +100,56 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     started: true,
     workflowId: signal.workflowId,
   };
+}
+
+async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
+  mailboxItemId: string;
+  source: "linq" | "telegram" | "whatsapp";
+}): Promise<void> {
+  const source = input.source;
+  if (source !== "linq") {
+    return;
+  }
+  const mailboxItemId = input.mailboxItemId;
+
+  try {
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId,
+      source: "linq",
+    });
+  } catch (error) {
+    console.warn("Hosted ingress latency accepted write failed.", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      source,
+      stage: "accepted",
+    });
+  }
+}
+
+async function recordHostedWebhookIngressLatencyTemporalSignalBestEffort(input: {
+  mailboxItemId: string;
+  source: "linq" | "telegram" | "whatsapp";
+  userId: string | null;
+}): Promise<void> {
+  const source = input.source;
+  if (source !== "linq") {
+    return;
+  }
+  const mailboxItemId = input.mailboxItemId;
+  const userId = input.userId;
+
+  try {
+    await recordHostedIngressTemporalSignalAccepted({
+      at: new Date(),
+      expectedUserId: userId,
+      mailboxItemId,
+      source: "linq",
+    });
+  } catch (error) {
+    console.warn("Hosted ingress latency temporal signal write failed.", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      source,
+      stage: "temporal_signal",
+    });
+  }
 }
