@@ -1808,7 +1808,7 @@ describe("appendHostedDeviceSyncWake", () => {
     }
   });
 
-  it("coalesces a historical webhook burst into one dirty row and one device-sync wake while the connection stays dirty", async () => {
+  it("coalesces a historical webhook burst into one dirty row and one background nudge while the connection stays dirty", async () => {
     let traceIndex = 0;
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
@@ -1891,12 +1891,16 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "user-123",
+    });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("appends a new device-sync wake in the same wall-clock bucket after prior work is clean", async () => {
+  it("requests another background nudge in the same wall-clock bucket after prior work is clean", async () => {
     let traceIndex = 0;
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
@@ -1972,8 +1976,9 @@ describe("appendHostedDeviceSyncWake", () => {
       });
     }
 
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(2);
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledTimes(2);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -2002,6 +2007,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("does not complete or nudge a hosted webhook trace when dirty-state persistence fails", async () => {
@@ -2025,6 +2031,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("does not nudge after a hosted webhook trace claim is lost before completion", async () => {
@@ -2053,6 +2060,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("shapes hosted webhook dirty resources by provider and job allowlists instead of key redaction", async () => {
