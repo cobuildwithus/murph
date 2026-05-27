@@ -118,6 +118,9 @@ import {
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
+import type {
+  HostedWorkspaceDurableCheckpointEffects,
+} from "../src/hosted-runtime/workspace-runner.ts";
 
 type RuntimeDeviceSyncPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]
@@ -173,6 +176,18 @@ function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
       };
     },
   };
+}
+
+async function runHostedWorkspaceDurableCheckpointEffects(
+  effects: HostedWorkspaceDurableCheckpointEffects | null | undefined,
+): Promise<void> {
+  if (!effects) {
+    return;
+  }
+  const list = typeof effects === "function" ? [effects] : [...effects];
+  for (const effect of list) {
+    await effect();
+  }
 }
 
 beforeEach(() => {
@@ -2302,12 +2317,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt: "2026-04-27T00:10:00.000Z",
       nextWakeReason: "assistant",
+      afterDurableCheckpoint: expect.any(Function),
       redactedStatus: expect.objectContaining({
-        hostedDeviceSyncDirtyAckRecorded: true,
-        hostedDeviceSyncDirtyStillPending: false,
+        hostedDeviceSyncDirtyAckDeferred: true,
+        hostedDeviceSyncDirtyAckRecorded: false,
+        hostedDeviceSyncDirtyStillPending: true,
         nextWakeAt: "2026-04-27T00:10:00.000Z",
       }),
     }));
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+    await runHostedWorkspaceDurableCheckpointEffects(postCheckpoint?.afterDurableCheckpoint);
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
+      record: {
+        connectionId: "dsc_dirty_system_mailbox",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedRevision: "44",
+      },
+      runtime: expect.any(Object),
+    });
   });
 
   it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {
@@ -3106,6 +3134,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Function),
+    }));
+    await runHostedWorkspaceDurableCheckpointEffects(postCheckpoint?.afterDurableCheckpoint);
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
       record: {
         connectionId: "dsc_dirty",
@@ -3117,10 +3150,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: "2026-04-27T00:13:00.000Z",
+      nextWakeAt: "2026-04-27T00:11:00.000Z",
       nextWakeReason: "device-sync.reconcile",
       redactedStatus: expect.objectContaining({
-        hostedDeviceSyncDirtyAckRecorded: true,
+        hostedDeviceSyncDirtyAckDeferred: true,
+        hostedDeviceSyncDirtyAckRecorded: false,
         hostedDeviceSyncDirtyStillPending: true,
         hostedSystemMailboxRecorded: 1,
       }),
@@ -3345,6 +3379,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.checkpointReason).toBe("assistant_runtime_commit");
     const postCheckpoint = await result.afterCheckpoint?.();
 
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Function),
+    }));
+    await runHostedWorkspaceDurableCheckpointEffects(postCheckpoint?.afterDurableCheckpoint);
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
       record: {
         connectionId: "dsc_dirty_ack_only",
@@ -3357,8 +3396,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       redactedStatus: expect.objectContaining({
-        hostedDeviceSyncDirtyAckRecorded: true,
-        hostedDeviceSyncDirtyStillPending: false,
+        hostedDeviceSyncDirtyAckDeferred: true,
+        hostedDeviceSyncDirtyAckRecorded: false,
+        hostedDeviceSyncDirtyStillPending: true,
       }),
     }));
   });
@@ -3396,15 +3436,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
     expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Function),
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt: "2026-04-27T00:09:00.000Z",
       nextWakeReason: "assistant",
       redactedStatus: expect.objectContaining({
-        hostedDeviceSyncDirtyAckRecorded: true,
-        hostedDeviceSyncDirtyStillPending: false,
+        hostedDeviceSyncDirtyAckDeferred: true,
+        hostedDeviceSyncDirtyAckRecorded: false,
+        hostedDeviceSyncDirtyStillPending: true,
         nextWakeAt: "2026-04-27T00:09:00.000Z",
       }),
     }));
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+    await runHostedWorkspaceDurableCheckpointEffects(postCheckpoint?.afterDurableCheckpoint);
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
+      record: {
+        connectionId: "dsc_dirty_ack_with_cleanup",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedRevision: "45",
+      },
+      runtime: expect.any(Object),
+    });
   });
 
   it("treats pending terminal Linq cleanup evidence as checkpoint progress", async () => {

@@ -93,7 +93,7 @@ function isEnsureProcessingSourceDeploySkewRejection(error: unknown): boolean {
   while (current && typeof current === "object" && !visited.has(current)) {
     visited.add(current);
     if (current instanceof HostedOrchestratorHttpResponseError) {
-      return current.status === 400;
+      return current.status === 400 && current.code === undefined;
     }
     current = (current as { cause?: unknown }).cause;
   }

@@ -66,6 +66,7 @@ import {
 } from "./wake-candidates.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
+const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 const HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT = 20;
 const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
@@ -821,6 +822,14 @@ export async function runHostedDeviceSyncPass(
   let controlPlaneSynced = false;
 
   try {
+    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs: 0,
+        service,
+        wake,
+      });
+    }
+
     if (secret) {
       syncState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -831,7 +840,24 @@ export async function runHostedDeviceSyncPass(
       controlPlaneSynced = true;
     }
 
+    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs: 0,
+        service,
+        wake,
+      });
+    }
+
     await service.runSchedulerOnce();
+
+    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs: 0,
+        service,
+        wake,
+      });
+    }
+
     const processedJobs = await drainHostedDeviceSyncWorker({
       service,
       shouldYield: options.shouldYield ?? null,
@@ -844,6 +870,14 @@ export async function runHostedDeviceSyncPass(
       wake,
     });
 
+    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        service,
+        wake,
+      });
+    }
+
     if (secret && controlPlaneSynced) {
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -851,6 +885,14 @@ export async function runHostedDeviceSyncPass(
         secret,
         service,
         state: syncState,
+      });
+    }
+
+    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        service,
+        wake,
       });
     }
 
@@ -867,6 +909,37 @@ export async function runHostedDeviceSyncPass(
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
   }
+}
+
+function shouldYieldHostedDeviceSync(shouldYield: (() => boolean) | null): boolean {
+  return shouldYield?.() === true;
+}
+
+function buildHostedDeviceSyncYieldedPassResult(input: {
+  processedJobs: number;
+  service: DeviceSyncService;
+  wake: HostedRuntimeEvent;
+}): {
+  nextWakeAt: string | null;
+  postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"];
+  processedJobs: number;
+  skipped: boolean;
+} {
+  return {
+    nextWakeAt: earliestHostedMaintenanceWakeAt(
+      input.service.getNextWakeAt(),
+      resolveHostedDeviceSyncYieldRetryAt(input.wake),
+    ),
+    postCheckpointRecord: null,
+    processedJobs: input.processedJobs,
+    skipped: true,
+  };
+}
+
+function resolveHostedDeviceSyncYieldRetryAt(wake: HostedRuntimeEvent): string {
+  const occurredAtMs = Date.parse(wake.occurredAt);
+  const baseMs = Number.isFinite(occurredAtMs) ? occurredAtMs : Date.now();
+  return new Date(baseMs + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
 }
 
 async function drainHostedDeviceSyncWorker(input: {

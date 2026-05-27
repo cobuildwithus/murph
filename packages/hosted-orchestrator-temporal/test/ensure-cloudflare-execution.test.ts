@@ -98,6 +98,47 @@ describe("ensureRuntimeProcessing", () => {
     });
   });
 
+  it("does not turn coded current Cloudflare validation failures into retry-later", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
+    await stubCloudflareEnvironment();
+
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse({ code: "invalid_request", error: "Invalid request." }, 400)
+    ));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      source: "device_sync_recovery",
+      userId: "member_test",
+    })).rejects.toMatchObject({
+      message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
+      nonRetryable: true,
+      type: "hosted_orchestrator_http_non_retryable",
+    });
+  });
+
+  it("does not turn source-less Cloudflare validation failures into retry-later", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
+    await stubCloudflareEnvironment();
+
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse({ error: "Invalid request." }, 400)
+    ));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      userId: "member_test",
+    })).rejects.toMatchObject({
+      message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
+      nonRetryable: true,
+      type: "hosted_orchestrator_http_non_retryable",
+    });
+  });
+
   it("does not turn non-recovery source parse failures into retry-later", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
