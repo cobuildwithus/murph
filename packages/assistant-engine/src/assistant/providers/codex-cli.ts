@@ -228,6 +228,7 @@ export async function executeCodexAssistantTurnAttempt(
     onTraceEvent: input.onTraceEvent,
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
+    turnProgress: input.turnProgress ?? undefined,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     refreshThreadInstructions: input.refreshThreadInstructions,

@@ -79,6 +79,9 @@ import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
+import {
+  createHostedAssistantTurnProgress,
+} from './turn-progress.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
@@ -342,6 +345,12 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
+        const turnProgress = createHostedAssistantTurnProgress({
+          messageInput: input,
+          session: resolved.session,
+          sharedPlan,
+          turnId: currentUserTurn.turnId,
+        })
         let activeTurnHistory: AssistantActiveTurnProviderHistory | null = null
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let activeTurnRouteLock: ExecutedAssistantProviderTurnResult['route'] | null = null
@@ -517,6 +526,7 @@ export async function sendAssistantMessageLocal(
             providerRequestOrdinal,
             resolvedSession: currentSession,
             turnCreatedAt: currentUserTurn.turnCreatedAt,
+            turnProgress,
             turnId: currentUserTurn.turnId,
           })
           if (providerOutcome.kind === 'failed_terminal') {

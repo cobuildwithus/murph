@@ -45,6 +45,9 @@ import type {
 import type {
   AssistantActiveTurnLiveProviderSteering,
 } from '../turn-input.js'
+import type {
+  AssistantTurnProgress,
+} from '../turn-progress.js'
 import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -228,6 +231,7 @@ export interface AssistantCodexTurnExecutionPlan {
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
+  turnProgress: AssistantTurnProgress | null
   turnId: string
 }
 
@@ -308,6 +312,7 @@ export async function buildCodexTurnExecutionPlan(input: {
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
+  turnProgress?: AssistantTurnProgress | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnExecutionPlan> {
@@ -335,6 +340,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     promptTimeContext,
     route: input.route,
     sharedPlan: input.plan,
+    turnProgress: input.turnProgress ?? null,
     turnId: input.turnId,
   }
 }

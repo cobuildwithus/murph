@@ -19,6 +19,7 @@ import type {
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
+import type { AssistantTurnProgress } from '../turn-progress.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -84,6 +85,7 @@ export interface AssistantProviderTurnInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  turnProgress?: AssistantTurnProgress | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
@@ -122,6 +124,7 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  turnProgress?: AssistantTurnProgress | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

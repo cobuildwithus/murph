@@ -34,6 +34,9 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
+  maybeHandleMurphDynamicToolRequest,
+} from './assistant-codex/dynamic-tools.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -77,6 +80,9 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import type {
+  AssistantTurnProgress,
+} from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
@@ -129,6 +135,7 @@ export interface CodexAppServerTurnInput {
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
+  turnProgress?: AssistantTurnProgress | null
   workingDirectory: string
 }
 
@@ -631,13 +638,49 @@ async function runCodexAppServerTurn(
 
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
-      denyUnsupportedCodexServerRequest({
-        message,
-        requestId,
-        writeRpcMessage: (payload) => {
-          void tryWriteRpcMessage(payload)
-        },
-      })
+      if (input.turnProgress) {
+        void maybeHandleMurphDynamicToolRequest({
+          message,
+          requestId,
+          turnProgress: input.turnProgress,
+          writeRpcMessage: (payload) => {
+            void tryWriteRpcMessage(payload)
+          },
+        })
+          .then((handled) => {
+            if (!handled) {
+              denyUnsupportedCodexServerRequest({
+                message,
+                requestId,
+                writeRpcMessage: (payload) => {
+                  void tryWriteRpcMessage(payload)
+                },
+              })
+            }
+          })
+          .catch(() => {
+            void tryWriteRpcMessage({
+              id: requestId,
+              result: {
+                success: false,
+                contentItems: [
+                  {
+                    type: 'inputText',
+                    text: 'progress update failed',
+                  },
+                ],
+              },
+            })
+          })
+      } else {
+        denyUnsupportedCodexServerRequest({
+          message,
+          requestId,
+          writeRpcMessage: (payload) => {
+            void tryWriteRpcMessage(payload)
+          },
+        })
+      }
       return
     }
 

@@ -86,6 +86,80 @@ export async function deliverAssistantReply(input: {
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
+  const audience = input.sharedPlan.conversationPolicy.audience
+  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+    audience,
+    channel: deliveryChannel,
+    input: input.input,
+    session: input.session,
+  })
+
+  return await deliverAssistantCurrentAudienceMessage({
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    input: input.input,
+    message: input.response,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+    turnId: input.turnId,
+  })
+}
+
+export async function deliverAssistantProgressUpdate(input: {
+  input: AssistantMessageInput
+  ordinal: number
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  text: string
+  turnId: string
+}): Promise<AssistantDeliveryOutcome> {
+  const audience = input.sharedPlan.conversationPolicy.audience
+  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  const deliveryIdempotencyKey = buildAssistantProgressDeliveryIdempotencyKey({
+    deliveryIdempotencyKey: input.input.deliveryIdempotencyKey,
+    ordinal: input.ordinal,
+    turnId: input.turnId,
+  })
+
+  return await deliverAssistantCurrentAudienceMessage({
+    deliveryIdempotencyKey,
+    deliveryTransportIdempotent:
+      resolveHostedAssistantDeliveryTransportIdempotentOverride({
+        channel: deliveryChannel,
+        deliveryIdempotencyKey,
+        executionContext: input.input.executionContext,
+      }),
+    input: input.input,
+    message: input.text,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+    turnId: input.turnId,
+  })
+}
+
+export function buildAssistantProgressDeliveryIdempotencyKey(input: {
+  deliveryIdempotencyKey?: string | null
+  ordinal: number
+  turnId: string
+}): string {
+  const explicitKey = normalizeNullableString(input.deliveryIdempotencyKey)
+  if (explicitKey) {
+    return `${explicitKey}:progress:${input.ordinal}`
+  }
+
+  return `assistant-progress:${input.turnId}:${input.ordinal}`
+}
+
+async function deliverAssistantCurrentAudienceMessage(input: {
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean | undefined
+  input: AssistantMessageInput
+  message: string
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<AssistantDeliveryOutcome> {
   if (!input.input.deliverResponse) {
     return {
       kind: 'not-requested',
@@ -96,20 +170,14 @@ export async function deliverAssistantReply(input: {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
   const deliveryChannel = audience?.channel ?? input.session.binding.channel
-  const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
-    audience,
-    channel: deliveryChannel,
-    input: input.input,
-    session: input.session,
-  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
-    message: input.response,
+    message: input.message,
     channel: deliveryChannel,
-    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
-    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     identityId: audience?.identityId ?? input.session.binding.identityId,
     actorId: audience?.actorId ?? input.session.binding.actorId,
     threadId: audience?.threadId ?? input.session.binding.threadId,
