@@ -7,6 +7,8 @@ import {
 } from "@murphai/health-metrics";
 
 import type {
+  QueryMetricPointFilters,
+  QueryMetricTargetRow,
   QueryProjectionStatus,
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
@@ -53,12 +55,13 @@ import {
   readProjectionStatus,
 } from "./projection/freshness.ts";
 import {
+  composePublicWearableSummaryBundleFromStoredRows,
+} from "./projection/wearable-summary-compose.ts";
+import {
   listStoredMetricPoints,
   listStoredMetricTargets,
   metricPointFiltersForGoalTarget,
   normalizeMetricPointFilters,
-  type QueryMetricPointFilters,
-  type QueryMetricTargetRow,
 } from "./projection/metric-store.ts";
 import {
   rebuildQueryProjectionWithManifest,
@@ -71,17 +74,25 @@ import {
   type QueryProjectionLocation,
 } from "./projection/schema.ts";
 import {
-  readStoredPublicWearableSummaryBundle,
+  readWearableSummaryRows,
 } from "./projection/wearable-summary-store.ts";
 
 export type {
   QueryProjectionStatus,
   RebuildQueryProjectionResult,
-} from "./query-projection-types.ts";
-export type {
   QueryMetricPointFilters,
   QueryMetricTargetRow,
-} from "./projection/metric-store.ts";
+} from "./query-projection-types.ts";
+
+function readStoredPublicWearableSummaryBundle(
+  location: QueryProjectionLocation,
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+) {
+  return composePublicWearableSummaryBundleFromStoredRows(
+    readWearableSummaryRows(location, filters.providers),
+    filters,
+  );
+}
 
 export async function getQueryProjectionStatus(
   vaultRoot: string,

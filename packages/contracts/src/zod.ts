@@ -28,6 +28,7 @@ import {
   GOAL_HORIZONS,
   GOAL_STATUSES,
   ID_PREFIXES,
+  OBSERVATION_GRAINS,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
   RAW_ASSET_OWNER_KINDS,
@@ -854,6 +855,7 @@ export const eventRecordSchema = withContractMetadata(
       value: numberSchema(),
       visibility: z.enum(["display"]).optional(),
       canonicalFact: z.literal(true).optional(),
+      observationGrain: z.enum(OBSERVATION_GRAINS).optional(),
       unit: patternedString(UNIT_PATTERN),
     }),
     eventSchema("measurement", {

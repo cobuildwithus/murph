@@ -1,6 +1,6 @@
 # Device Provider Compatibility Matrix
 
-Last verified: 2026-05-13
+Last verified: 2026-05-27
 
 ## Purpose
 
@@ -62,6 +62,8 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 - `temperature`
 
 These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer raw artifacts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples.
+
+Junction timeseries are the concrete model for this boundary: `junction-timeseries-*` raw artifacts are evidence/debug data only. They must not emit per-point observation events, appear in default read/search surfaces, or feed wearable summaries by themselves. Wearable summaries require compact summary/session facts such as daily activity, sleep, body, or workout observations.
 
 ### Observation metrics already in active use
 

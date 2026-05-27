@@ -77,6 +77,8 @@ Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRe
 
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
 
+`observation` events carry numeric metric facts with `metric`, `value`, and `unit`. Provider observations may also set `observationGrain` to `sample`, `summary`, or `derived_fact`; raw/high-frequency sample observations stay dense telemetry unless explicitly display/debug retained, while compact summaries and derived facts are admission-safe without forcing default query/search visibility.
+
 `activity_session` also carries a required nested `workout` payload as the canonical structured workout/session detail. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as query-friendly summaries, while exercises, sets, loads, session notes, source ids, and workout media descriptors live under `workout`.
 
 `intervention_session` may also include optional `durationMinutes` when the session length is known, optional `regimenId` when the intervention should stay linked back to one private therapy or habit regimen, and optional `experimentId`/`experimentSlug` when the session belongs to one experiment run. Experiment membership is also represented as a `related_to` link to the experiment id so generic link queries and experiment-specific reads stay aligned.

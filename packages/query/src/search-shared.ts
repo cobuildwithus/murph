@@ -5,7 +5,7 @@ import {
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
-import { isDenseProviderObservationEntity } from "./query-visibility.ts";
+import { isSearchIndexedQueryEntity } from "./query-visibility.ts";
 import type { DailySampleSummary } from "./summaries.ts";
 
 const DEFAULT_LIMIT = 20;
@@ -220,7 +220,7 @@ const MAX_STRUCTURED_TERM_CHARS = 120;
 const MAX_STRUCTURED_PAYLOAD_CHARS = 4_000;
 
 function searchableStructuredPayloadTerms(entity: CanonicalEntity): string[] {
-  if (isDenseProviderObservationEntity(entity)) {
+  if (!isSearchIndexedQueryEntity(entity)) {
     return [];
   }
 

@@ -18,6 +18,10 @@ test("showWearableLatest forwards normalized surface filters to the shared query
           recordIds: ["evt_sleep_01"],
         }],
         selection: {
+          dataOrigin: {
+            provider: "whoop",
+            ingestSessionId: "import_session_01",
+          },
           paths: ["ledger/events/2026/2026-04.jsonl"],
           provider: "whoop",
           recordIds: ["evt_sleep_01"],
@@ -79,6 +83,8 @@ test("showWearableLatest forwards normalized surface filters to the shared query
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes("candidate_01"), false);
   assert.equal(serialized.includes("provider-resource-01"), false);
+  assert.equal(serialized.includes("import_session_01"), false);
+  assert.equal(serialized.includes("dataOrigin"), false);
   assert.equal(serialized.includes("ledger/events"), false);
   assert.equal(serialized.includes("evt_sleep_01"), false);
   assert.equal(loadQueryRuntime.mock.calls.length, 1);
@@ -186,6 +192,56 @@ test("metric and drift wearable service methods use the shared assistant-aligned
     },
   });
   assert.equal(loadQueryRuntime.mock.calls.length, 3);
+  assert.equal(loadCoreRuntime.mock.calls.length, 0);
+  assert.equal(loadImporterRuntime.mock.calls.length, 0);
+});
+
+test("wearable services preserve explicit blank provider filters as empty runtime filters", async () => {
+  const summarizeWearableDayRuntime = vi.fn(async () => null);
+  const summarizeWearableLatestRuntime = vi.fn(async () => null);
+  const loadCoreRuntime = vi.fn();
+  const loadImporterRuntime = vi.fn();
+  const loadQueryRuntime = vi.fn(async () => ({
+    summarizeWearableDayRuntime,
+    summarizeWearableLatestRuntime,
+  }));
+
+  const integratedServicesModule = await importWithMocks<
+    typeof import("../src/usecases/integrated-services.ts")
+  >("../src/usecases/integrated-services.ts", {
+    "../src/usecases/runtime.ts": () => ({
+      createUnwiredMethod: vi.fn(),
+      loadCoreRuntime,
+      loadImporterRuntime,
+      loadQueryRuntime,
+    }),
+  });
+
+  const services = integratedServicesModule.createIntegratedVaultServices();
+  const latest = await services.query.showWearableLatest({
+    vault: "./vault",
+    requestId: null,
+    providers: [" "],
+  });
+  const day = await services.query.showWearableDay({
+    vault: "./vault",
+    requestId: null,
+    date: "2026-04-04",
+    providers: [" "],
+  });
+
+  assert.deepEqual(summarizeWearableLatestRuntime.mock.calls, [["./vault", {
+    date: undefined,
+    from: undefined,
+    to: undefined,
+    providers: [],
+  }]]);
+  assert.deepEqual(summarizeWearableDayRuntime.mock.calls, [["./vault", "2026-04-04", {
+    providers: [],
+  }]]);
+  assert.deepEqual(latest.filters.providers, []);
+  assert.deepEqual(day.filters.providers, []);
+  assert.equal(loadQueryRuntime.mock.calls.length, 2);
   assert.equal(loadCoreRuntime.mock.calls.length, 0);
   assert.equal(loadImporterRuntime.mock.calls.length, 0);
 });

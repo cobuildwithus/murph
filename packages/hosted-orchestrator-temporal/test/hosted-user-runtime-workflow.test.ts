@@ -570,6 +570,94 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
   });
 
+  it("keeps a device-sync recovery flag pending when the same runtime is already running", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(processingAccepted({
+      action: "already_running",
+      recommendedRecheckAt: isoAfter(45_000),
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+    runtime.demands.push((request) => {
+      expect(request.deviceSyncRecoveryRequested).toBe(true);
+      return idleDemand(null);
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal({
+      kind: "device_sync_recovery_requested",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "nudge",
+        source: "device_sync_recovery",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state).toMatchObject({
+      deviceSyncRecoveryRequested: false,
+      sameRuntimeWakeAcceptedCount: 1,
+    });
+  });
+
+  it("does not synthesize device-sync recovery flags from recovery demand alone", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(processingAccepted({
+      action: "woken",
+      recommendedRecheckAt: isoAfter(45_000),
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests[0]).toMatchObject({
+      deviceSyncRecoveryRequested: false,
+    });
+    expect(continued.state).toMatchObject({
+      deviceSyncRecoveryRequested: false,
+      sameRuntimeWakeAcceptedCount: 1,
+    });
+  });
+
+  it("preserves pending device-sync recovery flags after accepted non-device-sync runs", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    const state = emptyCarryForwardState();
+    state.deviceSyncRecoveryRequested = true;
+    state.manualRunRequested = true;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAccepted({
+      action: "started",
+      runtimeAttemptId: "runtime_attempt_new",
+    }));
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      state,
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(continued.state).toMatchObject({
+      deviceSyncRecoveryRequested: true,
+      manualRunRequested: false,
+      sameRuntimeWakeAcceptedCount: 0,
+    });
+  });
+
   it("pauses device-sync recovery after repeated accepted wakes for the same runtime", async () => {
     const runtime = new FakeWorkflowRuntime();
     const state = emptyCarryForwardState();

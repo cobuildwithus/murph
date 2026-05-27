@@ -43,11 +43,13 @@ import {
   summarizeSampleWindow,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
+} from "../src/index.ts";
+import * as queryIndex from "../src/index.ts";
+import {
   summarizeWearableDay,
   summarizeWearableSleep,
   summarizeWearableSourceHealth,
-} from "../src/index.ts";
-import * as queryIndex from "../src/index.ts";
+} from "../src/wearables.ts";
 import {
   listMetricTargetsRuntime,
   selectMetricGoalProgressRuntime,
@@ -91,6 +93,43 @@ test("root query export keeps runtime projection methods available as lazy wrapp
 
   for (const exportName of requiredRuntimeExports) {
     assert.equal(typeof queryIndex[exportName], "function", exportName);
+  }
+});
+
+test("root query export omits raw read-model wearable helpers", () => {
+  const rootExports = queryIndex as Record<string, unknown>;
+  const rawReadModelWearableExports = [
+    "buildWearableAssistantSummary",
+    "buildWearableSummaryBundle",
+    "explainWearableDrift",
+    "explainWearableDriftFromBundle",
+    "listWearableActivityDays",
+    "listWearableBodyStateDays",
+    "listWearableRecoveryDays",
+    "listWearableSleepNights",
+    "listWearableSourceHealth",
+    "summarizeWearableLatest",
+    "summarizeWearableLatestFromBundle",
+    "summarizeWearableMetricLatest",
+    "summarizeWearableMetricLatestFromBundle",
+    "summarizeWearableMetricTrend",
+    "summarizeWearableMetricTrendFromBundle",
+    "summarizeWearableSleep",
+    "summarizeWearableSleepFromBundle",
+    "summarizeWearableActivity",
+    "summarizeWearableActivityFromBundle",
+    "summarizeWearableBodyState",
+    "summarizeWearableBodyStateFromBundle",
+    "summarizeWearableDay",
+    "summarizeWearableDayFromBundle",
+    "summarizeWearableRecovery",
+    "summarizeWearableRecoveryFromBundle",
+    "summarizeWearableSourceHealth",
+    "summarizeWearableSourceHealthFromBundle",
+  ] as const;
+
+  for (const exportName of rawReadModelWearableExports) {
+    assert.equal(rootExports[exportName], undefined, exportName);
   }
 });
 
@@ -661,6 +700,8 @@ test("wearable runtime source health date filters use provider coverage interval
         .concat("\n"),
       "utf8",
     );
+
+    await rebuildQueryProjection(vaultRoot);
 
     const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
       date: "2026-03-10",
@@ -2256,9 +2297,49 @@ test("searchVault keeps dense provider observations out of in-memory search", ()
       value: 8,
     },
   });
+  const displayVisibilityObservation = createRecord({
+    id: "evt_display_visibility_fact",
+    lookupIds: ["evt_display_visibility_fact"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T08:06:00Z",
+    date: "2026-03-12",
+    kind: "observation",
+    title: "Display visibility fact",
+    data: {
+      source: "device",
+      metric: "strain-score",
+      unit: "score",
+      value: 12,
+      visibility: "display",
+    },
+  });
+  const canonicalFactObservation = createRecord({
+    id: "evt_canonical_recovery_fact",
+    lookupIds: ["evt_canonical_recovery_fact"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T08:07:00Z",
+    date: "2026-03-12",
+    kind: "observation",
+    title: "Canonical recovery fact",
+    data: {
+      source: "device",
+      metric: "recovery-score",
+      unit: "score",
+      value: 85,
+      canonicalFact: true,
+    },
+  });
 
-  vault.events = [denseObservation, denseImportObservation, displayObservation];
-  vault.entities = [denseObservation, denseImportObservation, displayObservation];
+  vault.events = [
+    denseObservation,
+    denseImportObservation,
+    displayObservation,
+    displayVisibilityObservation,
+    canonicalFactObservation,
+  ];
+  vault.entities = vault.events;
   syncVaultDerivedFields(vault);
 
   assert.equal(searchVault(vault, "garmin heart-rate").total, 0);
@@ -2266,6 +2347,8 @@ test("searchVault keeps dense provider observations out of in-memory search", ()
   assert.equal(searchVault(vault, "imported resting").total, 0);
   assert.equal(searchVaultSafe(vault, "imported resting").total, 0);
   assert.equal(searchVault(vault, "readiness").hits[0]?.recordId, "evt_display_readiness_fact");
+  assert.equal(searchVault(vault, "strain").hits[0]?.recordId, "evt_display_visibility_fact");
+  assert.equal(searchVault(vault, "recovery").hits[0]?.recordId, "evt_canonical_recovery_fact");
 });
 
 test("overview selectors move cleanly onto the query read model", () => {
@@ -4223,6 +4306,10 @@ test("runtime wearable provider filters do not fall back to all-provider summari
       date: "2026-03-20",
       providers: ["absent-provider"],
     });
+    const blankProvider = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-03-20",
+      providers: [" "],
+    });
     const composedProviderPair = await summarizeWearableActivityRuntime(vaultRoot, {
       date: "2026-03-20",
       providers: ["wearable0", "wearable1"],
@@ -4233,6 +4320,7 @@ test("runtime wearable provider filters do not fall back to all-provider summari
     });
 
     assert.deepEqual(absentProvider, []);
+    assert.deepEqual(blankProvider, []);
     assert.equal(composedProviderPair.length, 1);
     assert.equal(composedProviderPair[0]?.steps.confidence.candidateCount, 2);
     assert.equal(composedProviderPair[0]?.steps.selection.provider, "wearable0");

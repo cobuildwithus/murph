@@ -17,7 +17,7 @@ function isDisplayGradeObservation(attributes: Record<string, unknown>): boolean
   );
 }
 
-export function isDenseProviderObservationEntity(entity: CanonicalEntity): boolean {
+function isDefaultHiddenMetricObservationEntity(entity: CanonicalEntity): boolean {
   if (entity.family !== "event" || entity.kind !== "observation") {
     return false;
   }
@@ -32,7 +32,7 @@ export function isDenseProviderObservationEntity(entity: CanonicalEntity): boole
 }
 
 export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean {
-  if (isDenseProviderObservationEntity(entity)) {
+  if (isDefaultHiddenMetricObservationEntity(entity)) {
     return false;
   }
 
@@ -44,5 +44,5 @@ export function isDefaultProjectedQueryEntity(entity: CanonicalEntity): boolean 
 }
 
 export function isSearchIndexedQueryEntity(entity: CanonicalEntity): boolean {
-  return !isDenseProviderObservationEntity(entity);
+  return !isDefaultHiddenMetricObservationEntity(entity);
 }
