@@ -245,6 +245,47 @@ function buildDirtyConnectionRecord(overrides: Partial<{
   };
 }
 
+function installRollbackAwareWebhookTransactionRecorder() {
+  const committedWrites: string[] = [];
+  const stagedWritesByTx = new WeakMap<object, string[]>();
+  const stageWrite = (tx: object, write: string) => {
+    stagedWritesByTx.get(tx)?.push(write);
+  };
+
+  mocks.prisma.$transaction.mockImplementation(async (
+    callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+  ) => {
+    const tx = Object.create(mocks.prismaTx) as typeof mocks.prismaTx;
+    const stagedWrites: string[] = [];
+    stagedWritesByTx.set(tx, stagedWrites);
+    const result = await callback(tx);
+    committedWrites.push(...stagedWrites);
+    return result;
+  });
+  mocks.upsertDirtyConnection.mockImplementation(async (input: { tx: object }) => {
+    stageWrite(input.tx, "dirty");
+    return {
+      dirty: buildDirtyConnectionRecord(),
+      shouldRequestWake: true,
+    };
+  });
+  mocks.createSignal.mockImplementation(async (input: { tx: object }) => {
+    stageWrite(input.tx, "signal");
+    return { id: 8 };
+  });
+  mocks.completeWebhookTrace.mockImplementation(async (
+    _provider: string,
+    _traceId: string,
+    _claimToken: string,
+    tx: object,
+  ) => {
+    stageWrite(tx, "trace");
+    return true;
+  });
+
+  return { committedWrites };
+}
+
 function expectDurableDirtyWakeAppended(input: {
   callIndex?: number;
   connectionId?: string;
@@ -263,13 +304,13 @@ function expectDurableDirtyWakeAppended(input: {
     provider,
   });
   expect(envelope).toEqual(expect.objectContaining({
-    connectionId,
     eventId: expectedEventId,
     kind: "device-sync.wake",
-    provider,
     reason: "webhook_hint",
     userId: input.userId ?? "user-123",
   }));
+  expect(envelope).not.toHaveProperty("connectionId");
+  expect(envelope).not.toHaveProperty("provider");
 }
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
@@ -1617,8 +1658,9 @@ describe("appendHostedDeviceSyncWake", () => {
       eventType: "daily.data.steps.updated",
       provider: "junction",
       resourceCategory: "timeseries",
-      traceId: "trace_old",
+      traceIdPresent: true,
     });
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("trace_old");
     consoleWarn.mockRestore();
   });
 
@@ -1842,6 +1884,7 @@ describe("appendHostedDeviceSyncWake", () => {
   });
 
   it("keeps hosted webhook traces retryable when the durable dirty wake append fails", async () => {
+    const transaction = installRollbackAwareWebhookTransactionRecorder();
     mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("mailbox append failed"));
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -1859,12 +1902,14 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(transaction.committedWrites).toEqual([]);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("keeps hosted webhook traces retryable when a dirty wake dedupe conflict is detected", async () => {
+    const transaction = installRollbackAwareWebhookTransactionRecorder();
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
       dedupeConflict: true,
       duplicate: true,
@@ -1894,6 +1939,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(transaction.committedWrites).toEqual([]);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();

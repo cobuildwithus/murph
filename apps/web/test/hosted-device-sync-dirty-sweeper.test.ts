@@ -52,7 +52,6 @@ describe("hosted device-sync dirty sweeper", () => {
       occurredAt: "2026-05-05T00:00:00.000Z",
       provider: "oura",
       resourceCategory: "sleep",
-      traceId: null,
       userId: "member_dirty_1",
     });
     expect(mocks.appendHostedDeviceSyncDirtyWake.mock.calls.map(([wake]) => wake.occurredAt))

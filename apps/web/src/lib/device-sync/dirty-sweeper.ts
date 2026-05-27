@@ -84,7 +84,6 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
           occurredAt: dirtyConnection.latestDirtyAt,
           provider: dirtyConnection.provider,
           resourceCategory: dirtyConnection.latestResourceCategory,
-          traceId: null,
           userId: dirtyConnection.userId,
         });
       } catch (error) {
