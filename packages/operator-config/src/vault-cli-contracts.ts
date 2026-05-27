@@ -185,6 +185,20 @@ const workoutExerciseResultSchema = z.object({
   sets: z.array(workoutSetResultSchema).min(1).max(150),
 })
 
+const workoutSessionMetricsResultSchema = z.object({
+  activeCalories: z.number().nonnegative().optional(),
+  totalCalories: z.number().nonnegative().optional(),
+  averageHeartRate: z.number().nonnegative().optional(),
+  maxHeartRate: z.number().nonnegative().optional(),
+  hrv: z.number().nonnegative().optional(),
+  workoutStrain: z.number().nonnegative().optional(),
+  percentRecorded: z.number().nonnegative().optional(),
+  totalElevationGainMeters: z.number().nonnegative().optional(),
+  altitudeChangeMeters: z.number().optional(),
+  averageSpeedMps: z.number().nonnegative().optional(),
+  maxSpeedMps: z.number().nonnegative().optional(),
+})
+
 const workoutSessionResultSchema = z.object({
   sourceApp: z.string().min(1).optional(),
   sourceWorkoutId: z.string().min(1).optional(),
@@ -193,6 +207,7 @@ const workoutSessionResultSchema = z.object({
   routineId: z.string().min(1).optional(),
   routineName: z.string().min(1).optional(),
   sessionNote: z.string().min(1).optional(),
+  metrics: workoutSessionMetricsResultSchema.optional(),
   media: z.array(storedMediaResultSchema).max(10).optional(),
   exercises: z.array(workoutExerciseResultSchema).max(100),
 })

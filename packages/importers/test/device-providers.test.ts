@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "vitest";
 
 import * as coreRuntime from "@murphai/core";
+import { workoutSessionSchema, type WorkoutSessionMetrics } from "@murphai/contracts";
 
 import {
   createDeviceProviderRegistry,
@@ -65,6 +66,17 @@ function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawI
   const receipt = artifact.content as WearableRawIngestReceipt;
   assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
   return receipt;
+}
+
+function workoutMetricsFromEvent(
+  event: { fields?: { workout?: unknown } } | undefined,
+): WorkoutSessionMetrics | undefined {
+  const result = workoutSessionSchema.safeParse(event?.fields?.workout);
+  if (!result.success) {
+    assert.fail(`workout contract paths: ${result.error.issues.map((issue) => issue.path.join(".")).join(", ")}`);
+  }
+
+  return result.data.metrics;
 }
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -212,6 +224,9 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
+  const workoutObservationMetrics = payload.events
+    ?.filter((event) => event.kind === "observation" && event.externalRef?.resourceType === "workout")
+    .map((event) => event.fields?.metric) ?? [];
   const hrvEvent = payload.events?.find((event) => event.fields?.metric === "hrv");
   const bmiEvent = payload.events?.find((event) => event.fields?.metric === "bmi");
 
@@ -222,6 +237,15 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   });
   assert.equal(workoutEvent?.fields?.activityType, "run");
   assert.equal(workoutEvent?.fields?.distanceKm, 7.25);
+  assert.deepEqual(workoutMetricsFromEvent(workoutEvent), {
+    workoutStrain: 11.3,
+    averageHeartRate: 141,
+    maxHeartRate: 168,
+    totalCalories: 121.8929,
+    percentRecorded: 99,
+    totalElevationGainMeters: 42,
+  });
+  assert.deepEqual(workoutObservationMetrics, []);
   assert.equal(hrvEvent?.fields?.value, 42.5);
   assert.equal(hrvEvent?.externalRef?.facet, "hrv");
   assert.equal(bmiEvent?.dayKey, "2026-03-16");
@@ -314,6 +338,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
           end_datetime: "2026-03-15T17:45:00.000Z",
           timestamp: "2026-03-15T17:50:00.000Z",
           calories: 430,
+          total_calories: 470,
           distance: 6800,
         },
       ],
@@ -389,6 +414,20 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const workoutEvent = payload.events?.find((event) => event.externalRef?.resourceType === "workout");
+  const sessionEvent = payload.events?.find(
+    (event) => event.kind === "activity_session" && event.externalRef?.resourceType === "session",
+  );
+  const sessionObservationMetrics = payload.events
+    ?.filter((event) => event.kind === "observation" && event.externalRef?.resourceType === "session")
+    .map((event) => event.fields?.metric) ?? [];
+  const workoutObservationMetrics = payload.events
+    ?.filter(
+      (event) =>
+        event.kind === "observation" &&
+        event.externalRef?.resourceType === "workout" &&
+        event.externalRef?.resourceId === "workout-1",
+    )
+    .map((event) => event.fields?.metric) ?? [];
   const activityScoreEvent = payload.events?.find(
     (event) => event.fields?.metric === "activity-score",
   );
@@ -405,6 +444,16 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.equal(sleepRespiratoryEvent?.dayKey, "2026-03-15");
   assert.equal(workoutEvent?.fields?.activityType, "running");
   assert.equal(workoutEvent?.fields?.distanceKm, 6.8);
+  assert.deepEqual(workoutMetricsFromEvent(sessionEvent), {
+    averageHeartRate: 62,
+    hrv: 48,
+  });
+  assert.deepEqual(workoutMetricsFromEvent(workoutEvent), {
+    activeCalories: 430,
+    totalCalories: 470,
+  });
+  assert.deepEqual(sessionObservationMetrics, []);
+  assert.deepEqual(workoutObservationMetrics, []);
 });
 
 test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and WHOOP unit and facet mappings", async () => {
@@ -2032,13 +2081,9 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
       (event) => event.kind === "observation" && event.fields?.metric === "day-strain" && event.fields?.value === 13.7,
     ),
   );
-  assert.ok(
-    payload.events?.some(
-      (event) =>
-        event.kind === "observation" &&
-        event.fields?.metric === "altitude-change" &&
-        event.fields?.value === 33,
-    ),
+  assert.equal(
+    payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "altitude-change"),
+    false,
   );
   assert.equal(payload.events?.some((event) => event.kind === "sleep_session"), false);
   assert.equal(payload.events?.some((event) => event.kind === "activity_session"), false);
@@ -2170,9 +2215,15 @@ test("prepareDeviceProviderSnapshotImport covers WHOOP fallback ids and workout 
           end: "2026-03-15T17:45:00.000Z",
           updated_at: "2026-03-15T18:00:00.000Z",
           sport_name: "!!!",
+          altitude_gain_meter: "18",
+          altitude_change_meter: "-4",
           distance_meter: 4800,
           score: {
-            strain: 9.4,
+            strain: "9.4",
+            average_heart_rate: "132",
+            max_heart_rate: "151",
+            kilojoule: "418.4",
+            percent_recorded: "96",
           },
         },
       ],
@@ -2187,6 +2238,15 @@ test("prepareDeviceProviderSnapshotImport covers WHOOP fallback ids and workout 
   assert.equal(napEvent?.title, "WHOOP nap");
   assert.equal(workoutEvent?.fields?.activityType, "workout");
   assert.equal(workoutEvent?.fields?.distanceKm, 4.8);
+  assert.deepEqual(workoutMetricsFromEvent(workoutEvent), {
+    workoutStrain: 9.4,
+    averageHeartRate: 132,
+    maxHeartRate: 151,
+    totalCalories: 100,
+    percentRecorded: 96,
+    totalElevationGainMeters: 18,
+    altitudeChangeMeters: -4,
+  });
   assert.equal(
     payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "sleep-awake-minutes"),
     false,

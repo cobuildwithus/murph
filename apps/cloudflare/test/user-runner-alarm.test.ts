@@ -270,6 +270,41 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("returns retry_later and clears the fresh fence when startup readiness fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      throw new Error("container startup failed");
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
+    });
+
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+  });
+
   it("sends a payloadless wake behind an active write fence without starting another container run", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -407,7 +442,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("accepts a fresh starting write fence when no active child is wakeable yet", async () => {
+  it("returns retry_later for a fresh non-wakeable startup fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -430,11 +465,9 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
-      runtimeAttemptId: token?.attemptId,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
@@ -1000,6 +1033,7 @@ function createRunnerHarness(input: {
   alarmDeleteError?: Error;
   bucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
+  ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"];
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
@@ -1024,6 +1058,8 @@ function createRunnerHarness(input: {
   );
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: input.destroyInstance ?? (async () => {}),
+    ensureReadyForProcessing: async (ensureInput) =>
+      await input.ensureReadyForProcessing?.(ensureInput) ?? { kind: "ready" },
     ...(input.ensureProcessing
       ? {
           ensureProcessing: async (ensureInput) => {

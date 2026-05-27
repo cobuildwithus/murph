@@ -345,6 +345,27 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(1);
   });
 
+  it("ensureReadyForProcessing starts and health-checks without invoking workspace work", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "ready",
+    });
+
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/health")
+    );
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(healthCalls).toHaveLength(1);
+    expect(executeCalls).toHaveLength(0);
+  });
+
   it("ensureProcessing rejects mismatched user identities before waking or starting work", async () => {
     const { container, containerFetch } = createContainerDouble();
 

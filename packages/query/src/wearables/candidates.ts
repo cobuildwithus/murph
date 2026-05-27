@@ -170,6 +170,10 @@ export function buildActivitySessionAggregates(
       existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
       existing.sessionMinutes += candidate.value;
       existing.sessionCount += 1;
+      existing.workoutMetricKeys = uniqueStrings([
+        ...existing.workoutMetricKeys,
+        ...(candidate.workoutMetricKeys ?? []),
+      ]).sort();
       const activityType = normalizeActivityTypeFromTitle(candidate.title);
       if (activityType && !existing.activityTypes.includes(activityType)) {
         existing.activityTypes.push(activityType);
@@ -197,6 +201,7 @@ export function buildActivitySessionAggregates(
       recordIds: [...candidate.recordIds],
       sessionCount: 1,
       sessionMinutes: candidate.value,
+      workoutMetricKeys: uniqueStrings(candidate.workoutMetricKeys ?? []).sort(),
     });
   }
 
@@ -555,6 +560,7 @@ function buildActivitySessionCandidate(
     metric: "sessionMinutes",
     unit: "minutes",
     value: durationMinutes,
+    workoutMetricKeys: listWorkoutMetricKeys(entity.attributes.workout),
   };
 }
 
@@ -641,6 +647,34 @@ function mapScalarMetric(
         value: normalizedMetric.value,
       }
     : null;
+}
+
+const WORKOUT_METRIC_KEYS = [
+  "activeCalories",
+  "altitudeChangeMeters",
+  "averageHeartRate",
+  "averageSpeedMps",
+  "hrv",
+  "maxHeartRate",
+  "maxSpeedMps",
+  "percentRecorded",
+  "totalCalories",
+  "totalElevationGainMeters",
+  "workoutStrain",
+] as const;
+
+function listWorkoutMetricKeys(workout: unknown): string[] {
+  if (!workout || typeof workout !== "object" || Array.isArray(workout)) {
+    return [];
+  }
+
+  const metrics = (workout as Record<string, unknown>).metrics;
+  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) {
+    return [];
+  }
+
+  const metricRecord = metrics as Record<string, unknown>;
+  return WORKOUT_METRIC_KEYS.filter((metric) => readNumber(metricRecord[metric]) !== null);
 }
 
 function mapSleepStageToMetric(stage: string): WearableMetricKey | null {

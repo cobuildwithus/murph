@@ -29,6 +29,7 @@ export interface WearableMetricCandidate {
   title: string | null;
   unit: string | null;
   value: number;
+  workoutMetricKeys?: string[];
 }
 
 export interface WearableMetricSelection {
@@ -371,6 +372,7 @@ export interface WearableActivitySessionAggregate {
   recordIds: string[];
   sessionCount: number;
   sessionMinutes: number;
+  workoutMetricKeys: string[];
 }
 
 export interface WearableDataset {

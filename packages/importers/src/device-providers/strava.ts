@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@murphai/contracts";
+import { extractIsoDatePrefix, type WorkoutSessionMetrics } from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
@@ -6,8 +6,8 @@ import {
   asPlainObject,
   buildSyntheticDeletionResourceId,
   createRawArtifact,
-  emitObservationMetrics,
   finiteNumber,
+  kilojoulesToKilocalories,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   pushDeletionObservation as pushSharedDeletionObservation,
@@ -22,10 +22,7 @@ import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
 } from "../core-port.ts";
-import type {
-  ObservationMetricDescriptor,
-  PlainObject,
-} from "./shared-normalization.ts";
+import type { PlainObject } from "./shared-normalization.ts";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 import { STRAVA_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
@@ -37,71 +34,6 @@ export interface StravaSnapshotInput {
   deletions?: unknown[];
   sourceWindow?: unknown;
 }
-
-interface StravaActivityMetricSource {
-  activity: PlainObject;
-  distanceMeters?: number;
-  sportName: string;
-}
-
-const STRAVA_ACTIVITY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<StravaActivityMetricSource>[] = [
-  {
-    metric: "distance",
-    value: ({ distanceMeters }) => distanceMeters,
-    unit: "meter",
-    title: ({ sportName }) => `Strava ${sportName} distance`,
-    facet: "distance",
-  },
-  {
-    metric: "active-calories",
-    value: ({ activity }) => firstNumber(activity.calories),
-    unit: "kcal",
-    title: ({ sportName }) => `Strava ${sportName} calories`,
-    facet: "active-calories",
-  },
-  {
-    metric: "average-heart-rate",
-    value: ({ activity }) => firstNumber(activity.average_heartrate, activity.averageHeartRate),
-    unit: "bpm",
-    title: ({ sportName }) => `Strava ${sportName} average heart rate`,
-    facet: "average-heart-rate",
-  },
-  {
-    metric: "max-heart-rate",
-    value: ({ activity }) => firstNumber(activity.max_heartrate, activity.maxHeartRate),
-    unit: "bpm",
-    title: ({ sportName }) => `Strava ${sportName} max heart rate`,
-    facet: "max-heart-rate",
-  },
-  {
-    metric: "energy-burned",
-    value: ({ activity }) => firstNumber(activity.kilojoules),
-    unit: "kJ",
-    title: ({ sportName }) => `Strava ${sportName} energy burned`,
-    facet: "energy-burned",
-  },
-  {
-    metric: "altitude-gain",
-    value: ({ activity }) => firstNumber(activity.total_elevation_gain, activity.totalElevationGain),
-    unit: "meter",
-    title: ({ sportName }) => `Strava ${sportName} elevation gain`,
-    facet: "altitude-gain",
-  },
-  {
-    metric: "average-speed",
-    value: ({ activity }) => firstNumber(activity.average_speed, activity.averageSpeed),
-    unit: "m/s",
-    title: ({ sportName }) => `Strava ${sportName} average speed`,
-    facet: "average-speed",
-  },
-  {
-    metric: "max-speed",
-    value: ({ activity }) => firstNumber(activity.max_speed, activity.maxSpeed),
-    unit: "m/s",
-    title: ({ sportName }) => `Strava ${sportName} max speed`,
-    facet: "max-speed",
-  },
-];
 
 function parseStravaSnapshot(snapshot: unknown): StravaSnapshotInput {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
@@ -215,6 +147,45 @@ function addSecondsToIso(timestamp: string | undefined, seconds: number | undefi
   }
 
   return new Date(startMs + seconds * 1000).toISOString();
+}
+
+function nonEmptyWorkoutMetrics(metrics: WorkoutSessionMetrics): WorkoutSessionMetrics | undefined {
+  return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
+
+function buildStravaActivityMetrics(activity: PlainObject): WorkoutSessionMetrics | undefined {
+  const metrics: WorkoutSessionMetrics = {};
+  const activeCalories = firstNumber(activity.calories);
+  const totalCalories = kilojoulesToKilocalories(activity.kilojoules);
+  const averageHeartRate = firstNumber(activity.average_heartrate, activity.averageHeartRate);
+  const maxHeartRate = firstNumber(activity.max_heartrate, activity.maxHeartRate);
+  const totalElevationGainMeters = firstNumber(activity.total_elevation_gain, activity.totalElevationGain);
+  const averageSpeedMps = firstNumber(activity.average_speed, activity.averageSpeed);
+  const maxSpeedMps = firstNumber(activity.max_speed, activity.maxSpeed);
+
+  if (activeCalories !== undefined) {
+    metrics.activeCalories = activeCalories;
+  }
+  if (totalCalories !== undefined) {
+    metrics.totalCalories = totalCalories;
+  }
+  if (averageHeartRate !== undefined) {
+    metrics.averageHeartRate = averageHeartRate;
+  }
+  if (maxHeartRate !== undefined) {
+    metrics.maxHeartRate = maxHeartRate;
+  }
+  if (totalElevationGainMeters !== undefined) {
+    metrics.totalElevationGainMeters = totalElevationGainMeters;
+  }
+  if (averageSpeedMps !== undefined) {
+    metrics.averageSpeedMps = averageSpeedMps;
+  }
+  if (maxSpeedMps !== undefined) {
+    metrics.maxSpeedMps = maxSpeedMps;
+  }
+
+  return nonEmptyWorkoutMetrics(metrics);
 }
 
 function makeExternalRef(
@@ -348,29 +319,13 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
               startedAt: startAt,
               endedAt: endAt,
               sessionNote: trimToLength(title, 160),
+              metrics: buildStravaActivityMetrics(activity),
               exercises: [],
             },
           }),
         }),
       );
     }
-
-    emitObservationMetrics(
-      events,
-      {
-        source: {
-          activity,
-          distanceMeters,
-          sportName,
-        },
-        occurredAt,
-        recordedAt,
-        dayKey,
-        rawArtifactRoles: [role],
-        externalRef: (facet) => makeExternalRef("activity", activityId, version, facet),
-      },
-      STRAVA_ACTIVITY_OBSERVATION_METRICS,
-    );
   }
 
   for (const deletion of deletions) {

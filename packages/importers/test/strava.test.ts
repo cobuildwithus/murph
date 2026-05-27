@@ -44,6 +44,7 @@ describe("Strava importer adapter", () => {
             average_speed: 2.87,
             max_speed: 4.1,
             calories: 360,
+            kilojoules: 1506.24,
             device_name: "Garmin Forerunner",
           },
         ],
@@ -74,18 +75,28 @@ describe("Strava importer adapter", () => {
         distanceKm: 5,
         durationMinutes: 30,
         deviceName: "Garmin Forerunner",
+        workout: expect.objectContaining({
+          metrics: {
+            activeCalories: 360,
+            totalCalories: 360,
+            averageHeartRate: 150,
+            maxHeartRate: 165,
+            totalElevationGainMeters: 42,
+            averageSpeedMps: 2.87,
+            maxSpeedMps: 4.1,
+          },
+        }),
       },
     });
 
     expect(
-      payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "distance"),
-    ).toBe(true);
-    expect(
-      payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "active-calories"),
-    ).toBe(true);
-    expect(
-      payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "average-heart-rate"),
-    ).toBe(true);
+      payload.events?.filter(
+        (event) =>
+          event.kind === "observation" &&
+          event.externalRef?.resourceType === "activity" &&
+          event.externalRef?.resourceId === "1001",
+      ),
+    ).toEqual([]);
     expect(payload.provenance).toMatchObject({
       sourceWindow: {
         kind: "backfill",
@@ -151,10 +162,11 @@ describe("Strava importer adapter", () => {
             totalElevationGain: 12,
             averageSpeed: 3.5,
             maxSpeed: 5.1,
-            calories: 220,
-            trainer: 1,
-            commute: "false",
-            manual: "true",
+        calories: 220,
+        kilojoules: "920.48",
+        trainer: 1,
+        commute: "false",
+        manual: "true",
             private: 0,
           },
         ],
@@ -184,6 +196,15 @@ describe("Strava importer adapter", () => {
         manual: true,
         private: false,
         totalElevationGainMeters: 12,
+        workout: expect.objectContaining({
+          metrics: {
+            activeCalories: 220,
+            totalCalories: 220,
+            totalElevationGainMeters: 12,
+            averageSpeedMps: 3.5,
+            maxSpeedMps: 5.1,
+          },
+        }),
       }),
     });
 

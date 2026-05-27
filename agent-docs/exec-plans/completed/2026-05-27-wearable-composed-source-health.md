@@ -23,3 +23,6 @@ Make multi-provider/all-provider runtime wearable summaries report source health
 
 - Focused query projection regression for providers with different last dates.
 - Package/diff verification required by workflow.
+Status: completed
+Updated: 2026-05-27
+Completed: 2026-05-27

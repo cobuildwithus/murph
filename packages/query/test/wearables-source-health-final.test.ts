@@ -180,6 +180,7 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
         recordIds: ["beta-activity-1"],
         sessionCount: 1,
         sessionMinutes: 42,
+        workoutMetricKeys: ["activeCalories", "averageHeartRate"],
       },
     ],
     metricCandidates: [alphaRawMetric],
@@ -283,6 +284,11 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
     "sessionMinutes",
     "timeInBedMinutes",
   ]);
+  assert.equal(beta?.metricsContributed.includes("activeCalories"), false);
+  assert.equal(
+    beta?.notes.some((note) => note.includes("workout detail metrics on activity sessions")),
+    true,
+  );
   assert.equal(
     beta?.notes.some((note) => note.includes("contributed candidate evidence but was not the preferred source")),
     true,

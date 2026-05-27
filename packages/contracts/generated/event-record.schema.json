@@ -6721,6 +6721,55 @@
               "minLength": 1,
               "maxLength": 4000
             },
+            "metrics": {
+              "type": "object",
+              "properties": {
+                "activeCalories": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "totalCalories": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "averageHeartRate": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "maxHeartRate": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "hrv": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "workoutStrain": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "percentRecorded": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "totalElevationGainMeters": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "altitudeChangeMeters": {
+                  "type": "number"
+                },
+                "averageSpeedMps": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "maxSpeedMps": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
             "media": {
               "maxItems": 10,
               "type": "array",

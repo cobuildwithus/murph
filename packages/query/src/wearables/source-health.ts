@@ -174,6 +174,9 @@ export function buildWearableSourceHealth(input: {
       const providerSleepWindows = input.dataset.sleepWindows.filter(
         (candidate) => resolvePublicSourceProvider(candidate) === provider,
       );
+      const providerWorkoutMetricKeys = uniqueStrings(
+        providerActivitySessionAggregates.flatMap((aggregate) => aggregate.workoutMetricKeys ?? []),
+      ).sort();
       const providerDates = collectSortedDatesDesc([
         ...providerMetricCandidates.map((candidate) => candidate.date),
         ...providerActivitySessionAggregates.map((candidate) => candidate.date),
@@ -222,6 +225,12 @@ export function buildWearableSourceHealth(input: {
       if ((selectedMetricsByProvider.get(provider) ?? 0) === 0) {
         notes.push(
           `${formatProviderName(provider)} contributed candidate evidence but was not the preferred source for any selected metric in this filtered range.`,
+        );
+      }
+
+      if (providerWorkoutMetricKeys.length > 0) {
+        notes.push(
+          `${formatProviderName(provider)} has workout detail metrics on activity sessions (${providerWorkoutMetricKeys.join(", ")}); these remain session evidence until an explicit projector emits daily summary facts.`,
         );
       }
 
