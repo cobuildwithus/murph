@@ -1,6 +1,6 @@
 # Observation Grain Guard
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -32,3 +32,13 @@ Updated: 2026-05-27
 - `pnpm typecheck`
 - `pnpm test:diff <touched paths>` or owner package coverage lane, plus `pnpm test:smoke`
 - Focused tests proving summary backfills pass and raw sample telemetry is rejected
+
+## Completion Notes
+
+- Added the explicit `observationGrain` contract and generated schema artifact.
+- Junction compact summary observations set `observationGrain: "summary"` without default query/search visibility flags.
+- Core dense telemetry admission now treats missing-grain and `sample` numeric observations as dense even when display/query flags are present; `summary` and `derived_fact` are admitted by grain.
+- Security review finding on top-level non-persisted grain bypass was fixed by reading only persisted event fields.
+- Final review finding on display-grade admission coupling was fixed by removing display-grade as an admission escape hatch.
+- Root `pnpm typecheck` was attempted and failed in unrelated dirty `packages/assistant-engine` / query export work after contracts/core/importers had passed. Scoped owner verification passed.
+Completed: 2026-05-27
