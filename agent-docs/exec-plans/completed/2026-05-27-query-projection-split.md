@@ -1,6 +1,6 @@
 # Split query projection stores behind facade
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -52,3 +52,4 @@ Updated: 2026-05-27
   - `pnpm test:smoke`
   - coverage-bearing `pnpm test:diff` or package coverage as required by workflow
 - Expected outcomes: all pass or any unrelated pre-existing failure is isolated and reported.
+Completed: 2026-05-27

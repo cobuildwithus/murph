@@ -1,6 +1,6 @@
 # Wearable provider-scope read-time composition
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -60,3 +60,4 @@ Updated: 2026-05-27
 - `pnpm test:diff packages/query`
 - Additional focused `packages/query` test command if `test:diff` does not cover the exact regression.
 - Expected outcomes: query package tests and typecheck pass, or unrelated existing failures are documented with focused proof.
+Completed: 2026-05-27
