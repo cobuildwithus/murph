@@ -78,7 +78,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Markdown docs remain human-readable and reviewable in place.
 - Raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
 - Each raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
-- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus canonical attachment evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract. Eligible still-image attachment bytes may be normalized before they are written here.
+- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus canonical attachment evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract. Image attachment bytes are normalized to bounded static WebP before they are written here or left unstored.
 - Assistant inbox automation may additionally preserve accepted stored inbox document attachments into canonical document imports under `raw/documents/**`, but `raw/inbox/**` remains the source-capture layer for the original message envelope and canonical attachment bytes.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.

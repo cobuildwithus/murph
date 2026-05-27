@@ -60,6 +60,40 @@ async function createImageBytes(input: {
   }
 }
 
+async function createAnimatedWebpBytes(): Promise<Uint8Array> {
+  const sharp = (await import("sharp")).default;
+  const width = 16;
+  const frameHeight = 16;
+  const frameCount = 2;
+  const bytes = Buffer.alloc(width * frameHeight * frameCount * 3);
+
+  for (let index = 0; index < width * frameHeight; index += 1) {
+    bytes[index * 3] = 255;
+  }
+
+  for (
+    let index = width * frameHeight;
+    index < width * frameHeight * frameCount;
+    index += 1
+  ) {
+    bytes[index * 3 + 1] = 255;
+  }
+
+  return new Uint8Array(
+    await sharp(bytes, {
+      raw: {
+        width,
+        height: frameHeight * frameCount,
+        channels: 3,
+        pageHeight: frameHeight,
+      },
+      animated: true,
+    })
+      .webp({ quality: 80, loop: 0, delay: [50, 50] })
+      .toBuffer(),
+  );
+}
+
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -231,6 +265,53 @@ test("processCapture normalizes PNG and WebP original-path images into bounded W
   pipeline.close();
 });
 
+test("processCapture normalizes image attachments by kind even with unsupported mime aliases or extensions", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-kind");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const cases = [
+    { mime: "image/heic", fileName: "photo.heic", expected: "photo.webp" },
+    { mime: "image/jpg", fileName: "lab", expected: "lab.webp" },
+    { mime: "image/pjpeg", fileName: "progressive", expected: "progressive.webp" },
+  ];
+
+  for (const [index, imageCase] of cases.entries()) {
+    const originalBytes = await createImageBytes({
+      format: "jpeg",
+      width: 1400 + index,
+      height: 900,
+    });
+    const persisted = await pipeline.processCapture(createCapture({
+      externalId: `msg-image-normalize-kind-${index}`,
+      occurredAt: `2026-03-13T12:1${index}:00.000Z`,
+      attachments: [
+        {
+          externalId: `att-kind-${index}`,
+          kind: "image",
+          mime: imageCase.mime,
+          fileName: imageCase.fileName,
+          byteSize: originalBytes.byteLength,
+          data: originalBytes,
+        },
+      ],
+    }));
+    const capture = runtime.getCapture(persisted.captureId);
+    assert.ok(capture);
+    await assertStoredWebp({
+      vaultRoot,
+      attachment: capture.attachments[0],
+      expectedFileName: imageCase.expected,
+      originalByteSize: originalBytes.byteLength,
+    });
+  }
+
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, cases.length);
+
+  pipeline.close();
+});
+
 test("processCapture leaves non-image attachment bytes unchanged", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-non-image");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -260,6 +341,114 @@ test("processCapture leaves non-image attachment bytes unchanged", async () => {
     new Uint8Array(await fs.readFile(path.join(vaultRoot, attachment.storedPath))),
     bytes,
   );
+
+  pipeline.close();
+});
+
+test("processCapture clears byteSize for unstored descriptor-only image attachments", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-descriptor");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const persisted = await pipeline.processCapture(createCapture({
+    externalId: "msg-descriptor-image",
+    attachments: [
+      {
+        externalId: "att-descriptor-image",
+        kind: "image",
+        mime: "image/heic",
+        fileName: "photo.heic",
+        byteSize: 123_456,
+      },
+    ],
+  }));
+  const capture = runtime.getCapture(persisted.captureId);
+  assert.ok(capture);
+  const attachment = capture.attachments[0];
+  assert.ok(attachment);
+  assert.equal(attachment.storedPath, null);
+  assert.equal(attachment.sha256, null);
+  assert.equal(attachment.byteSize, null);
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
+
+  const envelope = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
+  ) as {
+    input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
+    stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
+  };
+  assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+    byteSize: null,
+    originalPath: null,
+  });
+  assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+    storedPath: null,
+    byteSize: null,
+    sha256: null,
+  });
+
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, 1);
+  const captureRecord = captureRecords[0] as {
+    attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }>;
+    rawRefs: string[];
+  };
+  assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
+    storedPath: null,
+    byteSize: null,
+    sha256: null,
+  });
+  assert.equal(captureRecord.rawRefs.some((rawRef) => rawRef.includes("/attachments/")), false);
+
+  pipeline.close();
+});
+
+test("processCapture clears byteSize for unstored missing original-path image attachments", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-missing-path");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const persisted = await pipeline.processCapture(createCapture({
+    externalId: "msg-missing-path-image",
+    attachments: [
+      {
+        externalId: "att-missing-path-image",
+        kind: "image",
+        mime: "image/jpeg",
+        originalPath: path.join(os.tmpdir(), "murph-missing-image-source.jpeg"),
+        fileName: "missing.jpeg",
+        byteSize: 98_765,
+      },
+    ],
+  }));
+  const capture = runtime.getCapture(persisted.captureId);
+  assert.ok(capture);
+  const attachment = capture.attachments[0];
+  assert.ok(attachment);
+  assert.equal(attachment.storedPath, null);
+  assert.equal(attachment.sha256, null);
+  assert.equal(attachment.byteSize, null);
+
+  const envelope = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
+  ) as {
+    input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
+    stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
+  };
+  assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+    byteSize: null,
+    originalPath: null,
+  });
+  assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+    storedPath: null,
+    byteSize: null,
+    sha256: null,
+  });
 
   pipeline.close();
 });
@@ -325,6 +514,98 @@ test("processCapture fails closed for corrupt eligible images without persisting
     sha256: null,
   });
   assert.equal(captureRecord.rawRefs.some((rawRef) => rawRef.includes("/attachments/")), false);
+
+  pipeline.close();
+});
+
+test("processCapture fails closed for mislabeled or animated eligible images", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-unsafe");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const cases = [
+    {
+      externalId: "msg-svg-labeled-jpeg",
+      attachmentId: "att-svg-labeled-jpeg",
+      mime: "image/jpeg",
+      fileName: "vector.jpg",
+      bytes: new Uint8Array(Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\" />")),
+    },
+    {
+      externalId: "msg-svg-extension-jpeg",
+      attachmentId: "att-svg-extension-jpeg",
+      mime: "application/octet-stream",
+      fileName: "vector-by-extension.jpg",
+      bytes: new Uint8Array(Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\" />")),
+    },
+    {
+      externalId: "msg-animated-webp",
+      attachmentId: "att-animated-webp",
+      mime: "image/webp",
+      fileName: "motion.webp",
+      bytes: await createAnimatedWebpBytes(),
+    },
+  ];
+
+  for (const [index, imageCase] of cases.entries()) {
+    const persisted = await pipeline.processCapture(createCapture({
+      externalId: imageCase.externalId,
+      occurredAt: `2026-03-13T12:2${index}:00.000Z`,
+      attachments: [
+        {
+          externalId: imageCase.attachmentId,
+          kind: "image",
+          mime: imageCase.mime,
+          fileName: imageCase.fileName,
+          byteSize: imageCase.bytes.byteLength,
+          data: imageCase.bytes,
+        },
+      ],
+    }));
+    const capture = runtime.getCapture(persisted.captureId);
+    assert.ok(capture);
+    const attachment = capture.attachments[0];
+    assert.ok(attachment);
+    assert.equal(attachment.storedPath, null);
+    assert.equal(attachment.sha256, null);
+    assert.equal(attachment.byteSize, null);
+
+    const envelope = JSON.parse(
+      await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
+    ) as {
+      input: { attachments: Array<{ byteSize: number | null; originalPath: string | null }> };
+      stored: { attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }> };
+    };
+    assert.deepEqual(selectCorruptInboundAttachmentFields(envelope.input.attachments[0]), {
+      byteSize: null,
+      originalPath: null,
+    });
+    assert.deepEqual(selectCorruptStoredAttachmentFields(envelope.stored.attachments[0]), {
+      storedPath: null,
+      byteSize: null,
+      sha256: null,
+    });
+  }
+
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
+
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, cases.length);
+  for (const captureRecord of captureRecords as Array<{
+    attachments: Array<{ storedPath: string | null; byteSize: number | null; sha256: string | null }>;
+    rawRefs: string[];
+  }>) {
+    assert.deepEqual(selectCorruptStoredAttachmentFields(captureRecord.attachments[0]), {
+      storedPath: null,
+      byteSize: null,
+      sha256: null,
+    });
+    assert.equal(captureRecord.rawRefs.some((rawRef) => rawRef.includes("/attachments/")), false);
+  }
 
   pipeline.close();
 });

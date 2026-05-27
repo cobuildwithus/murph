@@ -365,6 +365,62 @@ describe("hosted email worker ingress", () => {
     })));
   });
 
+  it("does not include original hosted email image attachment sizes in prompt projection", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+    const env = createWorkerEnv(bucket);
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmailWithAttachment({
+        attachmentBase64: Buffer.from("original image bytes").toString("base64"),
+        attachmentContentType: "image/png",
+        attachmentFileName: "photo.png",
+        body: "hello with attachment",
+        from: "Owner <owner@example.com>",
+        to: replyAliasAddress,
+      }),
+      to: replyAliasAddress,
+    }, env);
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput?.body?.attachmentSummaries).toEqual([
+      {
+        contentType: "image/png",
+        fileName: "photo.png",
+        sizeBytes: null,
+      },
+    ]);
+  });
+
   it("omits prompt projection metadata when parsed email body text is unavailable", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
@@ -904,6 +960,38 @@ function buildRawEmail(input: {
     "Subject: hello",
     "",
     input.body ?? "hello from murph",
+  ].join("\r\n");
+}
+
+function buildRawEmailWithAttachment(input: {
+  attachmentBase64: string;
+  attachmentContentType: string;
+  attachmentFileName: string;
+  body: string;
+  from: string;
+  to: string;
+}) {
+  const boundary = "murph-test-boundary";
+
+  return [
+    `From: ${input.from}`,
+    `To: ${input.to}`,
+    "Subject: hello",
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    input.body,
+    `--${boundary}`,
+    `Content-Type: ${input.attachmentContentType}; name="${input.attachmentFileName}"`,
+    `Content-Disposition: attachment; filename="${input.attachmentFileName}"`,
+    "Content-Transfer-Encoding: base64",
+    "",
+    input.attachmentBase64,
+    `--${boundary}--`,
+    "",
   ].join("\r\n");
 }
 

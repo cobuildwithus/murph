@@ -23,7 +23,7 @@ const IMAGE_NORMALIZATION_MAX_INPUT_PIXELS = 64 * 1_000_000;
 export async function normalizeAttachmentForStorage(
   input: NormalizeAttachmentForStorageInput,
 ): Promise<NormalizedAttachmentForStorage | null> {
-  if (!isEligibleStillImage(input.attachment, input.mediaType, input.fileName)) {
+  if (input.attachment.kind !== "image") {
     return {
       bytes: input.bytes,
       fileName: input.fileName,
@@ -32,21 +32,15 @@ export async function normalizeAttachmentForStorage(
     };
   }
 
-  const sharp = (await import("sharp")).default;
-
   try {
+    const sharp = (await import("sharp")).default;
     const image = sharp(input.bytes, {
       limitInputPixels: IMAGE_NORMALIZATION_MAX_INPUT_PIXELS,
     });
     const metadata = await image.metadata();
 
     if (typeof metadata.pages === "number" && metadata.pages > 1) {
-      return {
-        bytes: input.bytes,
-        fileName: input.fileName,
-        mediaType: input.mediaType,
-        normalized: false,
-      };
+      return null;
     }
 
     const output = await image
@@ -72,33 +66,6 @@ export async function normalizeAttachmentForStorage(
   } catch {
     return null;
   }
-}
-
-function isEligibleStillImage(
-  attachment: InboundAttachment,
-  mediaType: string,
-  fileName: string,
-): boolean {
-  if (attachment.kind !== "image") {
-    return false;
-  }
-
-  const normalizedMediaType = normalizeMediaType(mediaType);
-  if (
-    normalizedMediaType === "image/jpeg" ||
-    normalizedMediaType === "image/png" ||
-    normalizedMediaType === "image/webp"
-  ) {
-    return true;
-  }
-
-  return [".jpg", ".jpeg", ".png", ".webp"].includes(
-    path.posix.extname(fileName).toLowerCase(),
-  );
-}
-
-function normalizeMediaType(mediaType: string): string {
-  return mediaType.trim().toLowerCase().split(";", 1)[0] ?? "";
 }
 
 function replaceExtension(fileName: string, extension: string): string {
