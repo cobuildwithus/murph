@@ -555,20 +555,25 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     output: eventObservationAddResultSchema,
     async run({ options }) {
       const title = deriveEventTitle(options.title, `Observation: ${options.metric}`)
-      const payload = {
-        ...(await buildCommonTypedEventPayload({
-          kind: 'observation',
-          vault: options.vault,
-          occurredAt: options.occurredAt,
-          source: options.source,
-          title,
-          note: options.note,
-          tag: options.tag,
-        })),
+      const commonPayload = await buildCommonTypedEventPayload({
+        kind: 'observation',
+        vault: options.vault,
+        occurredAt: options.occurredAt,
+        source: options.source,
+        title,
+        note: options.note,
+        tag: options.tag,
+      })
+      const payload: JsonObject = {
+        ...commonPayload,
         metric: options.metric,
-        queryVisibility: 'default',
         value: options.value,
         unit: options.unit,
+      }
+
+      if (commonPayload.source === 'manual') {
+        payload.queryVisibility = 'default'
+        payload.visibility = 'display'
       }
       const result = await upsertEventRecord({
         vault: options.vault,

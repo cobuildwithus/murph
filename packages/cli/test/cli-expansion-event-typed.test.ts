@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -21,6 +21,7 @@ interface CommandSchema {
 interface EventAddEnvelope {
   eventId: string
   kind: string
+  ledgerFile: string
 }
 
 interface EventShowEnvelope {
@@ -218,6 +219,23 @@ test.sequential('typed event write commands persist common event records without
       '--vault',
       vaultRoot,
     ])
+    const deviceObservation = await runSliceCli<EventAddEnvelope>([
+      'event',
+      'observation',
+      'add',
+      '--metric',
+      'heart-rate',
+      '--value',
+      '72',
+      '--unit',
+      'bpm',
+      '--source',
+      'device',
+      '--occurred-at',
+      '2026-03-13T07:31:00.000Z',
+      '--vault',
+      vaultRoot,
+    ])
     const supplement = await runSliceCli<EventAddEnvelope>([
       'event',
       'supplement-intake',
@@ -249,6 +267,10 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(observation.meta?.command, 'event observation add')
     assert.equal(requireData(observation).kind, 'observation')
 
+    assert.equal(deviceObservation.ok, true, JSON.stringify(deviceObservation))
+    assert.equal(deviceObservation.meta?.command, 'event observation add')
+    assert.equal(requireData(deviceObservation).kind, 'observation')
+
     assert.equal(supplement.ok, true, JSON.stringify(supplement))
     assert.equal(supplement.meta?.command, 'event supplement-intake add')
     assert.equal(requireData(supplement).kind, 'supplement_intake')
@@ -271,6 +293,13 @@ test.sequential('typed event write commands persist common event records without
       'event',
       'show',
       requireData(observation).eventId,
+      '--vault',
+      vaultRoot,
+    ])
+    const shownDeviceObservation = await runSliceCli<EventShowEnvelope>([
+      'event',
+      'show',
+      requireData(deviceObservation).eventId,
       '--vault',
       vaultRoot,
     ])
@@ -300,6 +329,22 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(requireData(shownObservation).entity.data.queryVisibility, 'default')
     assert.equal(requireData(shownObservation).entity.data.value, 55)
     assert.equal(requireData(shownObservation).entity.data.unit, 'bpm')
+    assert.equal(requireData(shownObservation).entity.data.visibility, 'display')
+
+    assert.equal(shownDeviceObservation.ok, false)
+    assert.equal(shownDeviceObservation.error?.code, 'not_found')
+    const deviceLedgerRaw = await readFile(
+      path.join(vaultRoot, requireData(deviceObservation).ledgerFile),
+      'utf8',
+    )
+    const deviceLedgerEvent = deviceLedgerRaw
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((record) => record.id === requireData(deviceObservation).eventId)
+    assert.equal(deviceLedgerEvent?.source, 'device')
+    assert.equal('queryVisibility' in (deviceLedgerEvent ?? {}), false)
+    assert.equal('visibility' in (deviceLedgerEvent ?? {}), false)
 
     assert.equal(shownSupplement.ok, true)
     assert.equal(requireData(shownSupplement).entity.kind, 'supplement_intake')
