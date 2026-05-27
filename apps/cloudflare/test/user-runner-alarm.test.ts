@@ -353,6 +353,66 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("records accepted transport failure as complete when workspace progress committed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const workspace = createWorkspaceState({
+      nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMailboxImportedCount: 1,
+      },
+      version: "5",
+    });
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      mailboxLag: [createMailboxLag({ lag: "0", maxSeq: "0" })],
+      workspace,
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    workspace.version = "6";
+    invocationResult.reject(new Error("Hosted container first request failed."));
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 0,
+      last_invocation_at: expect.any(String),
+    });
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      inFlight: false,
+      workspace: expect.objectContaining({
+        version: "6",
+      }),
+    });
+    expect((await runner.runnerStatus()).lastErrorCode ?? null).toBeNull();
+    const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+    expect(runtimeLogCalls).toHaveLength(0);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          workspaceVersion: "5",
+        }),
+        message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
+      }),
+    );
+  });
+
   it("keeps accepted failure cleanup best-effort when the runtime log callback fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
