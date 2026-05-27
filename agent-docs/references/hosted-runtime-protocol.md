@@ -224,12 +224,16 @@ Only Temporal decides when Cloudflare should process. The short-lived
 active by starting a runner, replacing an expired write fence, waking a ready
 child, or recording a pending wake while the child is still starting. The
 command returns `retry_later` instead of pretending success when Cloudflare
-cannot confirm start or wake acceptance. Accepted background invocations are
-registered with the Durable Object lifetime. Accepted starts and wakes return an
-owner-watchdog recheck aligned to the expected idle checkpoint horizon or active
-write-fence expiry rather than a short durable-lag polling loop. A confirmed
-non-wakeable child is replaced after the startup grace window when a later
-ensure command observes it, instead of waiting for the full write-fence timeout.
+cannot confirm start or wake acceptance. Fresh starts read the hosted workspace,
+bind the workspace version to the write fence, build runtime config/secrets, and
+construct the container job before returning accepted; failures in that
+pre-handoff path clear the fresh fence and return `retry_later`. Accepted
+background invocations are registered with the Durable Object lifetime.
+Accepted starts and wakes return an owner-watchdog recheck aligned to the
+expected idle checkpoint horizon or active write-fence expiry rather than a
+short durable-lag polling loop. A confirmed non-wakeable child is replaced after
+the startup grace window when a later ensure command observes it, instead of
+waiting for the full write-fence timeout.
 Cloudflare worker config fails closed when `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`
 is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus the
 owner-watchdog recheck margin, so env overrides cannot make Temporal re-read

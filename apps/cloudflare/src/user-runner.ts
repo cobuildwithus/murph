@@ -13,6 +13,7 @@ import type {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
@@ -150,6 +151,19 @@ type RuntimeProcessingRetryReason =
   | "container_rpc_timeout"
   | "missing_container_binding"
   | "stale_fence_replacement_race";
+
+type RuntimeProcessingStartFailureRetryReason = Extract<
+  RuntimeProcessingRetryReason,
+  "container_rpc_error" | "container_rpc_timeout" | "missing_container_binding"
+>;
+
+interface PreparedRuntimeInvocation {
+  input: RuntimeInvocationInput;
+  job: HostedExecutionWorkspaceInvocationJobInput;
+  runnerContainerName: string;
+  token: RunnerWriteFenceToken;
+  workspaceVersion: string;
+}
 
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
@@ -638,30 +652,58 @@ export class HostedUserRunner {
 
     await this.syncWatchdogAlarm(await this.stateStore.readState());
 
+    const executionInput = toRuntimeInvocationInput(input);
+    let prepared: PreparedRuntimeInvocation;
+    try {
+      prepared = await this.prepareRuntimeExecutionWithFence({
+        input: executionInput,
+        token,
+      });
+    } catch (error) {
+      const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
+        error,
+        input,
+        message: "Hosted runner runtime processing preparation failed.",
+        token,
+      });
+      return failed.response;
+    }
+
     const startupConfirmed = await this.confirmRuntimeContainerStartup({
       input,
-      token,
+      runnerContainerName: prepared.runnerContainerName,
+      token: prepared.token,
     });
     if (!startupConfirmed.confirmed) {
       return startupConfirmed.response;
     }
 
-    const background = this.invokeRuntimeExecutionWithFence({
-      input: toRuntimeInvocationInput(input),
+    const stillOwnsPreparedFence = await this.confirmPreparedRuntimeWriteFenceIsActive({
+      input,
+      token: prepared.token,
+    });
+    if (!stillOwnsPreparedFence) {
+      return this.createRuntimeProcessingRetryLater({
+        reason: "stale_fence_replacement_race",
+        userId: input.userId,
+      });
+    }
+
+    const background = this.invokePreparedRuntimeExecutionWithFence({
+      prepared,
       runtimeWakeStartedAt,
-      token,
     }).then(
       () => undefined,
       () => undefined,
     );
-    this.trackRuntimeExecutionTask(token.attemptId, background);
+    this.trackRuntimeExecutionTask(prepared.token.attemptId, background);
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
         orchestrationAttemptId: input.orchestrationAttemptId,
         runtimeProcessingAction: action,
-        workspaceAttemptId: token.attemptId,
+        workspaceAttemptId: prepared.token.attemptId,
         workspaceReason: input.reason,
       },
       message: "Hosted runner runtime processing accepted.",
@@ -672,13 +714,40 @@ export class HostedUserRunner {
     return {
       action,
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(token),
-      runtimeAttemptId: token.attemptId,
+      recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(prepared.token),
+      runtimeAttemptId: prepared.token.attemptId,
     };
+  }
+
+  private async confirmPreparedRuntimeWriteFenceIsActive(input: {
+    input: RuntimeProcessingInput;
+    token: RunnerWriteFenceToken;
+  }): Promise<boolean> {
+    const current = await this.stateStore.readWriteFenceToken();
+    if (runnerWriteFenceTokensMatch(current, input.token)) {
+      return true;
+    }
+
+    const record = await this.stateStore.readState();
+    await this.syncWatchdogAlarm(record);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
+        workspaceAttemptId: input.token.attemptId,
+        workspaceReason: input.input.reason,
+      },
+      level: "warn",
+      message: "Hosted runner runtime processing startup confirmation finished after its write fence changed.",
+      phase: "runtime.starting",
+      userId: input.input.userId,
+    });
+    return false;
   }
 
   private async confirmRuntimeContainerStartup(input: {
     input: RuntimeProcessingInput;
+    runnerContainerName: string;
     token: RunnerWriteFenceToken;
   }): Promise<
     | { confirmed: true }
@@ -698,16 +767,13 @@ export class HostedUserRunner {
     }
 
     const container = this.runnerContainerNamespace.getByName(
-      resolveHostedExecutionRunnerContainerName({
-        source: this.runnerRuntimeEnvSource,
-        userId: input.input.userId,
-      }),
+      input.runnerContainerName,
     );
-    const ensureReadyForProcessing = container.ensureReadyForProcessing;
-    if (!ensureReadyForProcessing) {
+    if (!container.ensureReadyForProcessing) {
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error: new Error("Hosted runner container readiness method is unavailable."),
         input: input.input,
+        retryReason: "container_rpc_error",
         token: input.token,
       });
     }
@@ -717,7 +783,7 @@ export class HostedUserRunner {
       RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
     );
     try {
-      await ensureReadyForProcessing.call(container, {
+      await container.ensureReadyForProcessing({
         timeoutMs,
         userId: input.input.userId,
       });
@@ -746,11 +812,33 @@ export class HostedUserRunner {
   private async clearWriteFenceAfterStartupConfirmationFailure(input: {
     error: unknown;
     input: RuntimeProcessingInput;
+    retryReason?: RuntimeProcessingStartFailureRetryReason;
     token: RunnerWriteFenceToken;
   }): Promise<{
     confirmed: false;
     response: HostedRuntimeEnsureProcessingResponse;
   }> {
+    return await this.clearWriteFenceAfterRuntimeStartFailure({
+      error: input.error,
+      input: input.input,
+      message: "Hosted runner runtime processing startup confirmation failed.",
+      retryReason: input.retryReason,
+      token: input.token,
+    });
+  }
+
+  private async clearWriteFenceAfterRuntimeStartFailure(input: {
+    error: unknown;
+    input: RuntimeProcessingInput;
+    message: string;
+    retryReason?: RuntimeProcessingStartFailureRetryReason;
+    token: RunnerWriteFenceToken;
+  }): Promise<{
+    confirmed: false;
+    response: HostedRuntimeEnsureProcessingResponse;
+  }> {
+    const retryReason = input.retryReason
+      ?? classifyRuntimeStartFailureRetryReason(input.error);
     const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
       error: input.error,
       finishedAt: new Date().toISOString(),
@@ -767,14 +855,14 @@ export class HostedUserRunner {
         workspaceReason: input.input.reason,
       },
       level: "warn",
-      message: "Hosted runner runtime processing startup confirmation failed.",
+      message: input.message,
       phase: "runtime.starting",
       userId: input.input.userId,
     });
     return {
       confirmed: false,
       response: this.createRuntimeProcessingRetryLater({
-        reason: "container_rpc_timeout",
+        reason: retryReason,
         userId: input.input.userId,
       }),
     };
@@ -830,26 +918,80 @@ export class HostedUserRunner {
     token: RunnerWriteFenceToken;
   }): Promise<HostedWorkspaceInvocationResult> {
     const executionInput = input.input;
-    let token = input.token;
-    let workspaceVersion: string | null = null;
+    let prepared: PreparedRuntimeInvocation;
+    try {
+      prepared = await this.prepareRuntimeExecutionWithFence({
+        input: executionInput,
+        token: input.token,
+      });
+    } catch (error) {
+      const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
+        error,
+        finishedAt: new Date().toISOString(),
+        token: input.token,
+      });
+      await this.syncWatchdogAlarm(failed.record);
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: executionInput.orchestrationAttemptId,
+          transportFailureFenceCleared: failed.failed,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: executionInput.reason,
+        },
+        level: "warn",
+        message: "Hosted runner runtime execution adapter failed.",
+        phase: "failed",
+        userId: executionInput.userId,
+      });
+      throw error;
+    }
+
+    return await this.invokePreparedRuntimeExecutionWithFence({
+      prepared,
+      runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+    });
+  }
+
+  private async prepareRuntimeExecutionWithFence(input: {
+    input: RuntimeInvocationInput;
+    token: RunnerWriteFenceToken;
+  }): Promise<PreparedRuntimeInvocation> {
+    const workspaceRead = await this.readHostedWorkspaceFromWeb(input.input.userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.input.userId);
+    const workspaceVersion = workspaceRead.workspace?.version ?? "0";
+    const token = await this.stateStore.bindWriteFenceWorkspaceVersion({
+      token: input.token,
+      workspaceVersion,
+    });
+    const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
+      token,
+      reason: input.input.reason,
+      ...(input.input.source ? { source: input.input.source } : {}),
+      userId: input.input.userId,
+      workspace: workspaceRead.workspace,
+      workspaceVersion,
+    });
+
+    return {
+      input: input.input,
+      ...workspaceRunnerInvocation,
+      token,
+      workspaceVersion,
+    };
+  }
+
+  private async invokePreparedRuntimeExecutionWithFence(input: {
+    prepared: PreparedRuntimeInvocation;
+    runtimeWakeStartedAt: number;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    const executionInput = input.prepared.input;
+    const token = input.prepared.token;
+    const workspaceVersion = input.prepared.workspaceVersion;
     let result: HostedWorkspaceInvocationResult;
     try {
-      const workspaceRead = await this.readHostedWorkspaceFromWeb(executionInput.userId);
-      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, executionInput.userId);
-      workspaceVersion = workspaceRead.workspace?.version ?? "0";
-      token = await this.stateStore.bindWriteFenceWorkspaceVersion({
-        token,
-        workspaceVersion,
-      });
-
-      result = await this.invokeWorkspaceRunner({
-        token,
-        reason: executionInput.reason,
-        ...(executionInput.source ? { source: executionInput.source } : {}),
-        userId: executionInput.userId,
-        workspace: workspaceRead.workspace,
-        workspaceVersion,
-      });
+      result = await this.invokePreparedWorkspaceRunner(input.prepared);
     } catch (error) {
       const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
         error,
@@ -1160,14 +1302,17 @@ export class HostedUserRunner {
     };
   }
 
-  private async invokeWorkspaceRunner(input: {
+  private async prepareWorkspaceRunnerInvocation(input: {
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     source?: HostedRuntimeDemandRunSource;
     userId: string;
     workspace: HostedWorkspaceState | null;
     workspaceVersion: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
+  }): Promise<{
+    job: HostedExecutionWorkspaceInvocationJobInput;
+    runnerContainerName: string;
+  }> {
     if (!this.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
@@ -1225,7 +1370,7 @@ export class HostedUserRunner {
             forwardedEnv,
             userEnv,
           }),
-        runnerContainerName,
+        runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
         workspaceWriteFenceGeneration: input.token.generation,
         workspaceReason: input.reason,
@@ -1236,13 +1381,26 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
-    return await invokeHostedExecutionContainerRunner({
+    return {
       job,
       runnerContainerName,
+    };
+  }
+
+  private async invokePreparedWorkspaceRunner(
+    input: PreparedRuntimeInvocation,
+  ): Promise<HostedWorkspaceInvocationResult> {
+    if (!this.runnerContainerNamespace) {
+      throw new Error("Native hosted execution requires a RunnerContainer binding.");
+    }
+
+    return await invokeHostedExecutionContainerRunner({
+      job: input.job,
+      runnerContainerName: input.runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       signal: AbortSignal.timeout(this.env.runnerTimeoutMs),
       timeoutMs: this.env.runnerTimeoutMs,
-      userId: input.userId,
+      userId: input.input.userId,
     });
   }
 
@@ -1913,6 +2071,40 @@ function mapRunnerProcessingRetryReason(
     case "missing-wake-method":
       return "container_rpc_error";
   }
+}
+
+function classifyRuntimeStartFailureRetryReason(
+  error: unknown,
+): RuntimeProcessingStartFailureRetryReason {
+  if (isMissingContainerBindingFailure(error)) {
+    return "missing_container_binding";
+  }
+
+  return deriveHostedExecutionErrorCode(error) === "timeout"
+    ? "container_rpc_timeout"
+    : "container_rpc_error";
+}
+
+function isMissingContainerBindingFailure(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
+  const normalized = message.toLowerCase();
+  return normalized.includes("runnercontainer binding")
+    || normalized.includes("container binding");
+}
+
+function runnerWriteFenceTokensMatch(
+  current: RunnerWriteFenceToken | null,
+  expected: RunnerWriteFenceToken,
+): boolean {
+  return current !== null
+    && current.attemptId === expected.attemptId
+    && current.generation === expected.generation
+    && current.userId === expected.userId
+    && current.workspaceVersion === expected.workspaceVersion;
 }
 
 function readObjectRecord(value: unknown): Record<string, unknown> | null {
