@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { extractIsoDatePrefix } from "@murphai/contracts";
+import { extractIsoDatePrefix, type WorkoutSessionMetrics } from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
@@ -129,12 +129,6 @@ function firstDayKey(...candidates: unknown[]): string | undefined {
   }
 
   return undefined;
-}
-
-interface OuraWorkoutMetricSource {
-  workout: PlainObject;
-  activityType: string;
-  distanceMeters?: number;
 }
 
 const OURA_DAILY_ACTIVITY_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
@@ -342,40 +336,39 @@ const OURA_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<Plain
   },
 ];
 
-const OURA_SESSION_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
-  {
-    metric: "average-heart-rate",
-    value: (session) => session.heart_rate,
-    unit: "bpm",
-    title: "Oura session average heart rate",
-    facet: "heart-rate",
-  },
-  {
-    metric: "hrv",
-    value: (session) => session.heart_rate_variability,
-    unit: "ms",
-    title: "Oura session HRV",
-    facet: "hrv",
-  },
-];
+function nonEmptyWorkoutMetrics(metrics: WorkoutSessionMetrics): WorkoutSessionMetrics | undefined {
+  return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
 
-const OURA_WORKOUT_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<OuraWorkoutMetricSource>[] = [
-  {
-    metric: "active-calories",
-    value: ({ workout }) =>
-      firstNumber(workout.calories, workout.active_calories, workout.total_calories),
-    unit: "kcal",
-    title: ({ activityType }) => `Oura ${activityType} calories`,
-    facet: "active-calories",
-  },
-  {
-    metric: "distance",
-    value: ({ distanceMeters }) => distanceMeters,
-    unit: "meter",
-    title: ({ activityType }) => `Oura ${activityType} distance`,
-    facet: "distance",
-  },
-];
+function buildOuraSessionMetrics(session: PlainObject): WorkoutSessionMetrics | undefined {
+  const metrics: WorkoutSessionMetrics = {};
+  const averageHeartRate = firstNumber(session.heart_rate);
+  const hrv = firstNumber(session.heart_rate_variability);
+
+  if (averageHeartRate !== undefined) {
+    metrics.averageHeartRate = averageHeartRate;
+  }
+  if (hrv !== undefined) {
+    metrics.hrv = hrv;
+  }
+
+  return nonEmptyWorkoutMetrics(metrics);
+}
+
+function buildOuraWorkoutMetrics(workout: PlainObject): WorkoutSessionMetrics | undefined {
+  const metrics: WorkoutSessionMetrics = {};
+  const activeCalories = firstNumber(workout.active_calories, workout.calories);
+  const totalCalories = firstNumber(workout.total_calories);
+
+  if (activeCalories !== undefined) {
+    metrics.activeCalories = activeCalories;
+  }
+  if (totalCalories !== undefined) {
+    metrics.totalCalories = totalCalories;
+  }
+
+  return nonEmptyWorkoutMetrics(metrics);
+}
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
@@ -664,25 +657,13 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
               startedAt: startAt,
               endedAt: endAt,
               sessionNote: `Oura ${sessionType} session`,
+              metrics: buildOuraSessionMetrics(session),
               exercises: [],
             },
           }),
         }),
       );
     }
-
-    emitObservationMetrics(
-      events,
-      {
-        source: session,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        rawArtifactRoles: [role],
-        externalRef: (facet) => makeExternalRef("session", sessionId, version, facet),
-      },
-      OURA_SESSION_OBSERVATION_METRICS,
-    );
   }
 
   for (const workout of workouts) {
@@ -731,29 +712,13 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
               startedAt: startAt,
               endedAt: endAt,
               sessionNote: `Oura ${activityType}`,
+              metrics: buildOuraWorkoutMetrics(workout),
               exercises: [],
             },
           }),
         }),
       );
     }
-
-    emitObservationMetrics(
-      events,
-      {
-        source: {
-          workout,
-          activityType,
-          distanceMeters,
-        },
-        occurredAt,
-        recordedAt,
-        dayKey,
-        rawArtifactRoles: [role],
-        externalRef: (facet) => makeExternalRef("workout", workoutId, version, facet),
-      },
-      OURA_WORKOUT_OBSERVATION_METRICS,
-    );
   }
 
   for (const deletion of deletions) {

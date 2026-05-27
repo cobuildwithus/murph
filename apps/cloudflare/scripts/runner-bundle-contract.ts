@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -128,6 +128,10 @@ function readWorkspacePackageManifestByName(
       }
 
       const packageJsonPath = path.join(membersDir, entry.name, "package.json");
+      if (!existsSync(packageJsonPath)) {
+        continue;
+      }
+
       const packageJson = JSON.parse(
         readFileSync(packageJsonPath, "utf8"),
       ) as RunnerBundlePackageManifest;

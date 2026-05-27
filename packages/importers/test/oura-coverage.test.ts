@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
 
+import { workoutSessionSchema, type WorkoutSessionMetrics } from "@murphai/contracts";
 import { test } from "vitest";
 
 import { normalizeOuraSnapshot } from "../src/device-providers/oura.ts";
+
+function workoutMetricsFromEvent(
+  event: { fields?: { workout?: unknown } } | undefined,
+): WorkoutSessionMetrics | undefined {
+  const result = workoutSessionSchema.safeParse(event?.fields?.workout);
+  if (!result.success) {
+    assert.fail(`workout contract paths: ${result.error.issues.map((issue) => issue.path.join(".")).join(", ")}`);
+  }
+
+  return result.data.metrics;
+}
 
 test("normalizeOuraSnapshot covers dailySpo2 aliasing, heartRate aliasing, and provenance fallbacks", () => {
   const payload = normalizeOuraSnapshot({
@@ -166,6 +178,11 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
       event.kind === "observation" &&
       event.fields?.metric === "average-heart-rate",
   );
+  const partialWorkoutMetricEvents = payload.events?.filter(
+    (event) =>
+      event.externalRef?.resourceId === "workout-partial" &&
+      event.kind === "observation",
+  ) ?? [];
 
   assert.equal(payload.accountId, "oura-user-user-id-2");
   assert.equal(payload.provenance?.ouraUserId, "oura-user-user-id-2");
@@ -179,19 +196,14 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
   assert.ok(unknownDistanceWorkoutEvent);
   assert.equal(unknownDistanceWorkoutEvent?.fields?.activityType, "rowing");
   assert.equal(unknownDistanceWorkoutEvent?.fields?.distanceKm, undefined);
+  assert.deepEqual(workoutMetricsFromEvent(unknownDistanceWorkoutEvent), {
+    activeCalories: 290,
+  });
   assert.equal(restSleepAverageHeartRate?.fields?.value, 55);
   assert.equal(partialSleepRespiratoryRate?.fields?.value, 11.7);
-  assert.equal(partialSessionHeartRate?.fields?.value, 62);
+  assert.equal(partialSessionHeartRate, undefined);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.ok(
-    payload.events?.some(
-      (event) =>
-        event.externalRef?.resourceId === "workout-partial" &&
-        event.kind === "observation" &&
-        event.fields?.metric === "distance" &&
-        event.fields?.value === 4800,
-    ),
-  );
+  assert.deepEqual(partialWorkoutMetricEvents, []);
 });
 
 test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () => {

@@ -15,6 +15,7 @@ Success criteria:
 - Preserve unrelated dirty worktree edits and active Junction/device-sync rows.
 - Do not inspect or print `.env` contents, raw provider payloads, user health values from a live vault, local account identifiers, full home paths, raw account IDs, or secrets.
 - Prefer the existing wearable import/query primitives over adding a parallel summary system.
+- Provider workout metrics should be retained as session-scoped workout facts, not generic wearable observations, unless an explicit projector later promotes them into daily summaries.
 
 ## Plan
 
@@ -28,3 +29,4 @@ Success criteria:
 
 - Initial evidence points to the assistant seeing device account connection state through device-sync while usable summaries come from `vault-cli wearables latest` / query wearable summaries.
 - The likely fault boundary is between device-provider import output and the query wearable read model, not the assistant response wording.
+- Current workout refactor target: keep high-value Junction, Oura, WHOOP, and Strava workout/session calories, heart-rate, strain, speed, elevation, HRV, and recording-quality fields available through `workout show/list` by adding optional `workout.metrics`, while preserving the invariant that wearable latest reads compact display-grade facts and not raw/session payloads.

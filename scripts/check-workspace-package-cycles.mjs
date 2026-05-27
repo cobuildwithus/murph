@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -161,7 +161,19 @@ async function findWorkspacePackageJsonPaths(rootDir) {
         continue;
       }
 
-      packageJsonPaths.push(path.join(workspaceRootPath, entry.name, "package.json"));
+      const packageJsonPath = path.join(workspaceRootPath, entry.name, "package.json");
+
+      try {
+        await access(packageJsonPath);
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+          continue;
+        }
+
+        throw error;
+      }
+
+      packageJsonPaths.push(packageJsonPath);
     }
   }
 

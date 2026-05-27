@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { extractIsoDatePrefix } from "@murphai/contracts";
+import { extractIsoDatePrefix, type WorkoutSession } from "@murphai/contracts";
 import { z } from "zod";
 
 import { stripUndefined } from "../shared.ts";
@@ -187,10 +187,16 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "temperature-deviation", unit: "celsius", title: "Junction sleep temperature delta", paths: ["temperatureDelta", "temperature_delta", "skin_temperature_delta"] },
 ];
 
-const WORKOUT_METRICS: readonly MetricDescriptor[] = [
-  { metric: "active-calories", unit: "kcal", title: "Junction workout calories", paths: ["calories", "totalCalories", "total_calories"] },
-  { metric: "average-heart-rate", unit: "bpm", title: "Junction workout average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr"] },
-  { metric: "max-heart-rate", unit: "bpm", title: "Junction workout max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr"] },
+type WorkoutSessionMetrics = NonNullable<WorkoutSession["metrics"]>;
+
+const WORKOUT_SESSION_METRICS: readonly {
+  key: keyof WorkoutSessionMetrics;
+  paths: readonly string[];
+}[] = [
+  { key: "activeCalories", paths: ["activeCalories", "active_calories", "calories"] },
+  { key: "totalCalories", paths: ["totalCalories", "total_calories"] },
+  { key: "averageHeartRate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr"] },
+  { key: "maxHeartRate", paths: ["maxHeartRate", "max_heart_rate", "max_hr"] },
 ];
 
 type JunctionSleepStage = "awake" | "light" | "deep" | "rem";
@@ -666,8 +672,6 @@ function pushWorkoutSummary(
       observedAtRaw: stringId(startAtRaw) ?? occurredAt,
     })
     : timestamp;
-  pushObservationMetrics(entry, resourceContext, context, WORKOUT_METRICS, workoutTimestamp);
-
   if (!occurredAt || durationMinutes === undefined) {
     return;
   }
@@ -686,6 +690,7 @@ function pushWorkoutSummary(
   const distanceKm =
     firstNumberFromPaths(entry, ["distanceKm", "distance_km"]) ??
     metersToKilometers(firstNumberFromPaths(entry, ["distanceMeters", "distance_meters", "distance"]));
+  const workoutMetrics = buildWorkoutSessionMetrics(entry);
 
   context.events.push(stripUndefined({
     kind: "activity_session",
@@ -708,10 +713,24 @@ function pushWorkoutSummary(
         startedAt: startAt ?? occurredAt,
         endedAt: endAt,
         sessionNote: title,
+        metrics: workoutMetrics,
         exercises: [],
       }),
     }),
   }));
+}
+
+function buildWorkoutSessionMetrics(entry: PlainObject): WorkoutSessionMetrics | undefined {
+  const metrics: WorkoutSessionMetrics = {};
+
+  for (const { key, paths } of WORKOUT_SESSION_METRICS) {
+    const value = firstNumberFromPaths(entry, paths);
+    if (value !== undefined) {
+      metrics[key] = value;
+    }
+  }
+
+  return Object.keys(metrics).length > 0 ? metrics : undefined;
 }
 
 function pushObservationMetrics(

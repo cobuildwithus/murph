@@ -1725,7 +1725,7 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    it("keeps a fresh no-active-child fence as already running instead of replacing it", async () => {
+    it("returns retry_later for a fresh no-active-child fence instead of pretending it is running", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
@@ -1747,10 +1747,9 @@ describe("cloudflare worker routes", () => {
         userId: "test-user",
       });
 
-      expect(response).toMatchObject({
-        action: "already_running",
-        kind: "runtime_processing_accepted",
-        runtimeAttemptId: oldToken?.attemptId,
+      expect(response).toEqual({
+        kind: "retry_later",
+        retryAt: "2026-04-27T00:00:10.000Z",
       });
       expect(ensureProcessing).toHaveBeenCalledOnce();
       expect(ensureProcessing).toHaveBeenCalledWith({
@@ -2268,6 +2267,7 @@ function createRuntimeControlRunnerHarness(input: {
     sql: ReturnType<typeof createTestSqlStorage>;
   }) => void;
   deleteAlarmError?: Error;
+  ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"];
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
   workspace?: HostedWorkspaceState | null;
@@ -2334,6 +2334,11 @@ function createRuntimeControlRunnerHarness(input: {
   });
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: vi.fn(async () => undefined),
+    ensureReadyForProcessing: vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async (ensureInput) =>
+      await input.ensureReadyForProcessing?.(ensureInput) ?? { kind: "ready" }
+    ),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(

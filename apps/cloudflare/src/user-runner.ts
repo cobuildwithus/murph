@@ -96,6 +96,7 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
+const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
@@ -565,13 +566,10 @@ export class HostedUserRunner {
     if (containerResult.kind === "start-required") {
       if (this.shouldPreserveStartingWriteFence(activeFence)) {
         await this.syncWatchdogAlarm(record);
-        return {
-          action: "already_running",
-          kind: "runtime_processing_accepted",
-          recommendedRecheckAt:
-            this.computeRuntimeProcessingOwnerWatchdogAt(activeFence),
-          runtimeAttemptId: activeFence.attemptId,
-        };
+        return this.createRuntimeProcessingRetryLater({
+          reason: "container_rpc_timeout",
+          userId: input.userId,
+        });
       }
 
       const cleared = await this.stateStore.clearWriteFenceForReplacement({
@@ -640,6 +638,14 @@ export class HostedUserRunner {
 
     await this.syncWatchdogAlarm(await this.stateStore.readState());
 
+    const startupConfirmed = await this.confirmRuntimeContainerStartup({
+      input,
+      token,
+    });
+    if (!startupConfirmed.confirmed) {
+      return startupConfirmed.response;
+    }
+
     const background = this.invokeRuntimeExecutionWithFence({
       input: toRuntimeInvocationInput(input),
       runtimeWakeStartedAt,
@@ -668,6 +674,109 @@ export class HostedUserRunner {
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(token),
       runtimeAttemptId: token.attemptId,
+    };
+  }
+
+  private async confirmRuntimeContainerStartup(input: {
+    input: RuntimeProcessingInput;
+    token: RunnerWriteFenceToken;
+  }): Promise<
+    | { confirmed: true }
+    | {
+        confirmed: false;
+        response: HostedRuntimeEnsureProcessingResponse;
+      }
+  > {
+    if (!this.runnerContainerNamespace) {
+      return {
+        confirmed: false,
+        response: this.createRuntimeProcessingRetryLater({
+          reason: "missing_container_binding",
+          userId: input.input.userId,
+        }),
+      };
+    }
+
+    const container = this.runnerContainerNamespace.getByName(
+      resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId: input.input.userId,
+      }),
+    );
+    const ensureReadyForProcessing = container.ensureReadyForProcessing;
+    if (!ensureReadyForProcessing) {
+      return await this.clearWriteFenceAfterStartupConfirmationFailure({
+        error: new Error("Hosted runner container readiness method is unavailable."),
+        input: input.input,
+        token: input.token,
+      });
+    }
+
+    const timeoutMs = Math.min(
+      this.env.runnerTimeoutMs,
+      RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+    );
+    try {
+      await ensureReadyForProcessing.call(container, {
+        timeoutMs,
+        userId: input.input.userId,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          runtimeStartupConfirmTimeoutMs: timeoutMs,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: input.input.reason,
+        },
+        message: "Hosted runner runtime processing startup confirmed.",
+        phase: "runtime.starting",
+        userId: input.input.userId,
+      });
+      return { confirmed: true };
+    } catch (error) {
+      return await this.clearWriteFenceAfterStartupConfirmationFailure({
+        error,
+        input: input.input,
+        token: input.token,
+      });
+    }
+  }
+
+  private async clearWriteFenceAfterStartupConfirmationFailure(input: {
+    error: unknown;
+    input: RuntimeProcessingInput;
+    token: RunnerWriteFenceToken;
+  }): Promise<{
+    confirmed: false;
+    response: HostedRuntimeEnsureProcessingResponse;
+  }> {
+    const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
+      error: input.error,
+      finishedAt: new Date().toISOString(),
+      token: input.token,
+    });
+    await this.syncWatchdogAlarm(failed.record);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...buildHostedRunnerMetadataOnlyErrorDetails(input.error),
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
+        transportFailureFenceCleared: failed.failed,
+        workspaceAttemptId: input.token.attemptId,
+        workspaceReason: input.input.reason,
+      },
+      level: "warn",
+      message: "Hosted runner runtime processing startup confirmation failed.",
+      phase: "runtime.starting",
+      userId: input.input.userId,
+    });
+    return {
+      confirmed: false,
+      response: this.createRuntimeProcessingRetryLater({
+        reason: "container_rpc_timeout",
+        userId: input.input.userId,
+      }),
     };
   }
 

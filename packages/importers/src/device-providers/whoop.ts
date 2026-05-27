@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { WorkoutSessionMetrics } from "@murphai/contracts";
+
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
@@ -8,6 +10,7 @@ import {
   createRawArtifact,
   emitObservationMetrics,
   finiteNumber,
+  kilojoulesToKilocalories,
   makeNormalizedDeviceBatch,
   makeProviderExternalRef,
   minutesBetween,
@@ -130,12 +133,6 @@ function calculateBodyMassIndex(bodyMeasurement: PlainObject | undefined): numbe
   }
 
   return Number((weightKilograms / (heightMeters * heightMeters)).toFixed(4));
-}
-
-interface WhoopWorkoutMetricSource {
-  workout: PlainObject;
-  score?: PlainObject;
-  sportName: string;
 }
 
 interface WhoopBodyMeasurementMetricSource {
@@ -278,58 +275,6 @@ const WHOOP_CYCLE_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<Plai
   },
 ];
 
-const WHOOP_WORKOUT_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<WhoopWorkoutMetricSource>[] = [
-  {
-    metric: "workout-strain",
-    value: ({ score }) => score?.strain,
-    unit: "whoop_strain",
-    title: ({ sportName }) => `WHOOP ${sportName} strain`,
-    facet: "workout-strain",
-  },
-  {
-    metric: "average-heart-rate",
-    value: ({ score }) => score?.average_heart_rate,
-    unit: "bpm",
-    title: ({ sportName }) => `WHOOP ${sportName} average heart rate`,
-    facet: "average-heart-rate",
-  },
-  {
-    metric: "max-heart-rate",
-    value: ({ score }) => score?.max_heart_rate,
-    unit: "bpm",
-    title: ({ sportName }) => `WHOOP ${sportName} max heart rate`,
-    facet: "max-heart-rate",
-  },
-  {
-    metric: "energy-burned",
-    value: ({ score }) => score?.kilojoule,
-    unit: "kJ",
-    title: ({ sportName }) => `WHOOP ${sportName} energy burned`,
-    facet: "energy-burned",
-  },
-  {
-    metric: "percent-recorded",
-    value: ({ score }) => score?.percent_recorded,
-    unit: "%",
-    title: ({ sportName }) => `WHOOP ${sportName} percent recorded`,
-    facet: "percent-recorded",
-  },
-  {
-    metric: "altitude-gain",
-    value: ({ workout }) => finiteNumber(workout.altitude_gain_meter),
-    unit: "meter",
-    title: ({ sportName }) => `WHOOP ${sportName} altitude gain`,
-    facet: "altitude-gain",
-  },
-  {
-    metric: "altitude-change",
-    value: ({ workout }) => finiteNumber(workout.altitude_change_meter),
-    unit: "meter",
-    title: ({ sportName }) => `WHOOP ${sportName} altitude change`,
-    facet: "altitude-change",
-  },
-];
-
 const WHOOP_BODY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<WhoopBodyMeasurementMetricSource>[] = [
   {
     metric: "weight",
@@ -353,6 +298,48 @@ const WHOOP_BODY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<Whoop
     facet: "max-heart-rate",
   },
 ];
+
+function nonEmptyWorkoutMetrics(metrics: WorkoutSessionMetrics): WorkoutSessionMetrics | undefined {
+  return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
+
+function buildWhoopWorkoutMetrics(
+  workout: PlainObject,
+  score: PlainObject | undefined,
+): WorkoutSessionMetrics | undefined {
+  const metrics: WorkoutSessionMetrics = {};
+  const workoutStrain = finiteNumber(score?.strain);
+  const averageHeartRate = finiteNumber(score?.average_heart_rate);
+  const maxHeartRate = finiteNumber(score?.max_heart_rate);
+  const totalCalories = kilojoulesToKilocalories(score?.kilojoule);
+  const percentRecorded = finiteNumber(score?.percent_recorded);
+  const totalElevationGainMeters = finiteNumber(workout.altitude_gain_meter);
+  const altitudeChangeMeters = finiteNumber(workout.altitude_change_meter);
+
+  if (workoutStrain !== undefined) {
+    metrics.workoutStrain = workoutStrain;
+  }
+  if (averageHeartRate !== undefined) {
+    metrics.averageHeartRate = averageHeartRate;
+  }
+  if (maxHeartRate !== undefined) {
+    metrics.maxHeartRate = maxHeartRate;
+  }
+  if (totalCalories !== undefined) {
+    metrics.totalCalories = totalCalories;
+  }
+  if (percentRecorded !== undefined) {
+    metrics.percentRecorded = percentRecorded;
+  }
+  if (totalElevationGainMeters !== undefined) {
+    metrics.totalElevationGainMeters = totalElevationGainMeters;
+  }
+  if (altitudeChangeMeters !== undefined) {
+    metrics.altitudeChangeMeters = altitudeChangeMeters;
+  }
+
+  return nonEmptyWorkoutMetrics(metrics);
+}
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
@@ -596,28 +583,13 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
               startedAt: startAt,
               endedAt: endAt,
               sessionNote: `WHOOP ${sportName}`,
+              metrics: buildWhoopWorkoutMetrics(workout, score),
               exercises: [],
             },
           }),
         }),
       );
     }
-
-    emitObservationMetrics(
-      events,
-      {
-        source: {
-          workout,
-          score,
-          sportName,
-        },
-        occurredAt,
-        recordedAt,
-        rawArtifactRoles: [workoutRole],
-        externalRef: (facet) => makeExternalRef("workout", workoutId, version, facet),
-      },
-      WHOOP_WORKOUT_OBSERVATION_METRICS,
-    );
   }
 
   for (const deletion of deletions) {

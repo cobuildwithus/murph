@@ -378,6 +378,7 @@ function projectedActivitySessionAggregate(
     recordIds: [],
     sessionCount,
     sessionMinutes,
+    workoutMetricKeys: [],
   };
 }
 

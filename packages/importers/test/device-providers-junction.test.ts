@@ -1488,6 +1488,7 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
           },
           distance: 5000,
           calories: 320,
+          total_calories: 355,
           average_hr: 145,
           max_hr: 175,
         },
@@ -1526,6 +1527,7 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
   assert.equal(workoutSessions[0]?.fields?.activityType, "trail-run");
   assert.equal(workoutSessions[0]?.fields?.durationMinutes, 30);
   assert.equal(workoutSessions[0]?.fields?.distanceKm, 5);
+  assert.equal("activeCalories" in (workoutSessions[0]?.fields ?? {}), false);
   assert.equal("averageHeartRate" in (workoutSessions[0]?.fields ?? {}), false);
   assert.equal("maxHeartRate" in (workoutSessions[0]?.fields ?? {}), false);
   assert.equal("totalCalories" in (workoutSessions[0]?.fields ?? {}), false);
@@ -1535,39 +1537,19 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
     startedAt: "2026-05-20T12:00:00.000Z",
     endedAt: "2026-05-20T12:30:00.000Z",
     sessionNote: "Trail Run",
+    metrics: {
+      activeCalories: 320,
+      totalCalories: 355,
+      averageHeartRate: 145,
+      maxHeartRate: 175,
+    },
     exercises: [],
   });
 
-  const workoutMetrics = payload.events?.filter((event) => event.kind === "observation") ?? [];
-  assert.ok(workoutMetrics.some((event) =>
-    event.fields?.metric === "active-calories"
-    && event.fields.value === 320
-    && event.occurredAt === "2026-05-20T12:00:00.000Z"
-  ));
-  assert.ok(workoutMetrics.some((event) =>
-    event.fields?.metric === "average-heart-rate"
-    && event.fields.value === 145
-    && event.fields.unit === "bpm"
-    && event.occurredAt === "2026-05-20T12:00:00.000Z"
-    && event.dataOrigin?.observedAtRaw === "2026-05-20T12:00:00+00:00"
-    && event.externalRef?.resourceId === workoutSessions[0]?.externalRef?.resourceId
-  ));
-  assert.ok(workoutMetrics.some((event) =>
-    event.fields?.metric === "max-heart-rate"
-    && event.fields.value === 175
-    && event.fields.unit === "bpm"
-    && event.occurredAt === "2026-05-20T12:00:00.000Z"
-  ));
-  assert.ok(workoutMetrics.some((event) =>
-    event.fields?.metric === "active-calories"
-    && event.fields.value === 90
-    && event.occurredAt === "2026-05-20T15:00:00.000Z"
-  ));
-  assert.ok(workoutMetrics.some((event) =>
-    event.fields?.metric === "average-heart-rate"
-    && event.fields.value === 101
-    && event.occurredAt === "2026-05-20T15:00:00.000Z"
-  ));
+  const workoutMetrics = payload.events?.filter((event) =>
+    event.kind === "observation" && event.externalRef?.resourceType === "junction-garmin-workouts"
+  ) ?? [];
+  assert.deepEqual(workoutMetrics, []);
 
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workouts"));

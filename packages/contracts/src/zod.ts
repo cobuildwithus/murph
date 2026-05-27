@@ -495,6 +495,22 @@ export const workoutExerciseSchema = z
   })
   .strict();
 
+export const workoutSessionMetricsSchema = z
+  .object({
+    activeCalories: numberSchema(0).optional(),
+    totalCalories: numberSchema(0).optional(),
+    averageHeartRate: numberSchema(0).optional(),
+    maxHeartRate: numberSchema(0).optional(),
+    hrv: numberSchema(0).optional(),
+    workoutStrain: numberSchema(0).optional(),
+    percentRecorded: numberSchema(0).optional(),
+    totalElevationGainMeters: numberSchema(0).optional(),
+    altitudeChangeMeters: numberSchema().optional(),
+    averageSpeedMps: numberSchema(0).optional(),
+    maxSpeedMps: numberSchema(0).optional(),
+  })
+  .strict();
+
 export const workoutSessionSchema = z
   .object({
     sourceApp: patternedString(SLUG_PATTERN).optional(),
@@ -504,6 +520,7 @@ export const workoutSessionSchema = z
     routineId: boundedString(1, 200).optional(),
     routineName: boundedString(1, 160).optional(),
     sessionNote: boundedString(1, 4000).optional(),
+    metrics: workoutSessionMetricsSchema.optional(),
     media: z.array(storedMediaSchema).max(10).optional(),
     exercises: z.array(workoutExerciseSchema).max(100),
   })
@@ -2264,6 +2281,7 @@ export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
 export type WorkoutUnitPreferenceValues = z.infer<typeof workoutUnitPreferenceValuesSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
+export type WorkoutSessionMetrics = z.infer<typeof workoutSessionMetricsSchema>;
 export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
 export type WorkoutTemplateSet = z.infer<typeof workoutTemplateSetSchema>;
 export type WorkoutTemplateExercise = z.infer<typeof workoutTemplateExerciseSchema>;

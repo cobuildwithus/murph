@@ -208,6 +208,11 @@ export function finiteNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+export function kilojoulesToKilocalories(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric === undefined ? undefined : Number((numeric / 4.184).toFixed(4));
+}
+
 export function trimToLength(value: string, maxLength: number): string {
   return value.trim().slice(0, maxLength);
 }

@@ -17,6 +17,7 @@ import {
   summarizeWearableLatest,
   summarizeWearableMetricLatest,
   summarizeWearableMetricTrend,
+  summarizeWearableSourceHealth,
 } from "../src/wearables.ts";
 
 function makeEntity(
@@ -476,7 +477,7 @@ test("latest surface stays joined to the latest sleep-backed local day instead o
   );
 });
 
-test("activity surfaces keep WHOOP workout metrics and convert energy-burned into total calories", () => {
+test("activity surfaces keep explicit activity observations and convert energy-burned into total calories", () => {
   const vault = makeVault([
     makeObservation({
       entityId: "evt_whoop_energy",
@@ -666,6 +667,73 @@ test("metric latest and trend surfaces keep derived sleep and aggregate-backed p
 
   assert.equal(sessionCount?.value, 2);
   assert.equal(sessionCount?.provider, "garmin");
+});
+
+test("workout session metrics stay out of wearable summary projection without an explicit projector", () => {
+  const vault = makeVault([
+    makeEntity({
+      entityId: "evt_workout_metrics_01",
+      family: "event",
+      kind: "activity_session",
+      recordClass: "ledger",
+      occurredAt: "2026-04-08T12:00:00Z",
+      date: "2026-04-08",
+      title: "Garmin trail run",
+      attributes: {
+        dayKey: "2026-04-08",
+        durationMinutes: 42,
+        recordedAt: "2026-04-08T12:50:00Z",
+        externalRef: {
+          system: "garmin",
+          resourceType: "activity_session",
+          resourceId: "evt_workout_metrics_01-resource",
+        },
+        workout: {
+          sourceApp: "garmin",
+          sourceWorkoutId: "workout-01",
+          startedAt: "2026-04-08T12:00:00Z",
+          endedAt: "2026-04-08T12:42:00Z",
+          sessionNote: "Garmin trail run",
+          metrics: {
+            activeCalories: 320,
+            totalCalories: 355,
+            averageHeartRate: 145,
+            maxHeartRate: 175,
+            hrv: 44,
+            workoutStrain: 12.4,
+            percentRecorded: 97,
+            totalElevationGainMeters: 88,
+            altitudeChangeMeters: -12,
+            averageSpeedMps: 3.1,
+            maxSpeedMps: 5.4,
+          },
+          exercises: [],
+        },
+      },
+    }),
+  ]);
+
+  const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
+  const activeCalories = summarizeWearableMetricLatest(vault, "active-calories", { providers: ["garmin"] });
+  const maxHeartRate = summarizeWearableMetricLatest(vault, "max-heart-rate", { providers: ["garmin"] });
+  const sourceHealth = summarizeWearableSourceHealth(vault, { providers: ["garmin"] });
+
+  assert.equal(latest?.activity?.sessionMinutes.selection.value, 42);
+  assert.equal(latest?.activity?.sessionCount.selection.value, 1);
+  assert.equal(latest?.activity?.activeCalories.selection.value, null);
+  assert.equal(latest?.activity?.totalCalories.selection.value, null);
+  assert.equal(latest?.activity?.maxHeartRate.selection.value, null);
+  assert.equal(latest?.activity?.workoutStrain.selection.value, null);
+  assert.equal(latest?.activity?.percentRecorded.selection.value, null);
+  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, null);
+  assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, null);
+  assert.equal(activeCalories?.value, null);
+  assert.equal(maxHeartRate?.value, null);
+  assert.equal(sourceHealth[0]?.metricsContributed.includes("activeCalories"), false);
+  assert.equal(
+    sourceHealth[0]?.notes.some((note) => note.includes("workout detail metrics on activity sessions")),
+    true,
+  );
 });
 
 test("metric-trend and drift surfaces return compact structured bundles", () => {

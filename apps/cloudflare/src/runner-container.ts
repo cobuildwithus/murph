@@ -100,6 +100,15 @@ interface HostedExecutionContainerInvokeRequest {
 
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
+export interface RunnerContainerEnsureReadyForProcessingInput {
+  timeoutMs: number;
+  userId: string;
+}
+
+export interface RunnerContainerEnsureReadyForProcessingResult {
+  kind: "ready";
+}
+
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   runnerContainerName?: string;
@@ -112,6 +121,9 @@ interface HostedExecutionContainerRunnerInput {
 export interface HostedExecutionContainerStubLike {
   abortWorkspaceInvocation?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
+  ensureReadyForProcessing?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
@@ -276,6 +288,29 @@ export class RunnerContainer extends Container {
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     await this.withLifecycleLock(async () => {
       await this.stopWarmContainer();
+    });
+  }
+
+  async ensureReadyForProcessing(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
+    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    return await this.withLifecycleLock(async () => {
+      const logContext: RunnerContainerLogContext = {
+        userId: input.userId,
+      };
+      this.currentLogContext = logContext;
+      try {
+        await this.ensureContainerReady(
+          input,
+          AbortSignal.timeout(input.timeoutMs),
+        );
+        return { kind: "ready" };
+      } finally {
+        if (this.currentLogContext === logContext) {
+          this.currentLogContext = null;
+        }
+      }
     });
   }
 
@@ -1867,6 +1902,15 @@ function assertRunnerContainerEnsureProcessingUserIds(
   if (jobUserId !== input.userId) {
     throw new TypeError("Hosted runner container ensureProcessing job userId must match input userId.");
   }
+}
+
+function parseRunnerContainerEnsureReadyForProcessingInput(
+  payload: RunnerContainerEnsureReadyForProcessingInput,
+): RunnerContainerEnsureReadyForProcessingInput {
+  return {
+    timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
+    userId: requireString(payload.userId, "payload.userId"),
+  };
 }
 
 function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {
