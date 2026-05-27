@@ -22,7 +22,8 @@ import type {
 } from '../src/assistant/service-contracts.js'
 import {
   MAX_PROGRESS_CHARS,
-  MIN_PROGRESS_UPDATE_INTERVAL_MS,
+} from '../src/assistant/progress-constants.js'
+import {
   createHostedAssistantTurnProgress,
   normalizeAssistantProgressText,
 } from '../src/assistant/turn-progress.js'
@@ -42,8 +43,7 @@ describe('assistant turn progress', () => {
     expect(normalizeAssistantProgressText(longText)?.endsWith('...')).toBe(true)
   })
 
-  it('dedupes and rate-limits progress updates inside one turn', async () => {
-    let now = 1_000
+  it('dedupes and limits progress updates inside one turn', async () => {
     const delivered: DeliverProgressInput[] = []
     const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
       delivered.push(input)
@@ -51,7 +51,6 @@ describe('assistant turn progress', () => {
     const progress = createHostedAssistantTurnProgress({
       deliver,
       messageInput: createMessageInput(),
-      now: () => now,
       session: createSession(),
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
@@ -61,16 +60,13 @@ describe('assistant turn progress', () => {
     await progress.send('Extracting the PDF and checking relevant results.')
     await progress.send('Checking the saved context now.')
 
-    now += MIN_PROGRESS_UPDATE_INTERVAL_MS
     await progress.send('Checking the saved context now.')
 
-    now += MIN_PROGRESS_UPDATE_INTERVAL_MS
     await progress.send('Preparing a concise final reply.')
 
-    expect(deliver).toHaveBeenCalledTimes(2)
+    expect(deliver).toHaveBeenCalledTimes(1)
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Extracting the PDF and checking relevant results.'],
-      [1, 'Checking the saved context now.'],
     ])
   })
 

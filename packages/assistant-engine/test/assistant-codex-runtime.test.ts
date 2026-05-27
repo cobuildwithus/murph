@@ -1983,7 +1983,7 @@ describe('assistant codex runtime', () => {
     expect(turnProgress.send).not.toHaveBeenCalled()
   })
 
-  it('rejects progress dynamic tool calls on resumed threads without sending progress', async () => {
+  it('handles progress dynamic tool calls on resumed threads when a real sink exists', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-resume-')
     const turnProgress = {
       send: vi.fn(async (_text: string) => {
@@ -2038,10 +2038,14 @@ describe('assistant codex runtime', () => {
           const messages = await waitForRpcMessages(child, 5)
           expect(messages[4]).toEqual({
             id: 99,
-            error: {
-              code: -32000,
-              message:
-                'Murph does not support interactive Codex app-server request item/tool/call in noninteractive assistant turns.',
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update accepted',
+                },
+              ],
             },
           })
 
@@ -2074,7 +2078,7 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-resume',
     })
-    expect(turnProgress.send).not.toHaveBeenCalled()
+    expect(turnProgress.send).toHaveBeenCalledWith('Checking the file now.')
   })
 
   it('counts slash-form and dot-form provider actions from normalized events and skips pure image.view reads', async () => {

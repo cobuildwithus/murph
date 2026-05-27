@@ -1,6 +1,6 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
-import { MAX_PROGRESS_CHARS } from '../assistant/turn-progress.js'
+import { MAX_PROGRESS_CHARS } from '../assistant/progress-constants.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'

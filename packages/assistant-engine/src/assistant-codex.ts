@@ -399,10 +399,6 @@ async function runCodexAppServerTurn(
   let abortRequested = false
   let nextRequestId = 1
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
-  const progressToolAvailable =
-    input.turnProgress !== null &&
-    input.turnProgress !== undefined &&
-    codexThreadId === null
   let turnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
@@ -643,7 +639,7 @@ async function runCodexAppServerTurn(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       const dynamicToolRequest = readMurphDynamicToolRequest(message)
-      if (!dynamicToolRequest || !input.turnProgress || !progressToolAvailable) {
+      if (!dynamicToolRequest || !input.turnProgress) {
         denyUnsupportedCodexServerRequest({
           message,
           requestId,
