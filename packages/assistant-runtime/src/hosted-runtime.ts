@@ -996,12 +996,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ]);
         const checkpointReturnWakePresent = Object.hasOwn(checkpoint.workspace, "nextWakeAt")
           || durableCheckpointWakeAt !== null;
+        const checkpointDurableWakeReason = readSelectedDurableCheckpointWakeReason({
+          durableWakeAt: durableCheckpointWakeAt,
+          durableWakeReason: durableCheckpointWakeReason,
+          selectedWakeAt: checkpointReturnWake.nextWakeAt,
+          selectedWakeReason: checkpointReturnWake.nextWakeReason,
+        });
         const invocationResult = {
           ...(refreshRequestedImmediateWake
             ? { nextWakeAt: new Date().toISOString() }
             : !checkpointReturnWakePresent
             ? {}
             : { nextWakeAt: checkpointReturnWake.nextWakeAt ?? null }),
+          ...(!refreshRequestedImmediateWake && checkpointDurableWakeReason !== null
+            ? { nextWakeReason: checkpointDurableWakeReason }
+            : {}),
           redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
           status: refreshRequestedImmediateWake
             ? "scheduled" as const
@@ -1054,12 +1063,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         : null;
     const refreshRequestedImmediateWake =
       noProgressBrowserVaultRefresh?.status === "deferred_runtime_wake";
+    const noProgressReturnWake = selectEarliestHostedRuntimeWake([
+      {
+        at: projection.nextWakeAt,
+        reason: projection.nextWakeReason,
+      },
+      {
+        at: durableCheckpointWakeAt,
+        reason: durableCheckpointWakeReason,
+      },
+    ]);
+    const noProgressDurableWakeReason = readSelectedDurableCheckpointWakeReason({
+      durableWakeAt: durableCheckpointWakeAt,
+      durableWakeReason: durableCheckpointWakeReason,
+      selectedWakeAt: noProgressReturnWake.nextWakeAt,
+      selectedWakeReason: noProgressReturnWake.nextWakeReason,
+    });
     const invocationResult = {
       nextWakeAt: refreshRequestedImmediateWake
         ? new Date().toISOString()
-        : projection.nextWakeAt,
+        : noProgressReturnWake.nextWakeAt,
+      ...(!refreshRequestedImmediateWake && noProgressDurableWakeReason !== null
+        ? { nextWakeReason: noProgressDurableWakeReason }
+        : {}),
       redactedStatus: projection.redactedStatus,
-      status: refreshRequestedImmediateWake ? "scheduled" as const : projection.status,
+      status: refreshRequestedImmediateWake
+        ? "scheduled" as const
+        : resolveHostedWorkspaceInvocationStatus({
+            mailboxBudgetExhausted: mailboxBudgetExhausted(),
+            nextWakeAt: noProgressReturnWake.nextWakeAt,
+          }),
     };
     emitPhaseLog({
       details: {
@@ -1982,4 +2015,22 @@ function readHostedWorkspaceDurableCheckpointEffectWake(
     nextWakeAt: result.nextWakeAt,
     nextWakeReason: result.nextWakeReason ?? null,
   };
+}
+
+function readSelectedDurableCheckpointWakeReason(input: {
+  durableWakeAt: string | null;
+  durableWakeReason: string | null;
+  selectedWakeAt: string | null;
+  selectedWakeReason: string | null;
+}): string | null {
+  if (
+    input.durableWakeAt === null
+    || input.durableWakeReason === null
+    || input.selectedWakeAt !== input.durableWakeAt
+    || input.selectedWakeReason !== input.durableWakeReason
+  ) {
+    return null;
+  }
+
+  return input.durableWakeReason;
 }

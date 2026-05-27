@@ -438,6 +438,97 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves a deferred durable checkpoint effect wake after draining a checkpoint wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const durableWakeAt = "2026-04-27T00:04:00.000Z";
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      runtimeWakeSignal.notify();
+      return {
+        nextWakeAt: durableWakeAt,
+        nextWakeReason: "device-sync.reconcile",
+      };
+    });
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_durable_effect_checkpoint_wake_drain",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/durable-effect-checkpoint-wake-drain.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "assistant_runtime_commit",
+                }),
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(
+        events.indexOf("durable-effect") < events.indexOf("assistant.phase:2"),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, durableWakeAt);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("continues later deferred durable checkpoint effects after one fails", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
