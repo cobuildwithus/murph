@@ -301,9 +301,11 @@ describe("hosted orchestration control contracts", () => {
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
+      source: "device_sync_recovery",
     })).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
+      source: "device_sync_recovery",
     });
 
     for (const action of [

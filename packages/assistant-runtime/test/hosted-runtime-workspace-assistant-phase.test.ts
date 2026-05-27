@@ -375,6 +375,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("runs dirty device-sync work for background recovery when no foreground input is fresh", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      reason: "nudge",
+      source: "device_sync_recovery",
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: false,
+      }),
+    );
+  });
+
+  it("keeps background recovery device-sync deferred when foreground input is fresh", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "nudge",
+      source: "device_sync_recovery",
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: true,
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
   it("skips timer device-sync work for scheduled wakes so background sync cannot hold the hot reply path", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -3455,6 +3489,7 @@ function createPhaseInput(input: {
   now?: () => string;
   reason?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["reason"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
+  source?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["source"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -3527,6 +3562,7 @@ function createPhaseInput(input: {
       attemptId: "attempt_synthetic_phase",
       leaseGeneration: "3",
       reason: input.reason ?? "nudge",
+      ...(input.source ? { source: input.source } : {}),
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
     },

@@ -227,9 +227,11 @@ describe("hosted runtime control contracts", () => {
     );
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
+      source: "device_sync_recovery",
       workspace: null,
     })).toEqual({
       ...workspaceInvocationRequest,
+      source: "device_sync_recovery",
       workspace: null,
     });
     expect(parseHostedWorkspaceInvocationRequest({

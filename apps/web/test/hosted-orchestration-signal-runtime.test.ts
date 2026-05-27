@@ -53,6 +53,7 @@ vi.mock("@/src/lib/prisma", () => ({
 import {
   sanitizeHostedRuntimeSignalSource,
   signalHostedBrowserVaultRefreshRuntime,
+  signalHostedDeviceSyncBackgroundMaintenanceRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
@@ -207,6 +208,28 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
+    });
+  });
+
+  it("signals device-sync background maintenance without appending mailbox work", async () => {
+    await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "device_sync_recovery_requested",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
     });
   });
 

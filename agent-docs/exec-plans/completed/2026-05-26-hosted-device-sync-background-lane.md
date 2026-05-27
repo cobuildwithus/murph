@@ -29,14 +29,24 @@ Success criteria:
 
 ## Verification
 
-- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-runner.test.ts test/hosted-runtime-workspace-entrypoint.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts` passed.
-- `pnpm --dir packages/assistant-runtime typecheck` passed.
-- `bash scripts/workspace-verify.sh test:diff packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/src/hosted-runtime/workspace-runner.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts` passed.
-- `pnpm typecheck` passed.
+- Focused hosted-execution parser tests passed.
+- Focused hosted-orchestrator Temporal workflow/activity tests passed.
+- Focused assistant-runtime assistant-phase tests passed.
+- Focused Cloudflare ensure-processing runner tests passed.
+- Focused web background-maintenance signal tests passed.
+- `git diff --check` passed.
+- `pnpm docs:drift` passed.
 - `pnpm test:smoke` passed.
+- `pnpm typecheck` passed.
+- `pnpm test:diff` passed after final review fixes.
 - `security-privacy-review` passed with no findings.
-- `coverage-write` added focused clean-conversation-to-system-fallback proof and passed focused tests.
+- `simplify` found two low-complexity issues; both were fixed.
+- `coverage-write` added assistant-runtime child job parser proof and reran `pnpm test:diff`.
+- `task-finish-review` found a foreground deploy-skew issue; it was fixed and reverified.
 
 ## State
 
-Implemented. The hosted foreground runtime now imports conversation mailbox work first and imports the system lane only when that foreground import is clean. Legacy `device-sync.wake` compatibility is preserved through the existing system lane, and system mailbox maintenance yields when foreground input arrives during the run. Webhook producer changes were intentionally deferred because the relevant web/device-syncd test surface already has unrelated active dirty work.
+Complete. The hosted foreground runtime imports conversation mailbox work first, direct dirty webhook transitions use dirty state plus a best-effort background-maintenance Temporal signal instead of appending new `device-sync.wake` mailbox work, and `device_sync_recovery` is preserved through Temporal ensure-processing, Cloudflare runner invocation, and assistant-runtime parsing only for the background recovery demand that needs it. The assistant phase runs dirty device-sync only when no fresh conversation input is pending and schedules a short `device-sync.reconcile` retry when foreground work preempts recovery. Legacy `device-sync.wake` remains as bounded compatibility/recovery, not the direct webhook hot path.
+Status: completed
+Updated: 2026-05-26
+Completed: 2026-05-26

@@ -613,6 +613,39 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("keeps a device-sync recovery flag pending when only an existing runtime was woken", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(processingAccepted({
+      action: "woken",
+      recommendedRecheckAt: isoAfter(45_000),
+      runtimeAttemptId: "runtime_attempt_existing",
+    }));
+    runtime.demands.push((request) => {
+      expect(request.deviceSyncRecoveryRequested).toBe(true);
+      return idleDemand(null);
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal({
+      kind: "device_sync_recovery_requested",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "nudge",
+        source: "device_sync_recovery",
+        userId: "member_test",
+      },
+    ]);
+  });
+
   it("records malformed raw signals as no-op diagnostics", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(idleDemand(isoAfter(60_000)));

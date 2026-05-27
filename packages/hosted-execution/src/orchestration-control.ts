@@ -143,8 +143,10 @@ export interface HostedRuntimeEnsureExecutionRequest {
   reason: HostedWorkspaceInvocationReason;
 }
 
-export type HostedRuntimeEnsureProcessingRequest =
-  HostedRuntimeEnsureExecutionRequest;
+export interface HostedRuntimeEnsureProcessingRequest
+  extends HostedRuntimeEnsureExecutionRequest {
+  source?: HostedRuntimeDemandRunSource | null;
+}
 
 export const HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS = [
   "runtime_completed",

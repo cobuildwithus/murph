@@ -81,6 +81,9 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
 } from "./cursor.ts";
+import {
+  parseHostedRuntimeDemandRunSource,
+} from "./demand-source.ts";
 
 const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "address",
@@ -958,6 +961,14 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
       "Hosted workspace invocation request leaseGeneration",
     ),
     reason,
+    ...(record.source === undefined || record.source === null
+      ? {}
+      : {
+          source: parseHostedRuntimeDemandRunSource(
+            record.source,
+            "Hosted workspace invocation request source",
+          ),
+        }),
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     ...(record.workspace === undefined
       ? {}

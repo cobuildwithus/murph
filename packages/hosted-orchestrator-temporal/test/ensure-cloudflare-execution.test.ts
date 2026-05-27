@@ -18,6 +18,7 @@ import {
 
 describe("ensureRuntimeProcessing", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -42,6 +43,7 @@ describe("ensureRuntimeProcessing", () => {
     await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
+      source: "device_sync_recovery",
       userId: "member_test",
     })).resolves.toEqual(response);
 
@@ -60,10 +62,61 @@ describe("ensureRuntimeProcessing", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
+      source: "device_sync_recovery",
     });
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
     expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+  });
+
+  it("keeps source demands pending when Cloudflare has not deployed source parsing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
+    await stubCloudflareEnvironment();
+
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse({ error: "Invalid request." }, 400);
+    }));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      source: "device_sync_recovery",
+      userId: "member_test",
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-05-20T12:00:30.000Z",
+    });
+
+    expect(observedRequests).toHaveLength(1);
+    expect(JSON.parse(String(observedRequests[0].init?.body))).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      source: "device_sync_recovery",
+    });
+  });
+
+  it("does not turn non-recovery source parse failures into retry-later", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
+    await stubCloudflareEnvironment();
+
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse({ error: "Invalid request." }, 400)
+    ));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "manual",
+      source: "manual",
+      userId: "member_test",
+    })).rejects.toMatchObject({
+      message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
+      nonRetryable: true,
+      type: "hosted_orchestrator_http_non_retryable",
+    });
   });
 
   it("keeps the legacy ensure-execution HTTP budget separate from ensure-processing", async () => {
