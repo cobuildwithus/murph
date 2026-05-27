@@ -724,12 +724,16 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   };
   let webhookSubscriptionClient: OuraWebhookSubscriptionClient | null = null;
 
-  async function postTokenRequest(parameters: Record<string, string>): Promise<OuraTokenResponse> {
+  async function postTokenRequest(
+    parameters: Record<string, string>,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<OuraTokenResponse> {
     return postOAuthTokenRequest<OuraTokenResponse>({
       fetchImpl,
       url: `${apiBaseUrl}${OURA_TOKEN_PATH}`,
       timeoutMs,
       parameters,
+      signal: options.signal ?? null,
       buildError: (response, body) => {
         const diagnostics = buildOAuthTokenRequestDiagnostics({
           endpointKind: OURA_OAUTH_TOKEN_ENDPOINT_KIND,
@@ -754,6 +758,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     path: string;
     accessToken: string;
     optional?: boolean;
+    signal?: AbortSignal | null;
   }): Promise<T | null> {
     const endpointKind = resolveOuraApiEndpointKind(input.path);
 
@@ -762,6 +767,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       url: `${apiBaseUrl}${input.path}`,
       accessToken: input.accessToken,
       timeoutMs,
+      signal: input.signal ?? null,
       optional: input.optional,
       buildError: (response, body) =>
         buildOuraApiError("OURA_API_REQUEST_FAILED", `Oura API request failed for ${endpointKind}.`, response, body, {
@@ -933,6 +939,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           path,
           accessToken,
           optional: options.optional,
+          signal: context.signal ?? null,
         }),
     });
 
@@ -1282,9 +1289,14 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         throw error;
       }
     },
-    async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+    async refreshTokens(
+      account: DeviceSyncAccount,
+      options: { signal?: AbortSignal | null } = {},
+    ): Promise<ProviderAuthTokens> {
       return refreshOAuthTokens({
-        postTokenRequest,
+        postTokenRequest: (parameters) => postTokenRequest(parameters, {
+          signal: options.signal ?? null,
+        }),
         account,
         clientId: config.clientId,
         clientSecret: config.clientSecret,

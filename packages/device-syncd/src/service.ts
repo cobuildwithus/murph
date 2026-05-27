@@ -65,6 +65,7 @@ export { SqliteDeviceSyncStore } from "./store.ts";
 
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
+const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
 const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
@@ -82,6 +83,13 @@ class DeviceSyncJobExecutionCancelledError extends Error {
   constructor(readonly accountId: string, readonly jobId: string) {
     super(`Device sync job ${jobId} is no longer active for account ${accountId}.`);
     this.name = "DeviceSyncJobExecutionCancelledError";
+  }
+}
+
+class DeviceSyncJobExecutionYieldedError extends Error {
+  constructor() {
+    super("Device sync job yielded before completion.");
+    this.name = "DeviceSyncJobExecutionYieldedError";
   }
 }
 
@@ -452,6 +460,10 @@ class DeviceSyncServiceController {
   }
 
   async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
+    if (this.shouldYieldJobExecution?.() === true) {
+      return null;
+    }
+
     const now = toIsoTimestamp(new Date());
     const job = this.store.claimDueJob(this.workerId, now, this.workerLeaseMs);
     const currentNow = (): string => toIsoTimestamp(new Date());
@@ -559,23 +571,48 @@ class DeviceSyncServiceController {
         throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
       }
     };
+    const jobAbortController = new AbortController();
+    const yieldJobExecution = (): void => {
+      if (!jobAbortController.signal.aborted) {
+        jobAbortController.abort(new DeviceSyncJobExecutionYieldedError());
+      }
+    };
+    const assertJobExecutionNotYielded = (): void => {
+      if (jobAbortController.signal.aborted) {
+        throw readDeviceSyncJobYieldAbortReason(jobAbortController.signal);
+      }
+
+      if (this.shouldYieldJobExecution?.() === true) {
+        yieldJobExecution();
+        throw readDeviceSyncJobYieldAbortReason(jobAbortController.signal);
+      }
+    };
     const ensureExecutionActive = (): void => {
+      assertJobExecutionNotYielded();
       ensureJobLeaseOwned();
       ensureAccountActive();
     };
+    const stopYieldPolling = startDeviceSyncJobYieldPolling({
+      abort: yieldJobExecution,
+      shouldYield: this.shouldYieldJobExecution,
+      signal: jobAbortController.signal,
+    });
 
     let currentAccount: DeviceSyncAccount;
 
     try {
+      ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
       const result = await jobExecutor.executeJob(
         {
           account: currentAccount,
           now,
+          signal: jobAbortController.signal,
           ...(this.shouldYieldJobExecution
             ? { shouldYield: this.shouldYieldJobExecution }
             : {}),
+          throwIfAborted: assertJobExecutionNotYielded,
           importSnapshot: async (snapshot: unknown) => {
             ensureExecutionActive();
             return this.importer.importDeviceProviderSnapshot({
@@ -619,8 +656,11 @@ class DeviceSyncServiceController {
                 httpStatus: 409,
               });
             }
-            const refreshed = await refreshTokens(currentAccount);
-            ensureExecutionActive();
+            const refreshed = await refreshTokens(currentAccount, {
+              signal: jobAbortController.signal,
+            });
+            ensureJobLeaseOwned();
+            ensureAccountActive();
             const updated = this.store.updateAccountTokens(
               currentAccount.id,
               this.encryptTokens(currentAccount, refreshed),
@@ -632,6 +672,7 @@ class DeviceSyncServiceController {
             }
 
             currentAccount = this.toDecryptedAccount(updated);
+            assertJobExecutionNotYielded();
             return currentAccount;
           },
           disconnectAccount: async () => {
@@ -650,7 +691,8 @@ class DeviceSyncServiceController {
         normalizedJob,
       );
 
-      ensureExecutionActive();
+      ensureJobLeaseOwned();
+      ensureAccountActive();
 
       if (!this.store.completeJobIfOwned(job.id, this.workerId, currentNow())) {
         return job;
@@ -683,6 +725,16 @@ class DeviceSyncServiceController {
       this.enqueueJobs(storedAccount, result.scheduledJobs ?? []);
       return job;
     } catch (error) {
+      if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
+        const released = this.store.releaseJobIfOwned(job.id, this.workerId, currentNow());
+        this.logger.debug?.("Device sync job yielded before completion.", {
+          provider: provider.provider,
+          jobId: job.id,
+          released,
+        });
+        return job;
+      }
+
       if (error instanceof DeviceSyncJobExecutionCancelledError) {
         this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
           provider: provider.provider,
@@ -727,6 +779,8 @@ class DeviceSyncServiceController {
         ...failure.details,
       });
       return job;
+    } finally {
+      stopYieldPolling();
     }
   }
 
@@ -1046,6 +1100,55 @@ function resolveProviderTokenRefresher(
   provider: DeviceSyncProvider,
 ): DeviceConnectionHandler["refreshTokens"] {
   return provider.connectionHandler?.refreshTokens;
+}
+
+function startDeviceSyncJobYieldPolling(input: {
+  abort(): void;
+  shouldYield: (() => boolean) | null;
+  signal: AbortSignal;
+}): () => void {
+  if (!input.shouldYield) {
+    return () => undefined;
+  }
+
+  const interval = setInterval(() => {
+    if (input.signal.aborted) {
+      return;
+    }
+
+    if (input.shouldYield?.() === true) {
+      input.abort();
+    }
+  }, DEVICE_SYNC_JOB_YIELD_POLL_MS);
+
+  return () => clearInterval(interval);
+}
+
+function readDeviceSyncJobYieldAbortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DeviceSyncJobExecutionYieldedError();
+}
+
+function isDeviceSyncJobExecutionYielded(error: unknown, signal: AbortSignal): boolean {
+  return error instanceof DeviceSyncJobExecutionYieldedError
+    || (
+      signal.reason instanceof DeviceSyncJobExecutionYieldedError
+      && isDeviceSyncJobAbortError(error, signal)
+    );
+}
+
+function isDeviceSyncJobAbortError(error: unknown, signal: AbortSignal, depth = 0): boolean {
+  if (error === signal.reason || error instanceof DeviceSyncJobExecutionYieldedError) {
+    return true;
+  }
+
+  if (depth >= DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT || typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const cause = "cause" in error ? (error as { cause?: unknown }).cause : undefined;
+  return cause !== undefined && isDeviceSyncJobAbortError(cause, signal, depth + 1);
 }
 
 function normalizeExecutionError(error: unknown): {

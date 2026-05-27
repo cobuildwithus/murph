@@ -37,6 +37,7 @@ import {
   getDeviceSyncJobById,
   markPendingDeviceSyncJobsDeadForAccount,
   readNextDeviceSyncJobWakeAt,
+  releaseDeviceSyncJobIfOwned,
 } from "./store/jobs.ts";
 import {
   consumeOAuthState,
@@ -325,6 +326,14 @@ export class SqliteDeviceSyncStore {
 
   completeJobIfOwned(jobId: string, workerId: string, now: string): boolean {
     return completeDeviceSyncJobIfOwned(this.database, jobId, workerId, now);
+  }
+
+  releaseJobIfOwned(jobId: string, workerId: string, now: string): boolean {
+    return releaseDeviceSyncJobIfOwned(this.database, {
+      jobId,
+      now,
+      workerId,
+    });
   }
 
   failJob(

@@ -311,6 +311,111 @@ test("shared oauth token request and bearer fetch helpers cover success, optiona
   );
 });
 
+test("shared oauth bearer fetch helper honors caller abort signals", async () => {
+  const controller = new AbortController();
+  const abortReason = new Error("caller abort");
+
+  await assert.rejects(
+    () =>
+      fetchBearerJson({
+        fetchImpl: async (_input, init) => {
+          const signal = init?.signal;
+          assert.ok(signal);
+          return await new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            controller.abort(abortReason);
+          });
+        },
+        url: "https://provider.test/resource",
+        accessToken: "access-token",
+        timeoutMs: 1_000,
+        signal: controller.signal,
+        buildError(response) {
+          return new Error(`unexpected ${response.status}`);
+        },
+      }),
+    /caller abort/u,
+  );
+});
+
+test("shared oauth request helpers keep caller abort active through response body parsing", async () => {
+  const createSlowBodyFetch = (controller: AbortController, reason: Error): typeof fetch =>
+    async (_input, init) => {
+      const signal = init?.signal;
+      assert.ok(signal);
+      const stream = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          signal.addEventListener("abort", () => {
+            streamController.error(signal.reason);
+          }, { once: true });
+          queueMicrotask(() => controller.abort(reason));
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    };
+  const expectRejectsBeforeTimeout = async (
+    promise: Promise<unknown>,
+    pattern: RegExp,
+    timeoutMessage: string,
+  ): Promise<void> => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await assert.rejects(
+        Promise.race([
+          promise,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error(timeoutMessage)), 1_000);
+          }),
+        ]),
+        pattern,
+      );
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  };
+
+  const tokenController = new AbortController();
+  await expectRejectsBeforeTimeout(
+    postOAuthTokenRequest({
+      fetchImpl: createSlowBodyFetch(tokenController, new Error("token body abort")),
+      url: "https://provider.test/oauth/token",
+      timeoutMs: 1_000,
+      parameters: {
+        grant_type: "client_credentials",
+      },
+      signal: tokenController.signal,
+      buildError(response) {
+        return new Error(`unexpected ${response.status}`);
+      },
+    }),
+    /token body abort/u,
+    "token body abort timed out",
+  );
+
+  const bearerController = new AbortController();
+  await expectRejectsBeforeTimeout(
+    fetchBearerJson({
+      fetchImpl: createSlowBodyFetch(bearerController, new Error("bearer body abort")),
+      url: "https://provider.test/resource",
+      accessToken: "access-token",
+      timeoutMs: 1_000,
+      signal: bearerController.signal,
+      buildError(response) {
+        return new Error(`unexpected ${response.status}`);
+      },
+    }),
+    /bearer body abort/u,
+    "bearer body abort timed out",
+  );
+});
+
 test("shared oauth retry helpers refresh before requests, recover from a first 401, and retry retryable failures", async () => {
   const refreshOrder: string[] = [];
   const refreshedFirst = await requestWithRefreshAndRetry({
@@ -379,6 +484,29 @@ test("shared oauth retry helpers refresh before requests, recover from a first 4
   } finally {
     vi.useRealTimers();
   }
+
+  const retryAbortController = new AbortController();
+  let abortedRetryAttempts = 0;
+  await assert.rejects(
+    () =>
+      requestWithRefreshAndRetry({
+        shouldRefresh: () => false,
+        async refresh() {
+          throw new Error("refresh should not run for aborted retries");
+        },
+        async request() {
+          abortedRetryAttempts += 1;
+          retryAbortController.abort(new Error("stop retry"));
+          throw {
+            retryable: true,
+            httpStatus: 503,
+          };
+        },
+        signal: retryAbortController.signal,
+      }),
+    /stop retry/u,
+  );
+  assert.equal(abortedRetryAttempts, 1);
 });
 
 test("shared oauth helper flows cover auth-code exchange, refresh rotation, bearer fetch success, and scheduling", async () => {

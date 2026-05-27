@@ -470,7 +470,9 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
-    const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
+    const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
+      signal: context.signal ?? null,
+    });
     await projectJunctionSources(context, sourceProviders);
 
     const summaryWindow = job.kind === "reconcile" && isCurrentScheduledClosedWindow(window, context.now, reconcileDays)
@@ -817,7 +819,9 @@ export function createJunctionDeviceSyncProvider(
         return projectedSourceProviders;
       }
 
-      const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
+      const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
+        signal: context.signal ?? null,
+      });
       await projectJunctionSources(context, sourceProviders);
       projectedSourceProviders = sourceProviders;
       return sourceProviders;
@@ -882,6 +886,7 @@ export function createJunctionDeviceSyncProvider(
           resource,
           () => client.listSummary({
             resource,
+            signal: context.signal ?? null,
             sourceProviderSlug,
             userId: context.account.externalAccountId,
             windowStart: window.windowStart,
@@ -917,7 +922,9 @@ export function createJunctionDeviceSyncProvider(
     }
 
     try {
-      const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
+      const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
+        signal: context.signal ?? null,
+      });
       await projectJunctionSources(context, sourceProviders);
     } catch (error) {
       context.logger.warn?.(
@@ -1024,6 +1031,7 @@ export function createJunctionDeviceSyncProvider(
         resource,
         () => client.listSummary({
           resource,
+          signal: context.signal ?? null,
           userId: context.account.externalAccountId,
           windowStart,
           windowEnd,
@@ -1073,6 +1081,7 @@ export function createJunctionDeviceSyncProvider(
       try {
         const chunkRecords = await client.listTimeseries({
           resource,
+          signal: context.signal ?? null,
           sourceProviderSlug,
           userId: context.account.externalAccountId,
           windowStart: new Date(chunkStart).toISOString(),

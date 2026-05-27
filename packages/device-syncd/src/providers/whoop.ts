@@ -443,12 +443,16 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     },
   };
 
-  async function postTokenRequest(parameters: Record<string, string>): Promise<WhoopTokenResponse> {
+  async function postTokenRequest(
+    parameters: Record<string, string>,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<WhoopTokenResponse> {
     return postOAuthTokenRequest<WhoopTokenResponse>({
       fetchImpl,
       url: `${baseUrl}${WHOOP_TOKEN_PATH}`,
       timeoutMs,
       parameters,
+      signal: options.signal ?? null,
       buildError: (response, body) => {
         const diagnostics = buildOAuthTokenRequestDiagnostics({
           endpointKind: WHOOP_OAUTH_TOKEN_ENDPOINT_KIND,
@@ -474,6 +478,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     path: string;
     accessToken: string;
     optional?: boolean;
+    signal?: AbortSignal | null;
   }): Promise<T | null> {
     const endpointKind = resolveWhoopApiEndpointKind(input.path);
 
@@ -482,6 +487,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       url: `${baseUrl}${WHOOP_API_PREFIX}${input.path}`,
       accessToken: input.accessToken,
       timeoutMs,
+      signal: input.signal ?? null,
       optional: input.optional,
       buildError: (response, body) =>
         buildWhoopApiError("WHOOP_API_REQUEST_FAILED", `WHOOP API request failed for ${endpointKind}.`, response, body, {
@@ -700,6 +706,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           path,
           accessToken,
           optional: options.optional,
+          signal: context.signal ?? null,
         }),
     });
 
@@ -882,9 +889,14 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         throw error;
       }
     },
-    async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+    async refreshTokens(
+      account: DeviceSyncAccount,
+      options: { signal?: AbortSignal | null } = {},
+    ): Promise<ProviderAuthTokens> {
       return refreshOAuthTokens({
-        postTokenRequest,
+        postTokenRequest: (parameters) => postTokenRequest(parameters, {
+          signal: options.signal ?? null,
+        }),
         account,
         clientId: config.clientId,
         clientSecret: config.clientSecret,

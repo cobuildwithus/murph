@@ -1828,6 +1828,36 @@ test("Junction client includes safe provider diagnostics for failed API requests
   );
 });
 
+test("Junction client treats request timeouts as terminal aborts", async () => {
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    requestTimeoutMs: 1,
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      const signal = init?.signal;
+      assert.ok(signal);
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1"),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.cause instanceof DOMException, true);
+      assert.equal((error.cause as DOMException).name, "TimeoutError");
+      return true;
+    },
+  );
+  assert.equal(requests, 1);
+});
+
 test("Junction client deregisters provider connections by normalized provider slug", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const client = new JunctionClient({

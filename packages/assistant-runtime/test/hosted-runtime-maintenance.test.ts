@@ -1373,6 +1373,50 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the yielded device-sync retry delay when released jobs are immediately due", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValue(0);
+    const shouldYield = vi.fn(() => drainWorker.mock.calls.length > 0);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T00:00:00.000Z",
+      runSchedulerOnce,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_yield_device_sync_due_now",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        shouldYield,
+      },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 1,
+      skipped: true,
+    });
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("writes sanitized durable logs for newly failed device-sync jobs", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 1);
