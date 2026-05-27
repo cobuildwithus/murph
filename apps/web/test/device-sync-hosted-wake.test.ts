@@ -389,7 +389,7 @@ describe("appendHostedDeviceSyncWake", () => {
                 kind: "reconcile",
                 payload: {
                   windowStart: "2026-03-19T00:00:00.000Z",
-                  oauthRefreshToken: "job-secret-refresh-token",
+                  windowEnd: "2026-03-26T00:00:00.000Z",
                 },
               },
             ],
@@ -1543,7 +1543,13 @@ describe("appendHostedDeviceSyncWake", () => {
           webhook: {
             acceptanceMode: "level_dirty_hint" | "durable_webhook_work";
             eventType: string;
-            jobs: [];
+            jobs: Array<{
+              kind: "reconcile";
+              payload: {
+                windowStart: string;
+                windowEnd: string;
+              };
+            }>;
             resourceCategory: string | null;
           };
         }) => Promise<void> | void;
@@ -1558,7 +1564,15 @@ describe("appendHostedDeviceSyncWake", () => {
       webhook: {
         acceptanceMode: "level_dirty_hint",
         eventType: "daily.data.steps.updated",
-        jobs: [],
+        jobs: [
+          {
+            kind: "reconcile",
+            payload: {
+              windowStart: "2026-03-19T00:00:00.000Z",
+              windowEnd: "2026-03-26T00:00:00.000Z",
+            },
+          },
+        ],
         resourceCategory: "timeseries",
       },
     });
@@ -1605,7 +1619,6 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(JSON.stringify(signalInput ?? {})).not.toContain("provider-secret-token");
     expect(JSON.stringify(signalInput ?? {})).not.toContain("123-45-6789");
-    expect(JSON.stringify(signalInput ?? {})).not.toContain("job-secret-refresh-token");
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith({
       connectionId: "dsc_123",
       dirtyAt: "2026-03-26T11:59:00.000Z",
@@ -1618,11 +1631,12 @@ describe("appendHostedDeviceSyncWake", () => {
           jobKind: "reconcile",
           payload: {
             windowStart: "2026-03-19T00:00:00.000Z",
+            windowEnd: "2026-03-26T00:00:00.000Z",
           },
           resource: null,
           resourceCategory: null,
           sourceProviderSlug: null,
-          windowEnd: null,
+          windowEnd: "2026-03-26T00:00:00.000Z",
           windowStart: "2026-03-19T00:00:00.000Z",
         },
       ],
@@ -1827,6 +1841,7 @@ describe("appendHostedDeviceSyncWake", () => {
                 kind: "reconcile",
                 payload: {
                   windowStart: "2026-03-19T00:00:00.000Z",
+                  windowEnd: "2026-03-26T00:00:00.000Z",
                 },
               },
             ],
@@ -1912,6 +1927,7 @@ describe("appendHostedDeviceSyncWake", () => {
                 kind: "reconcile",
                 payload: {
                   windowStart: "2026-03-19T00:00:00.000Z",
+                  windowEnd: "2026-03-26T00:00:00.000Z",
                 },
               },
             ],
@@ -2063,7 +2079,7 @@ describe("appendHostedDeviceSyncWake", () => {
           provider: {},
           traceId: "trace_case_123",
           webhook: {
-            acceptanceMode: "level_dirty_hint",
+            acceptanceMode: "durable_webhook_work",
             eventType: "sleep.updated",
             jobs: [
               {
