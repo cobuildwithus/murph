@@ -163,6 +163,7 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
 
 type RuntimeProcessingRetryReason =
   | "active_child_rejected"
+  | "container_busy"
   | "container_rpc_error"
   | "container_rpc_timeout"
   | "missing_container_binding"
@@ -353,7 +354,7 @@ export class HostedUserRunner {
     input: RuntimePrewarmInput,
   ): Promise<HostedRuntimePrewarmResponse> {
     await this.stateStore.bindUser(input.userId);
-    const record = await this.readRunnerStateAfterClearingExpiredWriteFence();
+    const record = await this.stateStore.readState();
     if (record.writeFence) {
       return this.recordRuntimePrewarmAccepted({
         action: "already_running",
@@ -374,7 +375,7 @@ export class HostedUserRunner {
         userId: input.userId,
       }),
     );
-    if (!container.ensureReadyForProcessing) {
+    if (!container.prewarmForProcessing) {
       return this.createRuntimePrewarmRetryLater({
         reason: "container_rpc_error",
         userId: input.userId,
@@ -382,13 +383,19 @@ export class HostedUserRunner {
     }
 
     try {
-      const result = await container.ensureReadyForProcessing({
+      const result = await container.prewarmForProcessing({
         timeoutMs: Math.min(
           this.env.runnerTimeoutMs,
           RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
         ),
         userId: input.userId,
       });
+      if (result.kind === "busy") {
+        return this.createRuntimePrewarmRetryLater({
+          reason: "container_busy",
+          userId: input.userId,
+        });
+      }
       return this.recordRuntimePrewarmAccepted({
         action: result.action ?? "started",
         input,
@@ -1122,6 +1129,7 @@ export class HostedUserRunner {
   private computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
     const delayMs =
       reason === "stale_fence_replacement_race" ? 5_000 :
+      reason === "container_busy" ? 5_000 :
       reason === "container_rpc_timeout" ? 10_000 :
       reason === "container_rpc_error" ? 30_000 :
       reason === "missing_container_binding" ? 60_000 :

@@ -367,6 +367,53 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(0);
   });
 
+  it("preempts container prewarm when a workspace invocation arrives", async () => {
+    const firstStartEntered = createDeferred<void>();
+    const startAndWaitForPorts = vi.fn(async (input: {
+      cancellationOptions: { abort: AbortSignal };
+    }) => {
+      if (startAndWaitForPorts.mock.calls.length === 1) {
+        firstStartEntered.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          const signal = input.cancellationOptions.abort;
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+        return;
+      }
+    });
+    const { container, containerFetch } = createContainerDouble({
+      startAndWaitForPorts,
+    });
+
+    const prewarm = container.prewarmForProcessing({
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await firstStartEntered.promise;
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_prewarm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    await expect(prewarm).resolves.toEqual({ kind: "busy" });
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
+  });
+
   it("ensureProcessing rejects mismatched user identities before waking or starting work", async () => {
     const { container, containerFetch } = createContainerDouble();
 

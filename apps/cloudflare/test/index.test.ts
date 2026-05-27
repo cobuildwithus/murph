@@ -1648,6 +1648,41 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
+    it("returns retry-later for runtime prewarm Durable Object RPC failures", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const stub = createUserRunnerStub({
+        prewarmRuntimeContainerForUser: vi.fn(async () => {
+          throw new Error("durable object unavailable");
+        }),
+      });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/prewarm", {
+            body: JSON.stringify({
+              prewarmAttemptId: "prewarm-attempt-rpc-failure",
+              source: "linq.imessage.typing",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        kind: "retry_later",
+        retryAt: "2026-04-27T00:00:30.000Z",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
     it("returns a stable code for invalid runtime ensure-processing requests", async () => {
       const stub = createUserRunnerStub();
       const env = createWorkerEnv(stub);

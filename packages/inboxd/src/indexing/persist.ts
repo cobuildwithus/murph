@@ -45,6 +45,7 @@ import {
   buildInboxCaptureLedgerPathForOccurredAt,
   buildInboxCaptureRecord,
 } from "./persist/canonical-records.js";
+import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -98,14 +99,33 @@ export async function ensureInboxVault(vaultRoot: string): Promise<void> {
   await loadVault({ vaultRoot });
 }
 
-function buildSanitizedInboundCapture(input: InboundCapture): InboundCapture {
+function buildSanitizedInboundCapture(
+  input: InboundCapture,
+  storedAttachments?: ReadonlyArray<StoredAttachment>,
+): InboundCapture {
   return {
     ...input,
     accountId: input.accountId ?? null,
-    attachments: input.attachments.map((attachment) => ({
-      ...stripEphemeralAttachmentFields(attachment),
-      originalPath: null,
-    })),
+    attachments: input.attachments.map((attachment, index) => {
+      const sanitizedAttachment = stripEphemeralAttachmentFields(attachment);
+      const storedAttachment = storedAttachments?.[index];
+
+      if (!storedAttachment) {
+        return {
+          ...sanitizedAttachment,
+          originalPath: null,
+        };
+      }
+
+      return {
+        externalId: storedAttachment.externalId ?? null,
+        kind: storedAttachment.kind,
+        mime: storedAttachment.mime ?? null,
+        originalPath: null,
+        fileName: storedAttachment.fileName ?? null,
+        byteSize: storedAttachment.byteSize ?? null,
+      };
+    }),
     raw: redactSensitivePaths(input.raw) as Record<string, unknown>,
   };
 }
@@ -211,36 +231,35 @@ async function prepareRawCapturePersistence({
         `attachment-${ordinal}`,
       `attachment-${ordinal}`,
     );
-    const relativePath = normalizeRelativePath(
-      path.posix.join(
-        attachmentDirectory,
-        `${String(ordinal).padStart(2, "0")}__${safeName}`,
-      ),
-    );
     if (attachment.data) {
       totalAttachmentBytes = addInboxCaptureAttachmentBytesToBudget({
         byteLength: readAttachmentDataByteLength(attachment.data),
         totalAttachmentBytes,
       });
       const snapshotBytes = Uint8Array.from(attachment.data);
-      const sha256 = createHash("sha256").update(snapshotBytes).digest("hex");
-      rawContents.push({
-        targetRelativePath: relativePath,
-        content: snapshotBytes,
-        originalFileName: safeName,
-        mediaType: attachment.mime ?? "application/octet-stream",
-        allowExistingMatch: true,
-      });
-      storedAttachments.push({
-        ...sanitizedAttachment,
+      const prepared = await prepareStoredAttachmentBytes({
+        attachment,
+        attachmentDirectory,
         attachmentId,
         ordinal,
-        storedPath: relativePath,
-        fileName: attachment.fileName ?? safeName,
-        byteSize: snapshotBytes.byteLength,
-        sha256,
-        originalPath: null,
+        safeName,
+        sourceBytes: snapshotBytes,
       });
+      if (prepared) {
+        rawContents.push(prepared.rawContent);
+        storedAttachments.push(prepared.storedAttachment);
+      } else {
+        storedAttachments.push(
+          buildUnstoredAttachment({
+            attachment: {
+              ...sanitizedAttachment,
+              byteSize: null,
+            },
+            attachmentId,
+            ordinal,
+          }),
+        );
+      }
     } else if (attachment.originalPath) {
       if (!sourceAbsolutePath) {
         storedAttachments.push(
@@ -272,25 +291,29 @@ async function prepareRawCapturePersistence({
           totalAttachmentBytes,
         });
         const snapshotBytes = await readFile(sourceAbsolutePath);
-        const sha256 = createHash("sha256").update(snapshotBytes).digest("hex");
-
-        rawContents.push({
-          targetRelativePath: relativePath,
-          content: snapshotBytes,
-          originalFileName: safeName,
-          mediaType: attachment.mime ?? "application/octet-stream",
-          allowExistingMatch: true,
-        });
-        storedAttachments.push({
-          ...sanitizedAttachment,
+        const prepared = await prepareStoredAttachmentBytes({
+          attachment,
+          attachmentDirectory,
           attachmentId,
           ordinal,
-          storedPath: relativePath,
-          fileName: attachment.fileName ?? safeName,
-          byteSize: snapshotBytes.byteLength,
-          sha256,
-          originalPath: null,
+          safeName,
+          sourceBytes: snapshotBytes,
         });
+        if (prepared) {
+          rawContents.push(prepared.rawContent);
+          storedAttachments.push(prepared.storedAttachment);
+        } else {
+          storedAttachments.push(
+            buildUnstoredAttachment({
+              attachment: {
+                ...sanitizedAttachment,
+                byteSize: null,
+              },
+              attachmentId,
+              ordinal,
+            }),
+          );
+        }
       } catch (error) {
         if (!isMissingFileError(error)) {
           throw error;
@@ -319,7 +342,7 @@ async function prepareRawCapturePersistence({
     attachments: storedAttachments,
   };
 
-  const sanitizedInput = buildSanitizedInboundCapture(input);
+  const sanitizedInput = buildSanitizedInboundCapture(input, storedAttachments);
 
   rawContents.push({
     targetRelativePath: storedCapture.envelopePath,
@@ -346,6 +369,70 @@ async function prepareRawCapturePersistence({
     sanitizedInput,
     rawCopies,
     rawContents,
+  };
+}
+
+async function prepareStoredAttachmentBytes(input: {
+  attachment: InboundCapture["attachments"][number];
+  attachmentDirectory: string;
+  attachmentId: string;
+  ordinal: number;
+  safeName: string;
+  sourceBytes: Uint8Array;
+}): Promise<{
+  rawContent: CanonicalRawContentInput;
+  storedAttachment: StoredAttachment;
+} | null> {
+  const sanitizedAttachment = stripEphemeralAttachmentFields(input.attachment);
+  const originalFileName = input.attachment.fileName ?? input.safeName;
+  const originalMediaType = input.attachment.mime ?? "application/octet-stream";
+  const normalized = await normalizeAttachmentForStorage({
+    attachment: input.attachment,
+    bytes: input.sourceBytes,
+    fileName: originalFileName,
+    mediaType: originalMediaType,
+  });
+
+  if (!normalized) {
+    return null;
+  }
+
+  const storedFileName = normalized.normalized
+    ? normalized.fileName
+    : originalFileName;
+  const storedSafeName = normalized.normalized
+    ? sanitizeFileName(normalized.fileName, `attachment-${input.ordinal}`)
+    : input.safeName;
+  const storedMime = normalized.normalized
+    ? normalized.mediaType
+    : sanitizedAttachment.mime ?? null;
+  const relativePath = normalizeRelativePath(
+    path.posix.join(
+      input.attachmentDirectory,
+      `${String(input.ordinal).padStart(2, "0")}__${storedSafeName}`,
+    ),
+  );
+  const sha256 = createHash("sha256").update(normalized.bytes).digest("hex");
+
+  return {
+    rawContent: {
+      targetRelativePath: relativePath,
+      content: normalized.bytes,
+      originalFileName: storedSafeName,
+      mediaType: normalized.mediaType,
+      allowExistingMatch: true,
+    },
+    storedAttachment: {
+      ...sanitizedAttachment,
+      attachmentId: input.attachmentId,
+      ordinal: input.ordinal,
+      storedPath: relativePath,
+      fileName: storedFileName,
+      mime: storedMime,
+      byteSize: normalized.bytes.byteLength,
+      sha256,
+      originalPath: null,
+    },
   };
 }
 

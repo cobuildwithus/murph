@@ -29,7 +29,6 @@ import {
   type AppendHostedMailboxItemResult,
 } from "../hosted-mailbox/store";
 import {
-  signalHostedDeviceSyncBackgroundMaintenanceRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   type HostedDeviceSyncRecoverySignalIntent,
 } from "../hosted-orchestration/signal-runtime";
@@ -39,6 +38,7 @@ import {
 } from "./wake";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
 import type {
+  HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDirtyResource,
 } from "./prisma-store";
 import {
@@ -581,6 +581,24 @@ export interface HostedDeviceSyncDirtyWakeResult {
   wakeInserted: boolean;
 }
 
+export function buildHostedDeviceSyncDirtyWakeDedupeKey(input: {
+  connectionId: string;
+  dirtyRevision: bigint;
+  provider: string;
+}): string {
+  return [
+    "device-sync",
+    "dirty",
+    "v1",
+    "provider",
+    normalizeHostedDeviceSyncDirtyWakeDedupeSegment(input.provider),
+    "connection",
+    sha256Hex(input.connectionId).slice(0, 16),
+    "revision",
+    input.dirtyRevision.toString(),
+  ].join(":");
+}
+
 export async function appendHostedDeviceSyncDirtyWake(input: {
   connectionId: string;
   dedupeKey?: string | null;
@@ -595,21 +613,13 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
-  const eventId = buildHostedDeviceSyncDirtyWakeEventId({
+  const wake = buildHostedDeviceSyncDirtyWakeEnvelope({
     connectionId: input.connectionId,
+    occurredAt: input.occurredAt,
+    provider: input.provider,
     dedupeKey: input.dedupeKey ?? null,
-    occurredAt: input.occurredAt,
-    provider: input.provider,
-    traceId: input.traceId ?? null,
-    userId: input.userId,
-  });
-  const wake = buildHostedDeviceSyncWake({
-    connectionId: input.connectionId,
-    eventId,
-    hint: buildHostedDeviceSyncDirtyWakeHint(input),
-    occurredAt: input.occurredAt,
-    provider: input.provider,
-    source: "webhook-hint",
+    eventType: input.eventType ?? null,
+    resourceCategory: input.resourceCategory ?? null,
     traceId: input.traceId ?? null,
     userId: input.userId,
   });
@@ -724,27 +734,60 @@ async function startHostedDeviceSyncWakeWorkflow(
   }
 }
 
-async function signalHostedDeviceSyncDirtyBackgroundMaintenanceBestEffort(input: {
-  traceId: string | null;
-  userId: string;
-}): Promise<void> {
-  const traceIdPresent = input.traceId !== null;
-  const userIdPresent = input.userId.length > 0;
-  try {
-    await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
-      userId: input.userId,
-    });
-  } catch (error) {
-    console.warn("Hosted device-sync dirty background maintenance signal failed after webhook acceptance.", {
-      code: sanitizeHostedRuntimeErrorCode(
-        isDeviceSyncError(error)
-          ? error.code
-          : "HOSTED_DEVICE_SYNC_BACKGROUND_MAINTENANCE_SIGNAL_FAILED",
-      ),
-      traceIdPresent,
-      userIdPresent,
-    });
+async function appendHostedDeviceSyncDirtyWakeTx(input: {
+  dirty: HostedDeviceSyncDirtyConnectionRecord;
+  tx: HostedPrismaTransactionClient;
+}): Promise<AppendHostedMailboxItemResult> {
+  const wake = buildHostedDeviceSyncDirtyWakeEnvelope({
+    connectionId: input.dirty.connectionId,
+    dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
+      connectionId: input.dirty.connectionId,
+      dirtyRevision: input.dirty.dirtyRevision,
+      provider: input.dirty.provider,
+    }),
+    eventType: input.dirty.latestEventType,
+    occurredAt: input.dirty.latestDirtyAt,
+    provider: input.dirty.provider,
+    resourceCategory: input.dirty.latestResourceCategory,
+    traceId: null,
+    userId: input.dirty.userId,
+  });
+  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+    envelope: wake,
+    tx: input.tx,
+  });
+  assertHostedDeviceSyncDirtyWakeAccepted(mailboxAppend);
+  return mailboxAppend;
+}
+
+function assertHostedDeviceSyncDirtyWakeAccepted(
+  mailboxAppend: AppendHostedMailboxItemResult,
+): void {
+  const accepted = mailboxAppend.inserted
+    || (mailboxAppend.duplicate && !mailboxAppend.dedupeConflict);
+  if (accepted) {
+    return;
   }
+
+  throw deviceSyncError({
+    code: mailboxAppend.dedupeConflict
+      ? "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT"
+      : "HOSTED_DEVICE_SYNC_DIRTY_WAKE_APPEND_NOT_ACCEPTED",
+    httpStatus: mailboxAppend.dedupeConflict ? 500 : 503,
+    message: mailboxAppend.dedupeConflict
+      ? "Hosted device-sync dirty wake conflicted with an existing mailbox item."
+      : "Hosted device-sync dirty wake could not be queued for runner handoff.",
+    retryable: !mailboxAppend.dedupeConflict,
+  });
+}
+
+async function signalHostedDeviceSyncDirtyWakeBestEffort(input: {
+  mailboxItemId: string;
+}): Promise<void> {
+  await startHostedDeviceSyncWakeWorkflow(input.mailboxItemId, {
+    failureMode: "best_effort",
+    recoverySignalIntent: null,
+  });
 }
 
 async function persistHostedDeviceSyncWebhookAccepted(input: {
@@ -771,7 +814,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
-          backgroundNudgeRequested: false,
+          dirtyWakeMailboxItemId: null,
         };
       }
 
@@ -799,23 +842,23 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         tx,
       });
 
+      const dirtyWakeMailboxItemId = dirtyUpdate.shouldRequestWake
+        ? (await appendHostedDeviceSyncDirtyWakeTx({
+            dirty: dirtyUpdate.dirty,
+            tx,
+          })).item.id
+        : null;
+
       await completeHostedWebhookTraceTx(input, tx);
 
-      if (dirtyUpdate.shouldRequestWake) {
-        return {
-          backgroundNudgeRequested: true,
-        };
-      }
-
       return {
-        backgroundNudgeRequested: false,
+        dirtyWakeMailboxItemId,
       };
     }));
 
-  if (result.backgroundNudgeRequested) {
-    await signalHostedDeviceSyncDirtyBackgroundMaintenanceBestEffort({
-      traceId: input.traceId,
-      userId: input.userId,
+  if (result.dirtyWakeMailboxItemId) {
+    await signalHostedDeviceSyncDirtyWakeBestEffort({
+      mailboxItemId: result.dirtyWakeMailboxItemId,
     });
   }
 }
@@ -915,6 +958,37 @@ function buildHostedDeviceSyncDirtyWakeHint(input: {
   };
 }
 
+function buildHostedDeviceSyncDirtyWakeEnvelope(input: {
+  connectionId: string;
+  dedupeKey?: string | null;
+  eventType?: string | null;
+  occurredAt: string;
+  provider: string;
+  resourceCategory?: string | null;
+  traceId?: string | null;
+  userId: string;
+}): HostedExecutionWake {
+  const eventId = buildHostedDeviceSyncDirtyWakeEventId({
+    connectionId: input.connectionId,
+    dedupeKey: input.dedupeKey ?? null,
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    traceId: input.traceId ?? null,
+    userId: input.userId,
+  });
+
+  return buildHostedDeviceSyncWake({
+    connectionId: input.connectionId,
+    eventId,
+    hint: buildHostedDeviceSyncDirtyWakeHint(input),
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    source: "webhook-hint",
+    traceId: input.traceId ?? null,
+    userId: input.userId,
+  });
+}
+
 function buildHostedDeviceSyncDirtyWakeEventId(input: {
   connectionId: string;
   dedupeKey?: string | null;
@@ -924,22 +998,18 @@ function buildHostedDeviceSyncDirtyWakeEventId(input: {
   userId: string;
 }): string {
   const dedupeKey = normalizeNullableString(input.dedupeKey);
-  const fingerprintSeed = dedupeKey
-    ? {
-        connectionId: input.connectionId,
-        dedupeKey,
-        provider: input.provider,
-        userId: input.userId,
-        version: 2,
-      }
-    : {
-        connectionId: input.connectionId,
-        occurredAt: input.occurredAt,
-        provider: input.provider,
-        traceId: normalizeNullableString(input.traceId),
-        userId: input.userId,
-        version: 1,
-      };
+  if (dedupeKey) {
+    return dedupeKey;
+  }
+
+  const fingerprintSeed = {
+    connectionId: input.connectionId,
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    traceId: normalizeNullableString(input.traceId),
+    userId: input.userId,
+    version: 1,
+  };
   const fingerprint = sha256Hex(JSON.stringify(fingerprintSeed)).slice(0, 32);
 
   return [
@@ -947,6 +1017,17 @@ function buildHostedDeviceSyncDirtyWakeEventId(input: {
     "webhook-hint",
     fingerprint,
   ].join(":");
+}
+
+function normalizeHostedDeviceSyncDirtyWakeDedupeSegment(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 64);
+
+  return normalized || "unknown";
 }
 
 function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): string {
