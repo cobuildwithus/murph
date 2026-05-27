@@ -422,20 +422,26 @@ async function createFixtureClient(input: {
         }),
         createEntity("sample", "sample_1", {
           attributes: {
+            metric: "sleep_duration_minutes",
+            source: "manual",
             unit: "min",
             value: 430,
           },
           date: "2026-04-20",
+          kind: "metric_sample",
           occurredAt: "2026-04-20T08:30:00.000Z",
           stream: "sleep_duration_minutes",
           title: "Sleep duration",
         }),
         createEntity("sample", "sample_2", {
           attributes: {
+            metric: "sleep_duration_minutes",
+            source: "manual",
             unit: "min",
             value: 400,
           },
           date: "2026-04-13",
+          kind: "metric_sample",
           occurredAt: "2026-04-13T08:30:00.000Z",
           stream: "sleep_duration_minutes",
           title: "Sleep duration",
