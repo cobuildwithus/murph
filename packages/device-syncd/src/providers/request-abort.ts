@@ -78,6 +78,15 @@ export function isProviderAbortError(error: unknown, signal?: AbortSignal | null
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+export function normalizeProviderAbortError(
+  error: unknown,
+  signal?: AbortSignal | null,
+): unknown {
+  return signal?.aborted === true && signal.reason instanceof Error
+    ? signal.reason
+    : error;
+}
+
 export function isProviderTimeoutError(error: unknown, signal?: AbortSignal | null): boolean {
   return isProviderTimeoutReason(error)
     || (

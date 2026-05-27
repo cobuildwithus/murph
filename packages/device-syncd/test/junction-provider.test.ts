@@ -1923,6 +1923,82 @@ test("Junction client rethrows caller aborts instead of wrapping them as provide
   assert.equal(requests, 1);
 });
 
+test("Junction client preserves caller abort reasons when fetch reports a generic AbortError", async () => {
+  const abortController = new AbortController();
+  const abortError = new Error("foreground yield");
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      const signal = init?.signal;
+      assert.ok(signal);
+
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("The operation was aborted.", "AbortError")),
+          { once: true },
+        );
+        abortController.abort(abortError);
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1", {
+      signal: abortController.signal,
+    }),
+    (error) => error === abortError,
+  );
+  assert.equal(requests, 1);
+});
+
+test("Junction client does not misclassify request timeouts as late caller aborts", async () => {
+  const abortController = new AbortController();
+  const abortError = new Error("foreground yield");
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    requestTimeoutMs: 1,
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      const signal = init?.signal;
+      assert.ok(signal);
+
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            abortController.abort(abortError);
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1", {
+      signal: abortController.signal,
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.notEqual(error.cause, abortError);
+      assert.equal(error.cause instanceof DOMException, true);
+      assert.equal((error.cause as DOMException).name, "AbortError");
+      return true;
+    },
+  );
+  assert.equal(requests, 1);
+});
+
 test("Junction client deregisters provider connections by normalized provider slug", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const client = new JunctionClient({

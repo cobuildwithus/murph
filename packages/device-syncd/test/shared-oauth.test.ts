@@ -87,6 +87,17 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
     await parseResponseBody(unreadableResponse),
     "",
   );
+  const abortController = new AbortController();
+  const abortReason = new Error("body parent abort");
+  const abortedResponse = new Response("ok");
+  vi.spyOn(abortedResponse, "text").mockImplementation(async () => {
+    abortController.abort(abortReason);
+    throw new DOMException("The operation was aborted.", "AbortError");
+  });
+  await assert.rejects(
+    () => parseResponseBody(abortedResponse, abortController.signal),
+    (error) => error === abortReason,
+  );
 
   const rateLimited = buildProviderApiError(
     "RATE_LIMITED",
@@ -335,6 +346,98 @@ test("shared oauth bearer fetch helper honors caller abort signals", async () =>
         },
       }),
     /caller abort/u,
+  );
+});
+
+test("shared oauth fetch helpers preserve caller abort reasons when fetch reports a generic AbortError", async () => {
+  const createAbortFetch = (controller: AbortController, reason: Error): typeof fetch =>
+    async (_input, init) => {
+      const signal = init?.signal;
+      assert.ok(signal);
+
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("The operation was aborted.", "AbortError")),
+          { once: true },
+        );
+        controller.abort(reason);
+      });
+    };
+
+  const tokenAbortController = new AbortController();
+  const tokenAbortReason = new Error("token parent abort");
+  await assert.rejects(
+    () =>
+      postOAuthTokenRequest({
+        fetchImpl: createAbortFetch(tokenAbortController, tokenAbortReason),
+        url: "https://provider.test/oauth/token",
+        timeoutMs: 1_000,
+        parameters: {
+          grant_type: "client_credentials",
+        },
+        signal: tokenAbortController.signal,
+        buildError(response) {
+          return new Error(`unexpected ${response.status}`);
+        },
+      }),
+    (error) => error === tokenAbortReason,
+  );
+
+  const bearerAbortController = new AbortController();
+  const bearerAbortReason = new Error("bearer parent abort");
+  await assert.rejects(
+    () =>
+      fetchBearerJson({
+        fetchImpl: createAbortFetch(bearerAbortController, bearerAbortReason),
+        url: "https://provider.test/resource",
+        accessToken: "access-token",
+        timeoutMs: 1_000,
+        signal: bearerAbortController.signal,
+        buildError(response) {
+          return new Error(`unexpected ${response.status}`);
+        },
+      }),
+    (error) => error === bearerAbortReason,
+  );
+});
+
+test("shared oauth fetch helpers do not misclassify request timeouts as late caller aborts", async () => {
+  const abortController = new AbortController();
+  const abortReason = new Error("late caller abort");
+
+  await assert.rejects(
+    () =>
+      fetchBearerJson({
+        fetchImpl: async (_input, init) => {
+          const signal = init?.signal;
+          assert.ok(signal);
+
+          return await new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                abortController.abort(abortReason);
+                reject(new DOMException("The operation was aborted.", "AbortError"));
+              },
+              { once: true },
+            );
+          });
+        },
+        url: "https://provider.test/resource",
+        accessToken: "access-token",
+        timeoutMs: 1,
+        signal: abortController.signal,
+        buildError(response) {
+          return new Error(`unexpected ${response.status}`);
+        },
+      }),
+    (error) => {
+      assert.notEqual(error, abortReason);
+      assert.equal(error instanceof DOMException, true);
+      assert.equal((error as DOMException).name, "AbortError");
+      return true;
+    },
   );
 });
 
