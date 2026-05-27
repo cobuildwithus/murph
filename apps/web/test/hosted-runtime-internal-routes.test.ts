@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   checkpointHostedWorkspace: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
+  hasRecentAcceptedRuntimeAttemptFailureLog: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readHostedWorkspace: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  signalHostedRuntimeRecheckRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -38,10 +40,16 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
+  hasRecentAcceptedRuntimeAttemptFailureLog:
+    mocks.hasRecentAcceptedRuntimeAttemptFailureLog,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/legacy-source-hash-browser-vault", () => ({
@@ -99,6 +107,11 @@ describe("hosted runtime internal web routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
+    mocks.hasRecentAcceptedRuntimeAttemptFailureLog.mockResolvedValue(false);
+    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_routes_1",
+    });
   });
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
@@ -570,6 +583,8 @@ describe("hosted runtime internal web routes", () => {
       },
       userId: "member_routes_1",
     }));
+    expect(mocks.hasRecentAcceptedRuntimeAttemptFailureLog).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const rejectedResponse = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -644,6 +659,159 @@ describe("hosted runtime internal web routes", () => {
     ));
     expect(oversizedResponse.status).toBe(400);
     expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
+    mocks.recordHostedRuntimeLog.mockResolvedValue({
+      at: FIXED_NOW,
+      attemptId: null,
+      checkpointVersion: null,
+      component: "runner",
+      createdAt: FIXED_NOW,
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      id: "runtime_log_failure_1",
+      leaseGeneration: null,
+      level: "warn",
+      mailboxLane: null,
+      mailboxSeqEnd: null,
+      mailboxSeqStart: null,
+      outboxIntentRef: null,
+      phase: "error",
+      redactedJson: null,
+      userId: "member_routes_1",
+      workspaceVersion: "5",
+    });
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "runner",
+            errorCode: "runner_child_failed",
+            eventCode: "runner.accepted_attempt_failed",
+            level: "warn",
+            phase: "error",
+            workspaceVersion: "5",
+          },
+        ],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
+      loggedCount: 1,
+    });
+    expect(mocks.hasRecentAcceptedRuntimeAttemptFailureLog).toHaveBeenCalledWith({
+      excludeIds: ["runtime_log_failure_1"],
+      since: expect.any(Date),
+      userId: "member_routes_1",
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("cooldowns accepted runtime attempt failure recheck signals", async () => {
+    mocks.recordHostedRuntimeLog.mockResolvedValue({
+      at: FIXED_NOW,
+      attemptId: null,
+      checkpointVersion: null,
+      component: "runner",
+      createdAt: FIXED_NOW,
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      id: "runtime_log_failure_2",
+      leaseGeneration: null,
+      level: "warn",
+      mailboxLane: null,
+      mailboxSeqEnd: null,
+      mailboxSeqStart: null,
+      outboxIntentRef: null,
+      phase: "error",
+      redactedJson: null,
+      userId: "member_routes_1",
+      workspaceVersion: "5",
+    });
+    mocks.hasRecentAcceptedRuntimeAttemptFailureLog.mockResolvedValue(true);
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "runner",
+            errorCode: "runner_child_failed",
+            eventCode: "runner.accepted_attempt_failed",
+            level: "warn",
+            phase: "error",
+            workspaceVersion: "5",
+          },
+        ],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not fail runtime log writes when the recheck signal is unavailable", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.recordHostedRuntimeLog.mockResolvedValue({
+      at: FIXED_NOW,
+      attemptId: null,
+      checkpointVersion: null,
+      component: "runner",
+      createdAt: FIXED_NOW,
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      id: "runtime_log_failure_3",
+      leaseGeneration: null,
+      level: "warn",
+      mailboxLane: null,
+      mailboxSeqEnd: null,
+      mailboxSeqStart: null,
+      outboxIntentRef: null,
+      phase: "error",
+      redactedJson: null,
+      userId: "member_routes_1",
+      workspaceVersion: "5",
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/log",
+        {
+          entries: [
+            {
+              at: FIXED_NOW,
+              component: "runner",
+              errorCode: "runner_child_failed",
+              eventCode: "runner.accepted_attempt_failed",
+              level: "warn",
+              phase: "error",
+              workspaceVersion: "5",
+            },
+          ],
+        },
+      ));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Hosted runtime recheck signal failed after accepted-attempt failure log.",
+        {
+          errorName: "Error",
+        },
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("returns redacted status from workspace state, mailbox high-water, and structured logs", async () => {

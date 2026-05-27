@@ -6,15 +6,25 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  signalHostedRuntimeRecheckRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { recordHostedRuntimeLog } from "@/src/lib/hosted-workspace/store";
+import {
+  hasRecentAcceptedRuntimeAttemptFailureLog,
+  recordHostedRuntimeLog,
+  type HostedRuntimeLogRecord,
+} from "@/src/lib/hosted-workspace/store";
+
+const ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE = "runner.accepted_attempt_failed";
+const ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS = 30_000;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
 
-  await Promise.all(body.entries.map((entry) => recordHostedRuntimeLog({
+  const records = await Promise.all(body.entries.map((entry) => recordHostedRuntimeLog({
     at: entry.at,
     component: entry.component,
     eventCode: entry.eventCode,
@@ -33,7 +43,46 @@ export const POST = withJsonError(async (request: Request) => {
     ...("workspaceVersion" in entry ? { workspaceVersion: entry.workspaceVersion } : {}),
   })));
 
+  await signalAcceptedRuntimeAttemptFailureBestEffort({
+    records,
+    userId,
+  });
+
   return jsonOk(parseHostedRuntimeLogResponse({
     loggedCount: body.entries.length,
   }));
 });
+
+async function signalAcceptedRuntimeAttemptFailureBestEffort(input: {
+  records: readonly HostedRuntimeLogRecord[];
+  userId: string;
+}): Promise<void> {
+  const acceptedFailureLogIds = input.records
+    .filter((record) => record.eventCode === ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE)
+    .map((record) => record.id);
+  if (acceptedFailureLogIds.length === 0) {
+    return;
+  }
+
+  try {
+    const recentFailureAlreadyLogged = await hasRecentAcceptedRuntimeAttemptFailureLog({
+      excludeIds: acceptedFailureLogIds,
+      since: new Date(Date.now() - ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS),
+      userId: input.userId,
+    });
+    if (recentFailureAlreadyLogged) {
+      return;
+    }
+
+    await signalHostedRuntimeRecheckRuntime({
+      userId: input.userId,
+    });
+  } catch (error) {
+    console.warn(
+      "Hosted runtime recheck signal failed after accepted-attempt failure log.",
+      {
+        errorName: error instanceof Error ? error.name : typeof error,
+      },
+    );
+  }
+}

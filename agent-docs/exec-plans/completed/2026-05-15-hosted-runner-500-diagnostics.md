@@ -38,6 +38,15 @@ runtime phase boundaries.
 10. Add v2 workspace snapshot restore step diagnostics so `workspace.restore`
     failures identify the failing restore sub-step without logging object keys,
     presigned URLs, snapshot ids, user ids, file paths, hashes, or content.
+11. Add tar/zstd process diagnostics for workspace snapshot archive failures:
+    process label, exit code/signal, stderr byte/line counts, truncation flag,
+    and fixed-vocabulary stderr markers only. Do not log stderr text.
+12. Add a narrow accepted-runtime-attempt liveness handoff: Cloudflare records
+    a metadata-only `runner.accepted_attempt_failed` runtime log after an
+    accepted async invocation fails and its write fence is cleared; web
+    durably stores that log and, under a short cooldown, sends a stateless
+    `runtime_recheck_requested` Temporal signal so Temporal re-reads demand.
+    The signal carries no payload and Cloudflare remains a thin runner.
 
 ## Verification
 
@@ -168,6 +177,54 @@ runtime phase boundaries.
   upstream response text is still preserved for callers by design while
   structured logs stay redacted; hash redaction is covered by static inspection
   of the restore-detail helper rather than a dedicated test assertion.
+- `pnpm --dir apps/cloudflare typecheck` passed after adding tar/zstd
+  process-failure diagnostics.
+- `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts
+  node-runner-child.test.ts runner-container.test.ts` passed after adding
+  tar/zstd process-failure diagnostics and the archive-restore regression.
+- `git diff --check -- apps/cloudflare/src/workspace-snapshot-local.ts
+  apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/node-runner-child.ts
+  apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts
+  apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/runner-container.test.ts
+  agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md
+  agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after the
+  tar/zstd diagnostics update.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/workspace-snapshot-local.ts
+  apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/node-runner-child.ts
+  apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts
+  apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/runner-container.test.ts
+  agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md
+  agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after the
+  tar/zstd diagnostics update; it ran the Cloudflare verify surface.
+- `pnpm --dir packages/hosted-execution test -- hosted-orchestration-control.test.ts
+  hosted-runtime-control.test.ts` passed after adding the
+  `runtime_recheck_requested` signal contract and accepted-attempt failure log
+  event.
+- `pnpm --dir packages/hosted-orchestrator-temporal test --
+  hosted-user-runtime-workflow.test.ts` passed after adding the stateless
+  runtime recheck signal path.
+- `pnpm --dir apps/web test -- hosted-runtime-internal-routes.test.ts
+  hosted-workspace-store.test.ts` passed after wiring the persisted runtime-log
+  route to cooldown-throttle accepted-attempt failure rechecks.
+- `pnpm --dir apps/cloudflare test:node -- user-runner-alarm.test.ts` passed
+  after wiring accepted async invocation failures to the metadata-only runtime
+  log callback.
+- `pnpm --dir packages/hosted-execution typecheck`,
+  `pnpm --dir packages/hosted-orchestrator-temporal typecheck`,
+  `pnpm --dir apps/web typecheck`, and `pnpm --dir apps/cloudflare typecheck`
+  passed after the accepted-attempt recheck handoff.
+- `security-privacy-review` found no findings in the accepted-attempt failure
+  handoff. `simplify` found two low cleanup issues; both were fixed by making
+  the recent-log query purpose-specific and basing the route decision on
+  persisted log records. `coverage-write` added the focused store helper
+  regression. `task-finish-review` found one stale helper reference, which was
+  fixed before rerunning web tests and typecheck.
+- `pnpm hosted-local e2e temporal-orchestration` passed after the liveness
+  handoff changes.
+- `pnpm typecheck` passed after post-review fixes.
+- Final `bash scripts/workspace-verify.sh test:diff ...` passed after all
+  accepted-attempt failure handoff and post-review fixes; it ran the diff-aware
+  package, Cloudflare, and web verification surfaces.
 
 ## State
 
@@ -321,3 +378,15 @@ runtime phase boundaries.
 - Runtime write-fence validation rejection logs now add fixed reject-reason and
   match booleans so the next artifact 401 can identify the stale-fence component
   without logging attempt ids, user ids, workspace versions, paths, or bodies.
+- Workspace snapshot archive restore/create/list failures now capture tar/zstd
+  process metadata and thread it through runtime-platform, child-runtime, and
+  RunnerContainer diagnostics without stderr text or snapshot/object/user/path
+  identifiers.
+- Accepted async runtime invocation failures now have a narrow liveness
+  handoff: Cloudflare records only a metadata runtime log after clearing the
+  failed attempt's write fence, web persists that log and applies a short
+  same-user cooldown, and Temporal receives a payload-free recheck signal that
+  only interrupts its wait and re-reads demand.
+Status: completed
+Updated: 2026-05-27
+Completed: 2026-05-27

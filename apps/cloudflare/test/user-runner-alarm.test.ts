@@ -8,6 +8,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -315,6 +316,22 @@ describe("HostedUserRunner execution coordination", () => {
       failure_count: 1,
       last_invocation_at: null,
     });
+    const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+    expect(runtimeLogCalls).toHaveLength(1);
+    const runtimeLogBody = JSON.parse(runtimeLogCalls[0]?.[0].body ?? "{}") as {
+      entries?: Array<Record<string, unknown>>;
+    };
+    expect(runtimeLogBody.entries?.[0]).toEqual({
+      at: expect.any(String),
+      component: "runner",
+      errorCode: "runtime_error",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      workspaceVersion: "5",
+    });
+    expect(JSON.stringify(runtimeLogBody)).not.toContain("runtime-write-");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
@@ -1911,6 +1928,12 @@ function installWebControlResponses(
         return jsonResponse(
           await createTestHostedRuntimeCryptoContext(input.boundUserId),
         );
+      }
+
+      if (input.path === HOSTED_RUNTIME_LOG_PATH) {
+        return jsonResponse({
+          loggedCount: 1,
+        });
       }
 
       throw new Error(`Unexpected hosted web-control path: ${input.path}`);

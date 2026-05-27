@@ -192,6 +192,9 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.lagRecoveryObserved = true;
         break;
       }
+      case "runtime_recheck_requested": {
+        break;
+      }
       default: {
         const exhaustive: never = signal;
         throw new Error(`Unsupported hosted runtime signal ${String(exhaustive)}`);
@@ -796,6 +799,10 @@ function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
     }
     case "mailbox_lag_observed": {
       assertKindOnlySignal(record, "Hosted runtime mailbox-lag signal");
+      return { kind };
+    }
+    case "runtime_recheck_requested": {
+      assertKindOnlySignal(record, "Hosted runtime recheck signal");
       return { kind };
     }
     default:

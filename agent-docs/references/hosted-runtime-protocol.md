@@ -160,7 +160,15 @@ ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
 workflow signal recovery remains future hardening for a DB-backed
 pending-handoff reconciler or Temporal-owned reconciler. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
-import status for workflow completion, status projection, or recovery decisions.
+import status for workflow completion or status projection. The narrow liveness
+exception is the exact `runner.accepted_attempt_failed` event: after web has
+durably recorded that metadata-only row, it may send a cooldown-throttled,
+payload-free `runtime_recheck_requested` Temporal signal. That signal only
+interrupts the workflow's current wait so Temporal re-reads web-owned demand;
+it sets no mailbox, manual, browser-vault, lag, or device-sync demand flag.
+Cloudflare only reports the accepted-attempt failure through the existing
+signed runtime-log callback; it does not schedule retries or become a recovery
+orchestrator.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.

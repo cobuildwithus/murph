@@ -1,5 +1,6 @@
 import {
   type HostedRunnerStatusResponse,
+  type HostedRuntimeLogRequest,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceInvocationReason,
@@ -22,11 +23,13 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeLogResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -738,6 +741,7 @@ export class HostedUserRunner {
     }
 
     const background = this.invokePreparedRuntimeExecutionWithFence({
+      acceptedProcessingAttempt: true,
       prepared,
       runtimeWakeStartedAt: input.runtimeWakeStartedAt,
     }).then(
@@ -1060,6 +1064,7 @@ export class HostedUserRunner {
     }
 
     return await this.invokePreparedRuntimeExecutionWithFence({
+      acceptedProcessingAttempt: false,
       prepared,
       runtimeWakeStartedAt: input.runtimeWakeStartedAt,
     });
@@ -1106,6 +1111,7 @@ export class HostedUserRunner {
   }
 
   private async invokePreparedRuntimeExecutionWithFence(input: {
+    acceptedProcessingAttempt: boolean;
     prepared: PreparedRuntimeInvocation;
     runtimeWakeStartedAt: number;
   }): Promise<HostedWorkspaceInvocationResult> {
@@ -1121,6 +1127,14 @@ export class HostedUserRunner {
         finishedAt: new Date().toISOString(),
         token,
       });
+      if (input.acceptedProcessingAttempt && failed.failed) {
+        await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+          error,
+          executionInput,
+          token,
+          workspaceVersion,
+        });
+      }
       await this.syncWatchdogAlarm(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -1883,6 +1897,63 @@ export class HostedUserRunner {
     }
 
     return parseHostedWorkspaceReadResponse(await response.json());
+  }
+
+  private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
+    error: unknown;
+    executionInput: RuntimeInvocationInput;
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string;
+  }): Promise<void> {
+    const body = {
+      entries: [
+        {
+          at: new Date().toISOString(),
+          component: "runner",
+          errorCode: deriveHostedExecutionErrorCode(input.error),
+          eventCode: "runner.accepted_attempt_failed",
+          level: "warn",
+          phase: "error",
+          workspaceVersion: input.workspaceVersion,
+        },
+      ],
+    } satisfies HostedRuntimeLogRequest;
+
+    try {
+      const response = await fetchHostedExecutionWebControlPlaneResponse({
+        ...(this.env.hostedWebAllowHttpHosts
+          ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+          : {}),
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: JSON.stringify(body),
+        boundUserId: input.executionInput.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        method: "POST",
+        path: HOSTED_RUNTIME_LOG_PATH,
+        timeoutMs: this.env.webControlTimeoutMs,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Hosted runtime log write failed with HTTP ${response.status}.`);
+      }
+
+      parseHostedRuntimeLogResponse(await response.json());
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: input.executionInput.reason,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted runner accepted runtime attempt failure log write failed.",
+        phase: "failed",
+        userId: input.executionInput.userId,
+      });
+    }
   }
 
   private assertWorkspaceBelongsToRunnerUser(

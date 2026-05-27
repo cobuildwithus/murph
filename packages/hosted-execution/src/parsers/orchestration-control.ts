@@ -101,6 +101,15 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         kind,
       };
     }
+    case "runtime_recheck_requested": {
+      assertExactKeys(record, "Hosted runtime recheck signal", [
+        "kind",
+      ]);
+
+      return {
+        kind,
+      };
+    }
     default: {
       const exhaustive: never = kind;
       throw new TypeError(`Unsupported hosted runtime signal kind: ${String(exhaustive)}.`);
