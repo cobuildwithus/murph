@@ -280,7 +280,7 @@ test("importDeviceBatch treats numeric device observations without provenance as
   );
 });
 
-test("importDeviceBatch allows display-grade device observations to opt into canonical events", async () => {
+test("importDeviceBatch still rejects missing-grain observations with display visibility", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-display-events");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
   const events = buildDenseHeartRateObservations(1001).map((event) => ({
@@ -291,15 +291,44 @@ test("importDeviceBatch allows display-grade device observations to opt into can
     },
   }));
 
-  const result = await importDeviceBatch({
-    vaultRoot,
-    provider: "wearable-provider",
-    accountId: "acct-test",
-    importedAt: "2026-03-16T09:30:00.000Z",
-    events,
-  });
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      events,
+    }),
+    (error) =>
+      isDenseTelemetryPolicyError(error)
+      && error.details.observationEventCount === 1001,
+  );
+});
 
-  assert.equal(result.events.length, 1001);
+test("importDeviceBatch still rejects sample-grain observations with display visibility", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-sample-display-events");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const events = buildDenseHeartRateObservations(1001).map((event) => ({
+    ...event,
+    fields: {
+      ...event.fields,
+      observationGrain: "sample" as const,
+      queryVisibility: "default",
+    },
+  }));
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      events,
+    }),
+    (error) =>
+      isDenseTelemetryPolicyError(error)
+      && error.details.observationEventCount === 1001,
+  );
 });
 
 test("importDeviceBatch allows compact summary observations without display visibility", async () => {
@@ -344,6 +373,46 @@ test("importDeviceBatch allows compact summary observations without display visi
 
   assert.equal(result.events.length, 1095);
   assert.equal(result.events.every((event) => event.kind === "observation" && event.observationGrain === "summary"), true);
+  assert.equal(result.events.some((event) => event.kind === "observation" && event.queryVisibility === "default"), false);
+  assert.equal(result.events.some((event) => event.kind === "observation" && event.canonicalFact === true), false);
+});
+
+test("importDeviceBatch allows compact derived fact observations without display visibility", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-derived-fact-events");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const startMs = Date.parse("2024-01-01T08:00:00.000Z");
+  const events = Array.from({ length: 1001 }, (_, index) => {
+    const timestamp = new Date(startMs + index * 86_400_000).toISOString();
+
+    return {
+      kind: "observation" as const,
+      occurredAt: timestamp,
+      recordedAt: timestamp,
+      title: "Derived wearable fact",
+      externalRef: {
+        system: "wearable-provider",
+        resourceType: "derived-daily-fact",
+        resourceId: `derived-fact-${index}`,
+      },
+      fields: {
+        metric: "weekly-resting-heart-rate-baseline",
+        observationGrain: "derived_fact" as const,
+        unit: "bpm",
+        value: 58,
+      },
+    };
+  });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-provider",
+    accountId: "acct-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events,
+  });
+
+  assert.equal(result.events.length, 1001);
+  assert.equal(result.events.every((event) => event.kind === "observation" && event.observationGrain === "derived_fact"), true);
   assert.equal(result.events.some((event) => event.kind === "observation" && event.queryVisibility === "default"), false);
   assert.equal(result.events.some((event) => event.kind === "observation" && event.canonicalFact === true), false);
 });

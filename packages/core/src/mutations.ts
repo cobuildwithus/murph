@@ -2239,8 +2239,7 @@ function isDenseDeviceObservationInput(event: DeviceEventInput): boolean {
   return (
     typeof metric === "string" &&
     typeof value === "number" &&
-    Number.isFinite(value) &&
-    !isDisplayGradeDeviceObservationInput(event)
+    Number.isFinite(value)
   );
 }
 
@@ -2250,14 +2249,6 @@ function readPersistedDeviceObservationField(event: DeviceEventInput, key: strin
     : {};
 
   return fields[key];
-}
-
-function isDisplayGradeDeviceObservationInput(event: DeviceEventInput): boolean {
-  return (
-    normalizedDeviceObservationString(readPersistedDeviceObservationField(event, "visibility")) === "display" ||
-    normalizedDeviceObservationString(readPersistedDeviceObservationField(event, "queryVisibility")) === "default" ||
-    readPersistedDeviceObservationField(event, "canonicalFact") === true
-  );
 }
 
 function normalizedDeviceObservationString(value: unknown): string | null {
