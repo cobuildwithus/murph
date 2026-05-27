@@ -218,9 +218,9 @@ export interface DeviceDataOrigin {
 }
 ```
 
-For Junction-sourced records, keep `externalRef.system = "junction"` and put upstream attribution in `DeviceDataOrigin`. Use contract-safe resource types such as `junction-oura-sleep`, not colon-delimited values. Raw upstream source names, device ids, app ids, workout ids, or source identifiers may be read transiently to compute opaque hashes or resolve a provider/source, but they are not valid `DeviceDataOrigin` fields and must not be persisted in contracts, canonical wearable source identity, source projection summaries, hosted settings payloads, or web-visible projections.
+For Junction-sourced records, keep `externalRef.system = "junction"` and put upstream attribution in `DeviceDataOrigin`. Use contract-safe resource types such as `junction-oura-sleep`, not colon-delimited values. Raw upstream source names, device ids, app ids, workout ids, or source identifiers may be read transiently to compute opaque hashes or resolve a provider/source, but they are not valid `DeviceDataOrigin` fields and must not be persisted in contracts, compact wearable source identity, source projection summaries, hosted settings payloads, or web-visible projections.
 
-Canonical wearable source identity must include origin identity so `Oura via Junction`, `Dexcom via Junction`, and `Withings via Junction` do not collapse into one source.
+Compact wearable source identity must include origin identity so `Oura via Junction`, `Dexcom via Junction`, and `Withings via Junction` do not collapse into one source.
 
 ## Source Projection
 
@@ -558,7 +558,7 @@ The landed primitive/foundation slice includes:
 - Settings-source rendering that shows `pending_link` / `link_returned` setup as still setting up, and expired or failed setup as reconnectable, without changing account lifecycle status.
 - Hosted local-heartbeat store fixtures use explicit `oauth_tokens` credential rows so the new fail-closed credential mapper is covered by existing heartbeat tests.
 - `DeviceDataOrigin` provenance fields for upstream source identity, timestamp semantics, origin confidence, and normalizer version.
-- Origin-aware canonical wearable data-source identity, with tests proving two Junction upstream source slugs under one aggregator account do not collapse.
+- Origin-aware compact wearable data-source identity, with tests proving two Junction upstream source slugs under one aggregator account do not collapse.
 - Local SQLite `device_connection_source` projection storage keyed by parent connection plus opaque source instance key, with deterministic listing and cascade-delete coverage.
 - Hosted Prisma `DeviceConnectionSource` / additive `2026050101_device_connection_sources` migration, aligned status vocabulary, deterministic listing, and same-provider multi-source coverage.
 - Source projection sanitation keeps account metadata shallow and strips raw identifier-shaped availability/source values from projection summaries.

@@ -303,7 +303,7 @@ test("importDeviceBatch keeps dense sample escape hatch alias compatible", async
   assert.equal(result.samples.length, 1001);
 });
 
-test("importDeviceBatch writes inline raw integration payloads and canonical records", async () => {
+test("importDeviceBatch writes inline raw integration payloads and compact records", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 

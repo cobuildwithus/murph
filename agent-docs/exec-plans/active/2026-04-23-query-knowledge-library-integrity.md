@@ -79,7 +79,7 @@ Updated: 2026-04-23
 - An earlier focused `packages/query` run against `health-library.test.ts`, `knowledge-graph.test.ts`, and `automation-memory-knowledge-coverage.test.ts` also passed before the new assertions moved into fresh standalone files to avoid shared dirty test files.
 - `pnpm --dir packages/query typecheck` passed.
 - `pnpm test:smoke` passed.
-- `pnpm --dir packages/query test:coverage` is red for unrelated pre-existing issues outside this slice: `@murphai/core` resolution in `test/wearables-canonical-records.test.ts` plus existing coverage-threshold failures in `src/browser-replica/query.ts` and `src/wearables/canonical-records.ts`.
+- `pnpm --dir packages/query test:coverage` was red for unrelated pre-existing issues outside this slice; canonical wearable coverage blockers cited by the earlier run were removed by the later wearable evidence cleanup.
 - `pnpm typecheck` is red for unrelated pre-existing `packages/device-syncd` typecheck failures.
 - `pnpm --dir packages/assistant-engine typecheck` is red for unrelated pre-existing `packages/vault-usecases/src/vault-services.ts` typing failures.
 - `pnpm exec vitest run test/knowledge-documents.test.ts --config vitest.config.ts --no-coverage` in `packages/assistant-engine` is blocked by an unrelated existing `packages/vault-usecases` export/config-resolution error.
