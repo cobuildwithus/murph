@@ -610,6 +610,115 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures hosted Codex action diagnostics without raw payloads", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_action_diagnostics",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_action_diagnostics",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-action-diagnostics.v1",
+          type: "assistant.codex.action_diagnostics",
+          codexActionCachedInputUnitMax: 1000,
+          codexActionCommandCount: 1,
+          codexActionCompletedCount: 2,
+          codexActionDurationMsMax: 123,
+          codexActionDurationMsTotal: 183,
+          codexActionDynamicToolCallCount: 1,
+          codexActionEventCount: 8,
+          codexActionFailedCount: 0,
+          codexActionFileChangeCount: 0,
+          codexActionFinalInputUnit: 81000,
+          codexActionFinalOutputUnit: 1200,
+          codexActionInputUnitMax: 81000,
+          codexActionKinds: ["dynamic.tool.call", "command.execution"],
+          codexActionLabels: [
+            "dynamic.tool.call",
+            "dynamic.vault.readSummary",
+            "command.execution",
+            "/tmp/raw-path",
+          ],
+          codexActionOutputBytesMax: 64,
+          codexActionOutputBytesTotal: 128,
+          codexActionOutputItemCount: 3,
+          codexActionOutputUnitMax: 1200,
+          codexActionProviderActionCount: 2,
+          codexActionSlowDurationMs: [123, 60],
+          codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
+          codexActionSlowLabels: [
+            "dynamic.tool.call",
+            "dynamic.vault.readSummary",
+            "command.execution",
+            "/tmp/raw-slow-path",
+          ],
+          codexActionThreadIdPresent: true,
+          codexActionTotalUnitMax: 82500,
+          codexActionUsageSampleCount: 1,
+          codexActionTurnIdPresent: true,
+          codexActionWebSearchCount: 0,
+          prompt: "raw prompt must not appear",
+          toolOutput: "raw tool output must not appear",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_codex_action_diagnostics",
+      level: "info",
+      message: "Hosted assistant Codex action diagnostics captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexActionCommandCount: 1,
+        codexActionDurationMsMax: 123,
+        codexActionDurationMsTotal: 183,
+        codexActionDynamicToolCallCount: 1,
+        codexActionFinalInputUnit: 81000,
+        codexActionInputUnitMax: 81000,
+        codexActionKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionProviderActionCount: 2,
+        codexActionSlowDurationMs: [123, 60],
+        codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionTraceType: "action-diagnostics",
+        providerTraceKind: "codex.action_diagnostics",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-action-diagnostics.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-slow-path");
+    expect(entry?.redacted).not.toHaveProperty("codexActionLabels");
+    expect(entry?.redacted).not.toHaveProperty("codexActionOutputBytesMax");
+    expect(entry?.redacted).not.toHaveProperty("codexActionOutputBytesTotal");
+    expect(entry?.redacted).not.toHaveProperty("codexActionSlowLabels");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("readSummary");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw tool output");
+  });
+
   it("accepts legacy hosted provider plan diagnostic keys", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_plan_legacy_keys",

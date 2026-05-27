@@ -34,6 +34,9 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
+  createCodexActionDiagnosticsReducer,
+} from './assistant-codex/action-diagnostics.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -399,6 +402,7 @@ async function runCodexAppServerTurn(
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
+  const actionDiagnostics = createCodexActionDiagnosticsReducer()
   const pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
@@ -645,6 +649,10 @@ async function runCodexAppServerTurn(
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
 
     const normalizedEvent = normalizeCodexEvent(message)
+    actionDiagnostics.recordEvent({
+      normalizedEvent,
+      rawEvent: message,
+    })
     const providerActionKey = extractCodexProviderActionKey(normalizedEvent)
     if (providerActionKey && !providerActionItemIds.has(providerActionKey)) {
       providerActionItemIds.add(providerActionKey)
@@ -694,6 +702,31 @@ async function runCodexAppServerTurn(
     }
 
     completeTurn?.()
+  }
+
+  const emitActionDiagnosticsTrace = () => {
+    if (!input.onTraceEvent) {
+      return
+    }
+
+    const rawEvent = actionDiagnostics.buildTraceEvent({
+      codexThreadId,
+      providerActionCount,
+      turnId,
+    })
+    if (!rawEvent) {
+      return
+    }
+
+    try {
+      input.onTraceEvent({
+        codexThreadId: null,
+        rawEvent,
+        updates: [],
+      })
+    } catch {
+      // Action diagnostics are metadata-only and must not block assistant turns.
+    }
   }
 
   const sendRequest = (method: string, params: Record<string, unknown>): Promise<unknown> => {
@@ -920,6 +953,7 @@ async function runCodexAppServerTurn(
     registerLiveTurn()
 
     await turnCompleted
+    emitActionDiagnosticsTrace()
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
     normalShutdown = true

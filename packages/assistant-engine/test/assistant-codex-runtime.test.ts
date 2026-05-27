@@ -32,6 +32,10 @@ import {
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
+  CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
+  CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
+} from '../src/assistant-codex/action-diagnostics.ts'
+import {
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnStartParams,
@@ -536,6 +540,187 @@ describe('assistant codex runtime', () => {
         updates: [],
       }),
     )
+  })
+
+  it('emits one metadata-only Codex action diagnostics trace after a turn', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-action-diagnostics-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-diagnostics',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-diagnostics',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                startedAtMs: 100,
+                item: {
+                  id: 'cmd-1',
+                  type: 'commandExecution',
+                  command: 'cat /tmp/raw-private-file',
+                  cwd: '/tmp/raw-private-cwd',
+                  status: 'running',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                completedAtMs: 160,
+                item: {
+                  id: 'cmd-1',
+                  type: 'commandExecution',
+                  command: 'cat /tmp/raw-private-file',
+                  cwd: '/tmp/raw-private-cwd',
+                  status: 'completed',
+                  exitCode: 0,
+                  aggregatedOutput: 'command raw output must not appear',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                completedAtMs: 300,
+                item: {
+                  id: 'dyn-1',
+                  type: 'dynamicToolCall',
+                  namespace: 'vault',
+                  tool: 'readSummary',
+                  status: 'completed',
+                  success: true,
+                  durationMs: 123,
+                  arguments: {
+                    secretPath: '/tmp/raw-argument',
+                  },
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: 'dynamic raw output must not appear',
+                    },
+                    {
+                      type: 'inputImage',
+                      imageUrl: 'data:image/png;base64,AAA',
+                    },
+                  ],
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'thread/tokenUsage/updated',
+              params: {
+                turnId: 'turn-diagnostics',
+                tokenUsage: {
+                  last: {
+                    cachedInputTokens: 1000,
+                    inputTokens: 81000,
+                    outputTokens: 1200,
+                    reasoningOutputTokens: 300,
+                    totalTokens: 82500,
+                  },
+                  total: {
+                    cachedInputTokens: 1000,
+                    inputTokens: 81000,
+                    outputTokens: 1200,
+                    reasoningOutputTokens: 300,
+                    totalTokens: 82500,
+                  },
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-diagnostics',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent,
+        prompt: 'diagnose usage',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      providerActionCount: 2,
+      sessionId: 'thread-diagnostics',
+    })
+
+    const diagnosticEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.schema === CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA
+      })
+    expect(diagnosticEvents).toHaveLength(1)
+    const diagnosticEvent = diagnosticEvents[0]
+    expect(diagnosticEvent).toBeTruthy()
+    expect(diagnosticEvent?.codexThreadId).toBeNull()
+    expect(diagnosticEvent?.rawEvent).toMatchObject({
+      schema: CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
+      type: CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
+      codexActionCommandCount: 1,
+      codexActionDynamicToolCallCount: 1,
+      codexActionInputUnitMax: 81000,
+      codexActionKinds: ['command.execution', 'dynamic.tool.call'],
+      codexActionProviderActionCount: 2,
+      codexActionSlowDurationMs: [123, 60],
+      codexActionSlowKinds: ['dynamic.tool.call', 'command.execution'],
+      codexActionUsageSampleCount: 1,
+    })
+    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesMax')
+    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesTotal')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('readSummary')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
   })
 
   it('ignores custom Codex executable selectors in hosted runtime processes', async () => {
