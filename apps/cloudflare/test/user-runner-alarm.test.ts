@@ -308,12 +308,16 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspaceRead = createDeferred<void>();
+    const workspaceReadTimeouts: number[] = [];
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => ({ kind: "ready" }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
-      onWorkspaceRead: async () => await workspaceRead.promise,
+      onWorkspaceRead: async (input) => {
+        workspaceReadTimeouts.push(input.timeoutMs);
+        await workspaceRead.promise;
+      },
       workspace: createWorkspaceState({ version: "5" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -339,6 +343,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(acceptedSettled).toBe(false);
+    expect(workspaceReadTimeouts).toEqual([9_000]);
 
     workspaceRead.resolve();
 
@@ -349,6 +354,161 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+  });
+
+  it("reuses cached runner stores when applying a caller command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceReadTimeouts: number[] = [];
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: (input) => {
+        workspaceReadTimeouts.push(input.timeoutMs);
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-1",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await flushWaitUntil();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toHaveLength(1);
+
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockClear();
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "test-orchestration-attempt-2",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await flushWaitUntil();
+
+    expect(workspaceReadTimeouts).toEqual([9_000, 4_000]);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toHaveLength(0);
+  });
+
+  it("caps fresh-start readiness with the caller command timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceReadTimeouts: number[] = [];
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: (input) => {
+        workspaceReadTimeouts.push(input.timeoutMs);
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(workspaceReadTimeouts).toEqual([4_000]);
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 4_000,
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+  });
+
+  it("does not let caller timeout metadata increase Cloudflare's configured cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceReadTimeouts: number[] = [];
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: (input) => {
+        workspaceReadTimeouts.push(input.timeoutMs);
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 120_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(workspaceReadTimeouts).toEqual([29_000]);
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 8_000,
+      userId: TEST_USER_ID,
+    });
+  });
+
+  it("returns retry_later when fresh-start preparation exhausts the caller command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      onWorkspaceRead: () => {
+        vi.setSystemTime(new Date("2026-04-27T00:00:09.500Z"));
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 10_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:19.500Z",
+    });
+
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "container_rpc_timeout",
+        }),
+      }),
+    );
   });
 
   it("does not invoke a prepared startup job after its write fence changes", async () => {
@@ -1316,7 +1476,7 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
-  onWorkspaceRead?: () => Promise<void> | void;
+  onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   workspace?: HostedWorkspaceState | null;
@@ -1511,7 +1671,7 @@ function createDurableObjectState(input: {
 function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
-    onWorkspaceRead?: () => Promise<void> | void;
+    onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
     readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
   } = {},
@@ -1520,9 +1680,10 @@ function installWebControlResponses(
     async (input: {
       boundUserId: string;
       path: string;
+      timeoutMs: number;
     }) => {
       if (input.path === HOSTED_RUNTIME_WORKSPACE_PATH) {
-        await hooks.onWorkspaceRead?.();
+        await hooks.onWorkspaceRead?.({ timeoutMs: input.timeoutMs });
         return jsonResponse({
           fetchedAt: FIXED_NOW,
           workspace,

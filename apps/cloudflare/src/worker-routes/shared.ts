@@ -32,7 +32,10 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
   ensureRuntimeProcessingForUser(
-    input: HostedRuntimeEnsureProcessingRequest & { userId: string },
+    input: HostedRuntimeEnsureProcessingRequest & {
+      commandTimeoutMs?: number;
+      userId: string;
+    },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;

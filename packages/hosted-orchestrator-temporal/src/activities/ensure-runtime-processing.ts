@@ -11,6 +11,9 @@ import type {
   HostedRuntimeDemandRunSource,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
   HOSTED_WORKSPACE_INVOCATION_REASONS,
   type HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
@@ -57,6 +60,10 @@ export async function ensureRuntimeProcessing(
         {
           body: JSON.stringify(cloudflareRequest),
           boundUserId: parsedRequest.userId,
+          headers: {
+            [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
+              String(cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs),
+          },
           label: "runtime ensure processing",
           method: "POST",
           parse: parseHostedRuntimeEnsureProcessingResponse,

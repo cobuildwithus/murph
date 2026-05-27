@@ -227,7 +227,11 @@ command returns `retry_later` instead of pretending success when Cloudflare
 cannot confirm start or wake acceptance. Fresh starts read the hosted workspace,
 bind the workspace version to the write fence, build runtime config/secrets, and
 construct the container job before returning accepted; failures in that
-pre-handoff path clear the fresh fence and return `retry_later`. Accepted
+pre-handoff path clear the fresh fence and return `retry_later`. The Temporal
+caller sends its existing ensure-processing HTTP timeout as an internal header.
+Cloudflare treats that value as an operational hint only: the foreground
+pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
+workspace read/readiness steps are capped by the remaining budget. Accepted
 background invocations are registered with the Durable Object lifetime.
 Accepted starts and wakes return an owner-watchdog recheck aligned to the
 expected idle checkpoint horizon or active write-fence expiry rather than a

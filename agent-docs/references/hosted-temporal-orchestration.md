@@ -371,7 +371,12 @@ Cloudflare must not:
 Activity timeouts must be config-derived. Demand reads use a short timeout.
 `ensure-processing` uses a short command-acknowledgement budget because the
 response is only `runtime_processing_accepted` or `retry_later`, not runtime
-completion.
+completion. The foreground Cloudflare pre-accept budget must fit under the
+existing Temporal HTTP timeout:
+`pre_accept_budget + response_margin <= HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`.
+Cloudflare uses its existing web-control/readiness timeout values as per-step
+caps inside that budget and never lets unsigned timeout metadata increase the
+configured Cloudflare wait.
 
 ## Runtime Status And Completion
 
