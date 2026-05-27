@@ -21,7 +21,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 ## Core model
 
 - every inbound source normalizes into a single `InboundCapture` envelope
-- canonical source envelope and attachment evidence is persisted under `raw/inbox/<source>/...`; eligible still-image attachment bytes are normalized before storage
+- canonical source envelope and attachment evidence is persisted under `raw/inbox/<source>/...`; image attachment bytes are normalized to bounded static WebP before storage or left unstored
 - append-only `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` records the authoritative structured inbox-capture trail, with bounded text projection for list/search surfaces while the raw envelope can retain longer normalized message text
 - assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection
 - inbox intake and runtime rebuild rely on canonical inbox-capture ledger evidence, but they will backfill a missing inbox-capture record from a deterministic current-format raw envelope only when an unresolved `inbox_capture_persist` write operation shows raw writes completed before the ledger append
