@@ -79,6 +79,11 @@ export interface HostedMailboxImportLoopBlockedItem {
   seq: string | null;
 }
 
+export interface HostedMailboxConversationDeferral {
+  ready(): boolean;
+  reasonCode: string;
+}
+
 export interface HostedMailboxPrefixPrefetch {
   importedSeqByLane: Record<HostedMailboxLane, string>;
   lanes: readonly HostedMailboxLane[];
@@ -137,6 +142,7 @@ export function prefetchHostedMailboxPrefix(input: {
 }
 
 export async function fetchAndProcessHostedMailboxPrefix(input: {
+  deferConversationUntil?: HostedMailboxConversationDeferral | null;
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
   lanes?: readonly HostedMailboxLane[];
@@ -172,6 +178,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const expectedSeqByLane = Object.fromEntries(
     lanes.map((lane) => [lane, BigInt(nextState.watermarks[lane]) + 1n]),
   ) as Record<HostedMailboxLane, bigint>;
+  const systemLaneFetched = itemsByLane.system.length > 0;
 
   for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
     if (stoppedLanes.has(lane)) {
@@ -187,6 +194,28 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         itemId: item.id,
         lane,
         reasonCode: "lane.gap",
+        retryable: true,
+        seq: item.laneSeq,
+      });
+      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      stoppedLanes.add(lane);
+      continue;
+    }
+
+    if (
+      lane === "conversation"
+      && (systemLaneFetched || hasHostedMailboxSidecarPayload(item))
+      && input.deferConversationUntil
+      && !input.deferConversationUntil.ready()
+    ) {
+      const reasonCode = normalizeReasonCode(
+        input.deferConversationUntil.reasonCode,
+        "conversation.deferred",
+      );
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode,
         retryable: true,
         seq: item.laneSeq,
       });
@@ -365,6 +394,10 @@ async function fetchHostedMailboxPrefix(input: {
   }
 
   return await fetchHostedMailboxPrefixFromPort(input);
+}
+
+function hasHostedMailboxSidecarPayload(item: HostedMailboxItem): boolean {
+  return typeof item.payloadRef === "string" && item.payloadRef.trim().length > 0;
 }
 
 async function fetchHostedMailboxPrefixFromPort(input: {
