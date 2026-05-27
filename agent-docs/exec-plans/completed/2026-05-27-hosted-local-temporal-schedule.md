@@ -87,7 +87,7 @@ append the durable `device-sync.wake` mailbox pointer.
 - Device-sync wake coverage now characterizes the observed failure mode: when
   the first dirty wake is missed, later level webhooks coalesce behind the
   pending dirty row and wait for recovery sweep.
-- In progress: webhook acceptance now appends the dirty wake mailbox pointer
+- Webhook acceptance now appends the dirty wake mailbox pointer
   before trace completion, shares the same dirty-revision dedupe identity with
   the recovery sweep, and signals the normal mailbox wake path after commit.
 - Production startup still chains Schedule ensure before the production worker
