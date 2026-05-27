@@ -166,7 +166,7 @@ Murph now has three distinct runtime tiers:
 
 - `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runtime passes, keeps only DO-local runner coordination state, and invokes the workspace-private `@murphai/assistant-runtime` package against web-owned mailbox/checkpoint/log ports
 - `packages/hosted-orchestrator-temporal` runs the per-user Temporal workflow worker that reads web-owned demand, calls Cloudflare `ensure-processing`, and stores only pointer-level orchestration state
-- Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns start, wake, watchdog, and cleanup for the active runner; legacy ensure-execution is compatibility only
+- Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns start, wake, watchdog, and cleanup for the active runner through `ensure-processing`
 - the hosted execution plane is intentionally separate from the public hosted web app
 
 ## CLI surface
