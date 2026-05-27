@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { appendHostedDeviceSyncDirtyWake } from "./wake-service";
+import {
+  appendHostedDeviceSyncDirtyWake,
+  buildHostedDeviceSyncDirtyWakeDedupeKey,
+} from "./wake-service";
 
 const DEFAULT_WAKE_LIMIT = 25;
 const DEFAULT_STALE_AFTER_MS = 30_000;
@@ -77,9 +80,10 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
       try {
         wake = await appendDirtyWake({
           connectionId: dirtyConnection.connectionId,
-          dedupeKey: buildHostedDeviceSyncDirtySweepDedupeKey({
+          dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
             connectionId: dirtyConnection.connectionId,
             dirtyRevision: dirtyConnection.dirtyRevision,
+            provider: dirtyConnection.provider,
           }),
           eventType: dirtyConnection.latestEventType,
           occurredAt: dirtyConnection.latestDirtyAt,
@@ -146,19 +150,6 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
     wakeLimit,
     wakeNotAppended,
   };
-}
-
-function buildHostedDeviceSyncDirtySweepDedupeKey(input: {
-  connectionId: string;
-  dirtyRevision: bigint;
-}): string {
-  return [
-    "dirty-revision",
-    input.dirtyRevision.toString(),
-    "connection",
-    fingerprintHostedDeviceSyncDirtyValue(input.connectionId),
-    "sweep",
-  ].join(":");
 }
 
 function normalizeLimit(value: number | null | undefined, fallback: number, max: number): number {

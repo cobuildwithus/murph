@@ -416,13 +416,13 @@ test("processCapture stores in-memory attachment bytes without an external sourc
       isSelf: false,
     },
     occurredAt: "2026-03-13T08:30:00.000Z",
-    text: "Photo from Telegram",
+    text: "File from Telegram",
     attachments: [
       {
-        externalId: "photo-1",
-        kind: "image",
-        mime: "image/jpeg",
-        fileName: "telegram-photo.jpg",
+        externalId: "file-1",
+        kind: "document",
+        mime: "application/octet-stream",
+        fileName: "telegram-file.bin",
         data: new Uint8Array([7, 8, 9]),
       },
     ],
@@ -535,7 +535,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   const sourceRoot = await makeTempDirectory("murph-inbox-search-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "toast.jpg", "image");
+  const attachmentPath = await writeExternalFile(sourceRoot, "toast.txt", "document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -552,9 +552,10 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
     text: "Toast with avocado",
     attachments: [
       {
-        kind: "image",
-        originalPath: imagePath,
-        fileName: "toast-photo.jpg",
+        kind: "document",
+        mime: "text/plain",
+        originalPath: attachmentPath,
+        fileName: "toast-note.txt",
       },
     ],
     raw: {},
@@ -592,7 +593,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   const rebuilt = rebuiltRuntime.getCapture(capture.captureId);
   assert.ok(rebuilt);
   assert.equal(rebuilt.text, "Toast with avocado");
-  assert.equal(rebuilt.attachments[0]?.fileName, "toast-photo.jpg");
+  assert.equal(rebuilt.attachments[0]?.fileName, "toast-note.txt");
   assert.equal(rebuiltRuntime.listAttachmentParseJobs({ limit: 10 }).length, 1);
   assert.equal(
     rebuilt.attachments[0]?.attachmentId,

@@ -21,9 +21,10 @@ The live ownership split is:
   same Temporal workflow.
   Device-sync webhook freshness is different: web records per-webhook
   trace/audit facts, upserts per-connection dirty resources/revisions,
-  completes trace acceptance in the same transaction, and sends a best-effort
-  background-maintenance signal for clean-to-dirty transitions. Bounded
-  dirty-sweeper recovery may still append opaque wake pointers.
+  appends one opaque `device-sync.wake` pointer for the dirty revision, and
+  completes trace acceptance in the same transaction. The post-commit Temporal
+  signal is only a best-effort wake hint. Bounded dirty-sweeper recovery uses
+  the same dirty-revision mailbox identity when a signal is missed.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -207,16 +208,13 @@ there is no active Vercel producer for them.
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty
-resource/window map, completes the trace in the same transaction, and sends a
-best-effort `device_sync_recovery_requested` signal only when the dirty row
-transitions from clean to dirty. That signal is a wake hint; it must not carry
-provider payloads or become the device-sync queue. Temporal preserves the
-`device_sync_recovery` source through ensure-processing so the runner treats the
-invocation as background dirty work; the assistant runtime runs device sync only
-when no fresh conversation input is pending, and reschedules a short
-`device-sync.reconcile` wake if foreground work preempts that background pass.
-If an older Cloudflare deployment rejects that optional source field, Temporal
-keeps the recovery demand pending instead of consuming it as a source-less run.
+resource/window map, appends one opaque `device-sync.wake` pointer for the dirty
+revision, and completes the trace in the same transaction. That mailbox pointer
+is durable demand; the post-commit Temporal signal is only a wake hint and must
+not carry provider payloads or become the device-sync queue. The assistant
+runtime runs system-lane device sync only when no fresh conversation input is
+pending, and reschedules a short `device-sync.reconcile` wake if foreground work
+preempts that background pass.
 The dirty/due recovery sweep is the bounded recovery backstop for dirty rows
 that remain pending after a missed, denied, or insufficient wake, and for active
 connections whose canonical `nextReconcileAt` is due. Temporal owns the cadence

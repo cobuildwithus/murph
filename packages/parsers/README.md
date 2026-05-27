@@ -14,7 +14,7 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
 
 ## Design rules
 
-- original raw evidence stays under `raw/inbox/...`
+- canonical attachment evidence stays under `raw/inbox/...`
 - parse outputs are derived files, never canonical vault state
 - provider discovery stays explicit and local-first
 - adapters remain thin wrappers around mature open-source tools
@@ -27,7 +27,7 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
   `createParsedInboxPipeline(...)` processes a capture and immediately drains any newly enqueued attachment jobs
   `runInboxDaemonWithParsers(...)` backfills parser jobs on startup and keeps future captures auto-drained
 
-This keeps parsing additive to `@murphai/inboxd`: raw inbox evidence remains canonical, while parser outputs stay rebuildable under `derived/inbox/**`.
+This keeps parsing additive to `@murphai/inboxd`: canonical inbox evidence remains under inbox ownership, while parser outputs stay rebuildable under `derived/inbox/**`.
 
 ## Toolchain config and discovery
 

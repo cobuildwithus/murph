@@ -1531,10 +1531,29 @@ async function handleRuntimePrewarmRoute(
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId);
-  return json(await stub.prewarmRuntimeContainerForUser({
-    ...prewarmRequest,
-    userId,
-  }));
+  try {
+    return json(await stub.prewarmRuntimeContainerForUser({
+      ...prewarmRequest,
+      userId,
+    }));
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-prewarm-rpc-failed",
+        routeName: "runtime-prewarm",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker runtime prewarm route failed best-effort.",
+      phase: "runtime.prewarm",
+      userId,
+    });
+    return json({
+      kind: "retry_later",
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    } satisfies HostedRuntimePrewarmResponse);
+  }
 }
 
 function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

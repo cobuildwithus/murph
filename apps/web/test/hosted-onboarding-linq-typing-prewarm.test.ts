@@ -136,17 +136,43 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledTimes(1);
     expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
   });
+
+  it("ignores non-iMessage typing services before active route lookup", async () => {
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({
+        eventId: "evt_typing_sms",
+        service: "SMS",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-unsupported-service",
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
+    expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
+  });
 });
 
 function buildTypingWebhookBody(input: {
   eventId?: string;
+  service?: string;
 } = {}): string {
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-05-20T12:00:00.000Z",
     data: {
       chat_id: "chat_typing_123",
-      service: "iMessage",
+      service: input.service ?? "iMessage",
     },
     event_id: input.eventId ?? "evt_typing_123",
     event_type: "chat.typing_indicator.started",

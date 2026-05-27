@@ -220,6 +220,19 @@ async function handleHostedLinqTypingPrewarm(input: {
     },
   );
 
+  if (!isHostedLinqTypingPrewarmServiceSupported(typingEvent.data.service)) {
+    finishHostedOnboardingTiming(timing, "ignored-unsupported-service", {
+      decision: "ignored-unsupported-service",
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      scopeHashPresent: true,
+    });
+    return {
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-unsupported-service",
+    };
+  }
+
   const routing = await lookupHostedMemberRoutingByHomeLinqChatId({
     linqChatId: typingEvent.data.chat_id,
     prisma: input.prisma,
@@ -313,6 +326,16 @@ function shouldSignalHostedLinqTypingPrewarm(userId: string): boolean {
 
   hostedLinqTypingPrewarmLastSignalByUser.set(userId, now);
   return true;
+}
+
+function isHostedLinqTypingPrewarmServiceSupported(
+  service: string | null | undefined,
+): boolean {
+  if (typeof service !== "string" || service.trim().length === 0) {
+    return true;
+  }
+
+  return service.trim().toLowerCase() === "imessage";
 }
 
 function buildHostedLinqTypingPrewarmScopeHash(chatId: string): string {
