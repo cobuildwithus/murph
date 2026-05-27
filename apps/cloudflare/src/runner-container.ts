@@ -49,6 +49,7 @@ const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
+const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
@@ -2051,6 +2052,8 @@ async function watchWorkspaceRequestContainerStop(input: {
   userId: string;
 }): Promise<never> {
   const observedStatuses: string[] = [];
+  let stoppedFirstObservedAt: number | null = null;
+  let stoppedStatus: string | null = null;
   let statusReadFailureLogged = false;
   while (!input.signal.aborted && !input.operationAbortController.signal.aborted) {
     await sleep(RUNNER_WAIT_INTERVAL_MS);
@@ -2077,18 +2080,30 @@ async function watchWorkspaceRequestContainerStop(input: {
     }
 
     appendObservedRunnerContainerStatus(observedStatuses, status);
-    if (!isRunnerContainerStopped(status)) {
+    const stopped = isRunnerContainerStopped(status);
+    if (!stopped) {
+      stoppedFirstObservedAt = null;
+      stoppedStatus = null;
       continue;
     }
 
-    const error = new Error(`workspace invocation container stopped during active work (${status})`);
+    const now = Date.now();
+    stoppedFirstObservedAt ??= now;
+    stoppedStatus ??= status;
+    if ((now - stoppedFirstObservedAt) < RUNNER_STOPPED_REQUEST_SETTLE_MS) {
+      continue;
+    }
+
+    const error = new Error(`workspace invocation container stopped during active work (${stoppedStatus})`);
     input.operationAbortController.abort(error);
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
         lifecycleStage: "active-request-status-watch",
         observedStatuses,
-        statusAfterStop: status,
+        statusAfterStop: stoppedStatus,
+        stoppedSettleMs: now - stoppedFirstObservedAt,
+        stoppedSettleThresholdMs: RUNNER_STOPPED_REQUEST_SETTLE_MS,
       },
       error,
       level: "warn",
