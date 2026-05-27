@@ -728,6 +728,8 @@ async function signalHostedDeviceSyncDirtyBackgroundMaintenanceBestEffort(input:
   traceId: string | null;
   userId: string;
 }): Promise<void> {
+  const traceIdPresent = input.traceId !== null;
+  const userIdPresent = input.userId.length > 0;
   try {
     await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
       userId: input.userId,
@@ -739,8 +741,8 @@ async function signalHostedDeviceSyncDirtyBackgroundMaintenanceBestEffort(input:
           ? error.code
           : "HOSTED_DEVICE_SYNC_BACKGROUND_MAINTENANCE_SIGNAL_FAILED",
       ),
-      traceIdPresent: input.traceId !== null,
-      userIdPresent: input.userId.length > 0,
+      traceIdPresent,
+      userIdPresent,
     });
   }
 }
