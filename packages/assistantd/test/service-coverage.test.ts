@@ -1,15 +1,9 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
-const gatewayAdapters = vi.hoisted(() => ({
-  messageSender: { kind: 'message-sender' },
-  sourceReader: { kind: 'source-reader' },
-}))
-
 const mocks = vi.hoisted(() => ({
   createIntegratedInboxServices: vi.fn(() => ({ kind: 'inbox-services' })),
   createIntegratedVaultServices: vi.fn(() => ({ kind: 'vault-services' })),
-  createLocalGatewayService: vi.fn(() => ({ kind: 'gateway-service' })),
   drainAssistantOutbox: vi.fn(async (input) => ({ input, ok: 'drain' })),
   getAssistantCronJob: vi.fn(async (vault, job) => ({ job, vault })),
   getAssistantCronJobTarget: vi.fn(async (vault, job) => ({ job, vault })),
@@ -80,15 +74,6 @@ vi.mock('@murphai/vault-usecases/vault-services', () => ({
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
 }))
 
-vi.mock('@murphai/gateway-local', () => ({
-  createLocalGatewayService: mocks.createLocalGatewayService,
-}))
-
-vi.mock('@murphai/assistant-engine/gateway-local-adapter', () => ({
-  assistantGatewayLocalMessageSender: gatewayAdapters.messageSender,
-  assistantGatewayLocalProjectionSourceReader: gatewayAdapters.sourceReader,
-}))
-
 import {
   createAssistantLocalService,
   type AssistantLocalService,
@@ -117,16 +102,6 @@ test('createAssistantLocalService wires the local integrations and forwards assi
   assert.equal(process.env[ASSISTANTD_DISABLE_CLIENT_ENV], '1')
   assert.deepEqual(mocks.createIntegratedInboxServices.mock.calls, [[]])
   assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [])
-  assert.deepEqual(mocks.createLocalGatewayService.mock.calls, [
-    [
-      TEST_VAULT_ROOT,
-      {
-        messageSender: gatewayAdapters.messageSender,
-        sourceReader: gatewayAdapters.sourceReader,
-      },
-    ],
-  ])
-  assert.deepEqual(service.gateway, { kind: 'gateway-service' })
   assert.equal(service.vault, TEST_VAULT_ROOT)
   const health = await service.health()
   assert.equal(health.ok, true)

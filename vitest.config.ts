@@ -7,7 +7,6 @@ import contractsProject from "./packages/contracts/vitest.config.ts";
 import coreProject from "./packages/core/vitest.config.ts";
 import deviceSyncdProject from "./packages/device-syncd/vitest.config.ts";
 import gatewayCoreProject from "./packages/gateway-core/vitest.config.ts";
-import gatewayLocalProject from "./packages/gateway-local/vitest.config.ts";
 import healthMetricsProject from "./packages/health-metrics/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
 import hostedOrchestratorTemporalProject from "./packages/hosted-orchestrator-temporal/vitest.config.ts";
@@ -87,11 +86,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: gatewayCoreProject,
     root: "packages/gateway-core",
-    include: ["test/**/*.test.ts"],
-  },
-  {
-    config: gatewayLocalProject,
-    root: "packages/gateway-local",
     include: ["test/**/*.test.ts"],
   },
   {

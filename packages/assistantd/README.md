@@ -63,22 +63,4 @@ All routes are loopback control-plane routes, require `Authorization: Bearer <to
 - `POST /cron/process-due`
 - `POST /cron/jobs/:job/target`
 
-## Gateway routes
-
-assistantd now also serves the local derived gateway plane over loopback-only authenticated HTTP:
-
-- `POST /gateway/conversations/list`
-- `POST /gateway/conversations/get`
-- `POST /gateway/messages/read`
-- `POST /gateway/messages/send`
-- `POST /gateway/attachments/fetch`
-- `POST /gateway/events/poll`
-- `POST /gateway/events/wait`
-- `POST /gateway/permissions/list-open`
-- `POST /gateway/permissions/respond`
-
-These routes serve the operational conversation/message gateway surface for local MCP or other transport adapters without turning assistantd into a second canonical write owner.
-
-Local gateway helpers now honor the same assistantd base-url/token environment variables as the assistant client path, so consumers can route steady-state gateway reads/sends through the daemon whenever it is configured. The transport-neutral gateway contracts stay in `@murphai/gateway-core`; the vault-backed local runtime now lives in `@murphai/gateway-local`.
-
-The workspace-private `@murphai/assistantd/client` subpath now owns that loopback client config plus the gateway daemon client helpers. CLI-only assistant routing helpers may still wrap it where they need package-local assistant contracts, but the daemon transport substrate itself no longer lives in `packages/cli`.
+The daemon no longer exposes local gateway routes. Headless hosted gateway contracts stay in `@murphai/gateway-core`, while assistantd stays focused on local assistant control.

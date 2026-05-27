@@ -5,32 +5,7 @@ import {
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
 } from '@murphai/assistant-engine'
-import {
-  GATEWAY_SESSION_NOT_FOUND_CODE,
-  GATEWAY_UNSUPPORTED_OPERATION_CODE,
-  gatewayFetchAttachmentsInputSchema,
-  gatewayGetConversationInputSchema,
-  gatewayListConversationsInputSchema,
-  gatewayListOpenPermissionsInputSchema,
-  gatewayPollEventsInputSchema,
-  gatewayReadMessagesInputSchema,
-  gatewayRespondToPermissionInputSchema,
-  gatewaySendMessageInputSchema,
-  gatewayWaitForEventsInputSchema,
-  type GatewayFetchAttachmentsInput,
-  type GatewayGetConversationInput,
-  type GatewayListConversationsInput,
-  type GatewayListOpenPermissionsInput,
-  type GatewayPollEventsInput,
-  type GatewayReadMessagesInput,
-  type GatewayRespondToPermissionInput,
-  type GatewaySendMessageInput,
-  type GatewayWaitForEventsInput,
-} from '@murphai/gateway-core'
-import {
-  ASSISTANTD_VAULT_MISMATCH_CODE,
-  createAssistantdVaultMismatchError,
-} from './errors.js'
+import { ASSISTANTD_VAULT_MISMATCH_CODE } from './errors.js'
 import type { AssistantLocalService } from './service.js'
 
 const assistantConversationDirectnessValues = new Set([
@@ -63,10 +38,6 @@ type AssistantOutboxDrainRequest = Parameters<AssistantLocalService['drainOutbox
 type AssistantAutomationRunRequest = Parameters<AssistantLocalService['runAutomationOnce']>[0]
 type AssistantCronProcessRequest = Parameters<AssistantLocalService['processDueCron']>[0]
 type AssistantCronTargetSetRequest = Parameters<AssistantLocalService['setCronTarget']>[0]
-export interface AssistantGatewayRequest<TInput extends object> {
-  gatewayInput: TInput
-  vault?: string | null
-}
 
 function parseOpenConversationRequestBody(payload: unknown): AssistantOpenConversationRequest {
   const record = asAssistantRequestRecord(payload, 'open-conversation')
@@ -145,20 +116,6 @@ function parseAssistantVaultQuery(url: URL): AssistantSessionListRequest {
   }
 }
 
-function assertAssistantBoundVault(
-  requestedVault: string | null | undefined,
-  configuredVault: string,
-): void {
-  if (!requestedVault || requestedVault === configuredVault) {
-    return
-  }
-
-  throw createAssistantdVaultMismatchError({
-    configuredVault,
-    requestedVault,
-  })
-}
-
 function parseAssistantSessionRoute(url: URL): AssistantSessionLookupRequest {
   return {
     sessionId: parseRequiredOpaqueRouteSegment(
@@ -177,122 +134,6 @@ function parseAssistantOutboxDrainRequestBody(payload: unknown): AssistantOutbox
     limit: readOptionalIntegerField(record, 'limit', 'outbox/drain'),
     now: readOptionalNullableStringField(record, 'now', 'outbox/drain'),
     vault: readOptionalNullableStringField(record, 'vault', 'outbox/drain'),
-  }
-}
-
-function parseGatewayListConversationsRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayListConversationsInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayListConversationsInputSchema,
-    'gateway/conversations/list',
-  )
-}
-
-function parseGatewayGetConversationRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayGetConversationInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayGetConversationInputSchema,
-    'gateway/conversations/get',
-  )
-}
-
-function parseGatewayReadMessagesRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayReadMessagesInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayReadMessagesInputSchema,
-    'gateway/messages/read',
-  )
-}
-
-function parseGatewayFetchAttachmentsRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayFetchAttachmentsInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayFetchAttachmentsInputSchema,
-    'gateway/attachments/fetch',
-  )
-}
-
-function parseGatewaySendMessageRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewaySendMessageInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewaySendMessageInputSchema,
-    'gateway/messages/send',
-  )
-}
-
-function parseGatewayPollEventsRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayPollEventsInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayPollEventsInputSchema,
-    'gateway/events/poll',
-  )
-}
-
-function parseGatewayWaitForEventsRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayWaitForEventsInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayWaitForEventsInputSchema,
-    'gateway/events/wait',
-  )
-}
-
-function parseGatewayListOpenPermissionsRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayListOpenPermissionsInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayListOpenPermissionsInputSchema,
-    'gateway/permissions/list-open',
-  )
-}
-
-function parseGatewayRespondToPermissionRequestBody(
-  payload: unknown,
-): AssistantGatewayRequest<GatewayRespondToPermissionInput> {
-  return parseAssistantGatewayRequestBody(
-    payload,
-    gatewayRespondToPermissionInputSchema,
-    'gateway/permissions/respond',
-  )
-}
-
-function parseAssistantGatewayRequestBody<TInput extends object>(
-  payload: unknown,
-  schema: { parse(input: unknown): TInput },
-  context: string,
-): AssistantGatewayRequest<TInput> {
-  const record = asAssistantRequestRecord(payload, context)
-  const vault = readOptionalNullableStringField(record, 'vault', context)
-  const gatewayRecord = { ...record }
-  delete gatewayRecord.vault
-
-  try {
-    const gatewayInput = schema.parse(gatewayRecord)
-    return {
-      gatewayInput,
-      ...(vault === undefined ? {} : { vault }),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : `Assistant ${context} request was invalid.`,
-      400,
-    )
   }
 }
 
@@ -857,15 +698,13 @@ function resolveAssistantHttpErrorStatus(error: unknown): number {
   if (
     code === ASSISTANTD_VAULT_MISMATCH_CODE ||
     code === 'ASSISTANT_INVALID_RUNTIME_ID' ||
-    code === 'ASSISTANT_STATE_INVALID_DOC_ID' ||
-    code === GATEWAY_UNSUPPORTED_OPERATION_CODE
+    code === 'ASSISTANT_STATE_INVALID_DOC_ID'
   ) {
     return 400
   }
   if (
     code === 'ASSISTANT_SESSION_NOT_FOUND' ||
-    code === 'ASSISTANT_CRON_JOB_NOT_FOUND' ||
-    code === GATEWAY_SESSION_NOT_FOUND_CODE
+    code === 'ASSISTANT_CRON_JOB_NOT_FOUND'
   ) {
     return 404
   }
@@ -918,7 +757,6 @@ class AssistantHttpRequestError extends Error {
 
 export {
   AssistantHttpRequestError,
-  assertAssistantBoundVault,
   buildAssistantHttpErrorPayload,
   parseAssistantAutomationRunRequestBody,
   parseAssistantCronJobRoute,
@@ -933,15 +771,6 @@ export {
   parseAssistantSessionRoute,
   parseAssistantStatusQuery,
   parseAssistantVaultQuery,
-  parseGatewayFetchAttachmentsRequestBody,
-  parseGatewayGetConversationRequestBody,
-  parseGatewayListConversationsRequestBody,
-  parseGatewayListOpenPermissionsRequestBody,
-  parseGatewayPollEventsRequestBody,
-  parseGatewayReadMessagesRequestBody,
-  parseGatewayRespondToPermissionRequestBody,
-  parseGatewaySendMessageRequestBody,
-  parseGatewayWaitForEventsRequestBody,
   parseOpenConversationRequestBody,
   resolveAssistantHttpErrorStatus,
 }

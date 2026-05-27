@@ -30,7 +30,6 @@ import {
 } from "../src/local-state-files.ts";
 import {
   resolveDeviceSyncRuntimePaths,
-  resolveGatewayRuntimePaths,
   resolveInboxRuntimePaths,
   resolveParserRuntimePaths,
   resolveRuntimePaths,
@@ -290,10 +289,6 @@ describe("runtime-state taxonomy and runtime paths", () => {
     assert.equal(
       resolveDeviceSyncRuntimePaths("vault").deviceSyncDbPath,
       path.join(path.resolve("vault"), ".runtime", "operations", "device-sync", "state.sqlite"),
-    );
-    assert.equal(
-      resolveGatewayRuntimePaths("vault").gatewayDbPath,
-      path.join(path.resolve("vault"), ".runtime", "projections", "gateway.sqlite"),
     );
     assert.equal(
       resolveParserRuntimePaths("vault").parserToolchainConfigPath,

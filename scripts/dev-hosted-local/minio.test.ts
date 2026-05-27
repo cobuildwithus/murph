@@ -124,6 +124,12 @@ describe("hosted-local MinIO sidecar", () => {
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
     expect(dockerArgs).toContain("MINIO_REGION_NAME");
     expect(dockerArgs).toContain("minio/minio:RELEASE.2025-09-07T16-13-09Z");
+    if (typeof process.getuid === "function" && typeof process.getgid === "function") {
+      expect(dockerArgs).toEqual(expect.arrayContaining([
+        "--user",
+        `${process.getuid()}:${process.getgid()}`,
+      ]));
+    }
     expect(runtimeMocks.spawnChildProcess.mock.calls[0]?.[3]).toEqual(expect.objectContaining({
       MINIO_REGION_NAME: "auto",
     }));

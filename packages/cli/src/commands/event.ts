@@ -566,6 +566,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           tag: options.tag,
         })),
         metric: options.metric,
+        queryVisibility: 'default',
         value: options.value,
         unit: options.unit,
       }

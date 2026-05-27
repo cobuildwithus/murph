@@ -20,12 +20,6 @@
       "path": "../vault-usecases"
     },
     {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../gateway-local"
-    },
-    {
       "path": "../runtime-state"
     }
   ],
