@@ -215,6 +215,36 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("accepts legacy prewarm scope hashes without retaining them", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(idleDemand(null));
+    runtime.prewarms.push({
+      action: "started",
+      kind: "runtime_prewarm_accepted",
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal({
+      ...runtimePrewarmSignal(),
+      scopeHash: "linq-chat:legacy-scope",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.prewarmRequests).toEqual([
+      {
+        prewarmAttemptId: "orchestration-attempt-1",
+        source: "linq.imessage.typing",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.invalidSignalCount).toBe(0);
+    expect(continued.state).not.toHaveProperty("scopeHash");
+  });
+
   it("does not let pending prewarm block a later mailbox demand signal", async () => {
     const runtime = new FakeWorkflowRuntime();
     let machine: HostedUserRuntimeWorkflowMachine | null = null;

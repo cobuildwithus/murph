@@ -79,7 +79,7 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma: {} as never,
-      rawBody: buildTypingWebhookBody(),
+      rawBody: buildTypingWebhookBody({ service: " imessage " }),
       signature: null,
       timestamp: null,
     });
@@ -96,7 +96,6 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledWith({
       eventId: "evt_typing_123",
       occurredAt: "2026-05-20T12:00:00.000Z",
-      scopeHash: expect.stringMatching(/^linq-chat:[a-f0-9]{32}$/u),
       source: "linq.imessage.typing",
       userId: "member_typing",
     });
@@ -136,17 +135,75 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledTimes(1);
     expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
   });
+
+  it("ignores non-iMessage typing without resolving routes or signaling", async () => {
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({ service: "SMS" }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-non-imessage",
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
+  });
+
+  it("does not throttle the next typing signal after a Temporal signal failure", async () => {
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
+      core: {
+        billingStatus: "active",
+        id: "member_typing_retry",
+        suspendedAt: null,
+      },
+    });
+    mocks.signalHostedRuntimePrewarm
+      .mockRejectedValueOnce(new Error("Temporal unavailable"))
+      .mockResolvedValueOnce({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_typing_retry",
+      });
+
+    const failedResponse = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({ eventId: "evt_typing_failed" }),
+      signature: null,
+      timestamp: null,
+    });
+    const retryResponse = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({ eventId: "evt_typing_retry" }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(failedResponse.reason).toBe("typing-prewarm-temporal-signal-failed");
+    expect(retryResponse.reason).toBe("typing-prewarm-signaled");
+    expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledTimes(2);
+  });
 });
 
 function buildTypingWebhookBody(input: {
   eventId?: string;
+  service?: string;
 } = {}): string {
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-05-20T12:00:00.000Z",
     data: {
       chat_id: "chat_typing_123",
-      service: "iMessage",
+      service: input.service ?? "iMessage",
     },
     event_id: input.eventId ?? "evt_typing_123",
     event_type: "chat.typing_indicator.started",

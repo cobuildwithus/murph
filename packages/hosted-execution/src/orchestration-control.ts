@@ -66,7 +66,6 @@ export type HostedRuntimeSignal =
       eventId: string;
       kind: "runtime_prewarm_requested";
       occurredAt: string;
-      scopeHash?: string | null;
       source: HostedRuntimePrewarmSource;
     };
 

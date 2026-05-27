@@ -208,6 +208,10 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 5_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
 

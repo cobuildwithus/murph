@@ -1,6 +1,6 @@
 # Linq typing container prewarm
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -65,6 +65,9 @@ Updated: 2026-05-27
 - Use the existing per-user Temporal workflow with a new `runtime_prewarm_requested` signal kind, but keep the prewarm execution path non-blocking relative to later demand signals.
 - Keep typing outside mailbox and `readRuntimeDemand`.
 - Cloudflare prewarm route may only warm or observe the container shell; it must not call `ensureRuntimeProcessingForUser`.
+- Keep prewarm payloads source-only: no channel route, no raw chat id, and no raw-hash chat scope in Temporal history.
+- Use the shared `HOSTED_RUNTIME_PREWARM_TIMEOUT_MS` for the HTTP and Cloudflare readiness budget, with a pinned Temporal workflow Activity timeout that leaves response slack and must only change with replay proof.
+- Keep prewarm strictly subordinate to real runtime work: no Activity retry after abandon, no fresh lifecycle-lock budget after queueing, and no slow cleanup wait while holding the prewarm lock.
 
 ## Verification
 
@@ -74,3 +77,14 @@ Updated: 2026-05-27
   - Broader diff/app verification as practical after inspecting overlap.
 - Expected outcomes:
   - Tests prove typing prewarm does not append mailbox, send read receipts, bind routes, start ensure-processing, or block a later mailbox send while prewarm is pending/in flight.
+- Current focused results:
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-typing-prewarm.test.ts apps/web/test/hosted-orchestration-signal-runtime.test.ts` passed.
+  - `pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts --no-coverage test/hosted-orchestration-control.test.ts` passed.
+  - `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/ensure-runtime-processing.test.ts test/hosted-user-runtime-workflow.test.ts` passed.
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/index.test.ts` passed.
+  - `pnpm typecheck` passed after replay-tolerance update.
+  - `bash scripts/workspace-verify.sh test:diff ...` passed after replay-tolerance update, including Cloudflare verify and web verify.
+  - Stale coverage-worker reports for scopeHash rejection and prewarm 5000ms timeout were rechecked in the parent worktree; both focused commands passed.
+  - Final 5-agent audit drove fixes for single-attempt abandoned prewarm, workflow timeout slack, shared iMessage service normalization, queued-prewarm deadline handling, and no slow cleanup wait under the prewarm lifecycle lock.
+  - Final focused reruns passed for Cloudflare runner/user-runner, Temporal workflow/entrypoint, hosted-execution signal parsing, hosted Linq typing prewarm, and root `pnpm typecheck`.
+Completed: 2026-05-27

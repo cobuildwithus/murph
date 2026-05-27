@@ -4,6 +4,9 @@ import type {
   HostedRuntimePrewarmSource,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
+} from "@murphai/hosted-execution/contracts";
+import {
   parseHostedRuntimePrewarmRequest,
   parseHostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -22,7 +25,6 @@ export interface PrewarmRuntimeContainerInput {
 
 const CLOUDFLARE_RUNTIME_PREWARM_PATH_PREFIX = "/internal/users/";
 const CLOUDFLARE_RUNTIME_PREWARM_PATH_SUFFIX = "/runtime/prewarm";
-const PREWARM_RUNTIME_CONTAINER_HTTP_TIMEOUT_MS = 5_000;
 
 export async function prewarmRuntimeContainer(
   request: PrewarmRuntimeContainerInput,
@@ -50,10 +52,7 @@ export async function prewarmRuntimeContainer(
         parse: parseHostedRuntimePrewarmResponse,
         path: buildCloudflareRuntimePrewarmPath(parsedRequest.userId),
         signing: cloudflareEnvironment.cloudflareHostedControlSigning,
-        timeoutMs: Math.min(
-          cloudflareEnvironment.ensureRuntimeProcessingHttpTimeoutMs,
-          PREWARM_RUNTIME_CONTAINER_HTTP_TIMEOUT_MS,
-        ),
+        timeoutMs: HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
       },
     )
   );

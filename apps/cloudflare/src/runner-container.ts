@@ -147,6 +147,10 @@ interface RunnerContainerLogContext {
   userId: string;
 }
 
+interface RunnerContainerReadinessOptions {
+  failureCleanup: "await" | "skip";
+}
+
 interface HostedExecutionContainerSmokeHealthResult {
   codexShell?: {
     client: string | null;
@@ -296,15 +300,21 @@ export class RunnerContainer extends Container {
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    const deadlineMs = Date.now() + input.timeoutMs;
     return await this.withLifecycleLock(async () => {
+      const remainingTimeoutMs = readRunnerContainerDeadlineRemainingMs(deadlineMs);
+      if (remainingTimeoutMs < 1) {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      }
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
       };
       this.currentLogContext = logContext;
       try {
         const action = await this.ensureContainerReady(
-          input,
-          AbortSignal.timeout(input.timeoutMs),
+          { ...input, timeoutMs: remainingTimeoutMs },
+          AbortSignal.timeout(remainingTimeoutMs),
+          { failureCleanup: "skip" },
         );
         return { action, kind: "ready" };
       } finally {
@@ -882,6 +892,7 @@ export class RunnerContainer extends Container {
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
+    options: RunnerContainerReadinessOptions = { failureCleanup: "await" },
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
@@ -922,6 +933,9 @@ export class RunnerContainer extends Container {
           phase: "container.starting",
           userId: input.userId,
         });
+        if (options.failureCleanup === "skip") {
+          throw error;
+        }
         await this.stopWarmContainer();
       }
     }
@@ -977,7 +991,9 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: input.userId,
       });
-      await this.stopWarmContainer({ failClosed: false }).catch(() => undefined);
+      if (options.failureCleanup !== "skip") {
+        await this.stopWarmContainer({ failClosed: false }).catch(() => undefined);
+      }
       throw error;
     }
 
@@ -1976,6 +1992,10 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
+}
+
+function readRunnerContainerDeadlineRemainingMs(deadlineMs: number): number {
+  return Math.trunc(deadlineMs - Date.now());
 }
 
 async function assertRunnerHealthy(

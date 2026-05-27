@@ -87,7 +87,6 @@ export interface SignalHostedRuntimePrewarmInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   eventId: string;
   occurredAt: string;
-  scopeHash?: string | null;
   source?: HostedRuntimePrewarmSource;
   userId: string;
 }
@@ -215,7 +214,6 @@ export async function signalHostedRuntimePrewarm(
       }),
       kind: "runtime_prewarm_requested",
       occurredAt: input.occurredAt,
-      ...(input.scopeHash ? { scopeHash: input.scopeHash } : {}),
       source: input.source ?? HOSTED_RUNTIME_PREWARM_SOURCE,
     }),
     userId: input.userId,

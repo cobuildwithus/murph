@@ -367,6 +367,192 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(0);
   });
 
+  it("releases an in-flight prewarm readiness lock at the prewarm timeout before later runtime work", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const prewarmStarted = createDeferred<void>();
+      const invocationStartupStarted = createDeferred<void>();
+      const startAndWaitForPorts = vi.fn(async (input: {
+        cancellationOptions: { abort: AbortSignal };
+      }) => {
+        if (startAndWaitForPorts.mock.calls.length === 1) {
+          prewarmStarted.resolve();
+          await new Promise<void>((_resolve, reject) => {
+            input.cancellationOptions.abort.addEventListener(
+              "abort",
+              () => reject(input.cancellationOptions.abort.reason),
+              { once: true },
+            );
+          });
+          return;
+        }
+
+        invocationStartupStarted.resolve();
+      });
+      const { container, containerFetch } = createContainerDouble({
+        startAndWaitForPorts,
+      });
+      const prewarmOutcome = container.ensureReadyForProcessing({
+        timeoutMs: 5_000,
+        userId: "member_123",
+      }).then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
+
+      await prewarmStarted.promise;
+      const invocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_after_prewarm_timeout"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await invocationStartupStarted.promise;
+      await expect(prewarmOutcome).resolves.toBe("rejected");
+      await expect(invocation).resolves.toEqual(createRunnerResult());
+
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      expect(executeCalls).toHaveLength(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait on slow cleanup after a timed-out prewarm start", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopped" = "stopped";
+      const prewarmStarted = createDeferred<void>();
+      const destroy = vi.fn(async () => {
+        await new Promise<void>(() => undefined);
+      });
+      const startAndWaitForPorts = vi.fn(async (input: {
+        cancellationOptions: { abort: AbortSignal };
+      }) => {
+        status = "running";
+        prewarmStarted.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          input.cancellationOptions.abort.addEventListener(
+            "abort",
+            () => reject(input.cancellationOptions.abort.reason),
+            { once: true },
+          );
+        });
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        startAndWaitForPorts,
+      });
+
+      const prewarmOutcome = container.ensureReadyForProcessing({
+        timeoutMs: 5_000,
+        userId: "member_123",
+      }).then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
+
+      await prewarmStarted.promise;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(prewarmOutcome).resolves.toBe("rejected");
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not give queued prewarm a fresh lifecycle-lock timeout before runtime work", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const firstRequestStarted = createDeferred<void>();
+      const firstRequestRelease = createDeferred<void>();
+      const secondRequestStarted = createDeferred<void>();
+      let workspaceRequestCount = 0;
+      const containerFetch = vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        workspaceRequestCount += 1;
+        if (workspaceRequestCount === 1) {
+          firstRequestStarted.resolve();
+          await firstRequestRelease.promise;
+        } else {
+          secondRequestStarted.resolve();
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const { container } = createContainerDouble({ containerFetch });
+
+      const firstInvocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_lock_holder"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await firstRequestStarted.promise;
+
+      const stalePrewarm = container.ensureReadyForProcessing({
+        timeoutMs: 5_000,
+        userId: "member_123",
+      }).then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const secondInvocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_after_stale_prewarm"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      firstRequestRelease.resolve();
+      await secondRequestStarted.promise;
+
+      await expect(stalePrewarm).resolves.toBe("rejected");
+      await expect(firstInvocation).resolves.toEqual(createRunnerResult());
+      await expect(secondInvocation).resolves.toEqual(createRunnerResult());
+      expect(workspaceRequestCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("ensureProcessing rejects mismatched user identities before waking or starting work", async () => {
     const { container, containerFetch } = createContainerDouble();
 

@@ -185,12 +185,15 @@ append mailbox demand. After provider verification, web may classify
 `chat.typing_indicator.started`, resolve only an already-active hosted Linq
 route, throttle by user/source, and signal the existing per-user Temporal
 workflow with `runtime_prewarm_requested`. That signal carries only an opaque
-event id, timestamp, source, and optional hashed scope. It must not plan
+event id, timestamp, and source. It must not plan
 onboarding, bind routes, append mailbox rows, send read receipts, call
 Cloudflare directly, or add a `readRuntimeDemand` source. Temporal reads real
 web-owned demand first; if mailbox or other durable demand exists, normal
 ensure-processing wins. If demand is idle, Temporal may issue one short
 best-effort Cloudflare prewarm Activity and clears the hint after the attempt.
+The prewarm attempt uses no Activity retry, keeps the Cloudflare readiness
+budget shorter than the workflow Activity timeout, and does not wait on slow
+container cleanup while holding the prewarm lifecycle lock.
 If a real demand signal arrives while the prewarm Activity is pending, the
 workflow abandons the prewarm wait and immediately re-reads demand, so mailbox
 processing never waits behind a typing hint.
