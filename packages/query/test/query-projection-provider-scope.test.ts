@@ -170,14 +170,22 @@ test("runtime all-provider wearable source health recomputes provider staleness"
     const alphaOnlySourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
       providers: ["alpha"],
     });
+    const alphaBetaSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
+      providers: ["alpha", "beta"],
+    });
     const allProviderSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
     const allProviderSourceHealthByProvider = new Map(
       allProviderSourceHealth.map((summary) => [summary.provider, summary]),
+    );
+    const alphaBetaSourceHealthByProvider = new Map(
+      alphaBetaSourceHealth.map((summary) => [summary.provider, summary]),
     );
     const alphaSourceHealth = allProviderSourceHealthByProvider.get("alpha");
     const betaSourceHealth = allProviderSourceHealthByProvider.get("beta");
 
     assert.equal(alphaOnlySourceHealth[0]?.stalenessVsNewestDays, 0);
+    assert.equal(alphaBetaSourceHealthByProvider.get("alpha")?.stalenessVsNewestDays, 2);
+    assert.equal(alphaBetaSourceHealthByProvider.get("beta")?.stalenessVsNewestDays, 0);
     assert.equal(alphaSourceHealth?.lastDate, "2026-03-18");
     assert.equal(alphaSourceHealth?.stalenessVsNewestDays, 2);
     assert.equal(
@@ -289,29 +297,54 @@ test("provider-scoped wearable projection rows use resolved public providers", a
     await mkdir(path.dirname(eventLedgerPath), { recursive: true });
     await writeFile(
       eventLedgerPath,
-      JSON.stringify({
-        schemaVersion: "murph.event.v1",
-        id: "evt_public_provider_steps",
-        kind: "observation",
-        occurredAt: "2026-04-03T07:00:00Z",
-        recordedAt: "2026-04-03T07:01:00Z",
-        dayKey: "2026-04-03",
-        source: "device",
-        title: "Resolved provider steps",
-        metric: "steps",
-        value: 7200,
-        unit: "count",
-        dataOrigin: {
-          version: 1,
-          aggregatorProvider: "junction",
-          sourceProviderSlug: "garmin",
-          sourceType: "watch",
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_public_provider_steps",
+          kind: "observation",
+          occurredAt: "2026-04-03T07:00:00Z",
+          recordedAt: "2026-04-03T07:01:00Z",
+          dayKey: "2026-04-03",
+          source: "device",
+          title: "Resolved provider steps",
+          metric: "steps",
+          value: 7200,
+          unit: "count",
+          dataOrigin: {
+            version: 1,
+            aggregatorProvider: "junction",
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "junction-garmin-activity",
+          },
         },
-        externalRef: {
-          system: "junction",
-          resourceType: "junction-garmin-activity",
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_source_instance_only_steps",
+          kind: "observation",
+          occurredAt: "2026-04-03T08:00:00Z",
+          recordedAt: "2026-04-03T08:01:00Z",
+          dayKey: "2026-04-03",
+          source: "device",
+          title: "Source instance only steps",
+          metric: "steps",
+          value: 4100,
+          unit: "count",
+          dataOrigin: {
+            version: 1,
+            aggregatorProvider: "junction",
+            sourceInstanceId: "opaque-source-instance",
+            sourceType: "watch",
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "junction-activity",
+          },
         },
-      }).concat("\n"),
+      ].map((record) => JSON.stringify(record)).join("\n").concat("\n"),
       "utf8",
     );
     await rebuildQueryProjection(vaultRoot);
@@ -334,10 +367,14 @@ test("provider-scoped wearable projection rows use resolved public providers", a
 
       assert.deepEqual(
         activityScopeRows.map((row) => row.providerScopeKey),
-        ["providers:garmin"],
+        ["providers:garmin", "providers:unknown"],
+      );
+      assert.equal(
+        activityScopeRows.every((row) => !row.summaryJson.includes("opaque-source-instance")),
+        true,
       );
       assert.doesNotMatch(
-        activityScopeRows[0]?.summaryJson ?? "",
+        activityScopeRows.map((row) => row.summaryJson).join("\n"),
         /externalRef|dataOrigin|candidateId/u,
       );
     } finally {
@@ -352,11 +389,18 @@ test("provider-scoped wearable projection rows use resolved public providers", a
       date: "2026-04-03",
       providers: ["junction"],
     });
+    const unknownActivity = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-04-03",
+      providers: ["unknown"],
+    });
 
     assert.equal(garminActivity.length, 1);
     assert.equal(garminActivity[0]?.steps.selection.provider, "garmin");
     assert.equal(garminActivity[0]?.steps.selection.value, 7200);
     assert.deepEqual(junctionActivity, []);
+    assert.equal(unknownActivity.length, 1);
+    assert.equal(unknownActivity[0]?.steps.selection.provider, "unknown");
+    assert.equal(unknownActivity[0]?.steps.selection.value, 4100);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
