@@ -458,6 +458,9 @@ importers:
       react:
         specifier: ^19.2.6
         version: 19.2.6
+      sharp:
+        specifier: 0.34.5
+        version: 0.34.5
       zod:
         specifier: ^4.4.3
         version: 4.4.3
