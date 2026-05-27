@@ -209,6 +209,7 @@ describe("hosted web Temporal signal client", () => {
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
     }))).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
+      prewarmTaskQueue: "murph-hosted-runtime-prewarm",
       readRuntimeDemandStartToCloseTimeoutMs: 10_000,
     });
   });

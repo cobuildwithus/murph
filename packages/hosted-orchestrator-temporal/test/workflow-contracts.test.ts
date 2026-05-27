@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_DEVICE_SYNC_RECONCILER_WORKFLOW_TYPE,
+  HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
@@ -24,6 +25,9 @@ describe("hosted runtime workflow contracts", () => {
       "hostedUserRuntimeWorkflow",
     );
     expect(HOSTED_USER_RUNTIME_TASK_QUEUE).toBe("murph-hosted-runtime");
+    expect(HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE).toBe(
+      "murph-hosted-runtime-prewarm",
+    );
     expect(HOSTED_USER_RUNTIME_SIGNAL_NAME).toBe("runtimeSignal");
     expect(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME).toBe(
       "runtimeWorkflowStatus",

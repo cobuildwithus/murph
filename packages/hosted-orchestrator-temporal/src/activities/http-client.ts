@@ -85,6 +85,7 @@ export interface HostedTemporalActivityObservation {
     | "ensureRuntimeProcessing"
     | "prewarmRuntimeContainer";
   orchestrationAttemptId?: string | null;
+  prewarmAttemptId?: string | null;
   reason?: string | null;
   userId: string;
 }
@@ -301,6 +302,7 @@ export async function observeHostedTemporalActivity<TResponse>(
       component: "temporal.activity",
       durationMs: Date.now() - startedAt,
       orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
+      prewarmAttemptId: observation.prewarmAttemptId ?? null,
       reason: observation.reason ?? null,
       resultAction: resultDetails.resultAction,
       resultKind: resultDetails.resultKind,
@@ -315,6 +317,7 @@ export async function observeHostedTemporalActivity<TResponse>(
       errorCode: readHostedTemporalActivityErrorCode(error),
       nonRetryable: readHostedTemporalActivityNonRetryable(error),
       orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
+      prewarmAttemptId: observation.prewarmAttemptId ?? null,
       reason: observation.reason ?? null,
       resultAction: null,
       resultKind: null,

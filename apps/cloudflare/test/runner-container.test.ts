@@ -387,7 +387,7 @@ describe("RunnerContainer", () => {
         return;
       }
     });
-    const { container, containerFetch } = createContainerDouble({
+    const { container, containerFetch, destroy } = createContainerDouble({
       startAndWaitForPorts,
     });
 
@@ -408,6 +408,69 @@ describe("RunnerContainer", () => {
     await expect(prewarm).resolves.toEqual({ kind: "busy" });
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
+  });
+
+  it("does not restart a warm shell when prewarm is preempted by workspace invocation", async () => {
+    const healthEntered = createDeferred<void>();
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health") && containerFetch.mock.calls.length === 1) {
+        healthEntered.resolve();
+        await new Promise<never>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      }
+
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const prewarm = container.prewarmForProcessing({
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await healthEntered.promise;
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_warm_prewarm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    await expect(prewarm).resolves.toEqual({ kind: "busy" });
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     );

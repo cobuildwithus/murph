@@ -10,7 +10,10 @@ import {
 } from "@temporalio/worker";
 
 import * as activities from "./activities/index.js";
-import { HOSTED_USER_RUNTIME_TASK_QUEUE } from "./index.js";
+import {
+  HOSTED_USER_RUNTIME_TASK_QUEUE,
+  deriveHostedUserRuntimePrewarmTaskQueue,
+} from "./index.js";
 import {
   readHostedRuntimeTemporalEnvironment,
   type HostedRuntimeTemporalTls,
@@ -37,12 +40,18 @@ export interface HostedUserRuntimeWorkerOptions {
   maxConcurrentActivityTaskPolls?: number;
   maxConcurrentWorkflowTaskExecutions?: number;
   maxConcurrentWorkflowTaskPolls?: number;
+  prewarmTaskQueue?: string;
   production?: boolean;
   shutdownForceTimeMs?: number;
   shutdownGraceTimeMs?: number;
   taskQueue?: string;
   tls?: HostedRuntimeTemporalTls;
   workflowBundlePath?: string;
+}
+
+export interface HostedUserRuntimeWorkerGroup {
+  prewarmWorker: Worker;
+  runtimeWorker: Worker;
 }
 
 export async function createHostedUserRuntimeWorker(
@@ -84,11 +93,61 @@ export async function createHostedUserRuntimeWorker(
   });
 }
 
+export async function createHostedUserRuntimePrewarmWorker(
+  options: HostedUserRuntimeWorkerOptions = {},
+): Promise<Worker> {
+  const production = options.production ?? process.env.NODE_ENV === "production";
+  const workerShutdownOptions = resolveHostedUserRuntimeWorkerShutdownOptions({
+    production,
+    shutdownForceTimeMs: options.shutdownForceTimeMs,
+    shutdownGraceTimeMs: options.shutdownGraceTimeMs,
+    source: process.env,
+  });
+  const connection =
+    options.connection ??
+    (await NativeConnection.connect(buildNativeConnectionOptions(options)));
+
+  return Worker.create({
+    activities: {
+      prewarmRuntimeContainer: activities.prewarmRuntimeContainer,
+    },
+    connection,
+    maxConcurrentActivityTaskExecutions: 1,
+    maxConcurrentActivityTaskPolls: 1,
+    namespace: options.namespace ?? "default",
+    taskQueue: resolveHostedUserRuntimePrewarmTaskQueue(options),
+    ...workerShutdownOptions,
+  });
+}
+
+export async function createHostedUserRuntimeWorkerGroup(
+  options: HostedUserRuntimeWorkerOptions = {},
+): Promise<HostedUserRuntimeWorkerGroup> {
+  const connection =
+    options.connection ??
+    (await NativeConnection.connect(buildNativeConnectionOptions(options)));
+  const runtimeWorker = await createHostedUserRuntimeWorker({
+    ...options,
+    connection,
+  });
+  const prewarmWorker = await createHostedUserRuntimePrewarmWorker({
+    ...options,
+    connection,
+  });
+  return {
+    prewarmWorker,
+    runtimeWorker,
+  };
+}
+
 export async function runHostedUserRuntimeWorker(
   options: HostedUserRuntimeWorkerOptions = {},
 ): Promise<void> {
-  const worker = await createHostedUserRuntimeWorker(options);
-  await worker.run();
+  const workers = await createHostedUserRuntimeWorkerGroup(options);
+  await Promise.all([
+    workers.runtimeWorker.run(),
+    workers.prewarmWorker.run(),
+  ]);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -97,6 +156,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     address: environment.address,
     apiKey: environment.apiKey,
     namespace: environment.namespace,
+    prewarmTaskQueue: environment.prewarmTaskQueue,
     taskQueue: environment.taskQueue,
     tls: environment.tls,
   });
@@ -110,6 +170,15 @@ function buildNativeConnectionOptions(
     ...(options.apiKey ? { apiKey: options.apiKey } : {}),
     tls: options.tls ?? false,
   };
+}
+
+function resolveHostedUserRuntimePrewarmTaskQueue(
+  options: HostedUserRuntimeWorkerOptions,
+): string {
+  return options.prewarmTaskQueue?.trim()
+    || deriveHostedUserRuntimePrewarmTaskQueue(
+      options.taskQueue ?? HOSTED_USER_RUNTIME_TASK_QUEUE,
+    );
 }
 
 function resolveHostedUserRuntimeWorkflowsPath(): string {
