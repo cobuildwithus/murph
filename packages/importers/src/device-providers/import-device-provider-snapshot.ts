@@ -9,7 +9,6 @@ import {
   stripUndefined,
 } from "../shared.ts";
 
-import { canonicalizeDeviceBatchPayload } from "./canonical-wearable-records.ts";
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
 import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
@@ -109,8 +108,6 @@ export async function prepareDeviceProviderSnapshotImport(
     events: normalized.events,
     samples: normalized.samples,
     rawArtifacts: normalized.rawArtifacts,
-    rawIngestReceipts: normalized.rawIngestReceipts,
-    canonicalWearableRecords: normalized.canonicalWearableRecords,
     provenance: normalized.provenance,
   });
   const payloadWithRawEvidence = ensureProviderRawArtifact(basePayload, rawSnapshot);
@@ -135,13 +132,6 @@ export async function prepareDeviceProviderSnapshotImport(
     cursor: request.cursor,
     signatureVerified: request.signatureVerified,
   });
-  const canonicalWearableRecords = canonicalizeDeviceBatchPayload(payloadWithLegacyRawRole, {
-    rawReceipt,
-    connectionId: request.connectionId,
-    normalizerVersion: request.normalizerVersion,
-    observedAt: rawReceipt.observedAt,
-  });
-
   const payloadForCore = omitDefaultJunctionTimeseriesEvents(payloadWithLegacyRawRole);
 
   return stripUndefined({
@@ -150,8 +140,6 @@ export async function prepareDeviceProviderSnapshotImport(
       ...(payloadForCore.rawArtifacts ?? []),
       buildRawReceiptArtifact(rawReceipt),
     ],
-    rawIngestReceipts: [rawReceipt],
-    canonicalWearableRecords,
     provenance: stripUndefined({
       ...(payloadWithLegacyRawRole.provenance ?? {}),
       wearableRawReceipt: {
@@ -160,7 +148,6 @@ export async function prepareDeviceProviderSnapshotImport(
         payloadHash: rawReceipt.payloadHash,
         sourceKind: rawReceipt.sourceKind,
       },
-      canonicalWearableRecordCount: canonicalWearableRecords.length,
       normalizerVersion: request.normalizerVersion,
     }),
   });

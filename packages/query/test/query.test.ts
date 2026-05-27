@@ -27,6 +27,7 @@ import {
   getExperiment,
   getJournalEntry,
   getQueryProjectionStatus,
+  hashCanonicalQuerySources,
   listFamilyMembers,
   listEntities,
   listGeneticVariants,
@@ -46,6 +47,7 @@ import {
   summarizeWearableSleep,
   summarizeWearableSourceHealth,
 } from "../src/index.ts";
+import * as queryIndex from "../src/index.ts";
 import {
   listMetricTargetsRuntime,
   selectMetricGoalProgressRuntime,
@@ -69,6 +71,28 @@ import {
 } from "../src/search.ts";
 
 const require = createRequire(import.meta.url);
+
+test("root query export keeps runtime projection methods available as lazy wrappers", () => {
+  const requiredRuntimeExports = [
+    "getQueryProjectionStatus",
+    "rebuildQueryProjection",
+    "searchVaultRuntime",
+    "summarizeWearableDayRuntime",
+    "summarizeWearableLatestRuntime",
+    "summarizeWearableMetricLatestRuntime",
+    "summarizeWearableMetricTrendRuntime",
+    "summarizeWearableSleepRuntime",
+    "summarizeWearableActivityRuntime",
+    "summarizeWearableBodyStateRuntime",
+    "summarizeWearableRecoveryRuntime",
+    "summarizeWearableSourceHealthRuntime",
+    "explainWearableDriftRuntime",
+  ] as const;
+
+  for (const exportName of requiredRuntimeExports) {
+    assert.equal(typeof queryIndex[exportName], "function", exportName);
+  }
+});
 
 test("parseMarkdownDocument keeps tolerant parsing explicit", () => {
   const parsed = parseMarkdownDocument(`---
@@ -570,13 +594,13 @@ test("wearable source health reports excluded records when provider provenance i
     assert.equal(sourceHealth.length, 1);
     assert.equal(sourceHealth[0]?.provider, "unknown");
     assert.equal(sourceHealth[0]?.candidateMetrics, 1);
-    assert.equal(filteredSourceHealth[0]?.provider, "unknown");
+    assert.deepEqual(filteredSourceHealth, []);
     assert.equal(
       sourceHealth[0]?.notes[0]?.includes("Excluded 1 wearable record from semantic wearables"),
       true,
     );
     assert.equal(summary?.sourceHealth[0]?.provider, "unknown");
-    assert.equal(filteredSummary?.sourceHealth[0]?.provider, "unknown");
+    assert.equal(filteredSummary, null);
     assert.equal(
       summary?.notes.some((note) => note.includes("Excluded 1 wearable record from semantic wearables")),
       true,
@@ -2179,6 +2203,51 @@ test("searchVault includes sample summaries when the caller scopes by sample rec
   });
   assert.equal(kindOnlyResult.total, 1);
   assert.equal(kindOnlyResult.hits[0]?.recordId, "sample-summary:2026-03-12:glucose:mg_dL");
+});
+
+test("searchVault keeps dense provider observations out of in-memory search", () => {
+  const vault = createEmptyReadModel();
+  const denseObservation = createRecord({
+    id: "evt_dense_raw_heart_rate",
+    lookupIds: ["evt_dense_raw_heart_rate"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T08:00:00Z",
+    date: "2026-03-12",
+    kind: "observation",
+    title: "Raw Garmin heart-rate point",
+    data: {
+      source: "device",
+      metric: "heart-rate",
+      unit: "bpm",
+      value: 72,
+    },
+  });
+  const displayObservation = createRecord({
+    id: "evt_display_readiness_fact",
+    lookupIds: ["evt_display_readiness_fact"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T08:05:00Z",
+    date: "2026-03-12",
+    kind: "observation",
+    title: "Display readiness fact",
+    data: {
+      source: "device",
+      metric: "readiness-score",
+      queryVisibility: "default",
+      unit: "score",
+      value: 8,
+    },
+  });
+
+  vault.events = [denseObservation, displayObservation];
+  vault.entities = [denseObservation, displayObservation];
+  syncVaultDerivedFields(vault);
+
+  assert.equal(searchVault(vault, "garmin heart-rate").total, 0);
+  assert.equal(searchVaultSafe(vault, "garmin heart-rate").total, 0);
+  assert.equal(searchVault(vault, "readiness").hits[0]?.recordId, "evt_display_readiness_fact");
 });
 
 test("overview selectors move cleanly onto the query read model", () => {
@@ -3887,9 +3956,8 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       }),
     );
     await writeFile(heartRateLedgerPath, `${existingLedger.trimEnd()}\n${denseSamples.join("\n")}\n`);
-    await writeFile(
-      eventLedgerPath,
-      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${JSON.stringify({
+    const denseObservationEvents = [
+      {
         schemaVersion: "murph.event.v1",
         id: "evt_dense_provider_steps_01",
         kind: "observation",
@@ -3906,7 +3974,59 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
           resourceType: "daily_activity",
           resourceId: "daily-activity-2026-03-12",
         },
-      })}\n`,
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_dense_provider_steps_import_source",
+        kind: "observation",
+        occurredAt: "2026-03-13T07:00:00Z",
+        recordedAt: "2026-03-13T07:01:00Z",
+        dayKey: "2026-03-13",
+        source: "import",
+        title: "Imported resting heart rate",
+        metric: "resting-heart-rate",
+        value: 58,
+        unit: "bpm",
+        externalRef: {
+          system: "garmin",
+          resourceType: "daily_health",
+          resourceId: "daily-health-import-source",
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_dense_provider_steps_missing_source",
+        kind: "observation",
+        occurredAt: "2026-03-14T07:00:00Z",
+        recordedAt: "2026-03-14T07:01:00Z",
+        dayKey: "2026-03-14",
+        title: "Missing source resting heart rate",
+        metric: "resting-heart-rate",
+        value: 59,
+        unit: "bpm",
+        externalRef: {
+          system: "garmin",
+          resourceType: "daily_health",
+          resourceId: "daily-health-missing-source",
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_dense_provider_steps_missing_provenance",
+        kind: "observation",
+        occurredAt: "2026-03-15T07:00:00Z",
+        recordedAt: "2026-03-15T07:01:00Z",
+        dayKey: "2026-03-15",
+        source: "device",
+        title: "Missing provenance resting heart rate",
+        metric: "resting-heart-rate",
+        value: 60,
+        unit: "bpm",
+      },
+    ];
+    await writeFile(
+      eventLedgerPath,
+      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${denseObservationEvents.map((event) => JSON.stringify(event)).join("\n")}\n`,
     );
 
     const vault = await readVault(vaultRoot);
@@ -3935,16 +4055,35 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
         .prepare(`
           SELECT COUNT(*) AS count
           FROM query_entities
-          WHERE entity_id = 'evt_dense_provider_steps_01'
+          WHERE entity_id IN (
+            'evt_dense_provider_steps_01',
+            'evt_dense_provider_steps_import_source',
+            'evt_dense_provider_steps_missing_source',
+            'evt_dense_provider_steps_missing_provenance'
+          )
         `)
         .get() as { count: number };
       const denseEventSearchDocumentCount = database
         .prepare(`
           SELECT COUNT(*) AS count
           FROM query_search_document
-          WHERE record_id = 'evt_dense_provider_steps_01'
+          WHERE record_id IN (
+            'evt_dense_provider_steps_01',
+            'evt_dense_provider_steps_import_source',
+            'evt_dense_provider_steps_missing_source',
+            'evt_dense_provider_steps_missing_provenance'
+          )
         `)
         .get() as { count: number };
+      const wearableSummaryRow = database
+        .prepare(`
+          SELECT summary_json AS summaryJson
+          FROM query_wearable_summaries
+          WHERE provider_scope_key = 'providers:garmin'
+            AND summary_kind = 'activity'
+            AND summary_date = '2026-03-12'
+        `)
+        .get() as { summaryJson: string } | undefined;
       const wearableSummaryCount = database
         .prepare(`
           SELECT COUNT(*) AS count
@@ -3970,6 +4109,12 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       assert.equal(denseEventEntityCount.count, 0);
       assert.equal(denseEventSearchDocumentCount.count, 0);
       assert.equal(wearableSummaryCount.count, 1);
+      assert.ok(wearableSummaryRow);
+      assert.match(wearableSummaryRow.summaryJson, /"candidates":\[\]/u);
+      assert.doesNotMatch(
+        wearableSummaryRow.summaryJson,
+        /daily-activity-2026-03-12|evt_dense_provider_steps_01|ledger\/events|externalRef|dataOrigin|candidateId/u,
+      );
       assert.equal(ftsContentTable, undefined);
     } finally {
       database.close();
@@ -3981,6 +4126,10 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
     });
     assert.equal(activitySummaries[0]?.steps.selection.value, 8400);
     assert.equal(activitySummaries[0]?.steps.selection.provider, "garmin");
+    assert.doesNotMatch(
+      JSON.stringify(activitySummaries[0]?.steps),
+      /daily-activity-2026-03-12|evt_dense_provider_steps_01|ledger\/events|externalRef|dataOrigin|candidateId/u,
+    );
 
     await writeFile(
       heartRateLedgerPath,
@@ -3999,6 +4148,130 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
 
     const statusAfterSampleEdit = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusAfterSampleEdit.fresh, true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("runtime wearable provider filters do not fall back to all-provider summaries", async () => {
+  const vaultRoot = await createFixtureVault();
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+
+  try {
+    const providerEvents = Array.from({ length: 7 }, (_, index) => JSON.stringify({
+      schemaVersion: "murph.event.v1",
+      id: `evt_provider_scope_steps_${index}`,
+      kind: "observation",
+      occurredAt: "2026-03-20T07:00:00Z",
+      recordedAt: "2026-03-20T07:01:00Z",
+      dayKey: "2026-03-20",
+      source: "device",
+      title: `Provider ${index} steps`,
+      metric: "steps",
+      value: 5000 + index,
+      unit: "count",
+      externalRef: {
+        system: `wearable${index}`,
+        resourceType: "daily_activity",
+        resourceId: `daily-activity-2026-03-20-${index}`,
+      },
+    }));
+
+    await writeFile(
+      eventLedgerPath,
+      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${providerEvents.join("\n")}\n`,
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const absentProvider = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-03-20",
+      providers: ["absent-provider"],
+    });
+    const nonMaterializedProviderPair = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-03-20",
+      providers: ["wearable0", "wearable1"],
+    });
+    const singleProvider = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-03-20",
+      providers: ["wearable0"],
+    });
+
+    assert.deepEqual(absentProvider, []);
+    assert.deepEqual(nonMaterializedProviderPair, []);
+    assert.equal(singleProvider[0]?.steps.selection.provider, "wearable0");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("rebuildQueryProjection indexes compact structured terms without raw attribute payloads", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+
+  try {
+    await writeFile(
+      eventLedgerPath,
+      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_structured_allowlist_01",
+        kind: "observation",
+        occurredAt: "2026-03-18T07:00:00Z",
+        recordedAt: "2026-03-18T07:01:00Z",
+        dayKey: "2026-03-18",
+        source: "manual",
+        title: "Structured allowlist observation",
+        metric: "energy-score",
+        value: 7,
+        unit: "score",
+        rawPayload: {
+          privateVendorMarker: "raw-payload-marker-should-not-index",
+        },
+        timeseries: [
+          {
+            note: "timeseries-marker-should-not-index",
+            value: 777,
+          },
+        ],
+      })}\n`,
+    );
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+
+    try {
+      const row = database
+        .prepare(`
+          SELECT structured_text AS structuredText
+          FROM query_search_document
+          WHERE record_id = 'evt_structured_allowlist_01'
+        `)
+        .get() as { structuredText: string } | undefined;
+
+      assert.ok(row);
+      assert.match(row.structuredText, /metric\nenergy-score/u);
+      assert.match(row.structuredText, /source\nmanual/u);
+      assert.match(row.structuredText, /unit\nscore/u);
+      assert.doesNotMatch(
+        row.structuredText,
+        /raw-payload-marker-should-not-index|timeseries-marker-should-not-index/u,
+      );
+      assert.doesNotMatch(row.structuredText, /"privateVendorMarker"|"externalRef"|"timeseries"|"value":777/u);
+    } finally {
+      database.close();
+    }
+
+    const rawPayloadSearch = await searchVaultRuntime(vaultRoot, "raw-payload-marker-should-not-index");
+    assert.equal(rawPayloadSearch.total, 0);
+
+    const metricSearch = await searchVaultRuntime(vaultRoot, "energy-score", {
+      recordTypes: ["event"],
+    });
+    assert.equal(metricSearch.hits[0]?.recordId, "evt_structured_allowlist_01");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -4085,7 +4358,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 4);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
       const legacyLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4129,7 +4402,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
     try {
       assert.equal(rebuilt.schemaVersion, "murph.query-projection");
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 4);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
       const queryMetaTable = reopened
         .prepare(`
           SELECT name
@@ -4192,7 +4465,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     });
 
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 4);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
       const staleLookupTable = reopened
         .prepare(`
           SELECT name
@@ -4208,6 +4481,182 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     const statusAfter = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusAfter.schemaVersion, "murph.query-projection");
     assert.equal(statusAfter.fresh, true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("searchVaultRuntime rebuilds old v4 projections before serving dense or unsanitized rows", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+
+  try {
+    await writeFile(
+      eventLedgerPath,
+      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_old_v4_dense_device_point",
+        kind: "observation",
+        occurredAt: "2026-03-21T07:00:00Z",
+        recordedAt: "2026-03-21T07:01:00Z",
+        dayKey: "2026-03-21",
+        source: "device",
+        title: "Old v4 Garmin raw point",
+        metric: "steps",
+        value: 8401,
+        unit: "count",
+        externalRef: {
+          system: "garmin",
+          resourceType: "daily_activity",
+          resourceId: "old-v4-daily-activity",
+        },
+      })}\n`,
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      staleDatabase.exec("PRAGMA user_version = 4;");
+      staleDatabase
+        .prepare(`
+          INSERT INTO query_entities (
+            entity_id,
+            sort_rank,
+            primary_lookup_id,
+            family,
+            record_class,
+            kind,
+            status,
+            stream,
+            experiment_slug,
+            occurred_at,
+            date,
+            title,
+            tags_json,
+            entity_json
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(entity_id) DO UPDATE SET entity_json = excluded.entity_json
+        `)
+        .run(
+          "evt_old_v4_dense_device_point",
+          999,
+          "evt_old_v4_dense_device_point",
+          "event",
+          "ledger",
+          "observation",
+          null,
+          null,
+          null,
+          "2026-03-21T07:00:00Z",
+          "2026-03-21",
+          "Old v4 Garmin raw point",
+          "[]",
+          JSON.stringify({
+            attributes: {
+              externalRef: {
+                resourceId: "old-v4-daily-activity",
+                resourceType: "daily_activity",
+                system: "garmin",
+              },
+              metric: "steps",
+              source: "device",
+              unit: "count",
+              value: 8401,
+            },
+            body: null,
+            date: "2026-03-21",
+            entityId: "evt_old_v4_dense_device_point",
+            experimentSlug: null,
+            family: "event",
+            frontmatter: null,
+            kind: "observation",
+            links: [],
+            lookupIds: ["evt_old_v4_dense_device_point"],
+            occurredAt: "2026-03-21T07:00:00Z",
+            path: "ledger/events/2026/2026-03.jsonl",
+            primaryLookupId: "evt_old_v4_dense_device_point",
+            recordClass: "ledger",
+            relatedIds: [],
+            status: null,
+            stream: null,
+            tags: [],
+            title: "Old v4 Garmin raw point",
+          }),
+        );
+      staleDatabase
+        .prepare(`
+          INSERT INTO query_search_document (
+            record_id,
+            alias_ids_json,
+            record_type,
+            kind,
+            stream,
+            title,
+            occurred_at,
+            date,
+            experiment_slug,
+            tags_json,
+            path,
+            title_text,
+            body_text,
+            tags_text,
+            structured_text
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(record_id) DO UPDATE SET structured_text = excluded.structured_text
+        `)
+        .run(
+          "evt_old_v4_dense_device_point",
+          "[]",
+          "event",
+          "observation",
+          null,
+          "Old v4 Garmin raw point",
+          "2026-03-21T07:00:00Z",
+          "2026-03-21",
+          null,
+          "[]",
+          "ledger/events/2026/2026-03.jsonl",
+          "Old v4 Garmin raw point",
+          "",
+          "",
+          "old-v4-daily-activity garmin",
+        );
+      staleDatabase.exec("INSERT INTO query_search_fts(query_search_fts) VALUES ('rebuild');");
+    } finally {
+      staleDatabase.close();
+    }
+
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.fresh, false);
+
+    const result = await searchVaultRuntime(vaultRoot, "old-v4-daily-activity");
+    assert.equal(result.total, 0);
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false, readOnly: true });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), 5);
+      const denseEntity = reopened
+        .prepare(`
+          SELECT entity_id AS entityId
+          FROM query_entities
+          WHERE entity_id = 'evt_old_v4_dense_device_point'
+        `)
+        .get() as { entityId: string } | undefined;
+      const denseDocument = reopened
+        .prepare(`
+          SELECT record_id AS recordId
+          FROM query_search_document
+          WHERE record_id = 'evt_old_v4_dense_device_point'
+        `)
+        .get() as { recordId: string } | undefined;
+      assert.equal(denseEntity, undefined);
+      assert.equal(denseDocument, undefined);
+    } finally {
+      reopened.close();
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -4354,6 +4803,42 @@ test("query projection ignores inbox runtime state and leaves inbox sqlite untou
     assert.equal(queryTables.some((table) => table.name === "query_search_fts"), true);
     assert.equal(inboxState?.value, "{\"offset\":1}");
     assert.deepEqual(inboxQueryTables, []);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("hashCanonicalQuerySources hashes source file contents, not just file names and byte counts", async () => {
+  const vaultRoot = await createFixtureVault();
+  const journalPath = path.join(vaultRoot, "journal/2026/2026-03-10.md");
+  const firstJournal = `---
+schemaVersion: murph.frontmatter.journal-day.v1
+docType: journal_day
+dayKey: 2026-03-10
+title: March 10
+tags:
+  - focus
+eventIds:
+  - evt_01JNV4MEAL000000000000001
+sampleStreams:
+  - glucose
+---
+Steady energy after saffron tea.
+`;
+  const secondJournal = firstJournal.replace("saffron", "gingers");
+
+  try {
+    assert.equal(Buffer.byteLength(firstJournal), Buffer.byteLength(secondJournal));
+
+    await writeFile(journalPath, firstJournal, "utf8");
+    const firstHash = await hashCanonicalQuerySources(vaultRoot);
+
+    await writeFile(journalPath, secondJournal, "utf8");
+    const secondHash = await hashCanonicalQuerySources(vaultRoot);
+
+    assert.equal(firstHash.fileCount, secondHash.fileCount);
+    assert.equal(firstHash.totalBytes, secondHash.totalBytes);
+    assert.notEqual(firstHash.hash, secondHash.hash);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

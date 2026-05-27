@@ -35,11 +35,6 @@
       "import": "./dist/device-providers/junction-resources.js",
       "default": "./dist/device-providers/junction-resources.js"
     },
-    "./device-providers/canonical-wearable-records": {
-      "types": "./dist/device-providers/canonical-wearable-records.d.ts",
-      "import": "./dist/device-providers/canonical-wearable-records.js",
-      "default": "./dist/device-providers/canonical-wearable-records.js"
-    },
     "./device-providers/metric-catalog": {
       "types": "./dist/device-providers/metric-catalog.d.ts",
       "import": "./dist/device-providers/metric-catalog.js",

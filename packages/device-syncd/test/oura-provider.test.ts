@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vitest";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import type { DeviceBatchImportPayload, WearableRawIngestReceipt } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "../src/providers/oura.ts";
@@ -31,6 +32,12 @@ type StoredDeviceSyncAccountOverrides = Partial<Omit<StoredDeviceSyncAccount, "c
   refreshTokenEncrypted?: string | null;
   credential?: StoredDeviceSyncAccount["credential"];
 };
+
+function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawIngestReceipt {
+  const artifact = payload.rawArtifacts?.find((entry) => entry.role.startsWith("wearable-raw-receipt:"));
+  assert.ok(artifact);
+  return artifact.content as WearableRawIngestReceipt;
+}
 
 function createAccount(scopes: string[], overrides: DeviceSyncAccountOverrides = {}): DeviceSyncAccount {
   const {
@@ -917,8 +924,8 @@ test("Oura reconcile imports heartrate through stable closed-day snapshots", asy
   );
   assert.equal(firstPayload.importedAt, secondPayload.importedAt);
   assert.equal(
-    firstPayload.rawIngestReceipts?.[0]?.payloadHash,
-    secondPayload.rawIngestReceipts?.[0]?.payloadHash,
+    readRawReceiptArtifact(firstPayload).payloadHash,
+    readRawReceiptArtifact(secondPayload).payloadHash,
   );
 });
 

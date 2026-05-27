@@ -21,6 +21,10 @@ Temporal APIs, including Activities, timers or signal-aware timeouts,
 - `patched()` / `deprecatePatch()` around the changed command order.
 - A replay test against captured old histories for the affected path.
 
+Do not replace an active `patched()` marker with `deprecatePatch()` until
+workflow histories that already recorded the non-deprecated marker have
+drained; otherwise replay can fail before the workflow reaches new work.
+
 Pure state-machine tests do not prove old Temporal histories replay after a
 deployment. Keep captured histories redacted or synthetic, and do not commit raw
 payloads, prompts, transcripts, provider responses, secrets, local paths, or
@@ -195,12 +199,6 @@ Activity HTTP targets:
   ensure-processing command, max 30000. The Workflow Activity
   Start-To-Close timeout adds a small reporting slack over this value because
   Cloudflare returns after start/wake acceptance, not after runtime idle.
-- `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` and
-  `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: legacy
-  ensure-execution timeout inputs retained only for replay/deploy-skew
-  compatibility. Normal hosted runtime processing uses
-  `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`. Target removal is 2026-06-04 after
-  legacy hosted user runtime histories drain.
 
 Device-sync reconciler Schedule:
 

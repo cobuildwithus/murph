@@ -7,7 +7,7 @@ import { test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, VAULT_LAYOUT } from "@murphai/contracts";
 
-import { readVaultTolerant } from "../src/model.ts";
+import { readVaultRawTolerant, readVaultTolerant } from "../src/model.ts";
 
 test("readVaultTolerant builds a read model from sparse canonical layouts", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-vault-reader-"));
@@ -37,13 +37,38 @@ test("readVaultTolerant builds a read model from sparse canonical layouts", asyn
         "Lightweight note.",
       ].join("\n"),
     );
+    await writeVaultFile(
+      vaultRoot,
+      "ledger/events/2026/2026-04.jsonl",
+      JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_dense_device_observation_without_provenance",
+        kind: "observation",
+        occurredAt: "2026-04-20T08:00:00.000Z",
+        recordedAt: "2026-04-20T08:01:00.000Z",
+        source: "device",
+        title: "Dense heart-rate point",
+        metric: "heart-rate",
+        unit: "bpm",
+        value: 72,
+      }),
+    );
 
     const readModel = await readVaultTolerant(vaultRoot);
+    const rawReadModel = await readVaultRawTolerant(vaultRoot);
 
     assert.equal(readModel.vaultRoot, vaultRoot);
     assert.equal(readModel.metadata?.title, "Tolerant reader vault");
     assert.equal(readModel.journalEntries[0]?.title, "Tolerant journal");
     assert.deepEqual(readModel.byFamily.journal?.map((entry) => entry.entityId), ["journal:2026-04-20"]);
+    assert.equal(
+      readModel.entities.some((entity) => entity.entityId === "evt_dense_device_observation_without_provenance"),
+      false,
+    );
+    assert.equal(
+      rawReadModel.entities.some((entity) => entity.entityId === "evt_dense_device_observation_without_provenance"),
+      true,
+    );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

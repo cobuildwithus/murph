@@ -64,15 +64,6 @@ function buildHostedRuntimeDemandSearch(
   if (request.lagRecoveryObserved === true) {
     params.set("lagRecoveryObserved", "1");
   }
-  if (request.runtimeResultWakeAt) {
-    params.set("runtimeResultWakeAt", request.runtimeResultWakeAt);
-  }
-  if (request.runtimeResultWakeReason) {
-    params.set("runtimeResultWakeReason", request.runtimeResultWakeReason);
-  }
-  if (request.ignoredWorkspaceWakeKey) {
-    params.set("ignoredWorkspaceWakeKey", request.ignoredWorkspaceWakeKey);
-  }
 
   return params.toString();
 }

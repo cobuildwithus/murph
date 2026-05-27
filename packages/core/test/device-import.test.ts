@@ -113,13 +113,14 @@ function buildDenseHeartRateObservations(count: number): Array<{
   occurredAt: string;
   recordedAt: string;
   title: string;
-  externalRef: {
+  externalRef?: {
     system: string;
     resourceType: string;
     resourceId: string;
   };
   fields: {
     metric: string;
+    queryVisibility?: string;
     unit: string;
     value: number;
   };
@@ -204,6 +205,48 @@ test("importDeviceBatch rejects dense provider observation events by default", a
   );
 });
 
+test("importDeviceBatch treats numeric device observations without provenance as dense by default", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dense-events");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const events = buildDenseHeartRateObservations(1001).map(({ externalRef: _externalRef, ...event }) => event);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "wearable-provider",
+      accountId: "acct-test",
+      importedAt: "2026-03-16T09:30:00.000Z",
+      events,
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED"
+      && error.details?.observationEventCount === 1001,
+  );
+});
+
+test("importDeviceBatch allows display-grade device observations to opt into canonical events", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-display-events");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const events = buildDenseHeartRateObservations(1001).map((event) => ({
+    ...event,
+    fields: {
+      ...event.fields,
+      queryVisibility: "default",
+    },
+  }));
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-provider",
+    accountId: "acct-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events,
+  });
+
+  assert.equal(result.events.length, 1001);
+});
+
 test("importDeviceBatch dense sample escape hatch requires temporary debug retention", async () => {
   const missingRetentionVault = await makeTempDirectory("murph-device-import-dense-samples");
   await initializeVault({ vaultRoot: missingRetentionVault, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -215,7 +258,7 @@ test("importDeviceBatch dense sample escape hatch requires temporary debug reten
       accountId: "acct-test",
       importedAt: "2026-03-16T09:30:00.000Z",
       samples: buildDenseHeartRateSamples(1001),
-      denseSamplePolicy: {
+      denseTelemetryPolicy: {
         allowDenseDebugSamples: true,
       },
     }),
@@ -228,6 +271,25 @@ test("importDeviceBatch dense sample escape hatch requires temporary debug reten
   await initializeVault({ vaultRoot: allowedVault, createdAt: "2026-03-12T12:00:00.000Z" });
   const result = await importDeviceBatch({
     vaultRoot: allowedVault,
+    provider: "wearable-provider",
+    accountId: "acct-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    samples: buildDenseHeartRateSamples(1001),
+    denseTelemetryPolicy: {
+      allowDenseDebugSamples: true,
+      retention: "debug_temporary",
+    },
+  });
+
+  assert.equal(result.samples.length, 1001);
+});
+
+test("importDeviceBatch keeps dense sample escape hatch alias compatible", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-dense-samples-alias");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
     provider: "wearable-provider",
     accountId: "acct-test",
     importedAt: "2026-03-16T09:30:00.000Z",

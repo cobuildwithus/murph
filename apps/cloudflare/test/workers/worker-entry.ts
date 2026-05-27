@@ -551,7 +551,7 @@ async function driveRunnerNudgeForTest(
   runner: HostedUserRunner,
   userId: string,
 ): Promise<void> {
-  await runner.ensureRuntimeExecutionForUser({
+  await runner.ensureRuntimeProcessingForUser({
     orchestrationAttemptId: createTestOrchestrationAttemptId("wake"),
     reason: "nudge",
     userId,

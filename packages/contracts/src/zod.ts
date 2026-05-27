@@ -850,7 +850,10 @@ export const eventRecordSchema = withContractMetadata(
       .strict(),
     eventSchema("observation", {
       metric: patternedString(SLUG_PATTERN),
+      queryVisibility: z.enum(["default"]).optional(),
       value: numberSchema(),
+      visibility: z.enum(["display"]).optional(),
+      canonicalFact: z.literal(true).optional(),
       unit: patternedString(UNIT_PATTERN),
     }),
     eventSchema("measurement", {

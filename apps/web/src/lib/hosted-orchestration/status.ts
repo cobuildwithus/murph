@@ -3,18 +3,15 @@ import "server-only";
 import {
   HOSTED_RUNTIME_CURRENT_WAIT_REASONS,
   HOSTED_RUNTIME_DEMAND_KINDS,
-  HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandKind,
-  type HostedRuntimeEnsureExecutionResponseKind,
   type HostedRuntimeEnsureProcessingResponseKind,
   type HostedRuntimeLastRuntimeStatus,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
-  HOSTED_WORKSPACE_INVOCATION_STATUSES,
   isHostedMailboxLane,
   type HostedRunnerStatusResponse,
   type HostedWorkspaceState,
@@ -103,16 +100,10 @@ export async function readHostedOrchestrationUserStatus(input: {
     deviceSyncRecoveryRequested:
       temporalStatusResult.status?.deviceSyncRecoveryRequested === true,
     decisionSource: "status",
-    ignoredWorkspaceWakeKey:
-      temporalStatusResult.status?.ignoredWorkspaceWakeKey ?? null,
     lagRecoveryObserved:
       temporalStatusResult.status?.lagRecoveryObserved === true,
     manualRunRequested:
       temporalStatusResult.status?.manualRunRequested === true,
-    runtimeResultWakeAt:
-      temporalStatusResult.status?.runtimeResultWakeAt ?? null,
-    runtimeResultWakeReason:
-      temporalStatusResult.status?.runtimeResultWakeReason ?? null,
     usageGateMode: "read_only",
     userId: input.userId,
   });
@@ -326,7 +317,6 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     deviceSyncRecoveryRequested: requireBoolean(
       record.deviceSyncRecoveryRequested,
     ),
-    ignoredWorkspaceWakeKey: readNullableString(record.ignoredWorkspaceWakeKey),
     invalidSignalCount: requireSafeInteger(record.invalidSignalCount),
     lagRecoveryObserved: requireBoolean(record.lagRecoveryObserved),
     lastDemandKind: readNullableDemandKind(record.lastDemandKind),
@@ -348,15 +338,8 @@ function parseHostedRuntimeWorkflowStatusForWeb(
       readNullableObservabilityMailboxPointer(record.latestMailboxPointer),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
     manualRunRequested: requireBoolean(record.manualRunRequested),
-    legacyRuntimeFailedWithoutNextWakeCount: readOptionalSafeInteger(
-      record.legacyRuntimeFailedWithoutNextWakeCount
-        ?? record.runtimeFailedWithoutNextWakeCount,
-      0,
-    ),
-    runtimeResultWakeAt: readNullableString(record.runtimeResultWakeAt),
-    runtimeResultWakeReason: readNullableString(record.runtimeResultWakeReason),
     sameRuntimeWakeAcceptedCount: readOptionalSafeInteger(
-      record.sameRuntimeWakeAcceptedCount ?? record.sameRuntimeWakeSentCount,
+      record.sameRuntimeWakeAcceptedCount,
       0,
     ),
     signalVersion: requireSafeInteger(record.signalVersion),
@@ -440,14 +423,6 @@ function readNullableExecutionKind(
   }
 
   if (
-    HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS.includes(
-      kind as HostedRuntimeEnsureExecutionResponseKind,
-    )
-  ) {
-    return kind as HostedRuntimeEnsureExecutionResponseKind;
-  }
-
-  if (
     HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS.includes(
       kind as HostedRuntimeEnsureProcessingResponseKind,
     )
@@ -470,11 +445,7 @@ function readNullableLastRuntimeStatus(
     return status;
   }
 
-  if (
-    HOSTED_WORKSPACE_INVOCATION_STATUSES.includes(
-      status as Exclude<HostedRuntimeLastRuntimeStatus, "retry_later" | null>,
-    )
-  ) {
+  if (status === "scheduled") {
     return status as HostedRuntimeLastRuntimeStatus;
   }
 

@@ -15,9 +15,12 @@ import { extractIsoDatePrefix } from "@murphai/contracts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { CanonicalEntityFamily } from "./canonical-entities.ts";
 import { compareCanonicalEntities } from "./canonical-entities.ts";
-import { isDenseProviderObservationEntity } from "./dense-provider-observation.ts";
 import { ALL_QUERY_ENTITY_FAMILIES } from "./entity-families.ts";
 import { createVaultReadModel } from "./read-model.ts";
+import {
+  isDefaultProjectedQueryEntity,
+  isSearchIndexedQueryEntity,
+} from "./query-visibility.ts";
 import {
   filterSearchDocuments,
   materializeSampleSummarySearchDocuments as materializeSummaryDocuments,
@@ -44,7 +47,7 @@ import {
 import {
   buildMetricProjection,
 } from "./metrics/projection.ts";
-import { isDisplayGradeMetricSampleEntity, parseGoalMetricTargets } from "./metrics/index.ts";
+import { parseGoalMetricTargets } from "./metrics/index.ts";
 import {
   buildWearableSummaryBundle,
   explainWearableDriftFromBundle,
@@ -74,6 +77,7 @@ import {
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
+  readVaultSourceTolerant,
   type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
@@ -92,7 +96,7 @@ export type {
 } from "./query-projection-types.ts";
 
 const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-const QUERY_PROJECTION_SQLITE_VERSION = 4;
+const QUERY_PROJECTION_SQLITE_VERSION = 5;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -293,6 +297,13 @@ export async function loadProjectedVaultSource(
   return readStoredVaultSource(location);
 }
 
+export async function loadProjectedVaultSourceTolerant(
+  vaultRoot: string,
+): Promise<VaultSourceSnapshot> {
+  const location = await ensureFreshQueryProjection(vaultRoot, readVaultSourceTolerant);
+  return readStoredVaultSource(location);
+}
+
 export async function searchVaultRuntime(
   vaultRoot: string,
   query: string,
@@ -468,10 +479,11 @@ async function rebuildQueryProjectionWithManifest(
   vaultRoot: string,
   currentManifest: readonly QuerySourceManifestEntry[],
   location: QueryProjectionLocation = currentQueryProjectionLocation(vaultRoot),
+  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
 ): Promise<RebuildQueryProjectionResult> {
   await resetUnsupportedQueryProjection(location);
-  const snapshot = await readVaultSourceStrict(vaultRoot);
-  const projectedEntities = snapshot.entities.filter(isProjectedQueryEntity);
+  const snapshot = await readSource(vaultRoot);
+  const projectedEntities = snapshot.entities.filter(isDefaultProjectedQueryEntity);
   const snapshotReadModel = createVaultReadModel({
     metadata: snapshot.metadata,
     vaultRoot,
@@ -720,22 +732,6 @@ async function rebuildQueryProjectionWithManifest(
   }
 }
 
-function isProjectedQueryEntity(entity: CanonicalEntity): boolean {
-  if (isDenseProviderObservationEntity(entity)) {
-    return false;
-  }
-
-  if (entity.family !== "sample") {
-    return true;
-  }
-
-  return entity.kind === "metric_sample" && isDisplayGradeMetricSampleEntity(entity);
-}
-
-function isSearchIndexedQueryEntity(entity: CanonicalEntity): boolean {
-  return !isDenseProviderObservationEntity(entity);
-}
-
 interface WearableProviderScope {
   key: string;
   providers: string[];
@@ -799,7 +795,7 @@ function materializeWearableSummaryRows(
         providerScopeKey: scope.key,
         sortRank: index,
         summaryDate: summary.date,
-        summaryJson: JSON.stringify(summary),
+        summaryJson: stringifyWearableProjectionSummary(summary),
         summaryKind,
       });
     });
@@ -817,12 +813,36 @@ function materializeWearableSummaryRows(
       providerScopeKey: scope.key,
       sortRank: index,
       summaryDate: summary.lastDate ?? summary.firstDate,
-      summaryJson: JSON.stringify(summary),
+      summaryJson: stringifyWearableProjectionSummary(summary),
       summaryKind: "source_health",
     });
   });
 
   return rows;
+}
+
+const WEARABLE_SUMMARY_PROVENANCE_KEYS = new Set([
+  "candidateId",
+  "dataOrigin",
+  "externalRef",
+]);
+
+function stringifyWearableProjectionSummary(summary: unknown): string {
+  return JSON.stringify(summary, (key, value) => {
+    if (key === "candidates") {
+      return [];
+    }
+
+    if (WEARABLE_SUMMARY_PROVENANCE_KEYS.has(key)) {
+      return undefined;
+    }
+
+    if (key === "paths" || key === "recordIds") {
+      return [];
+    }
+
+    return value;
+  });
 }
 
 function normalizeWearableProviderScope(providers: readonly string[] | undefined): string[] {
@@ -875,13 +895,14 @@ async function resetUnsupportedQueryProjection(
 
 async function ensureFreshQueryProjection(
   vaultRoot: string,
+  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
 ): Promise<QueryProjectionLocation> {
   const location = currentQueryProjectionLocation(vaultRoot);
   const currentManifest = await listCanonicalSourceManifest(vaultRoot);
   const status = await readProjectionStatus(location, currentManifest);
 
   if (!status?.fresh) {
-    await rebuildQueryProjectionWithManifest(vaultRoot, currentManifest, location);
+    await rebuildQueryProjectionWithManifest(vaultRoot, currentManifest, location, readSource);
   }
 
   return location;
@@ -1046,12 +1067,7 @@ function readStoredWearableSummaryBundle(
         ORDER BY summary_kind ASC, summary_date DESC, sort_rank ASC
       `).all(scopeKey).map(decodeQueryWearableSummaryRow);
     const providerScopeKey = wearableProviderScopeKey(normalizeWearableProviderScope(filters.providers));
-    const scopedRows = readRows(providerScopeKey);
-    const rows = scopedRows.length > 0 || providerScopeKey === "all"
-      ? scopedRows
-      : readRows("all");
-
-    return wearableSummaryBundleFromRows(rows, filters);
+    return wearableSummaryBundleFromRows(readRows(providerScopeKey), filters);
   } finally {
     database.close();
   }

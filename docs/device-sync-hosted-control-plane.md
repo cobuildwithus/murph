@@ -231,7 +231,7 @@ Provider webhook traces remain exact for side-effect-bearing accepted deliveries
 
 When a connection transitions from clean to dirty, webhook ingress commits the dirty state and signals Temporal with a pointer to durable demand. Additional level hints while already dirty are coalesced without another ingress signal. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. If a post-commit Temporal signal is missed, the dirty row or remaining payload rows stay pending and the device-sync dirty sweeper can signal Temporal again later. Webhook and app paths do not send a user-level runner nudge directly to Cloudflare.
 
-Temporal is the only normal wake orchestrator. When demand exists, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, watchdog, and cleanup. Legacy `ensure-execution`/`runtime_completed` behavior is compatibility only, not the steady-state device-sync freshness path.
+Temporal is the only normal wake orchestrator. When demand exists, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, watchdog, and cleanup.
 
 For accepted webhooks, provider trace completion means durable audit and dirty acceptance committed. Internal wake delivery is not allowed to force provider retry after that transaction commits. Existing connection-established and disconnect wakes remain immediate lifecycle commands because they are explicit lifecycle commands, not high-cardinality freshness hints.
 

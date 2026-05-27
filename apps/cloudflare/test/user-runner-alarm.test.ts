@@ -100,13 +100,13 @@ describe("HostedUserRunner execution coordination", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("runs one direct ensure-execution adapter pass without reading status as demand", async () => {
+  it("accepts one runtime-processing pass without reading status as demand", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
       throw new Error("Cloudflare must not read status to schedule runtime demand.");
     });
-    const { alarms, invoke, runner, sql } = createRunnerHarness({
+    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
       onStatusRead,
       workspace: createWorkspaceState({
@@ -117,19 +117,19 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
-    await expect(runner.ensureRuntimeExecutionForUser({
+    await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
-      kind: "runtime_completed",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+      runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
 
     expect(onStatusRead).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
       reason: "nudge",
@@ -140,11 +140,12 @@ describe("HostedUserRunner execution coordination", () => {
       }),
       workspaceVersion: "5",
     });
+    await flushWaitUntil();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
       backoff_until: null,
       failure_count: 0,
-      last_invocation_at: FIXED_NOW,
+      last_invocation_at: expect.any(String),
       wake_at: null,
     });
     expect(alarms).toContain(RUNNER_TIMEOUT_AT);
@@ -170,15 +171,16 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
-    await expect(runner.ensureRuntimeExecutionForUser({
+    await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
-      kind: "runtime_completed",
-      runtimeStatus: "idle",
+      action: "started",
+      kind: "runtime_processing_accepted",
     });
 
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     const job = invoke.mock.calls[0]?.[0].job;
     expect(job?.diagnostics?.workspaceSnapshotPathHashSecret).toMatch(/^[a-f0-9]{64}$/u);
     expect(job?.diagnostics?.workspaceSnapshotPathHashSecret).not.toBe(logFingerprintSecret);
@@ -287,12 +289,13 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "7",
     });
 
-    await expect(runner.ensureRuntimeExecutionForUser({
+    await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
       reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
-      kind: "runtime_wake_sent",
+      action: "woken",
+      kind: "runtime_processing_accepted",
       recommendedRecheckAt: expect.any(String),
       runtimeAttemptId: token?.attemptId,
     });
@@ -553,19 +556,24 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
-    const firstEnsure = runner.ensureRuntimeExecutionForUser({
+    const firstEnsure = await runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-first",
       reason: "nudge",
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(firstEnsure).toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
 
-    await expect(runner.ensureRuntimeExecutionForUser({
+    await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-second",
       reason: "nudge",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
-      kind: "runtime_wake_sent",
+      action: "woken",
+      kind: "runtime_processing_accepted",
       recommendedRecheckAt: expect.any(String),
     });
 
@@ -584,17 +592,12 @@ describe("HostedUserRunner execution coordination", () => {
       nextWakeAt: null,
       status: "idle",
     });
-    await expect(firstEnsure).resolves.toMatchObject({
-      action: "started",
-      kind: "runtime_completed",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
-    });
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      wake_at: null,
-    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        wake_at: null,
+      })
+    );
   });
 
   it("uses Durable Object alarms only as write-fence watchdogs", async () => {
@@ -704,7 +707,7 @@ describe("HostedUserRunner execution coordination", () => {
       });
       await runner.bindUser(TEST_USER_ID);
 
-      const ensure = runner.ensureRuntimeExecutionForUser({
+      const ensure = await runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: `test-orchestration-status-${reason}`,
         reason,
         userId: TEST_USER_ID,
@@ -735,10 +738,9 @@ describe("HostedUserRunner execution coordination", () => {
         nextWakeAt: null,
         status: "idle",
       });
-      await expect(ensure).resolves.toMatchObject({
+      expect(ensure).toMatchObject({
         action: "started",
-        kind: "runtime_completed",
-        runtimeStatus: "idle",
+        kind: "runtime_processing_accepted",
       });
     },
   );

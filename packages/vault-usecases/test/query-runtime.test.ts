@@ -41,6 +41,22 @@ describe("query runtime compatibility surface", () => {
     expect(runtime.showAssessment).toBe(sharedQuery.showAssessment);
     expect(runtime.showBloodTest).toBe(sharedQuery.showBloodTest);
     expect(runtime.searchVaultRuntime).toBe(sharedQuery.searchVaultRuntime);
+    expect(runtime.summarizeWearableLatestRuntime).toBe(sharedQuery.summarizeWearableLatestRuntime);
+    expect(runtime.summarizeWearableMetricLatestRuntime).toBe(
+      sharedQuery.summarizeWearableMetricLatestRuntime,
+    );
+    expect(runtime.summarizeWearableMetricTrendRuntime).toBe(
+      sharedQuery.summarizeWearableMetricTrendRuntime,
+    );
+    expect(runtime.summarizeWearableSleepRuntime).toBe(sharedQuery.summarizeWearableSleepRuntime);
+    expect(runtime.summarizeWearableActivityRuntime).toBe(sharedQuery.summarizeWearableActivityRuntime);
+    expect(runtime.summarizeWearableBodyStateRuntime).toBe(sharedQuery.summarizeWearableBodyStateRuntime);
+    expect(runtime.summarizeWearableDayRuntime).toBe(sharedQuery.summarizeWearableDayRuntime);
+    expect(runtime.summarizeWearableRecoveryRuntime).toBe(sharedQuery.summarizeWearableRecoveryRuntime);
+    expect(runtime.summarizeWearableSourceHealthRuntime).toBe(
+      sharedQuery.summarizeWearableSourceHealthRuntime,
+    );
+    expect(runtime.explainWearableDriftRuntime).toBe(sharedQuery.explainWearableDriftRuntime);
     expect(runtime.showSupplement).toBe(sharedQuery.showSupplement);
     expect(runtime.showSupplementCompound).toBe(sharedQuery.showSupplementCompound);
     expect(runtime.summarizeExperimentProgress).toBe(sharedQuery.summarizeExperimentProgress);

@@ -1,6 +1,4 @@
 import type { DeviceDataOrigin as ContractDeviceDataOrigin, EventSource, MealNutrition } from "@murphai/contracts";
-import type { CanonicalWearableRecord } from "./device-providers/canonical-wearable-records.ts";
-import type { WearableRawIngestReceipt } from "./device-providers/raw-ingest-receipt.ts";
 
 export interface DocumentImportPayload {
   vaultRoot?: string;
@@ -133,8 +131,6 @@ export interface DeviceBatchImportPayload {
   events?: DeviceEventPayload[];
   samples?: DeviceSamplePayload[];
   rawArtifacts?: DeviceRawArtifactPayload[];
-  rawIngestReceipts?: WearableRawIngestReceipt[];
-  canonicalWearableRecords?: CanonicalWearableRecord[];
   provenance?: Record<string, unknown>;
 }
 

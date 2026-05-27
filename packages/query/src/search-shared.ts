@@ -5,7 +5,7 @@ import {
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
-import { isDenseProviderObservationEntity } from "./dense-provider-observation.ts";
+import { isDenseProviderObservationEntity } from "./query-visibility.ts";
 import type { DailySampleSummary } from "./summaries.ts";
 
 const DEFAULT_LIMIT = 20;

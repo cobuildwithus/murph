@@ -33,6 +33,7 @@ export {
 } from "./model.ts";
 export {
   readVault,
+  readVaultRawTolerant,
   readVaultTolerant,
 } from "./vault-reader.ts";
 export {
@@ -197,7 +198,6 @@ export {
 export {
   buildWearableAssistantSummary,
   buildWearableSummaryBundle,
-  collectCanonicalWearableDataset,
   explainWearableDriftFromBundle,
   explainWearableDrift,
   listWearableActivityDays,

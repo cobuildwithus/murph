@@ -4,8 +4,6 @@ import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedRuntimeEnsureExecutionRequest,
-  HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -33,14 +31,6 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
-  /**
-   * @deprecated Legacy replay/deploy-skew adapter. Normal orchestration uses
-   * `ensureRuntimeProcessingForUser`. Target removal: 2026-06-04 after old
-   * hosted user runtime histories drain.
-   */
-  ensureRuntimeExecutionForUser(
-    input: HostedRuntimeEnsureExecutionRequest & { userId: string },
-  ): Promise<HostedRuntimeEnsureExecutionResponse>;
   ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & { userId: string },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;

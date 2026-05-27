@@ -70,6 +70,48 @@ test("browser vault replica creation emits metric-key rows from wearable and vau
   assert.equal(Object.hasOwn(replica, "metricDayRows"), false);
 });
 
+test("browser vault replica excludes dense provider observations but keeps display-grade facts", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createCanonicalEntity("event", "evt_raw_device_point", {
+          attributes: {
+            metric: "heart-rate",
+            source: "device",
+            unit: "bpm",
+            value: 72,
+          },
+          kind: "observation",
+          title: "Raw heart-rate point",
+        }),
+        createCanonicalEntity("event", "evt_display_device_fact", {
+          attributes: {
+            metric: "readiness-score",
+            queryVisibility: "default",
+            source: "device",
+            unit: "score",
+            value: 8,
+          },
+          kind: "observation",
+          title: "Readiness fact",
+        }),
+      ],
+      metadata: { title: "Browser dense observation vault" },
+      vaultRoot: "browser://dense-observations",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const observationSearchRows = client.search("observation");
+
+  assert.equal(client.entities.get("evt_raw_device_point"), null);
+  assert.equal(client.entities.get("evt_display_device_fact")?.id, "evt_display_device_fact");
+  assert.equal(observationSearchRows.some((row) => row.entityId === "evt_raw_device_point"), false);
+  assert.equal(observationSearchRows.some((row) => row.entityId === "evt_display_device_fact"), true);
+});
+
 test("browser vault replica creation uses supplied metric points with a sparse vault", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-04-20T12:00:00.000Z",

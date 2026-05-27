@@ -8,15 +8,6 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "browser-vault/session",
   },
-  /**
-   * @deprecated Legacy replay/deploy-skew route. New orchestration should use
-   * `runtimeEnsureProcessing`. Target removal: 2026-06-04 after old hosted user
-   * runtime histories drain.
-   */
-  runtimeEnsureExecution: {
-    method: "POST",
-    suffix: "runtime/ensure-execution",
-  },
   runtimeEnsureProcessing: {
     method: "POST",
     suffix: "runtime/ensure-processing",
@@ -38,15 +29,6 @@ export type CloudflareHostedControlUserRouteParams = Readonly<Record<string, str
 
 export function buildCloudflareHostedControlUserStatusPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("status", userId);
-}
-
-/**
- * @deprecated Legacy replay/deploy-skew route. New orchestration should use
- * `buildCloudflareHostedControlRuntimeEnsureProcessingPath`. Target removal:
- * 2026-06-04 after legacy hosted user runtime histories drain.
- */
-export function buildCloudflareHostedControlRuntimeEnsureExecutionPath(userId: string): string {
-  return buildCloudflareHostedControlUserRoutePath("runtimeEnsureExecution", userId);
 }
 
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {

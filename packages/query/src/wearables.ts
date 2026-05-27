@@ -19,7 +19,6 @@ import {
 } from "./wearables/confidence.ts";
 import { formatMetricLabel, formatProviderName, inferDefaultMetricFamily } from "./wearables/provider-policy.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
-export { collectCanonicalWearableDataset } from "./wearables/canonical-records.ts";
 import { wearableDataOriginKey } from "./wearables/origin.ts";
 import { buildCandidateId, collectLatestDate, collectSortedDatesDesc, latestIsoTimestamp, uniqueStrings } from "./wearables/shared.ts";
 import {

@@ -4,9 +4,8 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
 } from "../src/orchestration-control.ts";
 import {
-  HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS,
+  HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS,
   HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS,
-  readHostedRuntimeEnsureCloudflareExecutionTimeouts,
   readHostedRuntimeEnsureProcessingTimeouts,
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
@@ -155,40 +154,24 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
     expect(
       timeouts.ensureRuntimeProcessingStartToCloseTimeoutMs
       - timeouts.ensureRuntimeProcessingHttpTimeoutMs,
-    ).toBe(HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS);
-
-    expect(readHostedRuntimeEnsureCloudflareExecutionTimeouts({
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
-      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "5000",
-    })).toEqual({
-      ensureCloudflareExecutionHttpTimeoutMs: 125_000,
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 155_000,
-    });
+    ).toBe(HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS);
   });
 
   it("reads shared workflow timing options", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions({
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
       HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "15000",
-      HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
     })).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
       readRuntimeDemandStartToCloseTimeoutMs: 15_000,
-      runtimeCompletedFailureRecheckDelayMs: 45_000,
     });
   });
 
-  it("bounds runtime demand and failed-completion retry delays", () => {
+  it("bounds runtime demand timeout", () => {
     expect(() => readHostedRuntimeTemporalWorkflowOptions({
       HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "30001",
     })).toThrow(
       "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS must be less than or equal to 30000.",
-    );
-
-    expect(() => readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "3600001",
-    })).toThrow(
-      "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS must be less than or equal to 3600000.",
     );
   });
 

@@ -5,13 +5,9 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import type {
-  HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
-import {
-  ensureCloudflareExecution,
-} from "../src/activities/ensure-cloudflare-execution.js";
 import {
   ensureRuntimeProcessing,
 } from "../src/activities/ensure-runtime-processing.js";
@@ -160,26 +156,6 @@ describe("ensureRuntimeProcessing", () => {
     });
   });
 
-  it("keeps the legacy ensure-execution HTTP budget separate from ensure-processing", async () => {
-    await stubCloudflareEnvironment();
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    const response: HostedRuntimeEnsureExecutionResponse = {
-      kind: "runtime_wake_sent",
-      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
-      runtimeAttemptId: "runtime_attempt_test",
-    };
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(response)));
-
-    await expect(ensureCloudflareExecution({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-      userId: "member_test",
-    })).resolves.toEqual(response);
-
-    expect(timeoutSpy).toHaveBeenCalledWith(125_000);
-  });
-
   it("posts only the minimal Cloudflare ensure-processing request", async () => {
     await stubCloudflareEnvironment();
 
@@ -317,8 +293,6 @@ async function stubCloudflareEnvironment(): Promise<void> {
     "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
     await createEphemeralPrivateJwkJson(),
   );
-  vi.stubEnv("HOSTED_EXECUTION_RUNNER_TIMEOUT_MS", "120000");
-  vi.stubEnv("HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS", "5000");
 }
 
 async function createEphemeralPrivateJwkJson(): Promise<string> {

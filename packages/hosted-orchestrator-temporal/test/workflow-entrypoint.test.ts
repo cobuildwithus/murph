@@ -71,4 +71,39 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
       startToCloseTimeout: 15_000,
     }));
   });
+
+  it("emits the ensure-processing patch marker at the execution decision", async () => {
+    vi.resetModules();
+    readRuntimeDemand.mockResolvedValueOnce({
+      kind: "run",
+      mailboxLag: [],
+      reason: "nudge",
+      source: "mailbox_backlog",
+      workspace: null,
+    });
+    ensureRuntimeProcessing.mockResolvedValueOnce({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: null,
+      runtimeAttemptId: "runtime_attempt_test",
+    });
+    const {
+      hostedUserRuntimeWorkflow,
+    } = await import("../src/workflows/hosted-user-runtime.js");
+
+    await expect(hostedUserRuntimeWorkflow({
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    })).rejects.toBe(continueAsNewError);
+
+    expect(patched).toHaveBeenCalledWith(
+      "hosted-user-runtime-ensure-runtime-processing-v1",
+    );
+    expect(patched.mock.invocationCallOrder[0]).toBeGreaterThan(
+      readRuntimeDemand.mock.invocationCallOrder[0],
+    );
+    expect(patched.mock.invocationCallOrder[0]).toBeLessThan(
+      ensureRuntimeProcessing.mock.invocationCallOrder[0],
+    );
+  });
 });

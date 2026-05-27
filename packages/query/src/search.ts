@@ -1,4 +1,5 @@
 import type { VaultReadModel } from "./read-model.ts";
+import { isSearchIndexedQueryEntity } from "./query-visibility.ts";
 import {
   materializeSafeSampleSummarySearchDocuments,
   materializeSafeSearchDocuments,
@@ -38,8 +39,11 @@ export function searchVault(
   query: string,
   filters: SearchFilters = {},
 ): SearchResult {
+  const searchableEntities = vault.entities.filter((entity) =>
+    entity.family !== "sample" && isSearchIndexedQueryEntity(entity)
+  );
   const documents = [
-    ...materializeSearchDocuments(vault.entities.filter((entity) => entity.family !== "sample")),
+    ...materializeSearchDocuments(searchableEntities),
     ...materializeSampleSummarySearchDocuments(summarizeDailySamples(vault)),
   ];
   return scoreSearchDocuments(documents, query, filters);
@@ -50,8 +54,11 @@ export function searchVaultSafe(
   query: string,
   filters: SearchFilters = {},
 ): SafeSearchResult {
+  const searchableEntities = vault.entities.filter((entity) =>
+    entity.family !== "sample" && isSearchIndexedQueryEntity(entity)
+  );
   const documents = [
-    ...materializeSafeSearchDocuments(vault.entities.filter((entity) => entity.family !== "sample")),
+    ...materializeSafeSearchDocuments(searchableEntities),
     ...materializeSafeSampleSummarySearchDocuments(summarizeDailySamples(vault)),
   ];
   const result = scoreSearchDocuments(documents, query, filters);

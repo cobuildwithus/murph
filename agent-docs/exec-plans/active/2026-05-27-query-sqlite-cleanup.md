@@ -23,6 +23,7 @@ Land the cleanup described by `agent-docs/exec-plans/completed/SQLITE_CLEANUP.md
 3. Exclude dense provider observations from `query_entities` after compact wearable data is available.
 4. Stop Junction timeseries normalization from emitting default event observations, and add a dense telemetry policy guard in core for event observations as well as samples.
 5. Switch FTS to external content, replace raw attribute JSON in search text with allowlisted structured terms, and stream JSONL source reads.
+6. Harden the visibility policy so numeric device observations are dense by default unless explicitly display-grade, and keep raw tolerant hydration separate from projected product reads.
 
 ## Acceptance
 
@@ -41,6 +42,6 @@ Land the cleanup described by `agent-docs/exec-plans/completed/SQLITE_CLEANUP.md
 
 ## State
 
-- Done: active plan registration, projection/search modeling fix, compact wearable runtime readers, core dense telemetry guard, Junction import payload filtering, external-content FTS, structured search allowlist, JSONL/source hash streaming.
-- Now: focused verification and repo-level checks.
+- Done: active plan registration, projection/search modeling fix, compact wearable runtime readers, core dense telemetry guard, Junction import payload filtering, external-content FTS, structured search allowlist, JSONL/source hash streaming, dense-by-default observation hardening, projected/raw tolerant read split, root runtime export regression coverage.
+- Now: owner typecheck/coverage and completion audits.
 - Next: commit/push/deploy only if scoped commit remains safe with the current dirty worktree.

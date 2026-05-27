@@ -31,8 +31,6 @@ Internal control routes:
   callback-signed Temporal processing adapter; it starts, wakes, or accepts a
   pending runtime wake for only the bound user's runtime and returns after that
   start/wake intent is accepted, not after the runtime reaches idle
-- `POST /internal/users/:userId/runtime/ensure-execution` is legacy
-  compatibility for older callers during migration
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API

@@ -1,5 +1,5 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { isDenseProviderObservationEntity } from "../dense-provider-observation.ts";
+import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import { buildTimeline, type TimelineEntry } from "../timeline.ts";
@@ -14,7 +14,6 @@ import {
   listMetricDefinitions,
   normalizeMetricKey,
   parseGoalMetricTargets,
-  isDisplayGradeMetricSampleEntity,
   selectMetricGoalProgress,
   type GoalMetricTarget,
   type MetricPoint,
@@ -149,15 +148,7 @@ function isBrowserVaultIncludedFamily(family: string): boolean {
 }
 
 function isBrowserVaultIncludedEntity(entity: CanonicalEntity): boolean {
-  if (isDenseProviderObservationEntity(entity)) {
-    return false;
-  }
-
-  if (entity.family === "sample") {
-    return entity.kind === "metric_sample" && isDisplayGradeMetricSampleEntity(entity);
-  }
-
-  return true;
+  return isDefaultProjectedQueryEntity(entity);
 }
 
 function buildMetricGoalProgressRows(

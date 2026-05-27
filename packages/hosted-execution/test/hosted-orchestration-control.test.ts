@@ -17,8 +17,6 @@ import {
 import {
   parseHostedRuntimeDemand,
   parseHostedRuntimeDemandRequest,
-  parseHostedRuntimeEnsureExecutionRequest,
-  parseHostedRuntimeEnsureExecutionResponse,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimeSignal,
@@ -111,11 +109,8 @@ describe("hosted orchestration control contracts", () => {
     const demandRequest = {
       browserVaultRefreshRequested: true,
       deviceSyncRecoveryRequested: true,
-      ignoredWorkspaceWakeKey: "7:2026-05-20T12:01:00.000Z:assistant",
       lagRecoveryObserved: false,
       manualRunRequested: true,
-      runtimeResultWakeAt: "2026-05-20T12:00:30.000Z",
-      runtimeResultWakeReason: "assistant",
       userId: "user_test",
     };
     const mailboxLag = createMailboxLag();
@@ -137,19 +132,6 @@ describe("hosted orchestration control contracts", () => {
       reason: "nudge",
       source: "mailbox_backlog",
       workspace,
-    });
-    expect(parseHostedRuntimeDemand({
-      kind: "run",
-      mailboxLag,
-      reason: "retry",
-      source: "runtime_result_wake",
-      workspace: null,
-    })).toEqual({
-      kind: "run",
-      mailboxLag,
-      reason: "retry",
-      source: "runtime_result_wake",
-      workspace: null,
     });
     expect(parseHostedRuntimeDemand({
       kind: "idle",
@@ -239,64 +221,6 @@ describe("hosted orchestration control contracts", () => {
     })).toThrow("Hosted runtime demand workspace projection must not include redactedStatus.");
   });
 
-  it("parses ensure-execution request and every response variant", () => {
-    expect(parseHostedRuntimeEnsureExecutionRequest({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
-    })).toEqual({
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "manual",
-    });
-    expect(parseHostedRuntimeEnsureExecutionResponse({
-      action: "started",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_test",
-      runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
-      runtimeResultNextWakeReason: "assistant",
-      runtimeStatus: "idle",
-    })).toEqual({
-      action: "started",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_test",
-      runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
-      runtimeResultNextWakeReason: "assistant",
-      runtimeStatus: "idle",
-    });
-    expect(parseHostedRuntimeEnsureExecutionResponse({
-      kind: "runtime_wake_sent",
-      recommendedRecheckAt: null,
-      runtimeAttemptId: "runtime_attempt_test",
-    })).toEqual({
-      kind: "runtime_wake_sent",
-      recommendedRecheckAt: null,
-      runtimeAttemptId: "runtime_attempt_test",
-    });
-    expect(parseHostedRuntimeEnsureExecutionResponse({
-      action: "replaced",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_replacement_test",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "scheduled",
-    })).toEqual({
-      action: "replaced",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_replacement_test",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "scheduled",
-    });
-    expect(() => parseHostedRuntimeEnsureExecutionResponse({
-      action: "started",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime_attempt_missing_reason_test",
-      runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
-      runtimeStatus: "idle",
-    })).toThrow(
-      "Hosted runtime completed response runtimeResultNextWakeReason must be a string or null.",
-    );
-  });
-
   it("parses ensure-processing request and response variants", () => {
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
@@ -335,63 +259,9 @@ describe("hosted orchestration control contracts", () => {
       retryAt: "2026-05-20T12:04:00.000Z",
     });
 
-    expect(parseHostedRuntimeEnsureProcessingResponse({
-      kind: "retry_later",
-      reason: "container_rpc_timeout",
-      retryAt: "2026-05-20T12:04:00.000Z",
-    })).toEqual({
-      kind: "retry_later",
-      retryAt: "2026-05-20T12:04:00.000Z",
-    });
   });
 
-  it("rejects raw payload-shaped fields and completion shortcuts in ensure-execution contracts", () => {
-    expect(() => parseHostedRuntimeEnsureExecutionRequest({
-      aiUsageAllowDecision: createAiUsageAllowDecision(),
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-    })).toThrow(
-      "Hosted runtime ensure-execution request must not include aiUsageAllowDecision.",
-    );
-
-    expect(() => parseHostedRuntimeEnsureExecutionRequest({
-      headers: true,
-      orchestrationAttemptId: "orchestration_attempt_test",
-      reason: "nudge",
-    })).toThrow("Hosted runtime ensure-execution request must not include headers.");
-
-    expect(() => parseHostedRuntimeEnsureExecutionResponse({
-      kind: "caught-up",
-      runtimeAttemptId: "runtime_attempt_test",
-    })).toThrow(/Hosted runtime ensure-execution response kind is not supported/u);
-
-    expect(() => parseHostedRuntimeEnsureExecutionResponse({
-      kind: "runtime_wake_sent",
-      mailboxLag: [],
-      recommendedRecheckAt: null,
-      runtimeAttemptId: "runtime_attempt_test",
-    })).toThrow("Hosted runtime wake-sent response must not include mailboxLag.");
-
-    expect(() => parseHostedRuntimeEnsureExecutionResponse({
-      action: "started",
-      kind: "runtime_completed",
-      payload: true,
-      runtimeAttemptId: "runtime_attempt_test",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
-    })).toThrow("Hosted runtime completed response must not include payload.");
-
-    expect(() => parseHostedRuntimeEnsureExecutionResponse({
-      action: "started",
-      kind: "runtime_completed",
-      redactedStatus: {},
-      runtimeAttemptId: "runtime_attempt_test",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
-    })).toThrow("Hosted runtime completed response must not include redactedStatus.");
-
+  it("rejects raw payload-shaped fields and completion shortcuts in ensure-processing contracts", () => {
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       aiUsageAllowDecision: createAiUsageAllowDecision(),
       orchestrationAttemptId: "orchestration_attempt_test",
@@ -438,7 +308,7 @@ describe("hosted orchestration control contracts", () => {
       reason: "container rpc timeout",
       retryAt: "2026-05-20T12:04:00.000Z",
     })).toThrow(
-      "Hosted runtime processing retry-later legacy response reason is not supported.",
+      "Hosted runtime processing retry-later response must not include reason.",
     );
   });
 });

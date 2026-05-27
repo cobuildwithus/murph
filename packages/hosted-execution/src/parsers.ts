@@ -133,8 +133,6 @@ export {
 export {
   parseHostedRuntimeDemand,
   parseHostedRuntimeDemandRequest,
-  parseHostedRuntimeEnsureExecutionRequest,
-  parseHostedRuntimeEnsureExecutionResponse,
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimeSignal,
