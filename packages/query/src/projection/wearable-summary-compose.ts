@@ -21,6 +21,7 @@ import type {
   WearableSleepWindowCandidate,
   WearableSourceHealthSummary,
 } from "../wearables/types.ts";
+import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
   normalizeWearableProviders,
 } from "./provider-scope.ts";
@@ -120,10 +121,10 @@ function composePublicWearableSummaryBundleFromProviderRows(
   const dataset = wearableDatasetFromProjectedBundle(providerBundle);
   const composed = buildWearableSummaryBundleFromDataset(dataset);
 
-  return projectPublicWearableSummaryBundle(mergeStoredSourceHealthRows(composed, providerBundle.sourceHealth));
+  return projectPublicWearableSummaryBundle(mergeStoredSourceHealthContext(composed, providerBundle.sourceHealth));
 }
 
-function mergeStoredSourceHealthRows(
+function mergeStoredSourceHealthContext(
   bundle: WearableSummaryBundle,
   storedSourceHealth: readonly ProjectedWearableSourceHealthSummary[],
 ): WearableSummaryBundle {
@@ -131,31 +132,90 @@ function mergeStoredSourceHealthRows(
     return bundle;
   }
 
+  const diagnosticsByProvider = new Map<string, string[]>();
+  for (const stored of storedSourceHealth) {
+    const diagnosticNotes = stored.notes.filter(isStoredSourceHealthDiagnosticNote);
+    if (diagnosticNotes.length === 0) {
+      continue;
+    }
+
+    diagnosticsByProvider.set(
+      stored.provider,
+      uniqueStringValues([
+        ...(diagnosticsByProvider.get(stored.provider) ?? []),
+        ...diagnosticNotes,
+      ]),
+    );
+  }
+
   const sourceHealth = bundle.sourceHealth.map((summary) => {
-    const stored = storedSourceHealth.find((candidate) => candidate.provider === summary.provider);
-    if (!stored) {
+    const diagnosticNotes = diagnosticsByProvider.get(summary.provider);
+    if (!diagnosticNotes || diagnosticNotes.length === 0) {
       return summary;
     }
 
     return {
       ...summary,
-      notes: uniqueStringValues([...summary.notes, ...stored.notes]),
+      notes: uniqueStringValues([...summary.notes, ...diagnosticNotes]),
     };
   });
   const composedProviders = new Set(sourceHealth.map((summary) => summary.provider));
 
   for (const summary of storedSourceHealth) {
+    const diagnosticNotes = diagnosticsByProvider.get(summary.provider);
     if (composedProviders.has(summary.provider)) {
       continue;
     }
 
-    sourceHealth.push(summary);
+    if (!diagnosticNotes && !storedSourceHealthHasCoverageInterval(summary)) {
+      continue;
+    }
+
+    sourceHealth.push(buildStoredSourceHealthCoverageRow(summary, diagnosticNotes ?? []));
     composedProviders.add(summary.provider);
   }
 
   return {
     ...bundle,
     sourceHealth: sourceHealth.sort(compareSourceHealthSummaries),
+  };
+}
+
+function isStoredSourceHealthDiagnosticNote(note: string): boolean {
+  return (
+    note.startsWith("Included ") && note.includes("incomplete provenance")
+  ) || (
+    note.startsWith("Excluded ") && note.includes("provenance was incomplete")
+  );
+}
+
+function storedSourceHealthHasCoverageInterval(summary: ProjectedWearableSourceHealthSummary): boolean {
+  return summary.firstDate !== null || summary.lastDate !== null;
+}
+
+function buildStoredSourceHealthCoverageRow(
+  summary: ProjectedWearableSourceHealthSummary,
+  diagnosticNotes: readonly string[],
+): WearableSourceHealthSummary {
+  const hasDiagnostics = diagnosticNotes.length > 0;
+
+  return {
+    activityDays: 0,
+    bodyStateDays: 0,
+    candidateMetrics: hasDiagnostics ? summary.candidateMetrics : 0,
+    conflictCount: 0,
+    exactDuplicatesSuppressed: 0,
+    firstDate: summary.firstDate,
+    lastDate: summary.lastDate,
+    latestRecordedAt: hasDiagnostics ? summary.latestRecordedAt : null,
+    metricsContributed: [],
+    notes: [...diagnosticNotes],
+    provider: summary.provider,
+    providerDisplayName: formatProviderName(summary.provider),
+    recoveryDays: 0,
+    selectedMetrics: 0,
+    sleepNights: 0,
+    stalenessVsNewestDays: null,
   };
 }
 

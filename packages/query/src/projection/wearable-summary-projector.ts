@@ -28,8 +28,7 @@ import type {
 export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWearableSummaryRow[] {
   const dataset = collectWearableDataset(vault, {});
   const datasetsByProvider = groupWearableDatasetByPublicProvider(dataset);
-  const allBundle = buildWearableSummaryBundleFromDataset(mergeWearableDatasets(datasetsByProvider.values()));
-  const providers = normalizeWearableProviders(allBundle.sourceHealth.map((entry) => entry.provider));
+  const providers = normalizeWearableProviders([...datasetsByProvider.keys()]);
 
   return providers.flatMap((provider) =>
     materializeWearableSummaryRows(
@@ -96,20 +95,6 @@ function emptyWearableDataset(): MutableWearableDataset {
     rawMetricCandidates: [],
     sleepWindows: [],
   };
-}
-
-function mergeWearableDatasets(datasets: Iterable<WearableDataset>): WearableDataset {
-  const merged = emptyWearableDataset();
-
-  for (const dataset of datasets) {
-    merged.activitySessionAggregates.push(...dataset.activitySessionAggregates);
-    merged.metricCandidates.push(...dataset.metricCandidates);
-    merged.provenanceDiagnostics.push(...dataset.provenanceDiagnostics);
-    merged.rawMetricCandidates.push(...dataset.rawMetricCandidates);
-    merged.sleepWindows.push(...dataset.sleepWindows);
-  }
-
-  return merged;
 }
 
 function resolveMetricCandidatePublicProvider(candidate: WearableMetricCandidate): string {
