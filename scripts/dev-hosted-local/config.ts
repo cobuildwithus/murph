@@ -234,6 +234,7 @@ export function printHelp(): void {
       "  MURPH_DEV_TEMPORAL=auto            Temporal mode: auto reuses a local Temporal listener or starts one; managed always starts one; external uses caller-supplied Temporal; disabled skips orchestration",
       "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for auto/managed mode",
       "  MURPH_DEV_TEMPORAL_PORT=7233       Local Temporal frontend gRPC port",
+      "  MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE=1 Allow local startup to create/update the reconciler Schedule in external Temporal",
       "  TEMPORAL_NAMESPACE=default         Temporal namespace for web signals and worker polling",
       "  TEMPORAL_TASK_QUEUE=murph-hosted-runtime Temporal task queue for hosted runtime workflows",
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",

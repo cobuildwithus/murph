@@ -13,12 +13,10 @@ Exact hosted message/event producers append encrypted mailbox items in Postgres,
 then signal the pointer-only hosted Temporal workflow for the affected member.
 Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
-that transaction, and sends a best-effort background-maintenance signal for
-clean-to-dirty transitions while the dirty row remains the source of truth.
-Temporal preserves that recovery source through ensure-processing so the runner
-can run dirty device-sync as background work when no fresh conversation input is
-pending. Bounded dirty-sweeper recovery may still append opaque wake pointers and
-signal Temporal instead of nudging Cloudflare directly.
+that transaction, appends one opaque `device-sync.wake` pointer for the dirty
+revision, and then sends a best-effort Temporal signal for that mailbox item.
+The dirty row remains the source of truth. Bounded dirty-sweeper recovery uses
+the same dirty-revision mailbox identity if the post-commit signal is missed.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
@@ -579,10 +577,10 @@ The onboarding lane is intentionally thin:
   not a second execution lifecycle authority.
 - Temporal-bound execution from onboarding and exact message ingress appends
   canonical hosted mailbox input first. Device-sync webhook freshness records
-  dirty state first, signals background maintenance for clean-to-dirty
-  transitions, preserves `device-sync.wake` only for legacy/lifecycle/recovery
-  paths, and keeps the dirty row as the source of truth until the runtime
-  checkpoints it.
+  dirty state and appends one opaque `device-sync.wake` pointer for the dirty
+  revision in the same transaction, then treats the post-commit Temporal signal
+  as a best-effort wake hint. The dirty row stays the source of truth until the
+  runtime checkpoints it.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

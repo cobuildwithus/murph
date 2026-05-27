@@ -21,6 +21,8 @@ import {
 import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimePrewarmRequest,
+  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   assertHostedRuntimeProcessingTimeoutMs,
@@ -33,6 +35,7 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedRuntimeEnsureProcessingRequest,
+  parseHostedRuntimePrewarmRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -269,6 +272,20 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     name: "runtime-ensure-processing",
     wrongMethodResponse: "method-not-allowed",
   },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "web-callback-signature",
+    beforeMethod(context, params) {
+      return requireBoundInternalRouteUser(context, params, "runtime-prewarm");
+    },
+    async handle(context, params) {
+      return handleRuntimePrewarmRoute(context, params.userId);
+    },
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimePrewarm", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimePrewarm.method],
+    name: "runtime-prewarm",
+    wrongMethodResponse: "method-not-allowed",
+  },
 
   {
     authorizeBeforeMethod: true,
@@ -382,6 +399,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return this.runner.ensureRuntimeProcessingForUser(input);
+  }
+
+  async prewarmRuntimeContainerForUser(
+    input: HostedRuntimePrewarmRequest & {
+      userId: string;
+    },
+  ): Promise<HostedRuntimePrewarmResponse> {
+    return this.runner.prewarmRuntimeContainerForUser(input);
   }
 
   async validateRuntimeWriteFence(input: {
@@ -1470,6 +1495,65 @@ async function handleRuntimeEnsureProcessingRoute(
     ...(commandTimeoutMs === null ? {} : { commandTimeoutMs }),
     userId,
   }));
+}
+
+async function handleRuntimePrewarmRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  let prewarmRequest: HostedRuntimePrewarmRequest;
+  try {
+    const payload = await readCachedRequestText(context, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
+    prewarmRequest = parseHostedRuntimePrewarmRequest(
+      requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
+    );
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-prewarm-request-invalid",
+        routeName: "runtime-prewarm",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker runtime prewarm route rejected an invalid request.",
+      phase: "failed",
+      userId,
+    });
+    const classified = classifyPublicRouteError(error);
+    return json({
+      code: "invalid_request",
+      error: classified.error,
+    }, classified.status);
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId);
+  try {
+    return json(await stub.prewarmRuntimeContainerForUser({
+      ...prewarmRequest,
+      userId,
+    }));
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-prewarm-rpc-failed",
+        routeName: "runtime-prewarm",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker runtime prewarm route failed best-effort.",
+      phase: "runtime.prewarm",
+      userId,
+    });
+    return json({
+      kind: "retry_later",
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    } satisfies HostedRuntimePrewarmResponse);
+  }
 }
 
 function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

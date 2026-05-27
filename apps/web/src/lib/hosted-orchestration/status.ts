@@ -330,14 +330,24 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     lastMailboxLagLaneCount: requireSafeInteger(record.lastMailboxLagLaneCount),
     lastOrchestrationAttemptId:
       readNullableString(record.lastOrchestrationAttemptId ?? null),
+    lastPrewarmAttemptId:
+      readNullableString(record.lastPrewarmAttemptId ?? null),
+    lastPrewarmErrorCode:
+      readNullableString(record.lastPrewarmErrorCode ?? null),
+    lastPrewarmResult:
+      readNullablePrewarmResult(record.lastPrewarmResult ?? null),
     lastRuntimeAttemptId: readNullableString(record.lastRuntimeAttemptId ?? null),
     lastRuntimeStatus: readNullableLastRuntimeStatus(
       record.lastRuntimeStatus ?? null,
     ),
     latestMailboxPointer:
       readNullableObservabilityMailboxPointer(record.latestMailboxPointer),
+    latestPrewarmRequestedAt:
+      readNullableString(record.latestPrewarmRequestedAt ?? null),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
     manualRunRequested: requireBoolean(record.manualRunRequested),
+    prewarmRequested: readOptionalBoolean(record.prewarmRequested, false),
+    prewarmSignalCount: readOptionalSafeInteger(record.prewarmSignalCount, 0),
     sameRuntimeWakeAcceptedCount: readOptionalSafeInteger(
       record.sameRuntimeWakeAcceptedCount,
       0,
@@ -433,6 +443,21 @@ function readNullableExecutionKind(
   return null;
 }
 
+function readNullablePrewarmResult(
+  value: unknown,
+): HostedRuntimeWorkflowState["lastPrewarmResult"] {
+  if (value === null) {
+    return null;
+  }
+
+  const result = requireString(value);
+  if (result === "accepted" || result === "retry_later" || result === "failed") {
+    return result;
+  }
+
+  return null;
+}
+
 function readNullableLastRuntimeStatus(
   value: unknown,
 ): HostedRuntimeLastRuntimeStatus {
@@ -466,6 +491,10 @@ function requireBoolean(value: unknown): boolean {
   }
 
   return value;
+}
+
+function readOptionalBoolean(value: unknown, fallback: boolean): boolean {
+  return value === undefined ? fallback : requireBoolean(value);
 }
 
 function readOptionalSafeInteger(value: unknown, fallback: number): number {

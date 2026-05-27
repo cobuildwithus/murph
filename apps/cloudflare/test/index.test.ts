@@ -1609,6 +1609,80 @@ describe("cloudflare worker routes", () => {
       });
     });
 
+    it("maps runtime prewarm route calls to the prewarm-only Durable Object adapter", async () => {
+      const stub = createUserRunnerStub({
+        prewarmRuntimeContainerForUser: vi.fn(async () => ({
+          action: "already_warm" as const,
+          kind: "runtime_prewarm_accepted" as const,
+        })),
+      });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/prewarm", {
+            body: JSON.stringify({
+              prewarmAttemptId: "prewarm-attempt-test",
+              source: "linq.imessage.typing",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        action: "already_warm",
+        kind: "runtime_prewarm_accepted",
+      });
+      expect(stub.prewarmRuntimeContainerForUser).toHaveBeenCalledWith({
+        prewarmAttemptId: "prewarm-attempt-test",
+        source: "linq.imessage.typing",
+        userId: "test-user",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
+    it("returns retry-later for runtime prewarm Durable Object RPC failures", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const stub = createUserRunnerStub({
+        prewarmRuntimeContainerForUser: vi.fn(async () => {
+          throw new Error("durable object unavailable");
+        }),
+      });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/prewarm", {
+            body: JSON.stringify({
+              prewarmAttemptId: "prewarm-attempt-rpc-failure",
+              source: "linq.imessage.typing",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        kind: "retry_later",
+        retryAt: "2026-04-27T00:00:30.000Z",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
     it("returns a stable code for invalid runtime ensure-processing requests", async () => {
       const stub = createUserRunnerStub();
       const env = createWorkerEnv(stub);
@@ -2774,6 +2848,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       kind: "runtime_processing_accepted" as const,
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
+    })),
+    prewarmRuntimeContainerForUser: vi.fn(async () => ({
+      action: "already_warm" as const,
+      kind: "runtime_prewarm_accepted" as const,
     })),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,

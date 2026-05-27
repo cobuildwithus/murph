@@ -1,11 +1,27 @@
+import { createHash } from "node:crypto";
+
 import type {
   Prisma,
   PrismaClient,
 } from "@prisma/client";
+import {
+  HOSTED_RUNTIME_PREWARM_SOURCE,
+} from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import {
+  signalHostedRuntimePrewarm,
+} from "../hosted-orchestration/signal-runtime";
+import {
+  hasHostedMemberActiveAccess,
+} from "./entitlement";
+import {
+  lookupHostedMemberRoutingByHomeLinqChatId,
+} from "./hosted-member-routing-store";
+import {
   requireHostedLinqMessageReceivedEvent,
+  requireHostedLinqTypingIndicatorStartedEvent,
+  resolveHostedLinqTypingOccurredAt,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
@@ -48,6 +64,9 @@ export type {
 
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 
+const HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS = 30_000;
+const hostedLinqTypingPrewarmLastSignalByUser = new Map<string, number>();
+
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
@@ -86,6 +105,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
+
+    if (event.event_type === "chat.typing_indicator.started") {
+      const response = await handleHostedLinqTypingPrewarm({
+        event,
+        prisma: input.prisma ?? getPrisma(),
+      });
+      responseReason = response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+      });
+      return response;
+    }
 
     if (event.event_type === "message.received") {
       requireHostedLinqMessageReceivedEvent(event);
@@ -170,6 +204,151 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+async function handleHostedLinqTypingPrewarm(input: {
+  event: ReturnType<typeof verifyAndParseHostedLinqWebhookRequest>;
+  prisma: PrismaClient;
+}): Promise<HostedOnboardingLinqWebhookResponse> {
+  const typingEvent = requireHostedLinqTypingIndicatorStartedEvent(input.event);
+  const timing = startHostedOnboardingTiming(
+    "hosted.linq.typing-prewarm",
+    {
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      eventType: typingEvent.event_type,
+      scopeHashPresent: true,
+    },
+  );
+
+  if (!isHostedLinqTypingPrewarmServiceSupported(typingEvent.data.service)) {
+    finishHostedOnboardingTiming(timing, "ignored-unsupported-service", {
+      decision: "ignored-unsupported-service",
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      scopeHashPresent: true,
+    });
+    return {
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-unsupported-service",
+    };
+  }
+
+  const routing = await lookupHostedMemberRoutingByHomeLinqChatId({
+    linqChatId: typingEvent.data.chat_id,
+    prisma: input.prisma,
+  });
+  if (!routing) {
+    finishHostedOnboardingTiming(timing, "ignored-no-active-route", {
+      decision: "ignored-no-active-route",
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      scopeHashPresent: true,
+    });
+    return {
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-no-active-route",
+    };
+  }
+
+  if (!hasHostedMemberActiveAccess(routing.core)) {
+    finishHostedOnboardingTiming(timing, "ignored-inactive-member", {
+      decision: "ignored-inactive-member",
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      scopeHashPresent: true,
+    });
+    return {
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-inactive-member",
+    };
+  }
+
+  if (!shouldSignalHostedLinqTypingPrewarm(routing.core.id)) {
+    finishHostedOnboardingTiming(timing, "coalesced", {
+      decision: "coalesced",
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      scopeHashPresent: true,
+    });
+    return {
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-coalesced",
+    };
+  }
+
+  try {
+    await signalHostedRuntimePrewarm({
+      eventId: typingEvent.event_id,
+      occurredAt: resolveHostedLinqTypingOccurredAt(typingEvent),
+      scopeHash: buildHostedLinqTypingPrewarmScopeHash(typingEvent.data.chat_id),
+      source: HOSTED_RUNTIME_PREWARM_SOURCE,
+      userId: routing.core.id,
+    });
+  } catch (error) {
+    finishHostedOnboardingTiming(timing, "temporal-signal-failed", {
+      decision: "temporal-signal-failed",
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      scopeHashPresent: true,
+    });
+    return {
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-temporal-signal-failed",
+    };
+  }
+
+  finishHostedOnboardingTiming(timing, "signaled", {
+    decision: "signaled",
+    eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+    userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+    scopeHashPresent: true,
+  });
+  return {
+    ignored: true,
+    ok: true,
+    reason: "typing-prewarm-signaled",
+  };
+}
+
+function shouldSignalHostedLinqTypingPrewarm(userId: string): boolean {
+  const now = Date.now();
+  const lastSignaledAt = hostedLinqTypingPrewarmLastSignalByUser.get(userId);
+  if (
+    lastSignaledAt !== undefined
+    && now - lastSignaledAt < HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS
+  ) {
+    return false;
+  }
+
+  hostedLinqTypingPrewarmLastSignalByUser.set(userId, now);
+  return true;
+}
+
+function isHostedLinqTypingPrewarmServiceSupported(
+  service: string | null | undefined,
+): boolean {
+  if (typeof service !== "string" || service.trim().length === 0) {
+    return true;
+  }
+
+  return service.trim().toLowerCase() === "imessage";
+}
+
+function buildHostedLinqTypingPrewarmScopeHash(chatId: string): string {
+  const normalized = chatId.trim();
+  if (!normalized) {
+    return "linq-chat:unknown";
+  }
+
+  const hash = createHash("sha256")
+    .update(normalized)
+    .digest("hex")
+    .slice(0, 32);
+  return `linq-chat:${hash}`;
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

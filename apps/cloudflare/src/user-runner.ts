@@ -11,6 +11,8 @@ import type {
   HostedRuntimeDemandRunSource,
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimePrewarmRequest,
+  HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
@@ -139,6 +141,10 @@ type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   userId: string;
 };
 
+type RuntimePrewarmInput = HostedRuntimePrewarmRequest & {
+  userId: string;
+};
+
 type RuntimeInvocationInput = {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
@@ -157,6 +163,7 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
 
 type RuntimeProcessingRetryReason =
   | "active_child_rejected"
+  | "container_busy"
   | "container_rpc_error"
   | "container_rpc_timeout"
   | "missing_container_binding"
@@ -341,6 +348,77 @@ export class HostedUserRunner {
       input,
       runtimeWakeStartedAt,
     });
+  }
+
+  async prewarmRuntimeContainerForUser(
+    input: RuntimePrewarmInput,
+  ): Promise<HostedRuntimePrewarmResponse> {
+    await this.stateStore.bindUser(input.userId);
+    const record = await this.stateStore.readState();
+    if (record.writeFence) {
+      return this.recordRuntimePrewarmAccepted({
+        action: "already_running",
+        input,
+      });
+    }
+
+    if (!this.runnerContainerNamespace) {
+      return this.createRuntimePrewarmRetryLater({
+        reason: "missing_container_binding",
+        userId: input.userId,
+      });
+    }
+
+    const container = this.runnerContainerNamespace.getByName(
+      resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId: input.userId,
+      }),
+    );
+    if (!container.prewarmForProcessing) {
+      return this.createRuntimePrewarmRetryLater({
+        reason: "container_rpc_error",
+        userId: input.userId,
+      });
+    }
+
+    try {
+      const result = await container.prewarmForProcessing({
+        timeoutMs: Math.min(
+          this.env.runnerTimeoutMs,
+          RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+        ),
+        userId: input.userId,
+      });
+      if (result.kind === "busy") {
+        return this.createRuntimePrewarmRetryLater({
+          reason: "container_busy",
+          userId: input.userId,
+        });
+      }
+      return this.recordRuntimePrewarmAccepted({
+        action: result.action ?? "started",
+        input,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          prewarmAttemptIdPresent: input.prewarmAttemptId.length > 0,
+          source: input.source,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner runtime prewarm failed best-effort.",
+        phase: "runtime.prewarm",
+        userId: input.userId,
+      });
+      return this.createRuntimePrewarmRetryLater({
+        reason: "container_rpc_error",
+        userId: input.userId,
+      });
+    }
   }
 
   async validateRuntimeWriteFence(input: {
@@ -1003,9 +1081,55 @@ export class HostedUserRunner {
     };
   }
 
+  private recordRuntimePrewarmAccepted(input: {
+    action: Extract<
+      HostedRuntimePrewarmResponse,
+      { kind: "runtime_prewarm_accepted" }
+    >["action"];
+    input: RuntimePrewarmInput;
+  }): HostedRuntimePrewarmResponse {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        prewarmAttemptIdPresent: input.input.prewarmAttemptId.length > 0,
+        runtimePrewarmAction: input.action,
+        source: input.input.source,
+      },
+      message: "Hosted runner runtime prewarm accepted.",
+      phase: "runtime.prewarm",
+      userId: input.input.userId,
+    });
+    return {
+      action: input.action,
+      kind: "runtime_prewarm_accepted",
+    };
+  }
+
+  private createRuntimePrewarmRetryLater(input: {
+    reason: RuntimeProcessingRetryReason;
+    userId: string;
+  }): HostedRuntimePrewarmResponse {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        runtimePrewarmAction: "retry_later",
+        runtimePrewarmRetryReason: input.reason,
+      },
+      level: "warn",
+      message: "Hosted runner runtime prewarm could not be accepted yet.",
+      phase: "runtime.prewarm",
+      userId: input.userId,
+    });
+    return {
+      kind: "retry_later",
+      retryAt: this.computeRuntimeProcessingRetryAt(input.reason),
+    };
+  }
+
   private computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
     const delayMs =
       reason === "stale_fence_replacement_race" ? 5_000 :
+      reason === "container_busy" ? 5_000 :
       reason === "container_rpc_timeout" ? 10_000 :
       reason === "container_rpc_error" ? 30_000 :
       reason === "missing_container_binding" ? 60_000 :

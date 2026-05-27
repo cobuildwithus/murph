@@ -7,6 +7,8 @@ import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+  HOSTED_RUNTIME_PREWARM_SOURCE,
+  type HostedRuntimePrewarmSource,
   type HostedRuntimeSignal,
   type HostedExecutionRuntimeControlWakeKind,
 } from "@murphai/hosted-execution";
@@ -78,6 +80,15 @@ export interface SignalHostedManualRunInput {
 
 export interface SignalHostedRuntimeRecheckInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  userId: string;
+}
+
+export interface SignalHostedRuntimePrewarmInput {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  eventId: string;
+  occurredAt: string;
+  scopeHash?: string | null;
+  source?: HostedRuntimePrewarmSource;
   userId: string;
 }
 
@@ -191,6 +202,26 @@ export async function signalHostedRuntimeRecheckRuntime(
   });
 }
 
+export async function signalHostedRuntimePrewarm(
+  input: SignalHostedRuntimePrewarmInput,
+): Promise<HostedRuntimeSignalResult> {
+  return signalHostedUserRuntimeWorkflow({
+    client: input.client,
+    ensureWorkspace: false,
+    signal: parseHostedRuntimeSignal({
+      eventId: buildHostedRuntimePrewarmEventId({
+        eventId: input.eventId,
+        source: input.source ?? HOSTED_RUNTIME_PREWARM_SOURCE,
+      }),
+      kind: "runtime_prewarm_requested",
+      occurredAt: input.occurredAt,
+      ...(input.scopeHash ? { scopeHash: input.scopeHash } : {}),
+      source: input.source ?? HOSTED_RUNTIME_PREWARM_SOURCE,
+    }),
+    userId: input.userId,
+  });
+}
+
 export async function signalHostedDeviceSyncMailboxRuntime(
   input: SignalHostedDeviceSyncMailboxInput,
 ): Promise<HostedRuntimeSignalResult> {
@@ -292,6 +323,22 @@ function buildHostedDeviceSyncRecoveryRuntimeControlEventId(input: {
     .slice(0, 32);
 
   return `runtime-control:device-sync-recovery:${fingerprint}`;
+}
+
+function buildHostedRuntimePrewarmEventId(input: {
+  eventId: string;
+  source: HostedRuntimePrewarmSource;
+}): string {
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({
+      eventId: input.eventId,
+      source: input.source,
+      version: 1,
+    }))
+    .digest("hex")
+    .slice(0, 32);
+
+  return `runtime-prewarm:${fingerprint}`;
 }
 
 function normalizeHostedRuntimeControlEventId(

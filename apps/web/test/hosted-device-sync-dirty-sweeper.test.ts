@@ -2,10 +2,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedDeviceSyncDirtyWake: vi.fn(),
+  buildHostedDeviceSyncDirtyWakeDedupeKey: vi.fn((input: {
+    connectionId: string;
+    dirtyRevision: bigint;
+    provider: string;
+  }) => {
+    const connectionFingerprint = input.connectionId === "dsc_dirty_2"
+      ? "2".repeat(16)
+      : "1".repeat(16);
+    return [
+      "device-sync",
+      "dirty",
+      "v1",
+      "provider",
+      input.provider,
+      "connection",
+      connectionFingerprint,
+      "revision",
+      input.dirtyRevision.toString(),
+    ].join(":");
+  }),
 }));
 
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
   appendHostedDeviceSyncDirtyWake: mocks.appendHostedDeviceSyncDirtyWake,
+  buildHostedDeviceSyncDirtyWakeDedupeKey: mocks.buildHostedDeviceSyncDirtyWakeDedupeKey,
 }));
 
 import {
@@ -47,7 +68,9 @@ describe("hosted device-sync dirty sweeper", () => {
     });
     expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledWith({
       connectionId: "dsc_dirty_1",
-      dedupeKey: expect.stringMatching(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u),
+      dedupeKey: expect.stringMatching(
+        /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
+      ),
       eventType: "sleep.updated",
       occurredAt: "2026-05-05T00:00:00.000Z",
       provider: "oura",
@@ -56,7 +79,7 @@ describe("hosted device-sync dirty sweeper", () => {
       userId: "member_dirty_1",
     });
     expect(JSON.stringify(mocks.appendHostedDeviceSyncDirtyWake.mock.calls))
-      .not.toContain("dirty-revision:2:sweep:2026-05-05T00:01:00.000Z");
+      .not.toContain("2026-05-05T00:01:00.000Z");
     expect(result).toEqual({
       dirtyConnections: 1,
       skippedDirtyConnections: 0,
@@ -107,7 +130,9 @@ describe("hosted device-sync dirty sweeper", () => {
     const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
     const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
     expect(firstWake?.dedupeKey).toBe(secondWake?.dedupeKey);
-    expect(firstWake?.dedupeKey).toMatch(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u);
+    expect(firstWake?.dedupeKey).toMatch(
+      /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
+    );
     expect(firstWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
     expect(secondWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
   });
@@ -144,8 +169,12 @@ describe("hosted device-sync dirty sweeper", () => {
 
     const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
     const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
-    expect(firstWake?.dedupeKey).toMatch(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u);
-    expect(secondWake?.dedupeKey).toMatch(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u);
+    expect(firstWake?.dedupeKey).toMatch(
+      /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
+    );
+    expect(secondWake?.dedupeKey).toMatch(
+      /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
+    );
     expect(firstWake?.dedupeKey).not.toBe(secondWake?.dedupeKey);
   });
 

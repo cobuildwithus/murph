@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import net from "node:net";
 
+import { repoRoot } from "./constants.ts";
 import {
+  runCommand,
   spawnChildProcess,
   terminateChildProcessAndWait,
   throwIfAbortSignalAborted,
@@ -39,6 +41,8 @@ const LOCAL_TEMPORAL_CLI_ENV_CLEARANCE_NAMES = [
   "TEMPORAL_NAMESPACE",
   "TEMPORAL_TASK_QUEUE",
 ] as const;
+const EXTERNAL_SCHEDULE_ENSURE_OPT_IN_ENV =
+  "MURPH_DEV_TEMPORAL_ALLOW_EXTERNAL_SCHEDULE_ENSURE";
 
 export interface HostedLocalTemporalRuntime {
   address: string;
@@ -104,6 +108,15 @@ export async function startHostedLocalTemporalRuntime(input: {
   const cloudflareHostedControlBaseUrl = normalizeHostedLocalClientBaseUrl(
     input.cloudflareHostedControlBaseUrl,
   );
+  const temporalRuntimeEnv = {
+    ...input.env,
+    ...buildHostedLocalTemporalRuntimeEnv({
+      config: input.config,
+      env: input.env,
+    }),
+    CLOUDFLARE_HOSTED_CONTROL_BASE_URL: cloudflareHostedControlBaseUrl,
+    HOSTED_WEB_BASE_URL: hostedWebBaseUrl,
+  };
   let serverProcess: BufferedNamedChildProcess | null = null;
   let workerProcess: BufferedNamedChildProcess | null = null;
 
@@ -159,19 +172,22 @@ export async function startHostedLocalTemporalRuntime(input: {
     }
 
     throwIfAbortSignalAborted(input.abortSignal);
+    if (shouldEnsureHostedLocalDeviceSyncReconcilerSchedule({
+      env: input.env,
+      mode: temporal.mode,
+    })) {
+      await ensureHostedLocalDeviceSyncReconcilerSchedule({
+        env: temporalRuntimeEnv,
+        signal: input.abortSignal,
+      });
+      throwIfAbortSignalAborted(input.abortSignal);
+    }
+
     workerProcess = spawnChildProcess(
       "temporal-worker",
       "pnpm",
       ["--dir", "packages/hosted-orchestrator-temporal", "temporal:worker"],
-      {
-        ...input.env,
-        ...buildHostedLocalTemporalRuntimeEnv({
-          config: input.config,
-          env: input.env,
-        }),
-        CLOUDFLARE_HOSTED_CONTROL_BASE_URL: cloudflareHostedControlBaseUrl,
-        HOSTED_WEB_BASE_URL: hostedWebBaseUrl,
-      },
+      temporalRuntimeEnv,
       {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
@@ -207,6 +223,33 @@ export async function startHostedLocalTemporalRuntime(input: {
     ]);
     throw error;
   }
+}
+
+async function ensureHostedLocalDeviceSyncReconcilerSchedule(input: {
+  env: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+}): Promise<void> {
+  await runCommand("pnpm", [
+    "--dir",
+    "packages/hosted-orchestrator-temporal",
+    "temporal:ensure-device-sync-reconciler-schedule",
+  ], {
+    cwd: repoRoot,
+    env: input.env,
+    name: "setup",
+    signal: input.signal,
+  });
+}
+
+function shouldEnsureHostedLocalDeviceSyncReconcilerSchedule(input: {
+  env: NodeJS.ProcessEnv;
+  mode: HostedLocalDevConfig["temporal"]["mode"];
+}): boolean {
+  if (usesLocalTemporalAddress(input.mode)) {
+    return true;
+  }
+
+  return input.env[EXTERNAL_SCHEDULE_ENSURE_OPT_IN_ENV] === "1";
 }
 
 export async function waitForHostedLocalTemporalPortRelease(input: {

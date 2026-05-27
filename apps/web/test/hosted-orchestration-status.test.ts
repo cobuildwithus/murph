@@ -228,6 +228,12 @@ describe("hosted orchestration status route", () => {
     delete oldStatus.lastOrchestrationAttemptId;
     delete oldStatus.lastRuntimeAttemptId;
     delete oldStatus.lastRuntimeStatus;
+    delete oldStatus.latestPrewarmRequestedAt;
+    delete oldStatus.lastPrewarmAttemptId;
+    delete oldStatus.lastPrewarmErrorCode;
+    delete oldStatus.lastPrewarmResult;
+    delete oldStatus.prewarmRequested;
+    delete oldStatus.prewarmSignalCount;
     delete oldStatus.sameRuntimeWakeAcceptedCount;
     mocks.queryWorkflowStatus.mockResolvedValue(oldStatus);
 
@@ -243,8 +249,14 @@ describe("hosted orchestration status route", () => {
       currentWaitReason: null,
       currentWaitUntil: null,
       lastOrchestrationAttemptId: null,
+      lastPrewarmAttemptId: null,
+      lastPrewarmErrorCode: null,
+      lastPrewarmResult: null,
       lastRuntimeAttemptId: null,
       lastRuntimeStatus: null,
+      latestPrewarmRequestedAt: null,
+      prewarmRequested: false,
+      prewarmSignalCount: 0,
       sameRuntimeWakeAcceptedCount: 0,
     });
   });
@@ -482,6 +494,9 @@ function buildWorkflowStatus() {
     lastInvalidSignalErrorCode: null,
     lastMailboxLagLaneCount: 1,
     lastOrchestrationAttemptId: "orchestration_attempt_1",
+    lastPrewarmAttemptId: "prewarm_attempt_1",
+    lastPrewarmErrorCode: null,
+    lastPrewarmResult: "accepted",
     lastRuntimeAttemptId: "runtime_attempt_1",
     lastRuntimeStatus: "scheduled",
     latestMailboxPointer: {
@@ -490,8 +505,11 @@ function buildWorkflowStatus() {
       mailboxItemId: "mailbox_status_1",
       source: "email",
     },
+    latestPrewarmRequestedAt: "2026-05-21T11:59:15.000Z",
     mailboxSignalCount: 2,
     manualRunRequested: true,
+    prewarmRequested: false,
+    prewarmSignalCount: 1,
     sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 4,
     userId: MEMBER_ID,
