@@ -1,6 +1,6 @@
 # Cloudflare Runtime Start Acceptance
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -38,3 +38,4 @@ only that the Durable Object scheduled a background promise.
 - `apps/cloudflare/test/user-runner-alarm.test.ts`
 - `apps/cloudflare/test/runner-container.test.ts`
 - focused docs only if the runtime contract needs wording updates
+Completed: 2026-05-27
