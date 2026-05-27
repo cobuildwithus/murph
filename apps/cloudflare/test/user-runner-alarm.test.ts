@@ -8,6 +8,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -273,6 +274,75 @@ describe("HostedUserRunner execution coordination", () => {
     expect(waitUntilSettled).toBe(true);
   });
 
+  it("clears the fresh fence asynchronously when the accepted first container request fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql, waitUntilPromises } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      source: "device_sync_recovery",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(waitUntilPromises).toHaveLength(1);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      active_workspace_version: "5",
+      failure_count: 0,
+    });
+
+    invocationResult.reject(new Error("Hosted container first request failed."));
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_workspace_version: null,
+      failure_count: 1,
+      last_invocation_at: null,
+    });
+    const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+    expect(runtimeLogCalls).toHaveLength(1);
+    const runtimeLogBody = JSON.parse(runtimeLogCalls[0]?.[0].body ?? "{}") as {
+      entries?: Array<Record<string, unknown>>;
+    };
+    expect(runtimeLogBody.entries?.[0]).toEqual({
+      at: expect.any(String),
+      component: "runner",
+      errorCode: "runtime_error",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      workspaceVersion: "5",
+    });
+    expect(JSON.stringify(runtimeLogBody)).not.toContain("runtime-write-");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          transportFailureFenceCleared: true,
+          workspaceVersion: "5",
+        }),
+        message: "Hosted runner runtime execution adapter failed.",
+      }),
+    );
+  });
+
   it("returns retry_later when processing cannot start without a container binding", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -343,7 +413,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(acceptedSettled).toBe(false);
-    expect(workspaceReadTimeouts).toEqual([9_000]);
+    expect(workspaceReadTimeouts).toHaveLength(1);
+    expect(workspaceReadTimeouts[0]).toBeGreaterThan(8_000);
+    expect(workspaceReadTimeouts[0]).toBeLessThanOrEqual(9_000);
 
     workspaceRead.resolve();
 
@@ -509,6 +581,48 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+  });
+
+  it("returns retry_later when runner secrets read exhausts the caller command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const runnerSecretsReadStarted = createDeferred<void>();
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: TEST_USER_ID });
+    const bucket = new DelayedGetMemoryEncryptedR2Bucket({
+      delayMs: 10_000,
+      key: runnerSecretsKey,
+      onDelayedGet: () => runnerSecretsReadStarted.resolve(),
+    });
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      bucket,
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    });
+    await runnerSecretsReadStarted.promise;
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:14.000Z",
+    });
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+      wake_at: null,
+    });
   });
 
   it("does not invoke a prepared startup job after its write fence changes", async () => {
@@ -972,6 +1086,47 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("does not give a replacement start a fresh caller command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => {
+        vi.setSystemTime(new Date("2026-04-27T00:00:40.500Z"));
+        return {
+          kind: "start-required" as const,
+          reason: "no-active-child" as const,
+        };
+      },
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 10_000,
+      orchestrationAttemptId: "test-orchestration-attempt-replace",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:50.500Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: null,
+    });
+  });
+
   it("returns retry_later when active child wake cannot be confirmed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1006,6 +1161,49 @@ describe("HostedUserRunner execution coordination", () => {
       active_attempt_id: token?.attemptId,
       active_expires_at: RUNNER_TIMEOUT_AT,
       backoff_until: null,
+      wake_at: null,
+    });
+  });
+
+  it("returns retry_later when active child wake exceeds the caller command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+        return {
+          action: "woken" as const,
+          kind: "accepted" as const,
+        };
+      },
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    });
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:14.000Z",
+    });
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token?.attemptId,
+      active_expires_at: RUNNER_TIMEOUT_AT,
       wake_at: null,
     });
   });
@@ -1612,6 +1810,33 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
   }
 }
 
+class DelayedGetMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
+  private readonly delayMs: number;
+  private readonly key: string;
+  private readonly onDelayedGet: () => void;
+
+  constructor(input: {
+    delayMs: number;
+    key: string;
+    onDelayedGet: () => void;
+  }) {
+    super();
+    this.delayMs = input.delayMs;
+    this.key = input.key;
+    this.onDelayedGet = input.onDelayedGet;
+  }
+
+  override async get(
+    key: string,
+  ): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null> {
+    if (key === this.key) {
+      this.onDelayedGet();
+      await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    }
+    return await super.get(key);
+  }
+}
+
 function createDurableObjectState(input: {
   alarmDeleteError?: Error;
 } = {}): {
@@ -1703,6 +1928,12 @@ function installWebControlResponses(
         return jsonResponse(
           await createTestHostedRuntimeCryptoContext(input.boundUserId),
         );
+      }
+
+      if (input.path === HOSTED_RUNTIME_LOG_PATH) {
+        return jsonResponse({
+          loggedCount: 1,
+        });
       }
 
       throw new Error(`Unexpected hosted web-control path: ${input.path}`);

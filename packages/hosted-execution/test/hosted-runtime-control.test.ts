@@ -131,6 +131,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.accepted_attempt_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.provider_egress_diagnostic");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");

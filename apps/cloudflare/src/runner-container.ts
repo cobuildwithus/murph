@@ -2293,6 +2293,20 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
     childRuntimeStage: "runnerChildRuntimeStage",
     childRuntimeWorkspaceSnapshotRestoreStep:
       "runnerChildRuntimeWorkspaceSnapshotRestoreStep",
+    childRuntimeWorkspaceSnapshotProcessExitCode:
+      "runnerChildRuntimeWorkspaceSnapshotProcessExitCode",
+    childRuntimeWorkspaceSnapshotProcessLabel:
+      "runnerChildRuntimeWorkspaceSnapshotProcessLabel",
+    childRuntimeWorkspaceSnapshotProcessSignal:
+      "runnerChildRuntimeWorkspaceSnapshotProcessSignal",
+    childRuntimeWorkspaceSnapshotProcessStderrBytes:
+      "runnerChildRuntimeWorkspaceSnapshotProcessStderrBytes",
+    childRuntimeWorkspaceSnapshotProcessStderrLineCount:
+      "runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount",
+    childRuntimeWorkspaceSnapshotProcessStderrMarkers:
+      "runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers",
+    childRuntimeWorkspaceSnapshotProcessStderrTruncated:
+      "runnerChildRuntimeWorkspaceSnapshotProcessStderrTruncated",
   } as const;
 
   for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {

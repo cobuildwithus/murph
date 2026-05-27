@@ -26,6 +26,7 @@ export interface AssistantCodexModelProviderConfig {
   baseUrl: string
   envKey: string
   failureHint?: string
+  supportsWebSockets?: boolean
   wireApi: AssistantCodexModelProviderWireApi
 }
 
@@ -65,6 +66,7 @@ export const OPENAI_CODEX_MODEL_PROVIDER_CONFIG = {
   name: 'OpenAI',
   baseUrl: 'https://api.openai.com/v1',
   envKey: 'OPENAI_API_KEY',
+  supportsWebSockets: true,
   wireApi: 'responses',
 } as const satisfies AssistantCodexModelProviderConfig
 

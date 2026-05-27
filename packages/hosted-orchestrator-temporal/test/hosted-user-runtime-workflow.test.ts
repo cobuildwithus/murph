@@ -126,6 +126,37 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(2);
   });
 
+  it("lets a stateless runtime recheck interrupt accepted processing without setting demand flags", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
+    runtime.demands.push((request) => {
+      expect(request).toEqual({
+        browserVaultRefreshRequested: false,
+        deviceSyncRecoveryRequested: false,
+        lagRecoveryObserved: false,
+        manualRunRequested: false,
+        userId: "member_test",
+      });
+      return idleDemand(null);
+    });
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-wake"));
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(runtimeRecheckSignal());
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([45_000, null]);
+    expect(runtime.executionRequests).toHaveLength(1);
+  });
+
   it("re-reads demand immediately when a signal arrives before processing accepted returns", async () => {
     const runtime = new FakeWorkflowRuntime();
     let machine: HostedUserRuntimeWorkflowMachine | null = null;
@@ -1189,6 +1220,12 @@ function manualSignal(_label = "manual_signal_test"): HostedRuntimeSignal {
 function browserVaultSignal(): HostedRuntimeSignal {
   return {
     kind: "browser_vault_refresh_requested",
+  };
+}
+
+function runtimeRecheckSignal(): HostedRuntimeSignal {
+  return {
+    kind: "runtime_recheck_requested",
   };
 }
 

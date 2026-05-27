@@ -21,6 +21,7 @@ export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "browser_vault_refresh_requested",
   "device_sync_recovery_requested",
   "mailbox_lag_observed",
+  "runtime_recheck_requested",
 ] as const;
 
 export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[number];
@@ -46,6 +47,9 @@ export type HostedRuntimeSignal =
     }
   | {
       kind: "mailbox_lag_observed";
+    }
+  | {
+      kind: "runtime_recheck_requested";
     };
 
 export interface HostedRuntimeMailboxPointer {

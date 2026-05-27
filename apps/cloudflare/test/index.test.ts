@@ -46,6 +46,7 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
@@ -100,6 +101,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("cloudflare worker routes", () => {
@@ -1635,6 +1637,89 @@ describe("cloudflare worker routes", () => {
         error: "Invalid request.",
       });
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    });
+
+    it("accepts runtime ensure-processing requests without timeout metadata", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+              source: "device_sync_recovery",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        source: "device_sync_recovery",
+        userId: "test-user",
+      });
+    });
+
+    it("rejects invalid runtime ensure-processing timeout headers before calling the Durable Object", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+
+      for (const invalidTimeout of [
+        "not-a-timeout",
+        String(HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS),
+      ]) {
+        const stub = createUserRunnerStub();
+        const env = createWorkerEnv(stub);
+
+        const response = await worker.fetch(
+          await signWebCallbackControlRequest(
+            new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+              body: JSON.stringify({
+                orchestrationAttemptId: "orchestration-attempt-test",
+                reason: "nudge",
+                source: "device_sync_recovery",
+              }),
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+                [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]: invalidTimeout,
+              },
+              method: "POST",
+            }),
+            env,
+          ),
+          env,
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          code: "invalid_request",
+          error: "Invalid request.",
+        });
+        expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+      }
+
+      const serializedWarnLogs = warn.mock.calls
+        .map(([payload]) => String(payload))
+        .join("\n");
+      expect(serializedWarnLogs).toContain("runtime-ensure-processing-request-invalid");
+      expect(serializedWarnLogs).toContain("/internal/users/<REDACTED_USER>/runtime/ensure-processing");
+      expect(serializedWarnLogs).not.toContain("/internal/users/test-user/runtime/ensure-processing");
     });
 
     it("starts runtime processing without an active fence", async () => {

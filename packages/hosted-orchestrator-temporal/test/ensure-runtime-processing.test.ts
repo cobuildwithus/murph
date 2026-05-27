@@ -12,6 +12,9 @@ import type {
 import {
   ensureRuntimeProcessing,
 } from "../src/activities/ensure-runtime-processing.js";
+import {
+  requestHostedOrchestratorJson,
+} from "../src/activities/http-client.js";
 
 describe("ensureRuntimeProcessing", () => {
   afterEach(() => {
@@ -264,6 +267,26 @@ describe("ensureRuntimeProcessing", () => {
       nonRetryable: true,
       type: "hosted_orchestrator_http_non_retryable",
     });
+  });
+
+  it("rejects reserved unsigned request headers before transport", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+
+    await expect(requestHostedOrchestratorJson("https://runner.example.test", {
+      fetchImpl,
+      label: "test",
+      method: "GET",
+      parse: (value) => value,
+      path: "/internal/test",
+      timeoutMs: 10_000,
+      unsignedHeaders: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: "member_other",
+      },
+    })).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "hosted_orchestrator_reserved_unsigned_header",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("keeps Cloudflare server failures retryable", async () => {

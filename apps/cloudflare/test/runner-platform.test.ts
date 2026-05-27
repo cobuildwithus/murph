@@ -1,3 +1,4 @@
+import { createCipheriv, createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,6 +16,8 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  serializeHostedWorkspaceSnapshotV2Aad,
+  type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
@@ -215,6 +218,42 @@ function createWorkspaceSnapshotV2Ref(input: {
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: "member_123",
   };
+}
+
+function createEncryptedWorkspaceSnapshotBytes(input: {
+  aad: HostedWorkspaceSnapshotV2Aad;
+  dataKey: Uint8Array;
+  ivBase64: string;
+  plaintextArchive: Buffer;
+}): {
+  encryptedBytes: Buffer;
+  encryptedObjectSha256: string;
+  plaintextArchiveSha256: string;
+} {
+  const cipher = createCipheriv(
+    "aes-256-gcm",
+    Buffer.from(input.dataKey),
+    Buffer.from(input.ivBase64, "base64url"),
+  );
+  cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(input.aad)));
+  const encryptedBody = Buffer.concat([
+    cipher.update(input.plaintextArchive),
+    cipher.final(),
+  ]);
+  const encryptedBytes = Buffer.concat([encryptedBody, cipher.getAuthTag()]);
+  return {
+    encryptedBytes,
+    encryptedObjectSha256: createHash("sha256").update(encryptedBytes).digest("hex"),
+    plaintextArchiveSha256: createHash("sha256")
+      .update(input.plaintextArchive)
+      .digest("hex"),
+  };
+}
+
+function copyBufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+  const result = new ArrayBuffer(buffer.byteLength);
+  new Uint8Array(result).set(buffer);
+  return result;
 }
 
 describe("buildHostedExecutionRuntimePlatform", () => {
@@ -1292,6 +1331,141 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain("X-Amz");
       expect(serializedLogs).not.toContain("fixture-get");
       expect(serializedLogs).not.toContain("hidden transport detail");
+      expect(serializedLogs).not.toContain("member_123");
+      expect(serializedLogs).not.toContain("root_key_test");
+      expect(serializedLogs).not.toContain("wrapped_data_key_test");
+      expect(serializedLogs).not.toContain(dataKeyBase64);
+      expect(serializedLogs).not.toContain(tempRoot);
+    } finally {
+      dataKey.fill(0);
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("logs archive restore tar/zstd process failures without stderr text", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-archive-process-fail-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const scratchRoot = path.join(tempRoot, "scratch");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+    const snapshotId = "snapshot_runner_platform_archive_process_fail";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const aad = buildHostedWorkspaceSnapshotV2Aad({
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const invalidPlaintextArchive = Buffer.from(
+      "not a zstd archive; hidden local path /tmp/private-snapshot-detail\n",
+      "utf8",
+    );
+    const encrypted = createEncryptedWorkspaceSnapshotBytes({
+      aad,
+      dataKey,
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      plaintextArchive: invalidPlaintextArchive,
+    });
+    const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
+
+    try {
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot archive process fetch");
+        if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
+          return new Response(JSON.stringify({ dataKey: dataKeyBase64 }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
+          return new Response(JSON.stringify({
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            getUrl,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        if (request.url === getUrl) {
+          return new Response(copyBufferToArrayBuffer(encrypted.encryptedBytes), {
+            headers: {
+              "content-length": String(encrypted.encryptedBytes.byteLength),
+              "content-type": "application/octet-stream",
+            },
+            status: 200,
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref: {
+          archive: {
+            compression: "zstd",
+            encryptedByteSize: encrypted.encryptedBytes.byteLength,
+            encryptedObjectSha256: encrypted.encryptedObjectSha256,
+            fileCount: 1,
+            format: "tar",
+            plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
+            totalPlainBytes: invalidPlaintextArchive.byteLength,
+          },
+          createdAt: "2026-05-20T00:00:00.000Z",
+          encryption: {
+            aad,
+            ivBase64: "AQIDBAUGBwgJCgsM",
+            rootKeyId: "root_key_test",
+            scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+            wrappedDataKey: "wrapped_data_key_test",
+          },
+          objectKey,
+          schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+          snapshotId,
+          upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+          userId: "member_123",
+        },
+        scratchRoot,
+      })).rejects.toThrow(/^Hosted workspace snapshot zstd command failed with /u);
+
+      const failedLogs = readWorkspaceSnapshotDiagnosticLogs()
+        .filter((log) => log.message === "Hosted workspace snapshot restore step failed.");
+      expect(failedLogs.at(-1)).toEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "runtime_error",
+          errorMessagePresent: true,
+          errorName: "Error",
+          operation: "workspace_snapshot_restore",
+          workspaceSnapshotProcessExitCode: expect.any(Number),
+          workspaceSnapshotProcessLabel: "zstd",
+          workspaceSnapshotProcessStderrBytes: expect.any(Number),
+          workspaceSnapshotProcessStderrLineCount: expect.any(Number),
+          workspaceSnapshotProcessStderrMarkers: expect.arrayContaining([
+            "unsupported_format",
+          ]),
+          workspaceSnapshotProcessStderrTruncated: false,
+          workspaceSnapshotRestoreStep: "archive_restore",
+        }),
+        level: "warn",
+        phase: "runtime.starting",
+        userId: null,
+      }));
+
+      const serializedLogs = JSON.stringify(readWorkspaceSnapshotDiagnosticLogs());
+      expect(serializedLogs).not.toContain(snapshotId);
+      expect(serializedLogs).not.toContain(objectKey);
+      expect(serializedLogs).not.toContain(getUrl);
+      expect(serializedLogs).not.toContain("private-snapshot-detail");
       expect(serializedLogs).not.toContain("member_123");
       expect(serializedLogs).not.toContain("root_key_test");
       expect(serializedLogs).not.toContain("wrapped_data_key_test");

@@ -5,6 +5,10 @@ import type {
 import {
   HOSTED_BUNDLE_ARCHIVE_VALIDATION_CAUSES,
 } from "./hosted-bundle-validation-cause.js";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABELS,
+  HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_MARKERS,
+} from "./workspace-snapshot-local.js";
 
 export type HostedRunnerChildFirstCompletionKind = "child_result" | "close";
 
@@ -159,6 +163,12 @@ const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS = new Set<string>([
   "scratch_prepare",
   "size_guard",
 ]);
+const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABEL_SET = new Set<string>(
+  HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABELS,
+);
+const HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_MARKER_SET = new Set<string>(
+  HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_MARKERS,
+);
 
 export const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES = [
   "cli.bridge",
@@ -749,6 +759,45 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
       childRuntimeWorkspaceSnapshotRestoreStep;
   }
 
+  const childRuntimeWorkspaceSnapshotProcessLabel =
+    readAllowedHostedExecutionChildDiagnostic(
+      record.childRuntimeWorkspaceSnapshotProcessLabel,
+      HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABEL_SET,
+    );
+  if (childRuntimeWorkspaceSnapshotProcessLabel) {
+    metadata.childRuntimeWorkspaceSnapshotProcessLabel =
+      childRuntimeWorkspaceSnapshotProcessLabel;
+  }
+
+  const childRuntimeWorkspaceSnapshotProcessSignal =
+    readHostedWorkspaceSnapshotProcessSignal(
+      record.childRuntimeWorkspaceSnapshotProcessSignal,
+    );
+  if (childRuntimeWorkspaceSnapshotProcessSignal) {
+    metadata.childRuntimeWorkspaceSnapshotProcessSignal =
+      childRuntimeWorkspaceSnapshotProcessSignal;
+  }
+
+  for (const key of [
+    "childRuntimeWorkspaceSnapshotProcessExitCode",
+    "childRuntimeWorkspaceSnapshotProcessStderrBytes",
+    "childRuntimeWorkspaceSnapshotProcessStderrLineCount",
+  ] as const) {
+    const value = readHostedWorkspaceSnapshotProcessDiagnosticCount(record[key]);
+    if (value !== null) {
+      metadata[key] = value;
+    }
+  }
+
+  const childRuntimeWorkspaceSnapshotProcessStderrMarkers =
+    readHostedWorkspaceSnapshotProcessStderrMarkers(
+      record.childRuntimeWorkspaceSnapshotProcessStderrMarkers,
+    );
+  if (childRuntimeWorkspaceSnapshotProcessStderrMarkers.length > 0) {
+    metadata.childRuntimeWorkspaceSnapshotProcessStderrMarkers =
+      childRuntimeWorkspaceSnapshotProcessStderrMarkers;
+  }
+
   const childRuntimeFetchCauseKind = readAllowedHostedExecutionChildDiagnostic(
     record.childRuntimeFetchCauseKind,
     HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KIND_SET,
@@ -839,6 +888,7 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
     "childRuntimeFetchCallerSignalAborted",
     "childRuntimeFetchRequestSignalAborted",
     "childRuntimeFetchTimeoutSignalAborted",
+    "childRuntimeWorkspaceSnapshotProcessStderrTruncated",
   ] as const) {
     const value = record[key];
     if (typeof value === "boolean") {
@@ -915,6 +965,43 @@ function readAllowedHostedExecutionChildDiagnostic(
 
   const normalized = value.trim();
   return allowed.has(normalized) ? normalized : null;
+}
+
+function readHostedWorkspaceSnapshotProcessDiagnosticCount(
+  value: unknown,
+): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    && value <= 1024 * 1024
+    ? value
+    : null;
+}
+
+function readHostedWorkspaceSnapshotProcessSignal(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Z0-9]+$/u.test(value)
+    ? value
+    : null;
+}
+
+function readHostedWorkspaceSnapshotProcessStderrMarkers(
+  value: unknown,
+): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const markers = new Set<string>();
+  for (const entry of value) {
+    const marker = readAllowedHostedExecutionChildDiagnostic(
+      entry,
+      HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_MARKER_SET,
+    );
+    if (marker) {
+      markers.add(marker);
+    }
+  }
+  return [...markers].sort();
 }
 
 function collectHostedRunnerChildRuntimePhaseTrace(

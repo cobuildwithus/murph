@@ -16,6 +16,7 @@ import {
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   readHostedExecutionSafeErrorName,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 
 import {
@@ -25,6 +26,9 @@ import {
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
   readHostedWorkspaceSnapshotRestoreStep,
 } from "./runtime-platform.js";
+import {
+  readHostedWorkspaceSnapshotProcessFailureDiagnostics,
+} from "./workspace-snapshot-local.js";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
@@ -484,7 +488,7 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
   input: {
     runtimeStage: HostedExecutionChildRuntimeStage;
   },
-): Record<string, boolean | number | string> {
+): HostedExecutionStructuredLogDetails {
   const childRuntimeErrorName = error instanceof Error
     ? readHostedExecutionChildRuntimeErrorName(error.name)
     : null;
@@ -525,6 +529,7 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
       : {}),
     ...readHostedExecutionChildRuntimeFetchFailureMetadata(error),
     ...readHostedExecutionChildRuntimeWorkspaceSnapshotRestoreStep(error),
+    ...readHostedExecutionChildRuntimeWorkspaceSnapshotProcessFailure(error),
     ...readHostedExecutionChildRuntimeStatus(error),
   };
 }
@@ -534,6 +539,37 @@ function readHostedExecutionChildRuntimeWorkspaceSnapshotRestoreStep(
 ): Record<string, string> {
   const step = readHostedWorkspaceSnapshotRestoreStep(error);
   return step ? { childRuntimeWorkspaceSnapshotRestoreStep: step } : {};
+}
+
+function readHostedExecutionChildRuntimeWorkspaceSnapshotProcessFailure(
+  error: unknown,
+): HostedExecutionStructuredLogDetails {
+  const diagnostics = readHostedWorkspaceSnapshotProcessFailureDiagnostics(error);
+  if (!diagnostics) {
+    return {};
+  }
+
+  return {
+    childRuntimeWorkspaceSnapshotProcessLabel: diagnostics.label,
+    ...(diagnostics.exitCode !== null
+      ? { childRuntimeWorkspaceSnapshotProcessExitCode: diagnostics.exitCode }
+      : {}),
+    ...(diagnostics.signal
+      ? { childRuntimeWorkspaceSnapshotProcessSignal: diagnostics.signal }
+      : {}),
+    childRuntimeWorkspaceSnapshotProcessStderrBytes:
+      diagnostics.stderrByteCount,
+    childRuntimeWorkspaceSnapshotProcessStderrLineCount:
+      diagnostics.stderrLineCount,
+    ...(diagnostics.stderrMarkers.length > 0
+      ? {
+          childRuntimeWorkspaceSnapshotProcessStderrMarkers:
+            [...diagnostics.stderrMarkers],
+        }
+      : {}),
+    childRuntimeWorkspaceSnapshotProcessStderrTruncated:
+      diagnostics.stderrTruncated,
+  };
 }
 
 function readHostedExecutionChildRuntimeFetchFailureMetadata(

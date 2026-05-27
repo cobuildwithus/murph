@@ -7,6 +7,7 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
 import {
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexLocalOnboardingProviderConfig,
 } from '../src/assistant/target-runtime.ts'
@@ -66,6 +67,17 @@ describe('assistant provider config runtime resolution', () => {
     expect(serializeAssistantProviderOperatorDefaults(input)).toMatchObject({
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
+    })
+  })
+
+  it('records OpenAI Codex provider WebSocket support explicitly', () => {
+    expect(OPENAI_CODEX_MODEL_PROVIDER_CONFIG).toEqual({
+      id: 'openai',
+      name: 'OpenAI',
+      baseUrl: 'https://api.openai.com/v1',
+      envKey: 'OPENAI_API_KEY',
+      supportsWebSockets: true,
+      wireApi: 'responses',
     })
   })
 

@@ -107,6 +107,7 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "./workspace-snapshot-store.ts";
 import {
+  readHostedWorkspaceSnapshotProcessFailureDiagnostics,
   restoreEncryptedWorkspaceSnapshot,
 } from "./workspace-snapshot-local.ts";
 import {
@@ -2563,6 +2564,8 @@ function buildHostedRuntimeControlPlaneSafeErrorMetadata(
     readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
   const workspaceSnapshotRestoreStep =
     readHostedWorkspaceSnapshotRestoreStep(error);
+  const workspaceSnapshotProcessFailure =
+    readHostedWorkspaceSnapshotProcessFailureDiagnostics(error);
   return {
     errorCode: fetchFailureDiagnostics?.fetchCauseCode
       ?? deriveHostedExecutionErrorCode(error),
@@ -2588,6 +2591,35 @@ function buildHostedRuntimeControlPlaneSafeErrorMetadata(
       : {}),
     ...(workspaceSnapshotRestoreStep
       ? { workspaceSnapshotRestoreStep }
+      : {}),
+    ...(workspaceSnapshotProcessFailure
+      ? {
+          workspaceSnapshotProcessLabel: workspaceSnapshotProcessFailure.label,
+          ...(workspaceSnapshotProcessFailure.exitCode !== null
+            ? {
+                workspaceSnapshotProcessExitCode:
+                  workspaceSnapshotProcessFailure.exitCode,
+              }
+            : {}),
+          ...(workspaceSnapshotProcessFailure.signal
+            ? {
+                workspaceSnapshotProcessSignal:
+                  workspaceSnapshotProcessFailure.signal,
+              }
+            : {}),
+          workspaceSnapshotProcessStderrBytes:
+            workspaceSnapshotProcessFailure.stderrByteCount,
+          workspaceSnapshotProcessStderrLineCount:
+            workspaceSnapshotProcessFailure.stderrLineCount,
+          ...(workspaceSnapshotProcessFailure.stderrMarkers.length > 0
+            ? {
+                workspaceSnapshotProcessStderrMarkers:
+                  [...workspaceSnapshotProcessFailure.stderrMarkers],
+              }
+            : {}),
+          workspaceSnapshotProcessStderrTruncated:
+            workspaceSnapshotProcessFailure.stderrTruncated,
+        }
       : {}),
   };
 }

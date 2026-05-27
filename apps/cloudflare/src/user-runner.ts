@@ -1,5 +1,6 @@
 import {
   type HostedRunnerStatusResponse,
+  type HostedRuntimeLogRequest,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceInvocationReason,
@@ -13,7 +14,8 @@ import type {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
-} from "@murphai/hosted-execution/temporal-env";
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+} from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -21,11 +23,13 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeLogResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -101,7 +105,8 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
-const RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
+const RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE =
+  "Hosted runner runtime processing command budget timed out.";
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
   "murph.hosted.workspace-snapshot-path-hash.v1";
@@ -315,12 +320,27 @@ export class HostedUserRunner {
   async ensureRuntimeProcessingForUser(
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    const runtimeWakeStartedAt = Date.now();
+    const commandBudget = this.createRuntimeProcessingCommandBudget({
+      commandTimeoutMs: input.commandTimeoutMs ?? null,
+      startedAtMs: runtimeWakeStartedAt,
+    });
     await this.stateStore.bindUser(input.userId);
     const record = await this.readRunnerStateAfterClearingExpiredWriteFence();
     if (record.writeFence) {
-      return await this.ensureExistingRuntimeProcessing(input, record);
+      return await this.ensureExistingRuntimeProcessing({
+        commandBudget,
+        input,
+        record,
+        runtimeWakeStartedAt,
+      });
     }
-    return await this.startRuntimeProcessing(input, "started");
+    return await this.startRuntimeProcessing({
+      action: "started",
+      commandBudget,
+      input,
+      runtimeWakeStartedAt,
+    });
   }
 
   async validateRuntimeWriteFence(input: {
@@ -554,12 +574,20 @@ export class HostedUserRunner {
     return { completed: result.completed };
   }
 
-  private async ensureExistingRuntimeProcessing(
-    input: RuntimeProcessingInput,
-    record: RunnerStateRecord,
-  ): Promise<HostedRuntimeEnsureProcessingResponse> {
+  private async ensureExistingRuntimeProcessing(input: {
+    commandBudget: RuntimeProcessingCommandBudget;
+    input: RuntimeProcessingInput;
+    record: RunnerStateRecord;
+    runtimeWakeStartedAt: number;
+  }): Promise<HostedRuntimeEnsureProcessingResponse> {
+    const record = input.record;
     if (!record.writeFence) {
-      return await this.startRuntimeProcessing(input, "started");
+      return await this.startRuntimeProcessing({
+        action: "started",
+        commandBudget: input.commandBudget,
+        input: input.input,
+        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+      });
     }
 
     const activeFence = record.writeFence;
@@ -569,7 +597,8 @@ export class HostedUserRunner {
         leaseGeneration: String(activeFence.generation),
         userId: record.userId,
       },
-      reason: input.reason,
+      commandBudget: input.commandBudget,
+      reason: input.input.reason,
     });
 
     if (containerResult.kind === "accepted") {
@@ -591,7 +620,7 @@ export class HostedUserRunner {
         await this.syncWatchdogAlarm(record);
         return this.createRuntimeProcessingRetryLater({
           reason: "container_rpc_timeout",
-          userId: input.userId,
+          userId: input.input.userId,
         });
       }
 
@@ -605,45 +634,47 @@ export class HostedUserRunner {
       if (!cleared.cleared) {
         return this.createRuntimeProcessingRetryLater({
           reason: "stale_fence_replacement_race",
-          userId: input.userId,
+          userId: input.input.userId,
         });
       }
-      return await this.startRuntimeProcessing(input, "replaced");
+      return await this.startRuntimeProcessing({
+        action: "replaced",
+        commandBudget: input.commandBudget,
+        input: input.input,
+        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+      });
     }
 
     await this.syncWatchdogAlarm(record);
     return this.createRuntimeProcessingRetryLater({
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
-      userId: input.userId,
+      userId: input.input.userId,
     });
   }
 
-  private async startRuntimeProcessing(
-    input: RuntimeProcessingInput,
-    action: "started" | "replaced",
-  ): Promise<HostedRuntimeEnsureProcessingResponse> {
-    const runtimeWakeStartedAt = Date.now();
-    const commandBudget = this.createRuntimeProcessingCommandBudget({
-      commandTimeoutMs: input.commandTimeoutMs ?? null,
-      startedAtMs: runtimeWakeStartedAt,
-    });
+  private async startRuntimeProcessing(input: {
+    action: "started" | "replaced";
+    commandBudget: RuntimeProcessingCommandBudget;
+    input: RuntimeProcessingInput;
+    runtimeWakeStartedAt: number;
+  }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const initialRecord = await this.stateStore.readState();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
         ...buildRunnerRecordTimingLogDetails(initialRecord),
-        orchestrationAttemptId: input.orchestrationAttemptId,
-        runtimeReason: input.reason,
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
+        runtimeReason: input.input.reason,
       },
       message: "Hosted runner runtime processing start requested.",
       phase: "runtime.starting",
-      userId: input.userId,
+      userId: input.input.userId,
     });
 
     if (!this.runnerContainerNamespace) {
       return this.createRuntimeProcessingRetryLater({
         reason: "missing_container_binding",
-        userId: input.userId,
+        userId: input.input.userId,
       });
     }
 
@@ -652,31 +683,36 @@ export class HostedUserRunner {
       token = await this.stateStore.beginWriteFence({
         expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
-        reason: input.reason,
-        userId: input.userId,
+        reason: input.input.reason,
+        userId: input.input.userId,
       });
     } catch (error) {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
       }
       await this.syncWatchdogAlarm(error.record);
-      return await this.ensureExistingRuntimeProcessing(input, error.record);
+      return await this.ensureExistingRuntimeProcessing({
+        commandBudget: input.commandBudget,
+        input: input.input,
+        record: error.record,
+        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+      });
     }
 
     await this.syncWatchdogAlarm(await this.stateStore.readState());
 
-    const executionInput = toRuntimeInvocationInput(input);
+    const executionInput = toRuntimeInvocationInput(input.input);
     let prepared: PreparedRuntimeInvocation;
     try {
       prepared = await this.prepareRuntimeExecutionWithFence({
-        commandBudget,
+        commandBudget: input.commandBudget,
         input: executionInput,
         token,
       });
     } catch (error) {
       const failed = await this.clearWriteFenceAfterRuntimeStartFailure({
         error,
-        input,
+        input: input.input,
         message: "Hosted runner runtime processing preparation failed.",
         token,
       });
@@ -684,8 +720,8 @@ export class HostedUserRunner {
     }
 
     const startupConfirmed = await this.confirmRuntimeContainerStartup({
-      commandBudget,
-      input,
+      commandBudget: input.commandBudget,
+      input: input.input,
       runnerContainerName: prepared.runnerContainerName,
       token: prepared.token,
     });
@@ -694,19 +730,20 @@ export class HostedUserRunner {
     }
 
     const stillOwnsPreparedFence = await this.confirmPreparedRuntimeWriteFenceIsActive({
-      input,
+      input: input.input,
       token: prepared.token,
     });
     if (!stillOwnsPreparedFence) {
       return this.createRuntimeProcessingRetryLater({
         reason: "stale_fence_replacement_race",
-        userId: input.userId,
+        userId: input.input.userId,
       });
     }
 
     const background = this.invokePreparedRuntimeExecutionWithFence({
+      acceptedProcessingAttempt: true,
       prepared,
-      runtimeWakeStartedAt,
+      runtimeWakeStartedAt: input.runtimeWakeStartedAt,
     }).then(
       () => undefined,
       () => undefined,
@@ -716,18 +753,18 @@ export class HostedUserRunner {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        orchestrationAttemptId: input.orchestrationAttemptId,
-        runtimeProcessingAction: action,
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
+        runtimeProcessingAction: input.action,
         workspaceAttemptId: prepared.token.attemptId,
-        workspaceReason: input.reason,
+        workspaceReason: input.input.reason,
       },
       message: "Hosted runner runtime processing accepted.",
       phase: "runtime.starting",
-      userId: input.userId,
+      userId: input.input.userId,
     });
 
     return {
-      action,
+      action: input.action,
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: this.computeRuntimeProcessingOwnerWatchdogAt(prepared.token),
       runtimeAttemptId: prepared.token.attemptId,
@@ -770,7 +807,7 @@ export class HostedUserRunner {
     );
     return {
       deadlineAtMs:
-        input.startedAtMs + effectiveTimeoutMs - RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+        input.startedAtMs + effectiveTimeoutMs - HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
     };
   }
 
@@ -780,9 +817,43 @@ export class HostedUserRunner {
   }): number {
     const remainingMs = input.budget.deadlineAtMs - Date.now();
     if (remainingMs <= 0) {
-      throw new Error("Hosted runner runtime processing command budget timed out.");
+      throw this.createRuntimeProcessingCommandBudgetTimeoutError();
     }
     return Math.max(1, Math.min(input.stepTimeoutMs, remainingMs));
+  }
+
+  private async runRuntimeProcessingCommandStep<T>(input: {
+    budget: RuntimeProcessingCommandBudget;
+    operation: () => Promise<T>;
+    stepTimeoutMs: number;
+  }): Promise<T> {
+    const timeoutMs = this.readRuntimeProcessingCommandStepTimeoutMs({
+      budget: input.budget,
+      stepTimeoutMs: input.stepTimeoutMs,
+    });
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(this.createRuntimeProcessingCommandBudgetTimeoutError());
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([input.operation(), timeout]);
+    } finally {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  private createRuntimeProcessingCommandBudgetTimeoutError(): Error {
+    return new Error(RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE);
+  }
+
+  private isRuntimeProcessingCommandBudgetTimeout(error: unknown): boolean {
+    return error instanceof Error
+      && error.message === RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE;
   }
 
   private async confirmRuntimeContainerStartup(input: {
@@ -993,6 +1064,7 @@ export class HostedUserRunner {
     }
 
     return await this.invokePreparedRuntimeExecutionWithFence({
+      acceptedProcessingAttempt: false,
       prepared,
       runtimeWakeStartedAt: input.runtimeWakeStartedAt,
     });
@@ -1039,6 +1111,7 @@ export class HostedUserRunner {
   }
 
   private async invokePreparedRuntimeExecutionWithFence(input: {
+    acceptedProcessingAttempt: boolean;
     prepared: PreparedRuntimeInvocation;
     runtimeWakeStartedAt: number;
   }): Promise<HostedWorkspaceInvocationResult> {
@@ -1054,6 +1127,14 @@ export class HostedUserRunner {
         finishedAt: new Date().toISOString(),
         token,
       });
+      if (input.acceptedProcessingAttempt && failed.failed) {
+        await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+          error,
+          executionInput,
+          token,
+          workspaceVersion,
+        });
+      }
       await this.syncWatchdogAlarm(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -1212,6 +1293,7 @@ export class HostedUserRunner {
   private async ensureActiveRuntimeProcessing(
     input: {
       activeRuntime: RunnerRuntimeWakeInput;
+      commandBudget: RuntimeProcessingCommandBudget;
       reason: HostedWorkspaceInvocationReason;
     },
   ): Promise<
@@ -1230,12 +1312,17 @@ export class HostedUserRunner {
       }),
     );
 
-    if (container.ensureProcessing) {
+    const ensureProcessing = container.ensureProcessing;
+    if (ensureProcessing) {
       try {
-        const result = await container.ensureProcessing({
-          activeRuntime: input.activeRuntime,
-          reason: input.reason,
-          userId: input.activeRuntime.userId,
+        const result = await this.runRuntimeProcessingCommandStep({
+          budget: input.commandBudget,
+          operation: async () => await ensureProcessing({
+            activeRuntime: input.activeRuntime,
+            reason: input.reason,
+            userId: input.activeRuntime.userId,
+          }),
+          stepTimeoutMs: this.env.runnerTimeoutMs,
         });
         if (
           result.kind === "accepted"
@@ -1254,16 +1341,28 @@ export class HostedUserRunner {
           phase: "scheduled",
           userId: input.activeRuntime.userId,
         });
-        return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
+        return {
+          kind: "wake-unconfirmed",
+          reason: this.isRuntimeProcessingCommandBudgetTimeout(error)
+            ? "container-rpc-timeout"
+            : "container-rpc-error",
+        };
       }
     }
 
-    if (!container.wakeRuntime) {
+    const wakeRuntime = container.wakeRuntime;
+    if (!wakeRuntime) {
       return { kind: "wake-unconfirmed", reason: "missing-wake-method" };
     }
 
     try {
-      const runtimeWake = normalizeRunnerRuntimeWakeResult(await container.wakeRuntime(input.activeRuntime));
+      const runtimeWake = normalizeRunnerRuntimeWakeResult(
+        await this.runRuntimeProcessingCommandStep({
+          budget: input.commandBudget,
+          operation: async () => await wakeRuntime(input.activeRuntime),
+          stepTimeoutMs: this.env.runnerTimeoutMs,
+        }),
+      );
       if (runtimeWake.kind === "accepted") {
         return { action: runtimeWake.action, kind: "accepted" };
       }
@@ -1276,11 +1375,16 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
-        message: "Hosted runner could not ensure active runtime processing.",
-        phase: "scheduled",
-        userId: input.activeRuntime.userId,
-      });
-      return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
+          message: "Hosted runner could not ensure active runtime processing.",
+          phase: "scheduled",
+          userId: input.activeRuntime.userId,
+        });
+      return {
+        kind: "wake-unconfirmed",
+        reason: this.isRuntimeProcessingCommandBudgetTimeout(error)
+          ? "container-rpc-timeout"
+          : "container-rpc-error",
+      };
     }
   }
 
@@ -1379,16 +1483,9 @@ export class HostedUserRunner {
     );
     const configSource = this.readRunnerRuntimeConfigSource();
     const runtimeConfig = await this.buildForegroundRunnerJobRuntimeConfig({
+      commandBudget: input.commandBudget,
       configSource,
       forwardedEnv,
-      ...(input.commandBudget
-        ? {
-            webControlTimeoutMs: this.readRuntimeProcessingCommandStepTimeoutMs({
-              budget: input.commandBudget,
-              stepTimeoutMs: this.env.webControlTimeoutMs,
-            }),
-          }
-        : {}),
       userId: input.userId,
     });
     const workspaceSnapshotPathHashSecret =
@@ -1470,18 +1567,30 @@ export class HostedUserRunner {
   }
 
   private async buildForegroundRunnerJobRuntimeConfig(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
     configSource: Readonly<Record<string, string | undefined>>;
     forwardedEnv: Readonly<Record<string, string>>;
     userId: string;
-    webControlTimeoutMs?: number;
   }): Promise<ReturnType<typeof buildHostedRunnerJobRuntimeConfig>> {
+    const webControlTimeoutMs = input.commandBudget
+      ? this.readRuntimeProcessingCommandStepTimeoutMs({
+          budget: input.commandBudget,
+          stepTimeoutMs: this.env.webControlTimeoutMs,
+        })
+      : undefined;
     const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(
       input.userId,
-      input.webControlTimeoutMs === undefined
+      webControlTimeoutMs === undefined
         ? undefined
-        : { webControlTimeoutMs: input.webControlTimeoutMs },
+        : { webControlTimeoutMs },
     );
-    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
+    const runnerSecrets = input.commandBudget
+      ? await this.runRuntimeProcessingCommandStep({
+          budget: input.commandBudget,
+          operation: async () => await runnerSecretsService.readRunnerSecrets(input.userId),
+          stepTimeoutMs: this.env.webControlTimeoutMs,
+        })
+      : await runnerSecretsService.readRunnerSecrets(input.userId);
     return buildHostedRunnerJobRuntimeConfig({
       configSource: input.configSource,
       forwardedEnv: input.forwardedEnv,
@@ -1788,6 +1897,63 @@ export class HostedUserRunner {
     }
 
     return parseHostedWorkspaceReadResponse(await response.json());
+  }
+
+  private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {
+    error: unknown;
+    executionInput: RuntimeInvocationInput;
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string;
+  }): Promise<void> {
+    const body = {
+      entries: [
+        {
+          at: new Date().toISOString(),
+          component: "runner",
+          errorCode: deriveHostedExecutionErrorCode(input.error),
+          eventCode: "runner.accepted_attempt_failed",
+          level: "warn",
+          phase: "error",
+          workspaceVersion: input.workspaceVersion,
+        },
+      ],
+    } satisfies HostedRuntimeLogRequest;
+
+    try {
+      const response = await fetchHostedExecutionWebControlPlaneResponse({
+        ...(this.env.hostedWebAllowHttpHosts
+          ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+          : {}),
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: JSON.stringify(body),
+        boundUserId: input.executionInput.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        method: "POST",
+        path: HOSTED_RUNTIME_LOG_PATH,
+        timeoutMs: this.env.webControlTimeoutMs,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Hosted runtime log write failed with HTTP ${response.status}.`);
+      }
+
+      parseHostedRuntimeLogResponse(await response.json());
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: input.executionInput.reason,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted runner accepted runtime attempt failure log write failed.",
+        phase: "failed",
+        userId: input.executionInput.userId,
+      });
+    }
   }
 
   private assertWorkspaceBelongsToRunnerUser(
