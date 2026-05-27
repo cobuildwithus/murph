@@ -13,6 +13,7 @@ import type {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -101,7 +102,6 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
-const RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
 const RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE =
   "Hosted runner runtime processing command budget timed out.";
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
@@ -803,7 +803,7 @@ export class HostedUserRunner {
     );
     return {
       deadlineAtMs:
-        input.startedAtMs + effectiveTimeoutMs - RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+        input.startedAtMs + effectiveTimeoutMs - HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
     };
   }
 

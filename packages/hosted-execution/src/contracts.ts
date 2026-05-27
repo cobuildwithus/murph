@@ -441,8 +441,25 @@ export type HostedRuntimeTimerTriggerKind =
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 10_000;
+export const HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
+export const MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS =
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1;
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-timeout-ms";
+
+export function assertHostedRuntimeProcessingTimeoutMs(
+  value: number,
+  label: string,
+): void {
+  if (
+    !Number.isSafeInteger(value)
+    || value < MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      `${label} must be greater than ${HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS}.`,
+    );
+  }
+}
 
 export type HostedExecutionDeviceSyncJobHint =
   DeviceSyncHostedExecutionDeviceSyncJobHint;

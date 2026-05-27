@@ -23,6 +23,7 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  assertHostedRuntimeProcessingTimeoutMs,
   getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
@@ -1447,12 +1448,12 @@ async function handleRuntimeEnsureProcessingRoute(
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
-        reason: "runtime-ensure-processing-request-body-invalid",
+        reason: "runtime-ensure-processing-request-invalid",
         routeName: "runtime-ensure-processing",
       }, context.request, userId),
       error,
       level: "warn",
-      message: "Hosted worker runtime ensure-processing route rejected an invalid request body.",
+      message: "Hosted worker runtime ensure-processing route rejected an invalid request.",
       phase: "failed",
       userId,
     });
@@ -1486,6 +1487,10 @@ function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number |
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
   }
+  assertHostedRuntimeProcessingTimeoutMs(
+    parsed,
+    "Hosted runtime ensure-processing command timeout header",
+  );
 
   return parsed;
 }
@@ -1788,12 +1793,19 @@ function buildWorkerRouteLogDetails(
     ...(boundUserId ? { boundUserId } : {}),
     host: url.host,
     method: request.method,
-    pathname: url.pathname,
+    pathname: redactWorkerRoutePathname(url.pathname),
     reason: input.reason,
     ...(input.routeName ? { routeName: input.routeName } : {}),
     ...(input.targetHost ? { targetHost: input.targetHost } : {}),
     ...(input.userId ?? userId ? { userId: input.userId ?? userId ?? "" } : {}),
   };
+}
+
+function redactWorkerRoutePathname(pathname: string): string {
+  return pathname.replace(
+    /^\/internal\/users\/[^/]+(?=\/|$)/u,
+    "/internal/users/<REDACTED_USER>",
+  );
 }
 
 function classifyPublicRouteError(error: unknown): { error: string; status: number } {

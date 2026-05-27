@@ -4,6 +4,7 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
 } from "../src/orchestration-control.ts";
 import {
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
   HOSTED_TEMPORAL_ENSURE_PROCESSING_REPORTING_SLACK_MS,
   HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS,
   readHostedRuntimeEnsureProcessingTimeouts,
@@ -180,6 +181,20 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "30001",
     })).toThrow(
       "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS must be less than or equal to 30000.",
+    );
+  });
+
+  it("rejects ensure-processing HTTP timeout budgets that cannot leave the response margin", () => {
+    expect(() => readHostedRuntimeEnsureProcessingTimeouts({
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: String(HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS),
+    })).toThrow(
+      `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS must be greater than ${HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS}.`,
+    );
+
+    expect(readHostedRuntimeEnsureProcessingTimeouts({
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: String(HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1),
+    }).ensureRuntimeProcessingHttpTimeoutMs).toBe(
+      HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1,
     );
   });
 });
