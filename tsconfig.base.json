@@ -262,6 +262,24 @@
       "@murphai/assistant-runtime": [
         "packages/assistant-runtime/src/index.ts"
       ],
+      "@murphai/assistant-runtime/hosted-assistant-env": [
+        "packages/assistant-runtime/src/hosted-assistant-env.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-assistant-env-constants": [
+        "packages/assistant-runtime/src/hosted-assistant-env-constants.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-email": [
+        "packages/assistant-runtime/src/hosted-email.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-provider-effects": [
+        "packages/assistant-runtime/src/hosted-provider-effects.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-runtime-contracts": [
+        "packages/assistant-runtime/src/hosted-runtime-contracts.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-runtime-worker-contracts": [
+        "packages/assistant-runtime/src/hosted-runtime-worker-contracts.ts"
+      ],
       "@murphai/assistant-runtime/*": [
         "packages/assistant-runtime/src/*"
       ],
@@ -327,9 +345,6 @@
       ],
       "@murphai/gateway-core": [
         "packages/gateway-core/src/index.ts"
-      ],
-      "@murphai/gateway-local": [
-        "packages/gateway-local/src/index.ts"
       ],
       "murph": [
         "packages/cli/src/index.ts"

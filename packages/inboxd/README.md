@@ -34,7 +34,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - a generic normalized chat-poll connector factory for source-specific transports
 - Telegram and email/Linq inbox connector ownership plus shared connector primitives for supported inbox sources; hosted conversation normalization also covers WhatsApp text wakes emitted by the control plane
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
-- capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream projections like the gateway store
+- capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata
 - runtime list, show, and search helpers for future CLI/agent surfaces
 - `vault-cli inbox ...` is the intended human/operator surface layered on top of this package

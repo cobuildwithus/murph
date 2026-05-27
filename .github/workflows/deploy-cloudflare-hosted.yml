@@ -109,6 +109,9 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
+
       - name: Run Codex cache-prefix hosted-local E2E
         shell: bash
         run: |
@@ -189,6 +192,9 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
+
       - name: Run Linq delivery hosted-local E2E
         shell: bash
         run: |
@@ -268,6 +274,9 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install/check Temporal CLI
+        run: pnpm temporal:cli:setup
 
       - name: Run Linq scheduled reminder hosted-local E2E
         shell: bash

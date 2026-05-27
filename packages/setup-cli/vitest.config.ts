@@ -6,7 +6,6 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
-  "@murphai/gateway-local": "../gateway-local/src/index.ts",
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
   "@murphai/inbox-services": "../inbox-services/src/index.ts",

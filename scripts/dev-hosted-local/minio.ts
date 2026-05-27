@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
+import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
 
 import {
@@ -93,6 +94,7 @@ export async function maybeStartHostedLocalMinio(input: {
     HOSTED_LOCAL_MINIO_ROLE_LABEL,
     "--label",
     `${HOSTED_LOCAL_MINIO_BUILD_ID_LABEL_NAME}=${buildIdLabelValue}`,
+    ...buildHostedLocalMinioDockerUserArgs(),
     "-p",
     `${publishTarget.publishHost}:${port}:9000`,
     "-v",
@@ -159,6 +161,20 @@ export async function maybeStartHostedLocalMinio(input: {
     },
     process: childProcess,
   };
+}
+
+function buildHostedLocalMinioDockerUserArgs(): string[] {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    return [];
+  }
+
+  const uid = process.getuid();
+  const gid = process.getgid();
+  if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) {
+    return [];
+  }
+
+  return ["--user", `${uid}:${gid}`];
 }
 
 function shouldStartHostedLocalMinio(env: NodeJS.ProcessEnv): boolean {

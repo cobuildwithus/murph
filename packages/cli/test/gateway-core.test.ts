@@ -28,12 +28,6 @@ const gatewayCoreSourceDir = path.resolve(
   'gateway-core',
   'src',
 )
-const gatewayLocalSourceDir = path.resolve(
-  fileURLToPath(new URL('..', import.meta.url)),
-  '..',
-  'gateway-local',
-  'src',
-)
 
 test('murph no longer publishes legacy gateway-core compatibility exports', async () => {
   const packageManifest = JSON.parse(
@@ -46,30 +40,19 @@ test('murph no longer publishes legacy gateway-core compatibility exports', asyn
   assert.equal(packageManifest.exports['./gateway-core-local'], undefined)
 })
 
-test('gateway-core stays transport-neutral and gateway-local owns the vault-backed local surface', async () => {
+test('gateway-core stays transport-neutral without a vault-backed local surface', async () => {
   const gatewayCoreManifest = JSON.parse(
     await readFile(path.resolve(gatewayCoreSourceDir, '..', 'package.json'), 'utf8'),
   ) as {
     dependencies?: Record<string, string | undefined>
   }
-  const gatewayLocalManifest = JSON.parse(
-    await readFile(path.resolve(gatewayLocalSourceDir, '..', 'package.json'), 'utf8'),
-  ) as {
-    dependencies?: Record<string, string | undefined>
-  }
   const packageIndex = await readFile(path.join(gatewayCoreSourceDir, 'index.ts'), 'utf8')
-  const packageLocal = await readFile(path.join(gatewayLocalSourceDir, 'index.ts'), 'utf8')
 
   assert.doesNotMatch(packageIndex, /from ['"]murph\/gateway-core['"]/u)
+  assert.doesNotMatch(packageIndex, /local-runtime/u)
   assert.equal(gatewayCoreManifest.dependencies?.['@murphai/assistant-core'], undefined)
   assert.equal(gatewayCoreManifest.dependencies?.['@murphai/inboxd'], undefined)
   assert.equal(gatewayCoreManifest.dependencies?.['@murphai/runtime-state'], undefined)
-  assert.equal(gatewayLocalManifest.dependencies?.['@murphai/gateway-core'], 'workspace:*')
-  assert.equal(gatewayLocalManifest.dependencies?.['@murphai/assistant-core'], undefined)
-  assert.doesNotMatch(packageLocal, /@murph\/gateway-core\/local/u)
-  assert.match(packageLocal, /\.\/local-service\.js/u)
-  assert.match(packageLocal, /\.\/store\.js/u)
-  assert.match(packageLocal, /\.\/send\.js/u)
 
   await assert.rejects(
     access(path.join(gatewayCoreSourceDir, 'local.ts'), constants.F_OK),
@@ -77,8 +60,9 @@ test('gateway-core stays transport-neutral and gateway-local owns the vault-back
   await assert.rejects(
     access(path.join(gatewayCoreSourceDir, 'local-service.ts'), constants.F_OK),
   )
-  await access(path.join(gatewayLocalSourceDir, 'index.ts'), constants.F_OK)
-  await access(path.join(gatewayLocalSourceDir, 'local-service.ts'), constants.F_OK)
+  await assert.rejects(
+    access(path.join(gatewayCoreSourceDir, 'local-runtime.ts'), constants.F_OK),
+  )
   await assert.rejects(
     access(new URL('../src/gateway-core.ts', import.meta.url), constants.F_OK),
   )
@@ -90,7 +74,7 @@ test('gateway-core stays transport-neutral and gateway-local owns the vault-back
   )
 })
 
-test('workspace source resolution points directly at dedicated gateway-core and gateway-local packages with no legacy local alias left behind', async () => {
+test('workspace source resolution points directly at gateway-core with no local gateway alias left behind', async () => {
   const tsconfig = JSON.parse(
     await readFile(new URL('../../../tsconfig.base.json', import.meta.url), 'utf8'),
   ) as {
@@ -102,9 +86,7 @@ test('workspace source resolution points directly at dedicated gateway-core and 
   assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murphai/gateway-core'], [
     'packages/gateway-core/src/index.ts',
   ])
-  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murphai/gateway-local'], [
-    'packages/gateway-local/src/index.ts',
-  ])
+  assert.equal(tsconfig.compilerOptions?.paths?.['@murphai/gateway-local'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['@murphai/gateway-core/local'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core-local'], undefined)
