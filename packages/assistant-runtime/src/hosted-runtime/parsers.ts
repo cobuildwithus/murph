@@ -2,6 +2,7 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import {
+  parseHostedRuntimeDemandRunSource,
   parseHostedWorkspaceState,
 } from "@murphai/hosted-execution/parsers";
 
@@ -115,6 +116,14 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
       "Hosted assistant workspace runtime job request.leaseGeneration",
     ),
     reason,
+    ...(record.source === undefined || record.source === null
+      ? {}
+      : {
+          source: parseHostedRuntimeDemandRunSource(
+            record.source,
+            "Hosted assistant workspace runtime job request.source",
+          ),
+        }),
     userId: requireString(
       record.userId,
       "Hosted assistant workspace runtime job request.userId",

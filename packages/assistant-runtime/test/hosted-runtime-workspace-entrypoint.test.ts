@@ -6241,6 +6241,23 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     assert.equal(browserVaultRefreshParsed.request.reason, "browser_vault_refresh");
 
+    const deviceSyncRecoveryParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
+      request: {
+        ...createWorkspaceRunRequest(),
+        source: "device_sync_recovery",
+      },
+    });
+    assert.equal(deviceSyncRecoveryParsed.request.source, "device_sync_recovery");
+
+    expect(() =>
+      parseHostedAssistantWorkspaceRuntimeJobInput({
+        request: {
+          ...createWorkspaceRunRequest(),
+          source: "webhook",
+        },
+      })
+    ).toThrow("Hosted assistant workspace runtime job request.source is not supported.");
+
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
         request: {

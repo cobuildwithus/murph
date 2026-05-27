@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-22
+Last verified: 2026-05-27
 
 ## Decision
 
@@ -21,8 +21,9 @@ The live ownership split is:
   same Temporal workflow.
   Device-sync webhook freshness is different: web records per-webhook
   trace/audit facts, upserts per-connection dirty resources/revisions,
-  completes trace acceptance in the same transaction, and appends opaque wake
-  pointers for clean-to-dirty transitions and bounded dirty-sweeper recovery.
+  completes trace acceptance in the same transaction, and sends a best-effort
+  background-maintenance signal for clean-to-dirty transitions. Bounded
+  dirty-sweeper recovery may still append opaque wake pointers.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -124,6 +125,10 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+Because the Temporal worker can deploy automatically before the manual
+Cloudflare worker rollout, new Temporal-to-Cloudflare `ensure-processing` fields
+must either be accepted by the currently deployed worker or keep the demand
+pending with `retry_later` until the consumer deployment catches up.
 
 Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work
@@ -172,10 +177,16 @@ there is no active Vercel producer for them.
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty
-resource/window map, completes the trace in the same transaction, and appends an
-opaque `device-sync.wake` mailbox pointer only when the dirty row transitions
-from clean to dirty. The pointer signal may wake hosted Temporal by mailbox item
-id; it must not carry provider payloads or become the device-sync queue.
+resource/window map, completes the trace in the same transaction, and sends a
+best-effort `device_sync_recovery_requested` signal only when the dirty row
+transitions from clean to dirty. That signal is a wake hint; it must not carry
+provider payloads or become the device-sync queue. Temporal preserves the
+`device_sync_recovery` source through ensure-processing so the runner treats the
+invocation as background dirty work; the assistant runtime runs device sync only
+when no fresh conversation input is pending, and reschedules a short
+`device-sync.reconcile` wake if foreground work preempts that background pass.
+If an older Cloudflare deployment rejects that optional source field, Temporal
+keeps the recovery demand pending instead of consuming it as a source-less run.
 The dirty/due recovery sweep is the bounded recovery backstop for dirty rows
 that remain pending after a missed, denied, or insufficient wake, and for active
 connections whose canonical `nextReconcileAt` is due. Temporal owns the cadence

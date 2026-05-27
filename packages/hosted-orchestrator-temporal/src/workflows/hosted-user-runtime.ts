@@ -128,6 +128,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     reason: HostedRuntimeRunDemand["reason"];
+    source?: HostedRuntimeRunDemand["source"] | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -328,6 +329,9 @@ export function createHostedUserRuntimeWorkflowMachine(
           execution = await runtime.ensureRuntimeProcessing({
             orchestrationAttemptId,
             reason: demand.reason,
+            ...(demand.source === "device_sync_recovery"
+              ? { source: demand.source }
+              : {}),
             userId: input.userId,
           });
         } else {
@@ -373,7 +377,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         if (signalArrivedDuringExecution) {
           continue;
         }
-        clearConsumedFlagsAfterRun(state, demand.source);
+        clearConsumedFlagsAfterRun(state, demand.source, execution);
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
@@ -739,6 +743,7 @@ function clearSatisfiedFlags(
 function clearConsumedFlagsAfterRun(
   state: HostedRuntimeWorkflowState,
   source: HostedRuntimeRunDemand["source"],
+  execution?: HostedRuntimeEnsureExecutionResponse | HostedRuntimeEnsureProcessingResponse,
 ): void {
   switch (source) {
     case "mailbox_backlog": {
@@ -755,6 +760,15 @@ function clearConsumedFlagsAfterRun(
       return;
     }
     case "device_sync_recovery": {
+      if (
+        execution?.kind === "runtime_processing_accepted"
+        && (
+          execution.action === "already_running"
+          || execution.action === "woken"
+        )
+      ) {
+        return;
+      }
       state.deviceSyncRecoveryRequested = false;
       return;
     }

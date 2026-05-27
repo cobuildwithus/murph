@@ -8,7 +8,6 @@ import {
 import {
   HOSTED_RUNTIME_DEMAND_BLOCKED_REASONS,
   HOSTED_RUNTIME_DEMAND_KINDS,
-  HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
   HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
@@ -29,6 +28,9 @@ import {
   requireString,
   readNullableString,
 } from "./assertions.ts";
+import {
+  parseHostedRuntimeDemandRunSource,
+} from "./demand-source.ts";
 import {
   parseHostedMailboxLane,
 } from "./runtime-control.ts";
@@ -224,10 +226,9 @@ export function parseHostedRuntimeDemand(value: unknown): HostedRuntimeDemand {
           record.reason,
           "Hosted runtime run demand reason",
         ),
-        source: parseAllowedString(
+        source: parseHostedRuntimeDemandRunSource(
           record.source,
           "Hosted runtime run demand source",
-          HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
         ),
         workspace: record.workspace === null
           ? null
@@ -321,6 +322,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "orchestrationAttemptId",
     "reason",
+    "source",
   ]);
 
   return {
@@ -332,6 +334,14 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       record.reason,
       "Hosted runtime ensure-processing request reason",
     ),
+    ...(record.source === undefined || record.source === null
+      ? {}
+      : {
+          source: parseHostedRuntimeDemandRunSource(
+            record.source,
+            "Hosted runtime ensure-processing request source",
+          ),
+        }),
   };
 }
 

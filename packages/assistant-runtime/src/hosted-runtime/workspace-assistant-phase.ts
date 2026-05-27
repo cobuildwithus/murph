@@ -1759,6 +1759,10 @@ function shouldSkipDeviceSyncForAssistantPhase(
     return true;
   }
 
+  if (input.request.source === "device_sync_recovery") {
+    return hasFreshHostedConversationInput(input);
+  }
+
   if (isDueHostedDeviceSyncReconcileWake(input)) {
     return false;
   }
@@ -1861,6 +1865,19 @@ function resolveSkippedDeviceSyncWake(input: {
 }): HostedRuntimeWakeCandidate | null {
   if (!input.skipDeviceSync || !input.assistantMetrics.deviceSyncSkipped) {
     return null;
+  }
+
+  if (
+    input.input.request.source === "device_sync_recovery"
+    && shouldRescheduleSkippedDeviceSyncWake(input.input)
+  ) {
+    return {
+      at: new Date(
+        resolveHostedAssistantPhaseNowMs(input.input)
+          + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS,
+      ).toISOString(),
+      reason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    };
   }
 
   const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;

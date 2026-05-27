@@ -1690,6 +1690,7 @@ describe("cloudflare worker routes", () => {
             body: JSON.stringify({
               orchestrationAttemptId: "orchestration-attempt-test",
               reason: "nudge",
+              source: "device_sync_recovery",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1711,6 +1712,7 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
         reason: "nudge",
+        source: "device_sync_recovery",
         userId: "test-user",
       });
       expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();

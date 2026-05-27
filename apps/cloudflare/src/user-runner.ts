@@ -7,6 +7,7 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedRuntimeDemandRunSource,
   HostedRuntimeEnsureExecutionRequest,
   HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingRequest,
@@ -136,8 +137,18 @@ type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
 type RuntimeInvocationInput = {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
+  source?: HostedRuntimeDemandRunSource;
   userId: string;
 };
+
+function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
+  return {
+    orchestrationAttemptId: input.orchestrationAttemptId,
+    reason: input.reason,
+    ...(input.source ? { source: input.source } : {}),
+    userId: input.userId,
+  };
+}
 
 type RuntimeProcessingRetryReason =
   | "active_child_rejected"
@@ -779,7 +790,7 @@ export class HostedUserRunner {
     await this.syncWatchdogAlarm(await this.stateStore.readState());
 
     const background = this.invokeRuntimeExecutionWithFence({
-      input,
+      input: toRuntimeInvocationInput(input),
       runtimeWakeStartedAt,
       token,
     }).then(
@@ -874,6 +885,7 @@ export class HostedUserRunner {
       result = await this.invokeWorkspaceRunner({
         token,
         reason: executionInput.reason,
+        ...(executionInput.source ? { source: executionInput.source } : {}),
         userId: executionInput.userId,
         workspace: workspaceRead.workspace,
         workspaceVersion,
@@ -1171,6 +1183,7 @@ export class HostedUserRunner {
   private async invokeWorkspaceRunner(input: {
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
+    source?: HostedRuntimeDemandRunSource;
     userId: string;
     workspace: HostedWorkspaceState | null;
     workspaceVersion: string;
@@ -1210,6 +1223,7 @@ export class HostedUserRunner {
         idleCheckpointDelayMs: this.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
         reason: input.reason,
+        ...(input.source ? { source: input.source } : {}),
         userId: input.userId,
         workspace: input.workspace,
         workspaceVersion: input.workspaceVersion,
