@@ -565,6 +565,47 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("continues the assistant lane when foreground input arrives during system mailbox preparation", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return {
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_processed",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shouldYieldDeviceSync: shouldYieldBackgroundMaintenance,
+      }),
+    );
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        itemId: "system_mailbox_item_processed",
+      }),
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("checkpoints a consumed alarm wake when foreground input was ingested", async () => {
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,
