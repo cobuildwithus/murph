@@ -84,7 +84,7 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
     ensureRuntimeProcessing.mockResolvedValueOnce({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: null,
+      recommendedRecheckAt: "2026-05-20T12:01:00.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     });
     const {

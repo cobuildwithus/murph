@@ -43,7 +43,7 @@ Updated: 2026-05-21
   - `packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts`
   - `packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts`
   - `packages/hosted-orchestrator-temporal/src/activities/http-client.ts`
-  - `packages/hosted-orchestrator-temporal/test/ensure-cloudflare-execution.test.ts`
+  - `packages/hosted-orchestrator-temporal/test/ensure-runtime-processing.test.ts`
   - `packages/hosted-orchestrator-temporal/test/read-runtime-demand.test.ts`
 - Out of scope:
   - Temporal workflow command ordering.
@@ -110,7 +110,7 @@ Updated: 2026-05-21
 - Commands to run:
   - `pnpm exec vitest run apps/web/test/hosted-orchestration-signal-runtime.test.ts --config apps/web/vitest.config.ts --no-coverage`
   - `pnpm exec vitest run apps/web/test/hosted-orchestration-demand.test.ts apps/web/test/hosted-account-data-service.test.ts apps/web/test/hosted-orchestration-workflow-termination.test.ts --config apps/web/vitest.config.ts --no-coverage`
-  - `pnpm exec vitest run packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts packages/hosted-orchestrator-temporal/test/worker.test.ts packages/hosted-orchestrator-temporal/test/ensure-cloudflare-execution.test.ts packages/hosted-orchestrator-temporal/test/read-runtime-demand.test.ts --config packages/hosted-orchestrator-temporal/vitest.config.ts --no-coverage`
+  - `pnpm exec vitest run packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts packages/hosted-orchestrator-temporal/test/worker.test.ts packages/hosted-orchestrator-temporal/test/ensure-runtime-processing.test.ts packages/hosted-orchestrator-temporal/test/read-runtime-demand.test.ts --config packages/hosted-orchestrator-temporal/vitest.config.ts --no-coverage`
   - `pnpm hosted-local e2e temporal-orchestration`
   - `pnpm typecheck`
   - `pnpm verify:acceptance`
@@ -120,7 +120,7 @@ Updated: 2026-05-21
     scoped diff.
 - Results so far:
   - PASS: `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-orchestration-signal-runtime.test.ts apps/web/test/hosted-account-data-service.test.ts apps/web/test/hosted-orchestration-workflow-termination.test.ts`
-  - PASS: `pnpm exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts test/worker.test.ts test/ensure-cloudflare-execution.test.ts test/read-runtime-demand.test.ts`
+  - PASS: `pnpm exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts test/worker.test.ts test/ensure-runtime-processing.test.ts test/read-runtime-demand.test.ts`
   - PASS: `git diff --check`
   - PENDING: `pnpm hosted-local e2e temporal-orchestration` exited before the
     test body while waiting on shared workspace artifact locks from concurrent
