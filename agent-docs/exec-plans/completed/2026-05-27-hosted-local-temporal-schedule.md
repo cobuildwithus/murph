@@ -1,6 +1,6 @@
 # Hosted Local Temporal Schedule Bootstrap
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -93,3 +93,4 @@ append the durable `device-sync.wake` mailbox pointer.
 - Production startup still chains Schedule ensure before the production worker
   in `render.yaml`; direct production mutation was not attempted because
   production Temporal env is not present locally.
+Completed: 2026-05-27

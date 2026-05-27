@@ -2,31 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedDeviceSyncDirtyWake: vi.fn(),
-  buildHostedDeviceSyncDirtyWakeDedupeKey: vi.fn((input: {
-    connectionId: string;
-    dirtyRevision: bigint;
-    provider: string;
-  }) => {
-    const connectionFingerprint = input.connectionId === "dsc_dirty_2"
-      ? "2".repeat(16)
-      : "1".repeat(16);
-    return [
-      "device-sync",
-      "dirty",
-      "v1",
-      "provider",
-      input.provider,
-      "connection",
-      connectionFingerprint,
-      "revision",
-      input.dirtyRevision.toString(),
-    ].join(":");
-  }),
 }));
 
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
   appendHostedDeviceSyncDirtyWake: mocks.appendHostedDeviceSyncDirtyWake,
-  buildHostedDeviceSyncDirtyWakeDedupeKey: mocks.buildHostedDeviceSyncDirtyWakeDedupeKey,
 }));
 
 import {
@@ -68,9 +47,7 @@ describe("hosted device-sync dirty sweeper", () => {
     });
     expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledWith({
       connectionId: "dsc_dirty_1",
-      dedupeKey: expect.stringMatching(
-        /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
-      ),
+      dirtyRevision: 2n,
       eventType: "sleep.updated",
       occurredAt: "2026-05-05T00:00:00.000Z",
       provider: "oura",
@@ -78,7 +55,7 @@ describe("hosted device-sync dirty sweeper", () => {
       traceId: null,
       userId: "member_dirty_1",
     });
-    expect(JSON.stringify(mocks.appendHostedDeviceSyncDirtyWake.mock.calls))
+    expect(mocks.appendHostedDeviceSyncDirtyWake.mock.calls.map(([wake]) => wake.occurredAt))
       .not.toContain("2026-05-05T00:01:00.000Z");
     expect(result).toEqual({
       dirtyConnections: 1,
@@ -103,7 +80,7 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_1");
   });
 
-  it("uses a stable dirty wake dedupe key across sweeps for the same unresolved dirty revision", async () => {
+  it("uses a stable dirty revision across sweeps for the same unresolved dirty row", async () => {
     const row = {
       connectionId: "dsc_dirty_1",
       dirtyRevision: 2n,
@@ -129,15 +106,14 @@ describe("hosted device-sync dirty sweeper", () => {
 
     const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
     const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
-    expect(firstWake?.dedupeKey).toBe(secondWake?.dedupeKey);
-    expect(firstWake?.dedupeKey).toMatch(
-      /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
-    );
+    expect(firstWake?.dirtyRevision).toBe(2n);
+    expect(secondWake?.dirtyRevision).toBe(2n);
+    expect(firstWake?.connectionId).toBe(secondWake?.connectionId);
     expect(firstWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
     expect(secondWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
   });
 
-  it("keeps dirty wake dedupe keys distinct for different connections at the same revision", async () => {
+  it("passes each dirty connection identity to the dirty wake primitive", async () => {
     const store = buildStore([
       {
         connectionId: "dsc_dirty_1",
@@ -169,13 +145,14 @@ describe("hosted device-sync dirty sweeper", () => {
 
     const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
     const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
-    expect(firstWake?.dedupeKey).toMatch(
-      /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
-    );
-    expect(secondWake?.dedupeKey).toMatch(
-      /^device-sync:dirty:v1:provider:oura:connection:[0-9a-f]{16}:revision:2$/u,
-    );
-    expect(firstWake?.dedupeKey).not.toBe(secondWake?.dedupeKey);
+    expect(firstWake).toMatchObject({
+      connectionId: "dsc_dirty_1",
+      dirtyRevision: 2n,
+    });
+    expect(secondWake).toMatchObject({
+      connectionId: "dsc_dirty_2",
+      dirtyRevision: 2n,
+    });
   });
 
   it("reports skipped dirty connections and wake append failures without logging raw ids", async () => {

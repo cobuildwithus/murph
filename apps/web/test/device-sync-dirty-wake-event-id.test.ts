@@ -65,21 +65,21 @@ describe("appendHostedDeviceSyncDirtyWake", () => {
 
     await appendHostedDeviceSyncDirtyWake({
       connectionId: "dsc_dirty_1",
-      dedupeKey: secondRevisionDedupeKey,
+      dirtyRevision: 2n,
       occurredAt: "2026-05-05T00:01:00.000Z",
       provider: "oura",
       userId: "member_dirty_1",
     });
     await appendHostedDeviceSyncDirtyWake({
       connectionId: "dsc_dirty_1",
-      dedupeKey: secondRevisionDedupeKey,
+      dirtyRevision: 2n,
       occurredAt: "2026-05-05T00:02:00.000Z",
       provider: "oura",
       userId: "member_dirty_1",
     });
     await appendHostedDeviceSyncDirtyWake({
       connectionId: "dsc_dirty_1",
-      dedupeKey: thirdRevisionDedupeKey,
+      dirtyRevision: 3n,
       occurredAt: "2026-05-05T00:03:00.000Z",
       provider: "oura",
       userId: "member_dirty_1",
