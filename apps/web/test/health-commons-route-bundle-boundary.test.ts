@@ -218,7 +218,11 @@ function listTraceFiles(root: string): string[] {
       continue;
     }
 
-    const stat = statSync(current);
+    const stat = statPathIfPresent(current);
+    if (!stat) {
+      continue;
+    }
+
     if (stat.isDirectory()) {
       for (const entry of readdirSync(current)) {
         stack.push(path.join(current, entry));
@@ -232,6 +236,24 @@ function listTraceFiles(root: string): string[] {
   }
 
   return result;
+}
+
+function statPathIfPresent(filePath: string): ReturnType<typeof statSync> | null {
+  try {
+    return statSync(filePath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error.code === "ENOENT" || error.code === "ENOTDIR");
 }
 
 function isHealthCommonsRouteTrace(filePath: string, source: string): boolean {
