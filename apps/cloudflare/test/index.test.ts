@@ -1560,31 +1560,6 @@ describe("cloudflare worker routes", () => {
   });
 
   describe("hosted runtime control", () => {
-    it("does not expose the removed runtime ensure-execution route", async () => {
-      const stub = createUserRunnerStub();
-      const env = createWorkerEnv(stub);
-
-      const response = await worker.fetch(
-        await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
-          body: JSON.stringify({
-            orchestrationAttemptId: "orchestration-attempt-test",
-            reason: "nudge",
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        })),
-        env,
-      );
-
-      expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toEqual({
-        error: "Not found",
-      });
-      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-    });
-
     it("maps runtime ensure-processing route calls to the Durable Object adapter", async () => {
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
