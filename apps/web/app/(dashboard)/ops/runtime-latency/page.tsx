@@ -58,7 +58,7 @@ export default async function RuntimeLatencyOpsPage({
             Hosted runtime latency
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {dashboard.source} accepted to provider start, {dashboard.window.hours}h window.
+            {dashboard.source} mailbox accepted to provider start, {dashboard.window.hours}h window.
             {" "}
             {dashboard.truncated
               ? `Showing metrics from newest ${formatInteger(dashboard.readLimit)} accepted rows.`
@@ -112,7 +112,7 @@ export default async function RuntimeLatencyOpsPage({
           <TableHeader>
             <TableRow>
               <TableHead>Row</TableHead>
-              <TableHead>Accepted</TableHead>
+              <TableHead>Mailbox accepted</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Signal</TableHead>
               <TableHead className="text-right">Staged</TableHead>
@@ -219,6 +219,8 @@ function formatDateTime(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
     month: "short",
+    timeZone: "UTC",
+    timeZoneName: "short",
   }).format(new Date(value));
 }
 

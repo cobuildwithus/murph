@@ -766,6 +766,47 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts max-cardinality provider latency callbacks under the shared body limit", async () => {
+    mocks.recordHostedIngressProviderStarted.mockResolvedValue({
+      matchedCount: 64,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    const assistantInputIds = Array.from({ length: 64 }, (_value, index) =>
+      `input_${index.toString().padStart(2, "0")}_${"a".repeat(230)}`
+    );
+
+    const response = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      {
+        event: {
+          assistantInputIds,
+          at: FIXED_NOW,
+          providerRequestOrdinal: 0,
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          type: "provider_started",
+        },
+      },
+      runtimeWriteFenceHeaders(),
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLatencyTraceResponse(await response.json())).toEqual({
+      matchedCount: 64,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledWith({
+      assistantInputIds,
+      at: FIXED_NOW,
+      authenticatedUserId: "member_routes_1",
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_routes_1",
+      source: "linq",
+    });
+  });
+
   it("returns redacted status from workspace state, mailbox high-water, and structured logs", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-04-26T00:10:00.000Z",

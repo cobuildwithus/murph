@@ -593,6 +593,7 @@ export type HostedIngressLatencySource =
   (typeof HOSTED_INGRESS_LATENCY_SOURCES)[number];
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
+export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
 
 export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent {
   assistantInputId: string;

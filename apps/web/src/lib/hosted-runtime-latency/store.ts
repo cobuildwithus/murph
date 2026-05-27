@@ -321,23 +321,38 @@ export async function readHostedIngressLatencyDashboard(
     const stagedAtMs = row.assistantInputStagedAt?.getTime() ?? null;
     const signalAtMs = row.temporalSignalAcceptedAt?.getTime() ?? null;
     const mature = row.acceptedAt <= inFlightCutoff;
+    const missingStaged = stagedAtMs === null;
+    const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
+    const hasNegativeStaged = stagedAtMs !== null && stagedAtMs < acceptedAtMs;
+    const hasNegativeProviderWait =
+      stagedAtMs !== null && providerStartMs !== null && providerStartMs < stagedAtMs;
 
-    if (signalAtMs !== null && signalAtMs >= acceptedAtMs) {
+    if (missingStaged && (mature || providerStartMs !== null)) {
+      missingStagedCount += 1;
+    }
+
+    if (signalAtMs !== null && !hasNegativeSignal) {
       acceptedToSignalDurations.push(signalAtMs - acceptedAtMs);
     }
-    if (stagedAtMs !== null && stagedAtMs >= acceptedAtMs) {
+    if (stagedAtMs !== null && !hasNegativeStaged) {
       acceptedToStagedDurations.push(stagedAtMs - acceptedAtMs);
     }
-    if (stagedAtMs !== null && providerStartMs !== null && providerStartMs >= stagedAtMs) {
+    if (
+      stagedAtMs !== null
+      && providerStartMs !== null
+      && !hasNegativeStaged
+      && !hasNegativeProviderWait
+    ) {
       stagedToProviderDurations.push(providerStartMs - stagedAtMs);
     }
 
     if (providerStartMs === null) {
+      if (hasNegativeSignal || hasNegativeStaged) {
+        invalidNegativeLatencyCount += 1;
+      }
       if (mature) {
         missingProviderStartCount += 1;
-        if (stagedAtMs === null) {
-          missingStagedCount += 1;
-        } else {
+        if (stagedAtMs !== null) {
           stagedButMissingProviderCount += 1;
         }
       } else {
@@ -347,8 +362,16 @@ export async function readHostedIngressLatencyDashboard(
     }
 
     const totalMs = providerStartMs - acceptedAtMs;
-    if (totalMs < 0) {
+    const hasNegativeTotal = totalMs < 0;
+    if (
+      hasNegativeSignal
+      || hasNegativeStaged
+      || hasNegativeProviderWait
+      || hasNegativeTotal
+    ) {
       invalidNegativeLatencyCount += 1;
+    }
+    if (hasNegativeTotal) {
       continue;
     }
 
@@ -363,7 +386,7 @@ export async function readHostedIngressLatencyDashboard(
         ? null
         : signalAtMs - acceptedAtMs,
       rowLabel: "",
-      stagedToProviderStartMs: stagedAtMs === null || providerStartMs < stagedAtMs
+      stagedToProviderStartMs: stagedAtMs === null || hasNegativeStaged || hasNegativeProviderWait
         ? null
         : providerStartMs - stagedAtMs,
     });

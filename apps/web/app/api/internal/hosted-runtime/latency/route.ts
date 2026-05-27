@@ -2,6 +2,9 @@ import {
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -14,7 +17,6 @@ import {
 import { readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 
 export const POST = withJsonError(async (request: Request) => {
