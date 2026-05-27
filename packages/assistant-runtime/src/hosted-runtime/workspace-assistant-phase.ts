@@ -1755,6 +1755,10 @@ function buildHostedProviderCleanupRedactedStatus(input: {
 function shouldSkipDeviceSyncForAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
+  if (input.shouldYieldBackgroundMaintenance?.() === true) {
+    return true;
+  }
+
   if (isDueHostedDeviceSyncReconcileWake(input)) {
     return false;
   }
@@ -1961,6 +1965,7 @@ function shouldRescheduleSkippedDeviceSyncWake(
   return (
     input.request.reason === "nudge"
     || hasFreshHostedConversationInput(input)
+    || input.shouldYieldBackgroundMaintenance?.() === true
   );
 }
 
