@@ -5,6 +5,14 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+  JUNCTION_SLEEP_STAGE_ARRAY_PATHS,
+  JUNCTION_SLEEP_STAGE_COUNT_PATHS,
+  JUNCTION_SLEEP_STAGE_DURATION_PATHS,
+  JUNCTION_SLEEP_STAGE_VALUE_PATHS,
+  JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS,
+  normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
@@ -104,33 +112,6 @@ type JunctionHistoricalBackfillCompletionSummaryResource =
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
 );
-const JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS = Object.freeze([
-  "sleepScore",
-  "sleep_score",
-  "score",
-  "totalSleepMinutes",
-  "total_sleep_minutes",
-  "asleep_minutes",
-  "deepMinutes",
-  "deep_minutes",
-  "remMinutes",
-  "rem_minutes",
-  "lightMinutes",
-  "light_minutes",
-  "awakeMinutes",
-  "awake_minutes",
-  "hrv",
-  "hrvRmssd",
-  "hrv_rmssd",
-  "restingHeartRate",
-  "resting_heart_rate",
-  "respiratoryRate",
-  "respiratory_rate",
-  "spo2",
-  "bloodOxygen",
-  "blood_oxygen",
-  "oxygen_saturation",
-] as const);
 const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   activity: [
     "steps",
@@ -157,8 +138,8 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "body_fat_percentage",
     "body_fat_percent",
   ],
-  sleep: JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
-  sleep_cycle: JUNCTION_HISTORICAL_SLEEP_SUMMARY_METRIC_PATHS,
+  sleep: JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS,
+  sleep_cycle: [],
   workouts: [
     "calories",
     "totalCalories",
@@ -172,45 +153,6 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "max_hr",
   ],
 } satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
-const JUNCTION_SLEEP_START_TIMESTAMP_PATHS = Object.freeze([
-  "startAt",
-  "start_at",
-  "bedtimeStart",
-  "bedtime_start",
-] as const);
-const JUNCTION_SLEEP_END_TIMESTAMP_PATHS = Object.freeze([
-  "endAt",
-  "end_at",
-  "bedtimeEnd",
-  "bedtime_end",
-  "bedtimeStop",
-  "bedtime_stop",
-] as const);
-const JUNCTION_SLEEP_CYCLE_STAGE_ARRAY_PATHS = Object.freeze([
-  "stages",
-  "sleepStages",
-  "sleep_stages",
-  "sleepLevels",
-  "sleep_levels",
-  "segments",
-] as const);
-const JUNCTION_SLEEP_CYCLE_STAGE_DURATION_PATHS = Object.freeze([
-  "duration",
-  "durationMinutes",
-  "duration_minutes",
-  "durationSeconds",
-  "duration_seconds",
-  "durationMillis",
-  "duration_millis",
-  "durationMs",
-  "duration_ms",
-] as const);
-const JUNCTION_SLEEP_CYCLE_STAGE_COUNT_PATHS = Object.freeze([
-  "stageCount",
-  "stage_count",
-  "sleepStageCount",
-  "sleep_stage_count",
-] as const);
 const JUNCTION_WEBHOOK_NESTED_RECORD_KEYS = Object.freeze([
   "data",
   "results",
@@ -839,9 +781,11 @@ export function createJunctionDeviceSyncProvider(
         });
       } else if (
         webhookDataRecord
-        && hasJunctionWebhookDataJobRecords(webhookDataRecord, resource, inferredCategory)
-        && canImportJunctionWebhookDataJobRecord({
+        &&
+        canImportJunctionWebhookDataJobRecord({
           record: webhookDataRecord,
+          resource,
+          resourceCategory: inferredCategory,
           sourceProviderSlug,
         })
       ) {
@@ -2900,34 +2844,35 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
   resource: JunctionHistoricalBackfillCompletionSummaryResource,
   entry: Record<string, unknown>,
   sourceProviderSlug: string | null,
+  options: { acceptSleepCycleStageCount?: boolean } = {},
 ): boolean {
   if (!sourceProviderSlug) {
     return false;
   }
 
   if (
-    !isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug)
+    resource !== "sleep_cycle"
+    && !isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug)
     && hasFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS[resource])
   ) {
     return true;
   }
 
-  if (resource === "sleep" || resource === "sleep_cycle") {
-    const hasSleepRange = hasPositiveJunctionTimestampRange(
+  if (resource === "sleep") {
+    return hasPositiveJunctionTimestampRange(
       entry,
       JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
       JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
       sourceProviderSlug,
     );
-    if (hasSleepRange) {
-      return true;
-    }
+  }
 
-    return resource === "sleep_cycle"
-      && (
-        hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_SLEEP_CYCLE_STAGE_COUNT_PATHS)
-        || hasUsefulJunctionSleepCycleStageRecord(entry, sourceProviderSlug)
-      );
+  if (resource === "sleep_cycle") {
+    return (
+      (options.acceptSleepCycleStageCount ?? true)
+      && hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_SLEEP_STAGE_COUNT_PATHS)
+    )
+      || hasUsefulJunctionSleepCycleStageRecord(entry, sourceProviderSlug);
   }
 
   if (resource === "workouts") {
@@ -2941,20 +2886,48 @@ function hasUsefulJunctionSleepCycleStageRecord(
   entry: Record<string, unknown>,
   sourceProviderSlug: string,
 ): boolean {
-  return JUNCTION_SLEEP_CYCLE_STAGE_ARRAY_PATHS.some((path) =>
-    readJunctionRecordArray(readJunctionRecordPath(entry, path)).some((stage) => {
-      const stageRecord = readPlainObject(stage);
-      return stageRecord
-        ? hasPositiveFiniteNumberFromJunctionRecordPaths(stageRecord, JUNCTION_SLEEP_CYCLE_STAGE_DURATION_PATHS)
-          || hasPositiveJunctionTimestampRange(
-            stageRecord,
-            JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
-            JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
-            sourceProviderSlug,
-          )
-        : false;
-    })
+  return collectJunctionSleepCycleStageRecords(entry).some((stage) =>
+    hasUsefulJunctionSleepCycleStageInterval(stage, sourceProviderSlug)
   );
+}
+
+function hasJunctionSleepStageValue(entry: Record<string, unknown>): boolean {
+  return JUNCTION_SLEEP_STAGE_VALUE_PATHS.some((path) =>
+    normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path)) !== null
+  );
+}
+
+function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectJunctionSleepCycleStageRecords(entry));
+  }
+
+  const entry = readPlainObject(value);
+  if (!entry) {
+    return [];
+  }
+
+  if (hasJunctionSleepStageValue(entry)) {
+    return [entry];
+  }
+
+  return JUNCTION_SLEEP_STAGE_ARRAY_PATHS.flatMap((path) => {
+    const nested = readJunctionRecordPath(entry, path);
+    return nested === value ? [] : collectJunctionSleepCycleStageRecords(nested);
+  });
+}
+
+function hasUsefulJunctionSleepCycleStageInterval(
+  entry: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  return hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_SLEEP_STAGE_DURATION_PATHS)
+    || hasPositiveJunctionTimestampRange(
+      entry,
+      JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+      JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+      sourceProviderSlug,
+    );
 }
 
 function expandJunctionHistoricalBackfillSummaryRecord(
@@ -3533,9 +3506,15 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
 }
 
 function canImportJunctionWebhookDataJobRecord(input: {
-  record: Record<string, unknown>;
+  record: Record<string, unknown> | null;
+  resource: string;
+  resourceCategory: "summary" | "timeseries";
   sourceProviderSlug: string | null;
 }): boolean {
+  if (!input.record) {
+    return false;
+  }
+
   const recordSourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(input.record);
   if (!recordSourceProviderSlug) {
     return false;
@@ -3544,7 +3523,12 @@ function canImportJunctionWebhookDataJobRecord(input: {
     return false;
   }
 
-  return true;
+  return hasJunctionWebhookDataJobRecords({
+    record: input.record,
+    resource: input.resource,
+    resourceCategory: input.resourceCategory,
+    sourceProviderSlug: recordSourceProviderSlug,
+  });
 }
 
 function resolveJunctionWebhookDataRecordSourceProviderSlug(
@@ -3587,24 +3571,30 @@ function resolveJunctionWebhookDataRecordSourceProviderSlug(
   return slugs.size === 1 ? [...slugs][0] ?? null : null;
 }
 
-function hasJunctionWebhookDataJobRecords(
-  record: Record<string, unknown>,
-  resource: string,
-  resourceCategory: "summary" | "timeseries",
-): boolean {
-  if (resourceCategory === "summary") {
-    return hasJunctionWebhookSummaryMetricRecord(record, resource);
+function hasJunctionWebhookDataJobRecords(input: {
+  record: Record<string, unknown>;
+  resource: string;
+  resourceCategory: "summary" | "timeseries";
+  sourceProviderSlug: string;
+}): boolean {
+  if (input.resourceCategory === "summary") {
+    return isJunctionHistoricalBackfillCompletionSummaryResource(input.resource)
+      && hasUsefulJunctionWebhookSummaryDataRecord({
+        record: input.record,
+        resource: input.resource,
+        sourceProviderSlug: input.sourceProviderSlug,
+      });
   }
 
-  if (readJunctionWebhookNestedRecordEntries(record).length > 0) {
+  if (readJunctionWebhookNestedRecordEntries(input.record).length > 0) {
     return true;
   }
 
-  if (readJunctionWebhookGroupedRecordEntries(record).length > 0) {
+  if (readJunctionWebhookGroupedRecordEntries(input.record).length > 0) {
     return true;
   }
 
-  return hasFiniteNumberFromJunctionRecordPaths(record, [
+  return hasFiniteNumberFromJunctionRecordPaths(input.record, [
     "value",
     "steps",
     "heartRate",
@@ -3626,26 +3616,59 @@ function hasJunctionWebhookDataJobRecords(
   ]);
 }
 
-function hasJunctionWebhookSummaryMetricRecord(
-  record: Record<string, unknown>,
-  resource: string,
-): boolean {
-  const metricPaths = readJunctionWebhookSummaryMetricPaths(resource);
-  if (metricPaths.length === 0) {
-    return false;
-  }
-
-  return [
-    record,
-    ...readJunctionWebhookNestedRecordEntries(record),
-    ...readJunctionWebhookGroupedRecordEntries(record),
-  ].some((entry) => hasFiniteNumberFromJunctionRecordPaths(entry, metricPaths));
+function hasUsefulJunctionWebhookSummaryDataRecord(input: {
+  record: Record<string, unknown>;
+  resource: JunctionHistoricalBackfillCompletionSummaryResource;
+  sourceProviderSlug: string;
+}): boolean {
+  return expandJunctionWebhookSummaryDataRecords(input.record).some(({ entry, originFallback }) =>
+    hasUsefulJunctionHistoricalBackfillSummaryRecord(
+      input.resource,
+      entry,
+      resolveJunctionWebhookSummarySourceProviderSlug(entry, originFallback, input.sourceProviderSlug),
+      { acceptSleepCycleStageCount: false },
+    )
+  );
 }
 
-function readJunctionWebhookSummaryMetricPaths(resource: string): readonly string[] {
-  return isJunctionHistoricalBackfillCompletionSummaryResource(resource)
-    ? JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS[resource]
-    : [];
+function expandJunctionWebhookSummaryDataRecords(
+  record: Record<string, unknown>,
+): Array<{ entry: Record<string, unknown>; originFallback?: Record<string, unknown> }> {
+  const records = [...expandJunctionHistoricalBackfillSummaryRecord(record)];
+  const groups = readPlainObject(record.groups);
+  if (!groups) {
+    return records;
+  }
+
+  for (const [groupedSourceSlug, rawGroups] of Object.entries(groups)) {
+    for (const rawGroup of readJunctionRecordArray(rawGroups)) {
+      const group = readPlainObject(rawGroup);
+      if (!group) {
+        continue;
+      }
+
+      for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(group)) {
+        records.push({
+          entry,
+          originFallback: {
+            ...(originFallback ?? group),
+            groupedSourceSlug,
+          },
+        });
+      }
+    }
+  }
+
+  return records;
+}
+
+function resolveJunctionWebhookSummarySourceProviderSlug(
+  entry: Record<string, unknown>,
+  originFallback: Record<string, unknown> | undefined,
+  webhookSourceProviderSlug: string,
+): string | null {
+  return normalizeProviderSlug(resolveJunctionOrigin(entry, originFallback).sourceProviderSlug)
+    ?? webhookSourceProviderSlug;
 }
 
 function readJunctionWebhookNestedRecordEntries(
