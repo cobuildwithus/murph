@@ -12,19 +12,35 @@ import {
 } from '../src/assistant-skill-assets.js'
 
 describe('assistant skill assets', () => {
-  it('has a valid SKILL.md for every registered assistant skill', async () => {
-    const root = resolveAssistantSkillsRoot()
+  async function readSkillFile(skill: (typeof ASSISTANT_SKILLS)[number]) {
+    return readFile(
+      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
+      'utf8',
+    )
+  }
 
+  it('has a valid SKILL.md for every registered assistant skill', async () => {
     for (const skill of ASSISTANT_SKILLS) {
-      const raw = await readFile(
-        path.join(root, skill.slug, 'SKILL.md'),
-        'utf8',
-      )
+      const raw = await readSkillFile(skill)
 
       expect(raw).toContain('---')
       expect(raw).toContain(`name: ${skill.name}`)
       expect(raw).toContain('description:')
       expect(raw.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('uses unique safe skill slugs and names', () => {
+    const slugs = new Set<string>()
+    const names = new Set<string>()
+
+    for (const skill of ASSISTANT_SKILLS) {
+      expect(skill.slug).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      expect(slugs.has(skill.slug)).toBe(false)
+      expect(names.has(skill.name)).toBe(false)
+
+      slugs.add(skill.slug)
+      names.add(skill.name)
     }
   })
 
@@ -35,7 +51,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('fills the assistant skills root env without overriding explicit roots', () => {
+  it('uses the canonical package skill root in process env', () => {
     const fallback = withAssistantSkillsRootEnv({
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: '   ',
     })
@@ -44,21 +60,24 @@ describe('assistant skill assets', () => {
     )
 
     const explicitRoot = path.join('custom', 'assistant-skills')
-    const preserved = withAssistantSkillsRootEnv({
+    const canonical = withAssistantSkillsRootEnv({
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: explicitRoot,
     })
-    expect(preserved[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toBe(explicitRoot)
+    expect(canonical[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toBe(
+      resolveAssistantSkillsRoot(),
+    )
   })
 
   it('keeps experiment onboarding details in the skill file, not the prompt', async () => {
-    const raw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'experiment-onboarding',
-        'SKILL.md',
-      ),
-      'utf8',
+    const experimentOnboardingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'experiment-onboarding',
     )
+    expect(experimentOnboardingSkill).toBeTruthy()
+    if (!experimentOnboardingSkill) {
+      return
+    }
+
+    const raw = await readSkillFile(experimentOnboardingSkill)
 
     expect(raw).toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
@@ -72,6 +91,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('first_session_prep_automation_slug')
     expect(raw).toContain('analysisPlan.measurementAnchors')
     expect(raw).toContain('analysisPlan.plannedMeasurements')
+    expect(raw).toContain(
+      'planned follow-up windows to `analysisPlan.plannedMeasurements`',
+    )
     expect(raw).toContain('commonsProtocolRef')
     expect(raw).toContain(
       'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
@@ -80,9 +102,20 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps skill descriptions under the Codex parser limit', () => {
+  it('keeps route hints and SKILL.md descriptions under parser limits', async () => {
     for (const skill of ASSISTANT_SKILLS) {
       expect(skill.triggerHint.length).toBeLessThan(1024)
+
+      const raw = await readSkillFile(skill)
+      const frontmatter = raw.match(/^---\n(?<body>[\s\S]*?)\n---/u)
+      expect(frontmatter?.groups?.body).toBeTruthy()
+
+      const description = frontmatter?.groups?.body.match(
+        /^description:\s*(?<description>.+)$/mu,
+      )?.groups?.description
+
+      expect(description).toBeTruthy()
+      expect(description?.length).toBeLessThan(1024)
     }
   })
 

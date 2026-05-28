@@ -602,7 +602,7 @@ describe('assistant experiment onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
     expect(prompt).toContain(
-      'read exactly that skill file before acting',
+      'read the minimal matching skill file(s) before acting',
     )
     expect(prompt).toContain(
       'Do not preload unrelated skill files.',

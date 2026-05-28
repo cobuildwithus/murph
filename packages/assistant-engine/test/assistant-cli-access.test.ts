@@ -40,6 +40,7 @@ describe("prepareAssistantDirectCliEnv", () => {
   it("prepends the operator bin directory and discovered package bin directories", () => {
     const env = prepareAssistantDirectCliEnv({
       HOME: "/tmp/murph-home",
+      [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
       PATH: "/usr/bin",
     });
 
@@ -89,6 +90,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
       [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
+      [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
       MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
       MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_123",
       MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "7",

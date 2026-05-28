@@ -34,8 +34,6 @@ export function withAssistantSkillsRootEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...env,
-    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]:
-      env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]?.trim() ||
-      resolveAssistantSkillsRoot(),
+    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
   }
 }

@@ -552,7 +552,7 @@ ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph ru
 function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill files:",
-    "- Specialized workflows live in local skill files. When the current user request clearly matches a skill below, read exactly that skill file before acting. Do not preload unrelated skill files.",
+    "- Specialized workflows live in local skill files. When the current user request clearly matches one or more skills below, read the minimal matching skill file(s) before acting. Do not preload unrelated skill files.",
     "- Skill file paths are shown with `$MURPH_ASSISTANT_SKILLS_ROOT`; use the env var in shell commands instead of resolving or hard-coding an absolute path in the prompt.",
     ...ASSISTANT_SKILLS.map(
       (skill) =>
