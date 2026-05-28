@@ -44,6 +44,50 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it("rejects oversized staged dirty ack overlays on dirty-pending requests", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyPendingRequest(
+        {
+          stagedDirtyAcks: Array.from(
+            {
+              length:
+                hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT + 1,
+            },
+            (_, index) => ({
+              connectionId: `dsc_${index}`,
+              processedRevision: "42",
+            }),
+          ),
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/stagedDirtyAcks must include no more than 200 entries/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyPendingRequest(
+        {
+          stagedDirtyAcks: [
+            {
+              connectionId: "dsc_1",
+              processedDirtyPayloadIds: Array.from({ length: 3_000 }, (_, index) =>
+                `dsp_left_${index}`
+              ),
+              processedRevision: "42",
+            },
+            {
+              connectionId: "dsc_2",
+              processedDirtyPayloadIds: Array.from({ length: 2_001 }, (_, index) =>
+                `dsp_right_${index}`
+              ),
+              processedRevision: "43",
+            },
+          ],
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/processedDirtyPayloadIds must include no more than 5000 total entries/u);
+  });
+
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {
     expect(buildHostedExecutionDeviceSyncConnectLinkPath("oura/webhook")).toBe(
       "/api/internal/device-sync/connect-targets/oura%2Fwebhook/connect-link",

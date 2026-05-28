@@ -80,7 +80,8 @@ import {
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
 import {
-  createHostedAssistantTurnProgress,
+  createAssistantProgressDelivery,
+  shouldEnableAssistantModelProgressUpdates,
 } from './turn-progress.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -345,8 +346,14 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
-        const turnProgress = shouldCreateHostedAssistantTurnProgress(input)
-          ? createHostedAssistantTurnProgress({
+        const modelProgressUpdatesEnabled =
+          shouldEnableAssistantModelProgressUpdates(input)
+        const progressDelivery = modelProgressUpdatesEnabled
+          ? createAssistantProgressDelivery({
+              getDeliveryContext: () => ({
+                messageInput: currentInput,
+                session: currentSession,
+              }),
               messageInput: input,
               session: resolved.session,
               sharedPlan,
@@ -539,7 +546,8 @@ export async function sendAssistantMessageLocal(
             providerRequestOrdinal,
             resolvedSession: currentSession,
             turnCreatedAt: currentUserTurn.turnCreatedAt,
-            turnProgress: providerRequestOrdinal === 0 ? turnProgress : null,
+            modelProgressUpdatesEnabled,
+            progressDelivery,
             turnId: currentUserTurn.turnId,
           })
           if (providerOutcome.kind === 'failed_terminal') {
@@ -794,12 +802,6 @@ export async function sendAssistantMessageLocal(
       }
     },
   })
-}
-
-function shouldCreateHostedAssistantTurnProgress(
-  input: AssistantMessageInput,
-): boolean {
-  return input.deliverResponse === true && input.deliveryDispatchMode !== 'queue-only'
 }
 
 export async function updateAssistantSessionOptionsLocal(input: {

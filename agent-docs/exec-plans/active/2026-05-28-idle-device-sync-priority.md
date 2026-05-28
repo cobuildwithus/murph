@@ -18,10 +18,13 @@ Make hosted device sync idle-only so foreground assistant replies never run or w
 2. Route due/recovery device-sync work through idle maintenance only.
 3. Preserve or reschedule skipped device-sync wakes when foreground work takes priority.
 4. Pass through the existing staged dirty-ack surface only where needed, without changing dirty-ack semantics.
-5. Add focused regression coverage for foreground priority and idle checkpoint-safe device-sync failure.
+5. Rename the assistant lane around automation-only behavior and keep device-sync-shaped metrics at the outer maintenance boundary only.
+6. Add focused regression coverage for foreground priority, idle preemption, and idle checkpoint-safe device-sync failure.
 
 ## Verification
 
-- Focused hosted assistant-runtime tests for workspace assistant phase and maintenance.
-- `pnpm typecheck`
-- Scoped diff or owner coverage command covering touched files.
+- Focused hosted assistant-runtime tests for workspace assistant phase and maintenance: passed.
+- `pnpm --dir packages/assistant-runtime test:coverage`: passed.
+- `pnpm typecheck`: passed.
+- `pnpm verify:repo`: pending.
+- `pnpm test:e2e:hosted-local`: pending.

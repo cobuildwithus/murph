@@ -503,6 +503,7 @@ describe('Codex model catalog', () => {
       },
       input,
       memoryTurnEnv: {},
+      modelProgressUpdatesEnabled: false,
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
@@ -619,6 +620,7 @@ describe('Codex model catalog', () => {
       executionContext: input.executionContext,
       input,
       memoryTurnEnv: {},
+      modelProgressUpdatesEnabled: false,
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',

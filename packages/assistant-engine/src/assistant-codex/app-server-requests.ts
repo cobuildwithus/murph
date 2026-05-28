@@ -61,6 +61,7 @@ export function buildCodexThreadResumeParams(input: {
       input.input.refreshThreadInstructions === true
         ? normalizeNullableString(input.input.developerInstructions)
         : undefined,
+    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
     threadId: input.codexThreadId,
   })
@@ -82,15 +83,20 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
-    dynamicTools:
-      input.input.turnProgress
-        ? [MURPH_SEND_PROGRESS_UPDATE_TOOL]
-        : undefined,
+    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
     serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
   })
+}
+
+function resolveCodexAppServerDynamicTools(
+  input: CodexAppServerTurnInput,
+): readonly [typeof MURPH_SEND_PROGRESS_UPDATE_TOOL] | undefined {
+  return input.modelProgressUpdatesEnabled === true
+    ? [MURPH_SEND_PROGRESS_UPDATE_TOOL]
+    : undefined
 }
 
 export function buildCodexTurnStartParams(input: {

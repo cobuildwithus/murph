@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
-  runHostedAssistantRuntimeTimerLane: vi.fn(),
+  runHostedAssistantAutomationLane: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
 }));
 
@@ -48,7 +48,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
-  runHostedAssistantRuntimeTimerLane: mocks.runHostedAssistantRuntimeTimerLane,
+  runHostedAssistantAutomationLane: mocks.runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
 }));
 
@@ -106,7 +106,7 @@ beforeEach(() => {
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
-  mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
+  mocks.runHostedAssistantAutomationLane.mockResolvedValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
     nextWakeAt: null,
@@ -127,7 +127,7 @@ beforeEach(() => {
 describe("hosted workspace assistant diagnostics detail logs", () => {
   it("revalidates Codex resume-failure diagnostics before durable logging", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
       nextWakeAt: null,
@@ -226,7 +226,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
 
   it("preserves neutral route-planning timing diagnostics", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
       nextWakeAt: null,

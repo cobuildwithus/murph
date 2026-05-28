@@ -23,6 +23,7 @@ import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-ser
 
 import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
+  HostedAssistantAutomationLaneMetrics,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -138,7 +139,7 @@ function reportHostedAssistantAutomationSkipped(
   });
 }
 
-export async function runHostedAssistantRuntimeTimerLane(input: {
+export async function runHostedAssistantAutomationLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   requestId: string;
@@ -153,7 +154,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
-}): Promise<HostedMaintenanceMetrics> {
+}): Promise<HostedAssistantAutomationLaneMetrics> {
   const startedAt = Date.now();
   const readinessStartedAt = Date.now();
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
@@ -211,11 +212,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       assistantResult.timings?.inputCandidateListed ?? false,
     assistantInputCandidateQueryCount:
       assistantResult.timings?.inputCandidateQueryCount ?? 0,
-    deviceSyncProcessed: 0,
-    deviceSyncSkipped: true,
     nextWakeAt: assistantResult.nextWakeAt,
-    parserProcessed: 0,
-    postCheckpointRecord: null,
     readinessElapsedMs,
     ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
     totalElapsedMs: elapsedSince(startedAt),
@@ -807,6 +804,7 @@ export async function runHostedDeviceSyncPass(
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     shouldYield?: (() => boolean) | null;
     skipDirtyPendingFetch?: boolean;
+    signal?: AbortSignal | null;
     stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   } = {},
 ): Promise<{
@@ -822,10 +820,14 @@ export async function runHostedDeviceSyncPass(
     platform: options.runtimeLogPlatform ?? null,
     platformEnv,
   });
+  const shouldYield = createHostedDeviceSyncYieldPredicate(
+    options.shouldYield ?? null,
+    options.signal ?? null,
+  );
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     platformEnv,
-    shouldYield: options.shouldYield ?? null,
+    shouldYield,
     vaultRoot,
   });
 
@@ -851,9 +853,10 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let controlPlaneSynced = false;
+  let processedJobs = 0;
 
   try {
-    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
@@ -867,6 +870,7 @@ export async function runHostedDeviceSyncPass(
         deviceSyncPort,
         wake,
         secret,
+        signal: options.signal ?? null,
         service,
         skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
@@ -874,7 +878,7 @@ export async function runHostedDeviceSyncPass(
       controlPlaneSynced = true;
     }
 
-    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
@@ -885,17 +889,18 @@ export async function runHostedDeviceSyncPass(
 
     await service.runSchedulerOnce();
 
-    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
+        syncState,
         wake,
       });
     }
 
-    const processedJobs = await drainHostedDeviceSyncWorker({
+    processedJobs = await drainHostedDeviceSyncWorker({
       service,
-      shouldYield: options.shouldYield ?? null,
+      shouldYield,
     });
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
@@ -905,7 +910,7 @@ export async function runHostedDeviceSyncPass(
       wake,
     });
 
-    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
         service,
@@ -919,12 +924,13 @@ export async function runHostedDeviceSyncPass(
         deviceSyncPort,
         wake,
         secret,
+        signal: options.signal ?? null,
         service,
         state: syncState,
       });
     }
 
-    if (shouldYieldHostedDeviceSync(options.shouldYield ?? null)) {
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
         service,
@@ -947,13 +953,47 @@ export async function runHostedDeviceSyncPass(
       skipped: false,
       ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     };
+  } catch (error) {
+    if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        service,
+        syncState,
+        wake,
+      });
+    }
+    throw error;
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
   }
 }
 
+function createHostedDeviceSyncYieldPredicate(
+  shouldYield: (() => boolean) | null,
+  signal: AbortSignal | null,
+): (() => boolean) | null {
+  if (!shouldYield && !signal) {
+    return null;
+  }
+
+  return () => signal?.aborted === true || shouldYield?.() === true;
+}
+
 function shouldYieldHostedDeviceSync(shouldYield: (() => boolean) | null): boolean {
   return shouldYield?.() === true;
+}
+
+function isHostedDeviceSyncAbortError(error: unknown, signal: AbortSignal | null): boolean {
+  if (!signal?.aborted) {
+    return false;
+  }
+  if (error === signal.reason) {
+    return true;
+  }
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function buildHostedDeviceSyncYieldedPassResult(input: {
@@ -1020,6 +1060,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   platformEnv?: Readonly<Record<string, string>>;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  signal?: AbortSignal | null;
   skipDirtyPendingFetch?: boolean;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   wake: HostedRuntimeEvent;
@@ -1039,6 +1080,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       platformEnv: input.platformEnv ?? {},
       runtimeLogPlatform: input.runtimeLogPlatform ?? null,
       shouldYield: input.shouldYieldDeviceSync ?? null,
+      signal: input.signal ?? null,
       skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
       stagedDirtyAcks: input.stagedDirtyAcks ?? null,
     },

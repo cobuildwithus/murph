@@ -24,7 +24,7 @@ import {
   MAX_PROGRESS_CHARS,
 } from '../src/assistant/progress-constants.js'
 import {
-  createHostedAssistantTurnProgress,
+  createAssistantProgressDelivery,
   normalizeAssistantProgressText,
 } from '../src/assistant/turn-progress.js'
 
@@ -48,7 +48,7 @@ describe('assistant turn progress', () => {
     const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
       delivered.push(input)
     })
-    const progress = createHostedAssistantTurnProgress({
+    const progress = createAssistantProgressDelivery({
       deliver,
       messageInput: createMessageInput(),
       session: createSession(),
@@ -74,7 +74,7 @@ describe('assistant turn progress', () => {
     const deliver = vi.fn(async () => {
       throw new Error('outbox unavailable')
     })
-    const progress = createHostedAssistantTurnProgress({
+    const progress = createAssistantProgressDelivery({
       deliver,
       messageInput: createMessageInput(),
       session: createSession(),
