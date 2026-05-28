@@ -169,12 +169,28 @@ export async function signalHostedDeviceSyncBackgroundMaintenanceRuntime(
 export async function signalHostedBrowserVaultRefreshRuntime(
   input: SignalHostedBrowserVaultRefreshInput,
 ): Promise<HostedRuntimeSignalResult> {
-  return signalHostedRuntimeControlMailboxRequest({
-    client: input.client,
-    kind: "runtime.browser-vault-refresh-requested",
-    source: "browser-vault-refresh",
-    userId: input.userId,
-  });
+  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId);
+  try {
+    return await signalHostedUserRuntimeWorkflow({
+      client: input.client,
+      ensureWorkspace: false,
+      signal: parseHostedRuntimeSignal({
+        kind: "browser_vault_refresh_requested",
+      }),
+      userId: input.userId,
+    });
+  } catch {
+    const fallbackControl =
+      buildHostedBrowserVaultRefreshRuntimeControlFallback(input.userId);
+    return signalHostedRuntimeControlMailboxRequest({
+      client: input.client,
+      eventId: fallbackControl.eventId,
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: fallbackControl.occurredAt,
+      source: "browser-vault-refresh",
+      userId: input.userId,
+    });
+  }
 }
 
 export async function signalHostedManualRunRuntime(
@@ -321,6 +337,29 @@ function buildHostedDeviceSyncRecoveryRuntimeControlEventId(input: {
     .slice(0, 32);
 
   return `runtime-control:device-sync-recovery:${fingerprint}`;
+}
+
+const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
+
+function buildHostedBrowserVaultRefreshRuntimeControlFallback(userId: string): {
+  eventId: string;
+  occurredAt: string;
+} {
+  const bucketMs = Math.floor(Date.now() / BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS) *
+    BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS;
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({
+      bucketMs,
+      userId,
+      version: 1,
+    }))
+    .digest("hex")
+    .slice(0, 32);
+
+  return {
+    eventId: `runtime-control:browser-vault-refresh:${fingerprint}`,
+    occurredAt: new Date(bucketMs).toISOString(),
+  };
 }
 
 function buildHostedRuntimePrewarmEventId(input: {

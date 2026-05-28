@@ -20,7 +20,10 @@ import {
   type InboxModelInputMode,
 } from '../inbox-model-contracts.js'
 import {
+  MAX_NATIVE_ROUTING_IMAGE_BYTES,
+  MAX_NATIVE_ROUTING_IMAGE_TOTAL_BYTES,
   getRoutingImageEligibility,
+  renderNativeRoutingImageSizeBucket,
   type RoutingImageEligibility,
 } from '../inbox-routing-vision.js'
 import {
@@ -37,8 +40,6 @@ const parserManifestSchema = z.object({
   }),
 })
 
-const MAX_ROUTING_IMAGE_BYTES = 50 * 1024 * 1024
-const MAX_ROUTING_IMAGE_TOTAL_BYTES = 200 * 1024 * 1024
 const MAX_DERIVED_TEXT_BYTES = 16 * 1024 * 1024
 const MAX_PARSER_MANIFEST_BYTES = 1024 * 1024
 
@@ -84,6 +85,10 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     attachment: input.attachment,
     rawPath,
   })
+  const shouldRedactImageReference = shouldRedactNativeImageReference({
+    kind: input.attachment.kind,
+    routingImage,
+  })
   const evidenceSources = [
     ...buildInlineTextSources(input.attachment),
     ...(await buildDerivedTextSources({
@@ -92,17 +97,22 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
       vaultRoot: input.vaultRoot,
     })),
   ]
+  const modelEvidenceSources = shouldRedactImageReference
+    ? redactModelEvidenceSourcePaths(evidenceSources)
+    : evidenceSources
   const fragments = [
     buildMetadataFragment(input.attachment, rawPath, routingImage),
     ...projectAttachmentEvidenceForModel({
       attachment: {
-        byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
+        byteSize: shouldRedactImageReference
+          ? null
+          : input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
         derivedPath: input.attachment.derived?.manifestPath ?? null,
-        fileName: input.attachment.fileName,
+        fileName: shouldRedactImageReference ? null : input.attachment.fileName,
         mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
-        storedPath: rawPath,
+        storedPath: shouldRedactImageReference ? null : rawPath,
       },
-      sources: evidenceSources,
+      sources: modelEvidenceSources,
     }),
   ]
   const combinedText = fragments
@@ -225,9 +235,7 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   for (const item of routingEvidence.evidence) {
     content.push({
       type: 'text',
-      text: item.fileName
-        ? `Attachment image ${item.ordinal} (${item.fileName}).`
-        : `Attachment image ${item.ordinal}.`,
+      text: `Attachment image ${item.ordinal}.`,
     })
     content.push({
       type: 'image',
@@ -271,30 +279,44 @@ function buildMetadataFragment(
   rawPath: string | null,
   routingImage: RoutingImageEligibility,
 ) {
-  const promptStoredPath = renderPromptStoredPath(rawPath)
+  const shouldRedactImageReference = shouldRedactNativeImageReference({
+    kind: attachment.kind,
+    routingImage,
+  })
+  const promptStoredPath = shouldRedactImageReference
+    ? null
+    : renderPromptStoredPath(rawPath)
+  const byteSize = attachment.byteSize ?? attachment.raw?.byteSize ?? null
   const metadataLines = [
     `ordinal: ${attachment.ordinal}`,
     `kind: ${attachment.kind}`,
-    `fileName: ${attachment.fileName ?? 'unknown'}`,
+    shouldRedactImageReference
+      ? null
+      : `fileName: ${attachment.fileName ?? 'unknown'}`,
     `mime: ${attachment.mime ?? attachment.raw?.mediaType ?? 'unknown'}`,
-    `byteSize: ${attachment.byteSize ?? attachment.raw?.byteSize ?? 'unknown'}`,
-    `storedPath: ${promptStoredPath}`,
+    shouldRedactImageReference
+      ? `byteSizeBucket: ${renderNativeRoutingImageSizeBucket(byteSize)}`
+      : `byteSize: ${byteSize ?? 'unknown'}`,
+    promptStoredPath ? `storedPath: ${promptStoredPath}` : null,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
           'automaticImageCodeScan: if parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
         ]
       : []),
+    shouldRedactImageReference
+      ? 'nativeImageEvidence: omitted_non_addressable'
+      : null,
     `routingImageEligible: ${String(routingImage.eligible)}`,
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
     `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
-  ]
+  ].filter((line): line is string => line !== null)
   const text = metadataLines.join('\n')
   return {
     kind: 'attachment_metadata' as const,
     label: `attachment-${attachment.ordinal}-metadata`,
-    path: rawPath,
+    path: shouldRedactImageReference ? null : rawPath,
     text,
     truncated: false,
   }
@@ -444,14 +466,14 @@ async function readPreparedRoutingEvidence(input: {
         throw new TypeError('Attachment image evidence path is not a file.')
       }
       if (
-        fileStats.size > MAX_ROUTING_IMAGE_BYTES ||
-        totalImageBytes + fileStats.size > MAX_ROUTING_IMAGE_TOTAL_BYTES
+        fileStats.size > MAX_NATIVE_ROUTING_IMAGE_BYTES ||
+        totalImageBytes + fileStats.size > MAX_NATIVE_ROUTING_IMAGE_TOTAL_BYTES
       ) {
-        throw new RangeError('Attachment image evidence exceeded the model input budget.')
+        throw new RangeError('Attachment image evidence exceeded the native image input budget.')
       }
       const bytes = await readFile(absolutePath)
-      if (bytes.byteLength > MAX_ROUTING_IMAGE_BYTES) {
-        throw new RangeError('Attachment image evidence exceeded the model input budget.')
+      if (bytes.byteLength > MAX_NATIVE_ROUTING_IMAGE_BYTES) {
+        throw new RangeError('Attachment image evidence exceeded the native image input budget.')
       }
       totalImageBytes += bytes.byteLength
       evidence.push({
@@ -496,6 +518,22 @@ function getAttachmentEvidenceRoutingImageEligibility(input: {
     mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
     storedPath: input.rawPath,
   })
+}
+
+function shouldRedactNativeImageReference(input: {
+  kind: AssistantInputAttachmentEvidenceItem['kind']
+  routingImage: RoutingImageEligibility
+}): boolean {
+  return input.kind === 'image'
+}
+
+function redactModelEvidenceSourcePaths(
+  sources: readonly ModelEvidenceSource[],
+): ModelEvidenceSource[] {
+  return sources.map((source) => ({
+    ...source,
+    path: null,
+  }))
 }
 
 function normalizeAttachmentEvidenceParseState(

@@ -618,11 +618,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     )
     expect(result.prompt).toContain('- raw evidence: not_attempted')
     expect(result.prompt).toContain('- parser output: unknown')
-    expect(result.prompt).toContain('Attachment 1\nfileName: private-photo.jpg')
+    expect(result.prompt).toContain('Attachment 1\nkind: image')
+    expect(result.prompt).not.toContain('fileName: private-photo.jpg')
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
-    expect(result.prompt).toContain('byteSize: 1024')
-    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).toContain('byteSizeBucket: <=32768')
+    expect(result.prompt).not.toContain('byteSize: 1024')
+    expect(result.prompt).toContain('nativeImageEvidence: omitted_non_addressable')
+    const imageLifecycleSection = result.prompt.slice(
+      result.prompt.indexOf('Attachment 1\nkind: image'),
+      result.prompt.indexOf('Attachment 2\nfileName: private-voice.ogg'),
+    )
+    expect(imageLifecycleSection).not.toContain('rawPath: missing')
     expect(result.prompt).toContain('parseState: unknown')
     expect(result.prompt).toContain('Attachment 2\nfileName: private-voice.ogg')
     expect(result.prompt).toContain('kind: voice_memo')
@@ -941,10 +948,13 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('- inbox projection: pending')
     expect(result.prompt).toContain('- raw evidence: not_attempted')
     expect(result.prompt).toContain('- parser output: unknown')
-    expect(result.prompt).toContain('Attachment 1\nfileName: private-photo.jpg')
+    expect(result.prompt).toContain('Attachment 1\nkind: image')
+    expect(result.prompt).not.toContain('fileName: private-photo.jpg')
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
-    expect(result.prompt).toContain('byteSize: 1024')
+    expect(result.prompt).toContain('byteSizeBucket: <=32768')
+    expect(result.prompt).not.toContain('byteSize: 1024')
+    expect(result.prompt).toContain('nativeImageEvidence: omitted_non_addressable')
     expect(result.prompt).toContain('Attachment 2\nfileName: private-voice.ogg')
     expect(result.prompt).toContain('kind: voice_memo')
     expect(result.prompt).toContain('mime: audio/ogg')
@@ -1581,7 +1591,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       true,
     )
     const userMessageContent = createRichUserMessageContent(
-      'Attachment image 1 (lunch.png).',
+      'Attachment image 1.',
     )
     promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
@@ -1600,11 +1610,72 @@ describe('prepareAssistantAutoReplyInput', () => {
 
     expect(result).toEqual({
       kind: 'ready',
-      prompt: expect.stringContaining(
-        'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
-      ),
+      prompt: expect.stringContaining('[metadata]\nmime: image/png'),
       userMessageContent,
     })
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).not.toContain('inspect those files with local tools')
+    expect(result.prompt).not.toContain('fileName: lunch.png')
+    expect(result.prompt).not.toContain('storedPath: inbox/attachments/lunch.png')
+  })
+
+  it('does not make unsupported image bundles raw-file-addressable', async () => {
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+      createAttachmentBundle({
+        kind: 'image',
+        mime: 'image/webp',
+        fileName: 'private-photo.webp',
+        storedPath:
+          'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.webp',
+        parseState: 'unsupported',
+        routingImage: {
+          eligible: false,
+          reason: 'unsupported-format',
+          mediaType: 'image/webp',
+          extension: '.webp',
+        },
+        fragments: [],
+        combinedText: 'mime: image/webp',
+      }),
+    ])
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
+      true,
+    )
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
+      fallbackError: null,
+      inputMode: 'text-only',
+      userMessageContent: null,
+    })
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              kind: 'image',
+              mime: 'image/webp',
+              fileName: 'private-photo.webp',
+              storedPath:
+                'raw/inbox/capture-1/attachments/01__private-photo.webp',
+              parseState: 'failed',
+            }),
+          ],
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Attachment 1 (image)')
+    expect(result.prompt).toContain('nativeImageEvidence: omitted_non_addressable')
+    expect(result.prompt).not.toContain('Raw attachment file is available')
+    expect(result.prompt).not.toContain('raw/assistant-input/')
+    expect(result.prompt).not.toContain('private-photo.webp')
   })
 
   it('keeps PDF-only input as stored-path metadata without routed file evidence', async () => {
@@ -1664,7 +1735,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
   it('keeps multimodal evidence alongside capture text when rich input is available', async () => {
     const userMessageContent = createRichUserMessageContent(
-      'Attachment image 1 (lunch.png).',
+      'Attachment image 1.',
     )
     promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,

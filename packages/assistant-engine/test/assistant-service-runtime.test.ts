@@ -1784,6 +1784,189 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.resumeState).toBeNull();
   });
 
+  it("clears hosted auto-reply resume state after an over-budget provider turn", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:35:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+      turnCount: 2,
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        executionContext: {
+          hosted: {
+            memberId: "member-test",
+            userEnvKeys: [],
+          },
+        },
+        prompt: "Reply to the inbound message.",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      providerResult: createProviderResult({
+        codexThreadId: "provider-session-existing",
+        response: "Here is the reply.",
+        route: createRoute({ routeId: "route-existing" }),
+        session,
+        usage: {
+          inputTokens: 18_001,
+          totalTokens: 18_020,
+        },
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T15:34:00.000Z",
+      turnId: "turn-finalizer-hosted-cost-cap",
+    });
+
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastTurnAt: "2026-04-08T15:35:00.000Z",
+        resumeState: null,
+        turnCount: 3,
+        updatedAt: "2026-04-08T15:35:00.000Z",
+      })
+    );
+    expect(saved.resumeState).toBeNull();
+  });
+
+  it("clears hosted auto-reply resume state when total usage is over budget", async () => {
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        executionContext: {
+          hosted: {
+            memberId: "member-test",
+            userEnvKeys: [],
+          },
+        },
+        prompt: "Reply to the inbound message.",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      plan: createSharedPlan(),
+      providerResult: createProviderResult({
+        codexThreadId: "provider-session-existing",
+        session,
+        usage: {
+          inputTokens: 5,
+          outputTokens: 5,
+          totalTokens: 18_001,
+        },
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T15:36:00.000Z",
+      turnId: "turn-finalizer-hosted-cost-total",
+    });
+
+    expect(saved.resumeState).toBeNull();
+  });
+
+  it("clears hosted auto-reply resume state when cached input usage is over budget", async () => {
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        executionContext: {
+          hosted: {
+            memberId: "member-test",
+            userEnvKeys: [],
+          },
+        },
+        prompt: "Reply to the inbound message.",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      plan: createSharedPlan(),
+      providerResult: createProviderResult({
+        codexThreadId: "provider-session-existing",
+        session,
+        usage: {
+          cachedInputTokens: 18_001,
+          inputTokens: null,
+          outputTokens: null,
+          totalTokens: null,
+        },
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T15:36:30.000Z",
+      turnId: "turn-finalizer-hosted-cost-cached-input",
+    });
+
+    expect(saved.resumeState).toBeNull();
+  });
+
+  it("clears hosted auto-reply resume state when provider usage is missing", async () => {
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        executionContext: {
+          hosted: {
+            memberId: "member-test",
+            userEnvKeys: [],
+          },
+        },
+        prompt: "Reply to the inbound message.",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      plan: createSharedPlan(),
+      providerResult: createProviderResult({
+        codexThreadId: "provider-session-existing",
+        session,
+        usage: null,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T15:37:00.000Z",
+      turnId: "turn-finalizer-hosted-cost-missing-usage",
+    });
+
+    expect(saved.resumeState).toBeNull();
+  });
+
   it("preserves existing provider resume state for isolated provider turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));

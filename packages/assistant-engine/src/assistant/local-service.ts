@@ -47,6 +47,9 @@ import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
 import {
+  shouldClearHostedAssistantCodexResumeAfterUsage,
+} from './codex-resume-budget.js'
+import {
   appendAssistantTurnReceiptEvent,
   createAssistantTurnReceipt,
   finalizeAssistantTurnReceipt,
@@ -105,6 +108,7 @@ import type {
   PersistedUserTurn,
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
+import type { AssistantProviderUsage } from './providers/types.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
@@ -561,6 +565,14 @@ export async function sendAssistantMessageLocal(
               },
               turnId: currentUserTurn.turnId,
             })
+            await runAssistantTurnBestEffort(() =>
+              clearHostedAssistantCodexResumeAfterFailedUsage({
+                input: currentInput,
+                providerSession: providerOutcome.session,
+                usage: providerOutcome.usage,
+                vault: currentInput.vault,
+              }),
+            )
             throw providerOutcome.error
           }
 
@@ -840,6 +852,30 @@ async function runAssistantTurnBestEffort(
   } catch {
     // Preserve the original turn failure; these cleanup writes are best-effort.
   }
+}
+
+async function clearHostedAssistantCodexResumeAfterFailedUsage(input: {
+  input: AssistantMessageInput
+  providerSession: AssistantSession
+  usage: AssistantProviderUsage | null
+  vault: string
+}): Promise<void> {
+  if (
+    !shouldClearHostedAssistantCodexResumeAfterUsage({
+      hostedMemberId: input.input.executionContext?.hosted?.memberId ?? null,
+      turnTrigger: input.input.turnTrigger ?? null,
+      usage: input.usage,
+    })
+  ) {
+    return
+  }
+
+  await saveAssistantSession(input.vault, {
+    ...input.providerSession,
+    codexResume: null,
+    resumeState: null,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 function resolveProviderResumeStateAction(input: {

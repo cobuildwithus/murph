@@ -55,6 +55,8 @@ const HOSTED_USER_RUNTIME_PREWARM_SIGNAL_PATCH =
   "hosted-user-runtime-prewarm-signal-v1";
 const HOSTED_USER_RUNTIME_PREWARM_DEDICATED_TASK_QUEUE_PATCH =
   "hosted-user-runtime-prewarm-dedicated-task-queue-v1";
+const HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH =
+  "hosted-user-runtime-coalesced-pending-signal-v1";
 export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
@@ -152,6 +154,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_SAME_RUNTIME_WAKE_COUNT_PATCH),
     useRuntimeRecheckSignalPatch: () =>
       patched(HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH),
+    useCoalescedPendingSignalPatch: () =>
+      patched(HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -193,6 +197,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useEnsureRuntimeProcessingPatch(): void;
   useRuntimePrewarmSignalPatch(): boolean;
   useRuntimeRecheckSignalPatch(): boolean;
+  useCoalescedPendingSignalPatch(): boolean;
   useSameRuntimeWakeAcceptedCountPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
@@ -243,6 +248,14 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
 
+  const wakeSignalOnlyWaitForCoalescedDemandSignal = (): void => {
+    if (state.currentWaitReason !== "non_retryable_signal_only") {
+      return;
+    }
+    state.signalVersion += 1;
+    demandSignalVersion += 1;
+  };
+
   const applySignal = (rawSignal: unknown): void => {
     let signal: HostedRuntimeSignal;
     try {
@@ -274,11 +287,10 @@ export function createHostedUserRuntimeWorkflowMachine(
       return;
     }
 
-    state.signalVersion += 1;
-    demandSignalVersion += 1;
-
     switch (signal.kind) {
       case "mailbox_appended": {
+        state.signalVersion += 1;
+        demandSignalVersion += 1;
         state.mailboxSignalCount += 1;
         state.latestMailboxPointer = {
           lane: signal.lane,
@@ -289,18 +301,47 @@ export function createHostedUserRuntimeWorkflowMachine(
         break;
       }
       case "manual_run_requested": {
+        state.signalVersion += 1;
+        demandSignalVersion += 1;
         state.manualRunRequested = true;
         break;
       }
       case "browser_vault_refresh_requested": {
+        if (
+          runtime.useCoalescedPendingSignalPatch() &&
+          state.browserVaultRefreshRequested
+        ) {
+          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          break;
+        }
+        state.signalVersion += 1;
+        demandSignalVersion += 1;
         state.browserVaultRefreshRequested = true;
         break;
       }
       case "device_sync_recovery_requested": {
+        if (
+          runtime.useCoalescedPendingSignalPatch() &&
+          state.deviceSyncRecoveryRequested
+        ) {
+          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          break;
+        }
+        state.signalVersion += 1;
+        demandSignalVersion += 1;
         state.deviceSyncRecoveryRequested = true;
         break;
       }
       case "mailbox_lag_observed": {
+        if (
+          runtime.useCoalescedPendingSignalPatch() &&
+          state.lagRecoveryObserved
+        ) {
+          wakeSignalOnlyWaitForCoalescedDemandSignal();
+          break;
+        }
+        state.signalVersion += 1;
+        demandSignalVersion += 1;
         state.lagRecoveryObserved = true;
         break;
       }

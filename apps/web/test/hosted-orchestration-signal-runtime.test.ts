@@ -341,28 +341,18 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("persists browser-vault refresh as durable control demand before signaling", async () => {
+  it("signals browser-vault refresh directly as coalesced runtime demand", async () => {
     await signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),
       userId: "member_123",
     });
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: expect.objectContaining({
-        kind: "runtime.browser-vault-refresh-requested",
-        userId: "member_123",
-      }),
-      tx: { kind: "tx" },
-    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-          source: "browser-vault-refresh",
+          kind: "browser_vault_refresh_requested",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -378,6 +368,78 @@ describe("hosted runtime Temporal signaling", () => {
     expect(JSON.stringify(mocks.signalWithStart.mock.calls[0]?.[1]?.signalArgs[0])).not.toMatch(
       /prompt|headers|payload|message/u,
     );
+  });
+
+  it("persists browser-vault refresh as durable control demand when direct signaling fails", async () => {
+    mocks.signalWithStart
+      .mockRejectedValueOnce(new Error("temporal unavailable"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(signalHostedBrowserVaultRefreshRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.browser-vault-refresh-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenNthCalledWith(
+      2,
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "mailbox_appended",
+          lane: "system",
+          laneSeq: "77",
+          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+          source: "browser-vault-refresh",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+  });
+
+  it("dedupes browser-vault fallback control demands within a short outage window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
+    try {
+      mocks.signalWithStart
+        .mockRejectedValueOnce(new Error("temporal unavailable"))
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("temporal unavailable"))
+        .mockResolvedValueOnce(undefined);
+
+      await signalHostedBrowserVaultRefreshRuntime({
+        client: buildClient(),
+        userId: "member_123",
+      });
+      await signalHostedBrowserVaultRefreshRuntime({
+        client: buildClient(),
+        userId: "member_123",
+      });
+
+      const envelopes = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+        ([input]) => input.envelope,
+      );
+      expect(envelopes).toHaveLength(2);
+      expect(envelopes[0]?.eventId).toMatch(
+        /^runtime-control:browser-vault-refresh:[0-9a-f]{32}$/u,
+      );
+      expect(envelopes[1]?.eventId).toBe(envelopes[0]?.eventId);
+      expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
+        "2026-05-28T08:15:00.000Z",
+        "2026-05-28T08:15:00.000Z",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists manual runs as durable control demand before signaling", async () => {

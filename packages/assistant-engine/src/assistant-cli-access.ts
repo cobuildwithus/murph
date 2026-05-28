@@ -78,6 +78,7 @@ export function buildAssistantCliGuidanceText(
   return [
     `\`${access.rawCommand}\` is the canonical Murph CLI. \`${access.setupCommand}\` is the setup entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup.`,
     'Use the matching local CLI command directly, prefer `--format json` for machine-readable output, and do not run recursive assistant or delivery commands such as `assistant chat`, `assistant ask`, `assistant run`, `assistant deliver`, `chat`, or `run` from inside an assistant turn.',
+    'When exact command details are missing, inspect the one needed command with `vault-cli <command> --schema --format json` or targeted `vault-cli <command> --help`. Avoid dumping broad CLI manifests during ordinary replies.',
   ].join('\n\n')
 }
 

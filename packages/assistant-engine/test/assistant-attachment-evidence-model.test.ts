@@ -8,6 +8,7 @@ import {
   prepareAssistantInputMultimodalUserMessageContent,
 } from '../src/assistant/attachment-evidence-model.ts'
 import type { AssistantInputAttachmentEvidenceItem } from '../src/assistant/input-store.ts'
+import { MAX_NATIVE_ROUTING_IMAGE_BYTES } from '../src/inbox-routing-vision.ts'
 
 const tempRoots: string[] = []
 
@@ -49,7 +50,9 @@ describe('assistant input attachment evidence model materialization', () => {
       reason: 'supported-format',
     })
     expect(bundle.fileName).toBe('01__meal.jpg')
-    expect(bundle.combinedText).toContain('fileName: 01__meal.jpg')
+    expect(bundle.combinedText).not.toContain('fileName: 01__meal.jpg')
+    expect(bundle.combinedText).not.toContain('storedPath:')
+    expect(bundle.combinedText).toContain('nativeImageEvidence: omitted_non_addressable')
     expect(bundle.combinedText).not.toContain('attachmentId:')
 
     const prepared = await prepareAssistantInputMultimodalUserMessageContent({
@@ -68,8 +71,9 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(prepared.userMessageContent?.some((part) => part.type === 'image')).toBe(true)
     expect(prepared.userMessageContent).toContainEqual({
       type: 'text',
-      text: 'Attachment image 1 (01__meal.jpg).',
+      text: 'Attachment image 1.',
     })
+    expect(JSON.stringify(prepared.userMessageContent)).not.toContain('01__meal.jpg')
     expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([imagePath])
   })
 
@@ -191,6 +195,39 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(bundle.combinedText).toContain('parseState: unsupported')
   })
 
+  it('redacts unsupported image filenames and source paths from model text', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const rawPath = 'raw/inbox/capture-1/attachments/private-scan.tiff'
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: {
+        ...createAttachmentEvidence({
+          kind: 'image',
+          mime: 'image/tiff',
+          rawPath,
+        }),
+        inlineFragments: [
+          {
+            kind: 'attachment_extracted_text',
+            label: 'attachment-1-extracted-text',
+            text: 'Decoded label text.',
+            truncated: false,
+          },
+        ],
+      },
+      vaultRoot,
+    })
+
+    expect(hasAssistantInputAttachmentEvidenceCandidate(bundle)).toBe(false)
+    expect(bundle.routingImage).toMatchObject({
+      eligible: false,
+      reason: 'unsupported-format',
+    })
+    expect(bundle.combinedText).toContain('Decoded label text.')
+    expect(bundle.combinedText).toContain('routingImageReason: unsupported-format')
+    expect(bundle.combinedText).not.toContain('private-scan.tiff')
+    expect(bundle.combinedText).not.toContain(rawPath)
+  })
+
   it('falls back to text-only mode when image bytes are missing', async () => {
     const vaultRoot = await createTempVaultRoot()
     const bundle = await buildAssistantInputAttachmentModelBundle({
@@ -221,6 +258,93 @@ describe('assistant input attachment evidence model materialization', () => {
       expect.objectContaining({
         attachmentOrdinal: 1,
         details: 'attachment 1 image evidence unavailable',
+        errorCode: 'image_read_failed',
+        kind: 'image',
+      }),
+    ])
+  })
+
+  it('keeps oversized image evidence text-only instead of attaching native image bytes', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const imagePath = 'raw/inbox/capture-1/attachments/too-large.jpg'
+    const imageBytes = Buffer.alloc(MAX_NATIVE_ROUTING_IMAGE_BYTES + 1, 0xab)
+    const materializeWorkspaceArtifacts = vi.fn(async () => ({
+      materializedArtifactPaths: new Set([`vault:${imagePath}`]),
+      missingArtifactPaths: new Set<string>(),
+    }))
+    await writeVaultFile(vaultRoot, imagePath, imageBytes)
+
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        byteSize: imageBytes.byteLength,
+        kind: 'image',
+        mime: 'image/jpeg',
+        rawPath: imagePath,
+      }),
+      vaultRoot,
+    })
+
+    expect(hasAssistantInputAttachmentEvidenceCandidate(bundle)).toBe(false)
+    expect(bundle.routingImage).toMatchObject({
+      eligible: false,
+      mediaType: 'image/jpeg',
+      reason: 'too-large',
+    })
+    expect(bundle.combinedText).toContain('routingImageReason: too-large')
+    expect(bundle.combinedText).not.toContain('fileName: too-large.jpg')
+    expect(bundle.combinedText).not.toContain(`storedPath: ${imagePath}`)
+    expect(bundle.combinedText).toContain('nativeImageEvidence: omitted_non_addressable')
+
+    const prepared = await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: [bundle],
+      materializeWorkspaceArtifacts,
+      prompt: 'Look at this image.',
+      vaultRoot,
+    })
+
+    expect(prepared).toEqual({
+      fallbackError: null,
+      inputMode: 'text-only',
+      userMessageContent: null,
+    })
+    expect(materializeWorkspaceArtifacts).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the native image byte budget after materialization', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const imagePath = 'raw/inbox/capture-1/attachments/metadata-missing.jpg'
+    const imageBytes = Buffer.alloc(MAX_NATIVE_ROUTING_IMAGE_BYTES + 1, 0xcd)
+    await writeVaultFile(vaultRoot, imagePath, imageBytes)
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        kind: 'image',
+        mime: 'image/jpeg',
+        rawPath: imagePath,
+      }),
+      vaultRoot,
+    })
+    const failures: unknown[] = []
+
+    expect(bundle.routingImage).toMatchObject({
+      eligible: true,
+      reason: 'supported-format',
+    })
+
+    const prepared = await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: [bundle],
+      onEvidenceReadFailure(failure) {
+        failures.push(failure)
+      },
+      prompt: 'Look at this image.',
+      vaultRoot,
+    })
+
+    expect(prepared.inputMode).toBe('text-only')
+    expect(prepared.userMessageContent).toBe(null)
+    expect(prepared.fallbackError).toContain('rich evidence could not be loaded')
+    expect(failures).toEqual([
+      expect.objectContaining({
+        attachmentOrdinal: 1,
         errorCode: 'image_read_failed',
         kind: 'image',
       }),
@@ -309,7 +433,7 @@ describe('assistant input attachment evidence model materialization', () => {
       },
       {
         type: 'text',
-        text: 'Attachment image 1 (01__meal.jpg).',
+        text: 'Attachment image 1.',
       },
       expect.objectContaining({
         type: 'image',
@@ -480,13 +604,14 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, bytes: Bu
 }
 
 function createAttachmentEvidence(input: {
+  byteSize?: number | null
   kind: AssistantInputAttachmentEvidenceItem['kind']
   mime: string | null
   ordinal?: number
   rawPath: string
 }): AssistantInputAttachmentEvidenceItem {
   return {
-    byteSize: null,
+    byteSize: input.byteSize ?? null,
     derived: null,
     descriptorAttachmentId: 'att_descriptor',
     fileName: path.posix.basename(input.rawPath),
@@ -496,7 +621,7 @@ function createAttachmentEvidence(input: {
     ordinal: input.ordinal ?? 1,
     parseState: 'failed',
     raw: {
-      byteSize: null,
+      byteSize: input.byteSize ?? null,
       kind: 'vault-relative-file',
       mediaType: input.mime,
       path: input.rawPath,

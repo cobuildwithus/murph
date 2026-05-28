@@ -50,8 +50,10 @@ const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
 const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
-const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 120_000;
-const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
+const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 12_000;
+const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 25_000;
+const HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT = 2_000;
+const HOSTED_CODEX_TOOL_OUTPUT_TOKEN_LIMIT_CEILING = 4_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
@@ -107,6 +109,13 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     config,
     new RegExp(
       `^model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}$`,
+      "mu",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      `^tool_output_token_limit = ${HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT}$`,
       "mu",
     ),
   );
@@ -1235,6 +1244,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
       `model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}`,
+      `tool_output_token_limit = ${HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT}`,
       'log_dir = "/tmp/murph-codex-log"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
@@ -1873,9 +1883,45 @@ function assertHostedCodexAutoCompactTokenLimit(config: string): void {
   assert.equal(
     limit < HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING,
     true,
-    "Hosted Codex config auto-compaction token limit must stay below 250k tokens.",
+    "Hosted Codex config auto-compaction token limit must stay within the reply cost budget.",
   );
 }
+
+test("hosted Cloudflare Codex config caps command output kept in model context", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  const matches = [...config.matchAll(/^tool_output_token_limit\s*=\s*(\d+)$/gmu)];
+  assert.equal(
+    matches.length,
+    1,
+    "Hosted Codex config must inject exactly one tool_output_token_limit setting.",
+  );
+
+  const limit = Number(matches[0]?.[1]);
+  assert.equal(
+    Number.isSafeInteger(limit) && limit > 0,
+    true,
+    "Hosted Codex tool output token limit must be a positive integer.",
+  );
+  assert.equal(
+    limit,
+    HOSTED_CODEX_EXPECTED_TOOL_OUTPUT_TOKEN_LIMIT,
+    "Hosted Codex tool output token limit must match the hosted reply cost budget.",
+  );
+  assert.equal(
+    limit <= HOSTED_CODEX_TOOL_OUTPUT_TOKEN_LIMIT_CEILING,
+    true,
+    "Hosted Codex tool output token limit must stay within the reply cost budget.",
+  );
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
