@@ -1565,16 +1565,13 @@ function readHostedAssistantProviderDiagnosticToolSummaryArray(
     };
     maybeSetHostedAssistantProviderDiagnosticDetail(
       summary,
-      "namespace",
-      readHostedAssistantProviderDiagnosticToolIdentifierPart(
-        entryRecord,
-        "namespace",
-      ),
+      "namespacePresent",
+      readHostedAssistantProviderDiagnosticBoolean(entryRecord, "namespacePresent"),
     );
     maybeSetHostedAssistantProviderDiagnosticDetail(
       summary,
-      "server",
-      readHostedAssistantProviderDiagnosticToolIdentifierPart(entryRecord, "server"),
+      "serverPresent",
+      readHostedAssistantProviderDiagnosticBoolean(entryRecord, "serverPresent"),
     );
     maybeSetHostedAssistantProviderDiagnosticDetail(
       summary,

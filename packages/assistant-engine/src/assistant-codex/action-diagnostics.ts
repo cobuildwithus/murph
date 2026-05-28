@@ -42,8 +42,8 @@ type ActionOutputMetrics = {
 
 type ToolDiagnosticIdentity = {
   kind: CodexActionKind
-  namespace: string | null
-  server: string | null
+  namespacePresent: boolean
+  serverPresent: boolean
   tool: string | null
 }
 
@@ -57,10 +57,10 @@ type ToolDiagnosticMetrics = {
 type ToolDiagnosticSummary = {
   callCount: number
   kind: CodexActionKind
-  namespace?: string
+  namespacePresent?: boolean
   outputBytesMax: number
   outputBytesTotal: number
-  server?: string
+  serverPresent?: boolean
   tool?: string
 }
 
@@ -373,8 +373,8 @@ function resolveToolDiagnosticIdentity(
     )
     return {
       kind,
-      namespace,
-      server: null,
+      namespacePresent: namespace !== null,
+      serverPresent: false,
       tool,
     }
   }
@@ -393,16 +393,16 @@ function resolveToolDiagnosticIdentity(
     )
     return {
       kind,
-      namespace: null,
-      server,
+      namespacePresent: false,
+      serverPresent: server !== null,
       tool,
     }
   }
 
   return {
     kind,
-    namespace: null,
-    server: null,
+    namespacePresent: false,
+    serverPresent: false,
     tool: null,
   }
 }
@@ -410,8 +410,8 @@ function resolveToolDiagnosticIdentity(
 function toolDiagnosticKey(identity: ToolDiagnosticIdentity): string {
   return JSON.stringify([
     identity.kind,
-    identity.namespace,
-    identity.server,
+    identity.namespacePresent,
+    identity.serverPresent,
     identity.tool,
   ])
 }
@@ -422,10 +422,10 @@ function toolDiagnosticSummary(
   return pruneNullishRecord({
     callCount: metrics.callCount,
     kind: metrics.identity.kind,
-    namespace: metrics.identity.namespace,
+    namespacePresent: metrics.identity.namespacePresent ? true : null,
     outputBytesMax: metrics.bytesMax,
     outputBytesTotal: metrics.bytesTotal,
-    server: metrics.identity.server,
+    serverPresent: metrics.identity.serverPresent ? true : null,
     tool: metrics.identity.tool,
   }) as ToolDiagnosticSummary
 }
