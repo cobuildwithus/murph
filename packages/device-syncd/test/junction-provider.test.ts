@@ -1023,6 +1023,72 @@ for (const summaryResource of ["sleep", "workouts", "body"] as const) {
   });
 }
 
+test("Junction sleep_cycle stage-count-only historical backfill marks the historical window complete", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              heartrate: true,
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        data: [{
+          id: "sleep-cycle-stage-count-only",
+          provider_connection_id: "provider-garmin-1",
+          stageCount: 4,
+        }],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/heartrate/grouped")) {
+      return createJsonResponse({ groups: {} });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result.metadataPatch, {
+    junctionHistoricalBackfillStatus: "complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(importedSnapshots.length, 1);
+});
+
 for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const) {
   test(`Junction ${summaryResource} id-only historical backfill keeps the summary window retrying`, async () => {
     const importedSnapshots: unknown[] = [];
