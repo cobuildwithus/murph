@@ -402,7 +402,10 @@ async function runCodexAppServerTurn(
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
-  const actionDiagnostics = createCodexActionDiagnosticsReducer()
+  const actionDiagnostics = input.onTraceEvent
+    ? createCodexActionDiagnosticsReducer()
+    : null
+  let actionDiagnosticsTraceEmitted = false
   const pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
@@ -625,6 +628,13 @@ async function runCodexAppServerTurn(
 
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
+      const pending = pendingRequests.get(responseId)
+      if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
+        codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
+      }
+      if (pending?.method === 'turn/start') {
+        turnId = extractCodexTurnIdFromResult(message.result) ?? turnId
+      }
       resolvePendingCodexRpcRequest({
         message,
         pendingRequests,
@@ -647,9 +657,14 @@ async function runCodexAppServerTurn(
 
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
+    const method = typeof message.method === 'string' ? message.method : null
+    if (method === 'turn/started') {
+      turnId = extractCodexTurnIdFromMessage(message) ?? turnId
+    }
 
     const normalizedEvent = normalizeCodexEvent(message)
-    actionDiagnostics.recordEvent({
+    actionDiagnostics?.recordEvent({
+      activeTurnId: turnId,
       normalizedEvent,
       rawEvent: message,
     })
@@ -678,9 +693,7 @@ async function runCodexAppServerTurn(
       input.onProgress?.(progressEvent)
     }
 
-    const method = typeof message.method === 'string' ? message.method : null
     if (method === 'turn/started') {
-      turnId = extractCodexTurnIdFromMessage(message) ?? turnId
       registerLiveTurn()
     }
 
@@ -705,7 +718,11 @@ async function runCodexAppServerTurn(
   }
 
   const emitActionDiagnosticsTrace = () => {
-    if (!input.onTraceEvent) {
+    if (
+      actionDiagnosticsTraceEmitted ||
+      !input.onTraceEvent ||
+      !actionDiagnostics
+    ) {
       return
     }
 
@@ -718,6 +735,7 @@ async function runCodexAppServerTurn(
       return
     }
 
+    actionDiagnosticsTraceEmitted = true
     try {
       input.onTraceEvent({
         codexThreadId: null,
@@ -967,6 +985,7 @@ async function runCodexAppServerTurn(
       throw stdinFailure
     }
   } catch (error) {
+    emitActionDiagnosticsTrace()
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true

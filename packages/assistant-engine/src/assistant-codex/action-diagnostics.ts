@@ -6,6 +6,7 @@ export const CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE =
   'assistant.codex.action_diagnostics'
 
 const ACTION_SAMPLE_LIMIT = 16
+const ACTION_DEDUPE_LIMIT = 1024
 const SLOW_ACTION_SAMPLE_LIMIT = 8
 const OUTPUT_ITEM_SCAN_LIMIT = 64
 const TRACKED_ACTION_LIMIT = 256
@@ -37,6 +38,7 @@ export interface CodexActionDiagnosticsReducer {
     turnId: string | null
   }): Record<string, unknown> | null
   recordEvent(input: {
+    activeTurnId: string | null
     normalizedEvent: CodexNormalizedEvent
     rawEvent: unknown
   }): void
@@ -64,8 +66,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
 
   const actionCounts = new Map<CodexActionKind, number>()
   const actionKinds: string[] = []
-  const seenActionKeys = new Set<string>()
+  const countedActionKeys = new Set<string>()
+  const completedActionKeys = new Set<string>()
   const itemStarts = new Map<string, number>()
+  const startedActionKeys = new Set<string>()
   const trackedActions: TrackedAction[] = []
 
   const recordActionSample = (kind: CodexActionKind) => {
@@ -75,18 +79,22 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   }
 
   const registerAction = (input: {
-    eventIndex: number
-    itemId: string | null
+    actionKey: string | null
     kind: CodexActionKind
-  }) => {
-    const key = input.itemId ?? `${input.kind}:${input.eventIndex}`
-    if (seenActionKeys.has(key)) {
-      return
+  }): boolean => {
+    if (input.actionKey !== null) {
+      if (countedActionKeys.has(input.actionKey)) {
+        return true
+      }
+      if (countedActionKeys.size >= ACTION_DEDUPE_LIMIT) {
+        return false
+      }
+      countedActionKeys.add(input.actionKey)
     }
 
-    seenActionKeys.add(key)
     actionCounts.set(input.kind, (actionCounts.get(input.kind) ?? 0) + 1)
     recordActionSample(input.kind)
+    return true
   }
 
   const recordCompletionMetrics = (input: {
@@ -141,7 +149,11 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
 
   return {
     buildTraceEvent(input) {
-      if (eventCount === 0 && tokenSampleCount === 0 && seenActionKeys.size === 0) {
+      if (
+        eventCount === 0 &&
+        tokenSampleCount === 0 &&
+        countedActionKeys.size === 0
+      ) {
         return null
       }
 
@@ -187,8 +199,12 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       })
     },
     recordEvent(input) {
+      if (!shouldRecordEventForTurn(input.rawEvent, input.activeTurnId)) {
+        return
+      }
+
       eventCount += 1
-      recordTokenUsage(readTokenUsageSample(input.rawEvent))
+      recordTokenUsage(readTokenUsageSample(input.rawEvent, input.activeTurnId))
 
       const eventType = readEventType(input.rawEvent)
       const kind = resolveActionKind(input.normalizedEvent, input.rawEvent)
@@ -196,23 +212,37 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         return
       }
 
-      const itemId = readNormalizedItemId(input.normalizedEvent)
+      const itemId =
+        readNormalizedItemId(input.normalizedEvent) ?? readRawItemId(input.rawEvent)
+      const actionKey = itemId !== null ? `${kind}:${itemId}` : null
       const item = readEventItem(input.rawEvent)
-      registerAction({
-        eventIndex: eventCount,
-        itemId,
+      const counted = registerAction({
+        actionKey,
         kind,
       })
+      if (!counted && actionKey !== null) {
+        return
+      }
 
       if (eventType === 'item.started') {
+        if (!markActionKey(startedActionKeys, actionKey)) {
+          return
+        }
         startedCount += 1
         const startedAtMs = readTimestampMs(input.rawEvent, 'startedAtMs', 'started_at_ms')
-        if (itemId && startedAtMs !== null) {
-          itemStarts.set(itemId, startedAtMs)
+        if (
+          actionKey !== null &&
+          startedAtMs !== null &&
+          itemStarts.size < ACTION_DEDUPE_LIMIT
+        ) {
+          itemStarts.set(actionKey, startedAtMs)
         }
         return
       }
 
+      if (!markActionKey(completedActionKeys, actionKey)) {
+        return
+      }
       completedCount += 1
       if (isFailedAction(item, input.normalizedEvent)) {
         failedCount += 1
@@ -221,10 +251,13 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       const durationMs =
         readItemDurationMs(item)
         ?? readObservedDurationMs({
+          actionKey,
           completedAtMs: readTimestampMs(input.rawEvent, 'completedAtMs', 'completed_at_ms'),
-          itemId,
           itemStarts,
         })
+      if (actionKey !== null) {
+        itemStarts.delete(actionKey)
+      }
       recordCompletionMetrics({
         durationMs,
         kind,
@@ -232,6 +265,32 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       })
     },
   }
+}
+
+function markActionKey(set: Set<string>, key: string | null): boolean {
+  if (key === null) {
+    return true
+  }
+  if (set.has(key)) {
+    return false
+  }
+  if (set.size >= ACTION_DEDUPE_LIMIT) {
+    return false
+  }
+  set.add(key)
+  return true
+}
+
+function shouldRecordEventForTurn(
+  event: unknown,
+  activeTurnId: string | null,
+): boolean {
+  if (activeTurnId === null) {
+    return false
+  }
+
+  const eventTurnId = readEventTurnId(event)
+  return eventTurnId === null || eventTurnId === activeTurnId
 }
 
 function resolveActionKind(
@@ -279,6 +338,25 @@ function readNormalizedItemId(normalized: CodexNormalizedEvent): string | null {
   }
 }
 
+function readEventTurnId(event: unknown): string | null {
+  const record = asRecord(event)
+  const params = asRecord(record?.params)
+  const data = asRecord(record?.data)
+  const turn =
+    asRecord(params?.turn) ??
+    asRecord(data?.turn) ??
+    asRecord(record?.turn)
+  return readNonemptyString(
+    turn?.id,
+    params?.turnId,
+    params?.turn_id,
+    data?.turnId,
+    data?.turn_id,
+    record?.turnId,
+    record?.turn_id,
+  )
+}
+
 function readEventType(event: unknown): string | null {
   const record = asRecord(event)
   const raw =
@@ -291,6 +369,22 @@ function readEventItem(event: unknown): Record<string, unknown> | null {
   const params = asRecord(record?.params)
   const data = asRecord(record?.data)
   return asRecord(params?.item) ?? asRecord(data?.item) ?? asRecord(record?.item)
+}
+
+function readRawItemId(event: unknown): string | null {
+  const record = asRecord(event)
+  const params = asRecord(record?.params)
+  const data = asRecord(record?.data)
+  const item = readEventItem(event)
+  return readNonemptyString(
+    item?.id,
+    params?.itemId,
+    params?.item_id,
+    data?.itemId,
+    data?.item_id,
+    record?.itemId,
+    record?.item_id,
+  )
 }
 
 function readItemType(event: unknown): string | null {
@@ -319,14 +413,14 @@ function readTimestampMs(
 }
 
 function readObservedDurationMs(input: {
+  actionKey: string | null
   completedAtMs: number | null
-  itemId: string | null
   itemStarts: Map<string, number>
 }): number | null {
-  if (!input.itemId || input.completedAtMs === null) {
+  if (!input.actionKey || input.completedAtMs === null) {
     return null
   }
-  const startedAtMs = input.itemStarts.get(input.itemId)
+  const startedAtMs = input.itemStarts.get(input.actionKey)
   if (startedAtMs === undefined || input.completedAtMs < startedAtMs) {
     return null
   }
@@ -413,8 +507,14 @@ function countActionOutputItems(item: Record<string, unknown> | null): number {
   return outputItems
 }
 
-function readTokenUsageSample(event: unknown): TokenUsageSample | null {
+function readTokenUsageSample(
+  event: unknown,
+  activeTurnId: string | null,
+): TokenUsageSample | null {
   if (readEventType(event) !== 'thread.token.usage.updated') {
+    return null
+  }
+  if (activeTurnId === null || readEventTurnId(event) !== activeTurnId) {
     return null
   }
 
@@ -461,6 +561,19 @@ function readFirstString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value === 'string') {
       return value
+    }
+  }
+  return null
+}
+
+function readNonemptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue
+    }
+    const trimmed = value.trim()
+    if (trimmed.length > 0) {
+      return trimmed
     }
   }
   return null
