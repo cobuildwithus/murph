@@ -35,7 +35,7 @@ Success criteria:
 ## Audits
 
 - `security-privacy-review`: no findings. Residual gap: no live hosted chat channel proof; runtime tests cover the delivery boundary.
-- `coverage-write`: added current-channel progress delivery assertions; local provider progress/trace intentionally remains unchanged for context compaction.
+- `coverage-write`: added trace/completed-progress assertions to the context-compaction runtime test.
 Status: completed
 Updated: 2026-05-28
 Completed: 2026-05-28
