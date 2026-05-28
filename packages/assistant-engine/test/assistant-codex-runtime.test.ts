@@ -930,6 +930,73 @@ describe('assistant codex runtime', () => {
     expect(JSON.stringify(trace)).not.toContain('raw output')
   })
 
+  it('dedupes Codex action diagnostics without item ids when normalized identity is available', () => {
+    const reducer = createCodexActionDiagnosticsReducer()
+    const activeTurnId = 'turn-current'
+    const rawCompletedEvent = {
+      event: 'item.completed',
+      turnId: activeTurnId,
+      data: {
+        item: {
+          type: 'mcpToolCall',
+          server_name: 'web',
+          name: 'search_query',
+          status: 'completed',
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: 'raw output must not appear',
+              },
+            ],
+          },
+        },
+      },
+    }
+    const normalized: CodexNormalizedEvent = {
+      itemId: null,
+      itemState: 'completed',
+      kind: 'tool_call',
+      rawEvent: rawCompletedEvent,
+      toolName: 'search_query',
+      toolServer: 'web',
+    }
+
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: normalized,
+      rawEvent: rawCompletedEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: normalized,
+      rawEvent: rawCompletedEvent,
+    })
+
+    const trace = reducer.buildTraceEvent({
+      codexThreadId: 'thread-current',
+      providerActionCount: 0,
+      turnId: activeTurnId,
+    })
+    expect(trace).toMatchObject({
+      codexActionCompletedCount: 1,
+      codexActionMcpToolCallCount: 1,
+      codexActionOutputBytesMax: 26,
+      codexActionOutputBytesTotal: 26,
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: 'mcp.tool.call',
+          outputBytesMax: 26,
+          outputBytesTotal: 26,
+          server: 'web',
+          tool: 'search_query',
+        },
+      ],
+    })
+    expect(JSON.stringify(trace)).not.toContain('raw output')
+  })
+
   it('emits Codex action diagnostics when a turn fails', async () => {
     const workingDirectory = await createTempDir('assistant-codex-failed-diagnostics-')
     const onTraceEvent = vi.fn()
