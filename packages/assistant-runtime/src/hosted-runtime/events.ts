@@ -286,6 +286,8 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
   "codexActionFinalTotalUnit",
   "codexActionInputUnitMax",
   "codexActionMcpToolCallCount",
+  "codexActionOutputBytesMax",
+  "codexActionOutputBytesTotal",
   "codexActionOutputItemCount",
   "codexActionOutputUnitMax",
   "codexActionProviderActionCount",

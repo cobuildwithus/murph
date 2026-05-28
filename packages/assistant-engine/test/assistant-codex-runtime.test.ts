@@ -724,13 +724,14 @@ describe('assistant codex runtime', () => {
       codexActionDynamicToolCallCount: 1,
       codexActionInputUnitMax: 81000,
       codexActionKinds: ['command.execution', 'dynamic.tool.call'],
+      codexActionOutputBytesMax: 59,
+      codexActionOutputBytesTotal: 93,
+      codexActionOutputItemCount: 3,
       codexActionProviderActionCount: 2,
       codexActionSlowDurationMs: [123, 60],
       codexActionSlowKinds: ['dynamic.tool.call', 'command.execution'],
       codexActionUsageSampleCount: 1,
     })
-    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesMax')
-    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesTotal')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
@@ -846,6 +847,9 @@ describe('assistant codex runtime', () => {
       codexActionDurationMsMax: 60,
       codexActionDurationMsTotal: 60,
       codexActionInputUnitMax: 123,
+      codexActionOutputBytesMax: 26,
+      codexActionOutputBytesTotal: 26,
+      codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
       codexActionStartedCount: 1,
       codexActionTotalUnitMax: 168,
@@ -3133,6 +3137,7 @@ describe('assistant codex event shaping', () => {
       itemId: 'assistant-4',
       itemState: 'completed',
       kind: 'assistant_message',
+      messagePhase: null,
       rawEvent: {
         item: {
           id: 'assistant-4',
@@ -3757,6 +3762,7 @@ describe('assistant codex event shaping', () => {
         itemId: 'assistant-11',
         itemState: 'completed',
         kind: 'assistant_message',
+        messagePhase: null,
         rawEvent: {
           type: 'item.completed',
         },
