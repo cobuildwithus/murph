@@ -9,11 +9,23 @@ export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
 
 export const HOSTED_USER_RUNTIME_TASK_QUEUE =
   "murph-hosted-runtime" as const;
+export const HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE =
+  "murph-hosted-runtime-prewarm" as const;
 
 export const HOSTED_USER_RUNTIME_SIGNAL_NAME = "runtimeSignal" as const;
 
 export const HOSTED_USER_RUNTIME_STATUS_QUERY_NAME =
   "runtimeWorkflowStatus" as const;
+
+export function deriveHostedUserRuntimePrewarmTaskQueue(
+  taskQueue: string,
+): string {
+  const normalized = taskQueue.trim();
+  if (!normalized || normalized === HOSTED_USER_RUNTIME_TASK_QUEUE) {
+    return HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE;
+  }
+  return `${normalized}-prewarm`;
+}
 
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
@@ -66,7 +78,6 @@ export type HostedRuntimeSignal =
       eventId: string;
       kind: "runtime_prewarm_requested";
       occurredAt: string;
-      scopeHash?: string | null;
       source: HostedRuntimePrewarmSource;
     };
 

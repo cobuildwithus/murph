@@ -4,7 +4,6 @@ import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import {
   appendHostedDeviceSyncDirtyWake,
-  buildHostedDeviceSyncDirtyWakeDedupeKey,
 } from "./wake-service";
 
 const DEFAULT_WAKE_LIMIT = 25;
@@ -80,16 +79,11 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
       try {
         wake = await appendDirtyWake({
           connectionId: dirtyConnection.connectionId,
-          dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
-            connectionId: dirtyConnection.connectionId,
-            dirtyRevision: dirtyConnection.dirtyRevision,
-            provider: dirtyConnection.provider,
-          }),
+          dirtyRevision: dirtyConnection.dirtyRevision,
           eventType: dirtyConnection.latestEventType,
           occurredAt: dirtyConnection.latestDirtyAt,
           provider: dirtyConnection.provider,
           resourceCategory: dirtyConnection.latestResourceCategory,
-          traceId: null,
           userId: dirtyConnection.userId,
         });
       } catch (error) {

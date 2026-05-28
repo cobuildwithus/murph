@@ -68,6 +68,8 @@ const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
+const RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE =
+  "container prewarm preempted";
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
@@ -964,6 +966,9 @@ export class RunnerContainer extends Container {
         });
         return "already_warm";
       } catch (error) {
+        if (isRunnerContainerPrewarmPreempted(operationAbortSignal)) {
+          throwIfRunnerContainerOperationAborted(operationAbortSignal);
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -1017,6 +1022,9 @@ export class RunnerContainer extends Container {
       });
       await assertRunnerHealthy(this, readinessTimeoutMs, operationAbortSignal);
     } catch (error) {
+      if (isRunnerContainerPrewarmPreempted(operationAbortSignal)) {
+        throwIfRunnerContainerOperationAborted(operationAbortSignal);
+      }
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1215,7 +1223,7 @@ export class RunnerContainer extends Container {
   private abortContainerPrewarm(): void {
     const controller = this.prewarmAbortController;
     if (controller && !controller.signal.aborted) {
-      controller.abort(new Error("container prewarm preempted"));
+      controller.abort(new Error(RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE));
     }
   }
 }
@@ -1394,6 +1402,12 @@ function throwIfRunnerContainerOperationAborted(signal: AbortSignal): void {
       ? signal.reason
       : new DOMException("The operation was aborted.", "AbortError");
   }
+}
+
+function isRunnerContainerPrewarmPreempted(signal: AbortSignal): boolean {
+  return signal.aborted
+    && signal.reason instanceof Error
+    && signal.reason.message === RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE;
 }
 
 function combineRunnerContainerAbortSignals(

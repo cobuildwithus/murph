@@ -1,6 +1,6 @@
 # Hosted Local Temporal Schedule Bootstrap
 
-Status: active
+Status: completed
 Created: 2026-05-27
 Updated: 2026-05-27
 
@@ -87,9 +87,10 @@ append the durable `device-sync.wake` mailbox pointer.
 - Device-sync wake coverage now characterizes the observed failure mode: when
   the first dirty wake is missed, later level webhooks coalesce behind the
   pending dirty row and wait for recovery sweep.
-- In progress: webhook acceptance now appends the dirty wake mailbox pointer
+- Webhook acceptance now appends the dirty wake mailbox pointer
   before trace completion, shares the same dirty-revision dedupe identity with
   the recovery sweep, and signals the normal mailbox wake path after commit.
 - Production startup still chains Schedule ensure before the production worker
   in `render.yaml`; direct production mutation was not attempted because
   production Temporal env is not present locally.
+Completed: 2026-05-27

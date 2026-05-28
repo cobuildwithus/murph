@@ -96,7 +96,6 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledWith({
       eventId: "evt_typing_123",
       occurredAt: "2026-05-20T12:00:00.000Z",
-      scopeHash: expect.stringMatching(/^linq-chat:[a-f0-9]{32}$/u),
       source: "linq.imessage.typing",
       userId: "member_typing",
     });
@@ -161,19 +160,46 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
     expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
   });
+
+  it("ignores typing prewarm when the service is missing", async () => {
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({
+        eventId: "evt_typing_unknown_service",
+        service: null,
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-unsupported-service",
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
+  });
 });
 
 function buildTypingWebhookBody(input: {
   eventId?: string;
-  service?: string;
+  service?: string | null;
 } = {}): string {
+  const data: Record<string, unknown> = {
+    chat_id: "chat_typing_123",
+  };
+  if (input.service !== null) {
+    data.service = input.service ?? "iMessage";
+  }
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-05-20T12:00:00.000Z",
-    data: {
-      chat_id: "chat_typing_123",
-      service: input.service ?? "iMessage",
-    },
+    data,
     event_id: input.eventId ?? "evt_typing_123",
     event_type: "chat.typing_indicator.started",
   });

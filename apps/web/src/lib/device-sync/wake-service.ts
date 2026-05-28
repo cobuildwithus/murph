@@ -18,9 +18,10 @@ import {
   sanitizeHostedRuntimeErrorText,
   type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
-import type {
-  HostedExecutionWake,
-  HostedExecutionDeviceSyncWakeEvent,
+import {
+  buildHostedExecutionDeviceSyncWake,
+  type HostedExecutionDeviceSyncWakeEvent,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
@@ -264,7 +265,7 @@ export function handleHostedDeviceSyncUnknownWebhook({
     externalAccountIdHash: sha256Hex(externalAccountId),
     eventType: webhook.eventType,
     resourceCategory: normalizeNullableString(webhook.resourceCategory),
-    traceId: normalizeNullableString(traceId),
+    traceIdPresent: normalizeNullableString(traceId) !== null,
   });
 }
 
@@ -419,9 +420,9 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 
   if (!ownerId) {
     console.warn("Rejecting hosted device-sync webhook without an owner mapping.", {
-      connectionId: input.account.id,
+      connectionFingerprint: sha256Hex(input.account.id).slice(0, 16),
       provider: input.account.provider,
-      traceId,
+      traceIdPresent: traceId !== null,
     });
 
     throw deviceSyncError({
@@ -601,26 +602,26 @@ export function buildHostedDeviceSyncDirtyWakeDedupeKey(input: {
 
 export async function appendHostedDeviceSyncDirtyWake(input: {
   connectionId: string;
-  dedupeKey?: string | null;
+  dirtyRevision: bigint;
   eventType?: string | null;
   occurredAt: string;
   provider: string;
   resourceCategory?: string | null;
   store?: PrismaDeviceSyncControlPlaneStore;
-  traceId?: string | null;
   userId: string;
 }): Promise<HostedDeviceSyncDirtyWakeResult> {
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
   const wake = buildHostedDeviceSyncDirtyWakeEnvelope({
-    connectionId: input.connectionId,
     occurredAt: input.occurredAt,
-    provider: input.provider,
-    dedupeKey: input.dedupeKey ?? null,
+    dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
+      connectionId: input.connectionId,
+      dirtyRevision: input.dirtyRevision,
+      provider: input.provider,
+    }),
     eventType: input.eventType ?? null,
     resourceCategory: input.resourceCategory ?? null,
-    traceId: input.traceId ?? null,
     userId: input.userId,
   });
 
@@ -739,7 +740,6 @@ async function appendHostedDeviceSyncDirtyWakeTx(input: {
   tx: HostedPrismaTransactionClient;
 }): Promise<AppendHostedMailboxItemResult> {
   const wake = buildHostedDeviceSyncDirtyWakeEnvelope({
-    connectionId: input.dirty.connectionId,
     dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
       connectionId: input.dirty.connectionId,
       dirtyRevision: input.dirty.dirtyRevision,
@@ -747,9 +747,7 @@ async function appendHostedDeviceSyncDirtyWakeTx(input: {
     }),
     eventType: input.dirty.latestEventType,
     occurredAt: input.dirty.latestDirtyAt,
-    provider: input.dirty.provider,
     resourceCategory: input.dirty.latestResourceCategory,
-    traceId: null,
     userId: input.dirty.userId,
   });
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
@@ -942,7 +940,6 @@ function buildHostedDeviceSyncDirtyWakeHint(input: {
   eventType?: string | null;
   occurredAt: string;
   resourceCategory?: string | null;
-  traceId?: string | null;
 }): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
   return {
     occurredAt: input.occurredAt,
@@ -952,71 +949,28 @@ function buildHostedDeviceSyncDirtyWakeHint(input: {
     ...(normalizeNullableString(input.resourceCategory)
       ? { resourceCategory: normalizeNullableString(input.resourceCategory) }
       : {}),
-    ...(normalizeNullableString(input.traceId)
-      ? { traceId: normalizeNullableString(input.traceId) }
-      : {}),
   };
 }
 
 function buildHostedDeviceSyncDirtyWakeEnvelope(input: {
-  connectionId: string;
-  dedupeKey?: string | null;
+  dedupeKey: string;
   eventType?: string | null;
   occurredAt: string;
-  provider: string;
   resourceCategory?: string | null;
-  traceId?: string | null;
   userId: string;
 }): HostedExecutionWake {
-  const eventId = buildHostedDeviceSyncDirtyWakeEventId({
-    connectionId: input.connectionId,
-    dedupeKey: input.dedupeKey ?? null,
-    occurredAt: input.occurredAt,
-    provider: input.provider,
-    traceId: input.traceId ?? null,
-    userId: input.userId,
-  });
+  const eventId = normalizeNullableString(input.dedupeKey);
+  if (!eventId) {
+    throw new TypeError("Hosted device-sync dirty wake dedupe key is required.");
+  }
 
-  return buildHostedDeviceSyncWake({
-    connectionId: input.connectionId,
+  return buildHostedExecutionDeviceSyncWake({
     eventId,
     hint: buildHostedDeviceSyncDirtyWakeHint(input),
     occurredAt: input.occurredAt,
-    provider: input.provider,
-    source: "webhook-hint",
-    traceId: input.traceId ?? null,
+    reason: "webhook_hint",
     userId: input.userId,
   });
-}
-
-function buildHostedDeviceSyncDirtyWakeEventId(input: {
-  connectionId: string;
-  dedupeKey?: string | null;
-  occurredAt: string;
-  provider: string;
-  traceId?: string | null;
-  userId: string;
-}): string {
-  const dedupeKey = normalizeNullableString(input.dedupeKey);
-  if (dedupeKey) {
-    return dedupeKey;
-  }
-
-  const fingerprintSeed = {
-    connectionId: input.connectionId,
-    occurredAt: input.occurredAt,
-    provider: input.provider,
-    traceId: normalizeNullableString(input.traceId),
-    userId: input.userId,
-    version: 1,
-  };
-  const fingerprint = sha256Hex(JSON.stringify(fingerprintSeed)).slice(0, 32);
-
-  return [
-    "device-sync",
-    "webhook-hint",
-    fingerprint,
-  ].join(":");
 }
 
 function normalizeHostedDeviceSyncDirtyWakeDedupeSegment(value: string): string {

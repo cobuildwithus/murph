@@ -245,6 +245,47 @@ function buildDirtyConnectionRecord(overrides: Partial<{
   };
 }
 
+function installRollbackAwareWebhookTransactionRecorder() {
+  const committedWrites: string[] = [];
+  const stagedWritesByTx = new WeakMap<object, string[]>();
+  const stageWrite = (tx: object, write: string) => {
+    stagedWritesByTx.get(tx)?.push(write);
+  };
+
+  mocks.prisma.$transaction.mockImplementation(async (
+    callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+  ) => {
+    const tx = Object.create(mocks.prismaTx) as typeof mocks.prismaTx;
+    const stagedWrites: string[] = [];
+    stagedWritesByTx.set(tx, stagedWrites);
+    const result = await callback(tx);
+    committedWrites.push(...stagedWrites);
+    return result;
+  });
+  mocks.upsertDirtyConnection.mockImplementation(async (input: { tx: object }) => {
+    stageWrite(input.tx, "dirty");
+    return {
+      dirty: buildDirtyConnectionRecord(),
+      shouldRequestWake: true,
+    };
+  });
+  mocks.createSignal.mockImplementation(async (input: { tx: object }) => {
+    stageWrite(input.tx, "signal");
+    return { id: 8 };
+  });
+  mocks.completeWebhookTrace.mockImplementation(async (
+    _provider: string,
+    _traceId: string,
+    _claimToken: string,
+    tx: object,
+  ) => {
+    stageWrite(tx, "trace");
+    return true;
+  });
+
+  return { committedWrites };
+}
+
 function expectDurableDirtyWakeAppended(input: {
   callIndex?: number;
   connectionId?: string;
@@ -254,18 +295,22 @@ function expectDurableDirtyWakeAppended(input: {
 } = {}) {
   const call = mocks.appendHostedMailboxEnvelope.mock.calls[input.callIndex ?? 0]?.[0];
   const envelope = call?.envelope;
+  const connectionId = input.connectionId ?? "dsc_123";
   const provider = input.provider ?? "oura";
   const revision = input.revision ?? "1";
-  expect(envelope).toEqual(expect.objectContaining({
-    connectionId: input.connectionId ?? "dsc_123",
-    eventId: expect.stringMatching(
-      new RegExp(`^device-sync:dirty:v1:provider:${provider}:connection:[0-9a-f]{16}:revision:${revision}$`, "u"),
-    ),
-    kind: "device-sync.wake",
+  const expectedEventId = buildHostedDeviceSyncDirtyWakeDedupeKey({
+    connectionId,
+    dirtyRevision: BigInt(revision),
     provider,
+  });
+  expect(envelope).toEqual(expect.objectContaining({
+    eventId: expectedEventId,
+    kind: "device-sync.wake",
     reason: "webhook_hint",
     userId: input.userId ?? "user-123",
   }));
+  expect(envelope).not.toHaveProperty("connectionId");
+  expect(envelope).not.toHaveProperty("provider");
 }
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
@@ -326,6 +371,7 @@ import {
 } from "@/src/lib/device-sync/control-plane";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncDirtyWakeDedupeKey,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
@@ -1612,8 +1658,9 @@ describe("appendHostedDeviceSyncWake", () => {
       eventType: "daily.data.steps.updated",
       provider: "junction",
       resourceCategory: "timeseries",
-      traceId: "trace_old",
+      traceIdPresent: true,
     });
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("trace_old");
     consoleWarn.mockRestore();
   });
 
@@ -1837,6 +1884,7 @@ describe("appendHostedDeviceSyncWake", () => {
   });
 
   it("keeps hosted webhook traces retryable when the durable dirty wake append fails", async () => {
+    const transaction = installRollbackAwareWebhookTransactionRecorder();
     mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("mailbox append failed"));
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -1854,12 +1902,14 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(transaction.committedWrites).toEqual([]);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("keeps hosted webhook traces retryable when a dirty wake dedupe conflict is detected", async () => {
+    const transaction = installRollbackAwareWebhookTransactionRecorder();
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
       dedupeConflict: true,
       duplicate: true,
@@ -1889,6 +1939,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(transaction.committedWrites).toEqual([]);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).not.toHaveBeenCalled();
@@ -2764,11 +2815,13 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(consoleWarn).toHaveBeenCalledWith(
       "Rejecting hosted device-sync webhook without an owner mapping.",
       expect.objectContaining({
-        connectionId: "dsc_123",
+        connectionFingerprint: "a".repeat(16),
         provider: "oura",
-        traceId: "trace_123",
+        traceIdPresent: true,
       }),
     );
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("dsc_123");
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("trace_123");
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();

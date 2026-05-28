@@ -162,9 +162,19 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions({
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
       HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "15000",
+      HOSTED_TEMPORAL_TASK_QUEUE: "hosted-runtime-custom",
     })).toEqual({
       ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
+      prewarmTaskQueue: "hosted-runtime-custom-prewarm",
       readRuntimeDemandStartToCloseTimeoutMs: 15_000,
+    });
+  });
+
+  it("allows an explicit dedicated prewarm task queue", () => {
+    expect(readHostedRuntimeTemporalWorkflowOptions({
+      HOSTED_TEMPORAL_PREWARM_TASK_QUEUE: "hosted-runtime-prewarm-custom",
+    })).toMatchObject({
+      prewarmTaskQueue: "hosted-runtime-prewarm-custom",
     });
   });
 

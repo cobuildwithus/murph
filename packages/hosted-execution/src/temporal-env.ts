@@ -4,6 +4,7 @@ import {
 } from "./contracts.ts";
 import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
+  deriveHostedUserRuntimePrewarmTaskQueue,
 } from "./orchestration-control.ts";
 
 export {
@@ -51,6 +52,7 @@ export interface HostedRuntimeTemporalTlsConfig {
 
 export interface HostedRuntimeTemporalWorkflowOptions {
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
+  prewarmTaskQueue: string;
   readRuntimeDemandStartToCloseTimeoutMs: number;
 }
 
@@ -91,10 +93,20 @@ export function readHostedRuntimeTemporalWorkflowOptions(
 ): HostedRuntimeTemporalWorkflowOptions {
   const ensureRuntimeProcessingTimeouts =
     readHostedRuntimeEnsureProcessingTimeouts(source);
+  const taskQueue =
+    readOptionalEnv(source, "HOSTED_TEMPORAL_TASK_QUEUE", "TEMPORAL_TASK_QUEUE")
+    ?? HOSTED_USER_RUNTIME_TASK_QUEUE;
 
   return {
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       ensureRuntimeProcessingTimeouts.ensureRuntimeProcessingStartToCloseTimeoutMs,
+    prewarmTaskQueue:
+      readOptionalEnv(
+        source,
+        "HOSTED_TEMPORAL_PREWARM_TASK_QUEUE",
+        "TEMPORAL_PREWARM_TASK_QUEUE",
+      )
+      ?? deriveHostedUserRuntimePrewarmTaskQueue(taskQueue),
     readRuntimeDemandStartToCloseTimeoutMs: parseBoundedPositiveInteger(
       readOptionalEnv(source, "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS"),
       DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS,

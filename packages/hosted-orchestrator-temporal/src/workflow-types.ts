@@ -22,6 +22,7 @@ export type HostedUserRuntimeWorkflowCarryForwardState = Omit<
 export interface HostedUserRuntimeWorkflowOptions {
   continueAsNewAfterIterations?: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs?: number;
+  prewarmTaskQueue?: string;
   readRuntimeDemandStartToCloseTimeoutMs?: number;
 }
 

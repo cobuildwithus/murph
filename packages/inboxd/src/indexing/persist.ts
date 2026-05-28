@@ -12,7 +12,6 @@ import {
   acquireCanonicalWriteLock,
   applyCanonicalWriteBatch,
   type CanonicalRawContentInput,
-  type CanonicalRawCopyInput,
   loadVault,
   listWriteOperationMetadataPaths,
   readJsonlRecords,
@@ -29,7 +28,6 @@ import {
   createInboxCaptureIdentityKey,
   normalizeStoredAttachments,
   normalizeRelativePath,
-  redactSensitivePaths,
   resolveVaultPath,
   sanitizeFileName,
 } from "../shared.ts";
@@ -38,6 +36,7 @@ import {
   buildInboxCaptureDirectory,
   buildInboxEnvelopePath,
   buildUnstoredAttachment,
+  type PersistableInboundAttachment,
   stripEphemeralAttachmentFields,
 } from "./capture-shape.js";
 import {
@@ -46,6 +45,7 @@ import {
   buildInboxCaptureRecord,
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
+import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -66,7 +66,6 @@ export interface StoredCaptureEnvelope {
 interface PreparedRawCapturePersistence {
   stored: StoredCapture;
   sanitizedInput: InboundCapture;
-  rawCopies: CanonicalRawCopyInput[];
   rawContents: CanonicalRawContentInput[];
 }
 
@@ -126,7 +125,7 @@ function buildSanitizedInboundCapture(
         byteSize: storedAttachment.byteSize ?? null,
       };
     }),
-    raw: redactSensitivePaths(input.raw) as Record<string, unknown>,
+    raw: normalizeRawMetadataForStorage(input.raw),
   };
 }
 
@@ -192,7 +191,6 @@ async function prepareRawCapturePersistence({
   const sourceDirectory = buildInboxCaptureDirectory(input, captureId);
   const attachmentDirectory = path.posix.join(sourceDirectory, "attachments");
   const storedAttachments: StoredAttachment[] = [];
-  const rawCopies: CanonicalRawCopyInput[] = [];
   const rawContents: CanonicalRawContentInput[] = [];
   let totalAttachmentBytes = 0;
 
@@ -210,7 +208,7 @@ async function prepareRawCapturePersistence({
     if (!attachment.originalPath && !attachment.data) {
       storedAttachments.push(
         buildUnstoredAttachment({
-          attachment: sanitizedAttachment,
+          attachment: removeRawImageSizeForStorage(sanitizedAttachment),
           attachmentId,
           ordinal,
         }),
@@ -251,10 +249,7 @@ async function prepareRawCapturePersistence({
       } else {
         storedAttachments.push(
           buildUnstoredAttachment({
-            attachment: {
-              ...sanitizedAttachment,
-              byteSize: null,
-            },
+            attachment: removeRawImageSizeForStorage(sanitizedAttachment),
             attachmentId,
             ordinal,
           }),
@@ -264,7 +259,7 @@ async function prepareRawCapturePersistence({
       if (!sourceAbsolutePath) {
         storedAttachments.push(
           buildUnstoredAttachment({
-            attachment: sanitizedAttachment,
+            attachment: removeRawImageSizeForStorage(sanitizedAttachment),
             attachmentId,
             ordinal,
           }),
@@ -278,7 +273,7 @@ async function prepareRawCapturePersistence({
         if (!sourceStats.isFile()) {
           storedAttachments.push(
             buildUnstoredAttachment({
-              attachment: sanitizedAttachment,
+              attachment: removeRawImageSizeForStorage(sanitizedAttachment),
               attachmentId,
               ordinal,
             }),
@@ -305,10 +300,7 @@ async function prepareRawCapturePersistence({
         } else {
           storedAttachments.push(
             buildUnstoredAttachment({
-              attachment: {
-                ...sanitizedAttachment,
-                byteSize: null,
-              },
+              attachment: removeRawImageSizeForStorage(sanitizedAttachment),
               attachmentId,
               ordinal,
             }),
@@ -321,7 +313,7 @@ async function prepareRawCapturePersistence({
 
         storedAttachments.push(
           buildUnstoredAttachment({
-            attachment: sanitizedAttachment,
+            attachment: removeRawImageSizeForStorage(sanitizedAttachment),
             attachmentId,
             ordinal,
           }),
@@ -367,8 +359,20 @@ async function prepareRawCapturePersistence({
   return {
     stored: storedCapture,
     sanitizedInput,
-    rawCopies,
     rawContents,
+  };
+}
+
+function removeRawImageSizeForStorage(
+  attachment: PersistableInboundAttachment,
+): PersistableInboundAttachment {
+  if (attachment.kind !== "image") {
+    return attachment;
+  }
+
+  return {
+    ...attachment,
+    byteSize: null,
   };
 }
 
@@ -491,7 +495,6 @@ export async function persistCanonicalInboxCapture({
       summary: `Persisted inbox capture ${captureId}.`,
       targetIds: [captureId, eventId],
     },
-    rawCopies: prepared.rawCopies,
     rawContents: prepared.rawContents,
     jsonlAppends: [
       {
