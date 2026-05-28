@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
+import { deflateSync } from "node:zlib";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
@@ -116,23 +117,25 @@ export const HOSTED_LOCAL_LINQ_PDF_BYTES = new TextEncoder().encode([
   "",
 ].join("\n"));
 
-export const HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES = Uint8Array.from([
+const HOSTED_LOCAL_LINQ_IMAGE_PNG_WIDTH = 1536;
+const HOSTED_LOCAL_LINQ_IMAGE_PNG_HEIGHT = 1024;
+const PNG_SIGNATURE = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
-  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
-  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-  0x42, 0x60, 0x82,
 ]);
+const PNG_CRC_TABLE = buildPngCrcTable();
+
+let hostedLocalLinqImagePngBytes: Uint8Array | null = null;
+
+export function readHostedLocalLinqImagePngBytes(): Uint8Array {
+  hostedLocalLinqImagePngBytes ??= buildHostedLocalLargeImagePngBytes();
+  return hostedLocalLinqImagePngBytes;
+}
 
 export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedMessageIdsByChat = new Map<string, string[]>();
-  const imageBytes = HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES;
+  const imageBytes = readHostedLocalLinqImagePngBytes();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
   let nextObservedChatSequence = 0;
@@ -712,6 +715,79 @@ function buildHostedLocalLinqVoiceMemoBytes(): Uint8Array {
     0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x7f,
     0x00, 0x80, 0x00, 0x00,
   ]);
+}
+
+function buildHostedLocalLargeImagePngBytes(): Uint8Array {
+  const width = HOSTED_LOCAL_LINQ_IMAGE_PNG_WIDTH;
+  const height = HOSTED_LOCAL_LINQ_IMAGE_PNG_HEIGHT;
+  const bytesPerPixel = 3;
+  const scanlineLength = 1 + (width * bytesPerPixel);
+  const raw = Buffer.allocUnsafe(scanlineLength * height);
+  let offset = 0;
+  let state = 0x9e3779b9;
+
+  for (let y = 0; y < height; y += 1) {
+    raw[offset] = 0;
+    offset += 1;
+    for (let x = 0; x < width; x += 1) {
+      state = Math.imul(state, 1664525) + 1013904223;
+      const noise = state >>> 24;
+      raw[offset] = (x + noise) & 0xff;
+      raw[offset + 1] = (y + (noise * 3)) & 0xff;
+      raw[offset + 2] = ((x ^ y) + (noise * 7)) & 0xff;
+      offset += bytesPerPixel;
+    }
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  return new Uint8Array(Buffer.concat([
+    Buffer.from(PNG_SIGNATURE),
+    buildPngChunk("IHDR", ihdr),
+    buildPngChunk("IDAT", deflateSync(raw, { level: 6 })),
+    buildPngChunk("IEND", Buffer.alloc(0)),
+  ]));
+}
+
+function buildPngChunk(type: string, data: Uint8Array): Buffer {
+  const typeBytes = Buffer.from(type, "ascii");
+  const chunk = Buffer.alloc(12 + data.byteLength);
+  chunk.writeUInt32BE(data.byteLength, 0);
+  typeBytes.copy(chunk, 4);
+  Buffer.from(data).copy(chunk, 8);
+  chunk.writeUInt32BE(pngCrc32([typeBytes, data]), 8 + data.byteLength);
+  return chunk;
+}
+
+function buildPngCrcTable(): Uint32Array {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) !== 0
+        ? 0xedb88320 ^ (value >>> 1)
+        : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+function pngCrc32(buffers: readonly Uint8Array[]): number {
+  let crc = 0xffffffff;
+  for (const bytes of buffers) {
+    for (const byte of bytes) {
+      crc = PNG_CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function summarizeObservedLinqRequests(
