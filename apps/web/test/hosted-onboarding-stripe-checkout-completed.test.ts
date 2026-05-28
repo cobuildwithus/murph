@@ -145,6 +145,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: "member_123",
     });
 
     expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(expect.objectContaining({
@@ -187,6 +188,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: "member_123",
     });
 
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
@@ -207,6 +209,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
     });
 
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
@@ -248,6 +251,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
     });
 
     expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
@@ -275,6 +279,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
     });
 
     const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
@@ -315,6 +320,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
     });
 
     const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
@@ -406,6 +412,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     });
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
@@ -426,6 +433,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     });
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
@@ -450,6 +458,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: "member_123",
     });
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
@@ -477,6 +486,7 @@ describe("applyStripeCheckoutCompleted", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     });
 
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();

@@ -15,6 +15,9 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "./shared";
 import {
+  sendHostedSignupWelcomeEmailForMemberBestEffort,
+} from "./signup-welcome-email";
+import {
   listHostedStripeCheckoutSessionMemberIds,
 } from "./stripe-billing-lookup";
 import { applyStripeCheckoutCompleted } from "./stripe-billing-events";
@@ -56,6 +59,10 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     session,
   });
   await nudgeHostedCheckoutSuccessActivationRunner(activationOutcome);
+  await sendHostedCheckoutSuccessWelcomeEmailBestEffort({
+    memberId: activationOutcome.welcomeEmailMemberId,
+    prisma,
+  });
 
   return getHostedInviteStatus({
     authenticatedMember: input.member,
@@ -71,13 +78,16 @@ async function applyHostedCheckoutSessionSuccess(input: {
 }): Promise<{
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  welcomeEmailMemberId: string | null;
 }> {
   let activationOutcome: {
     activatedMemberId: string | null;
     hostedExecutionEventId: string | null;
+    welcomeEmailMemberId: string | null;
   } = {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    welcomeEmailMemberId: null,
   };
 
   await input.prisma.$transaction(async (tx) => {
@@ -98,6 +108,20 @@ async function applyHostedCheckoutSessionSuccess(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return activationOutcome;
+}
+
+async function sendHostedCheckoutSuccessWelcomeEmailBestEffort(input: {
+  memberId: string | null;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.memberId) {
+    return;
+  }
+
+  await sendHostedSignupWelcomeEmailForMemberBestEffort({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 }
 
 async function nudgeHostedCheckoutSuccessActivationRunner(input: {

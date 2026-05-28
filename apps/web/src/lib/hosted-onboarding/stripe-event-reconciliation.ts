@@ -46,8 +46,7 @@ import {
 import { requireHostedStripeApi } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
-  HostedSignupWelcomeEmailError,
-  sendHostedSignupWelcomeEmailForMember,
+  sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
@@ -220,6 +219,7 @@ async function processHostedStripeEventRecord(
 ): Promise<{
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  welcomeEmailMemberId: string | null;
 }> {
   const payload = event.data.object;
   const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
@@ -493,6 +493,12 @@ async function processClaimedHostedStripeEvent(
         transaction,
       );
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (result.welcomeEmailMemberId) {
+      await sendHostedSignupWelcomeEmailForMemberBestEffort({
+        memberId: result.welcomeEmailMemberId,
+        prisma,
+      });
+    }
     await prisma.hostedStripeEvent.update({
       where: {
         eventId: claimed.eventId,
@@ -505,15 +511,10 @@ async function processClaimedHostedStripeEvent(
         status: HostedStripeEventStatus.completed,
       },
     });
-    if (result.activatedMemberId) {
-      await sendHostedSignupWelcomeEmailBestEffort({
-        memberId: result.activatedMemberId,
-        prisma,
-      });
-    }
     finishHostedOnboardingTiming(timing, "completed", {
       activatedMember: Boolean(result.activatedMemberId),
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
+      welcomeEmailCandidate: Boolean(result.welcomeEmailMemberId),
     });
 
     return {
@@ -561,29 +562,6 @@ async function processClaimedHostedStripeEvent(
       hostedExecutionEventId: null,
       status: "failed",
     };
-  }
-}
-
-async function sendHostedSignupWelcomeEmailBestEffort(input: {
-  memberId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  try {
-    await sendHostedSignupWelcomeEmailForMember({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-  } catch (error) {
-    console.warn("Hosted signup welcome email send failed.", {
-      ...(error instanceof HostedSignupWelcomeEmailError
-        ? {
-            errorCode: error.code,
-            providerStatus: error.providerStatus,
-          }
-        : {
-            errorName: error instanceof Error ? error.name : "UnknownError",
-          }),
-    });
   }
 }
 
@@ -720,24 +698,29 @@ function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
     hostedExecutionEventId: string | null;
+    welcomeEmailMemberId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
+    welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
   };
 }
 
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    welcomeEmailMemberId: null,
   };
 }
 
