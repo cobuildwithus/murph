@@ -101,7 +101,7 @@ describe('assistant GPT-5 execution prompt overlay', () => {
     ).not.toContain('send_progress_update')
 
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantTurnProgressAvailable: true,
+      assistantModelProgressUpdatesAvailable: true,
     }))
 
     expect(prompt).toContain('send_progress_update')

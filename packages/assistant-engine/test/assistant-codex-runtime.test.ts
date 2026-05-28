@@ -212,6 +212,19 @@ describe('assistant codex runtime', () => {
       excludeTurns: true,
       threadId: 'thread-1',
     })
+    expect(
+      buildCodexThreadResumeParams({
+        input: {
+          ...baseInput,
+          modelProgressUpdatesEnabled: true,
+        },
+        codexThreadId: 'thread-1',
+      }),
+    ).toEqual({
+      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+      excludeTurns: true,
+      threadId: 'thread-1',
+    })
 
     expect(
       buildCodexThreadResumeParams({
@@ -2348,6 +2361,103 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')
   })
 
+  it('returns unavailable for progress tool calls when model progress is disabled', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-progress-disabled-')
+    const progressDelivery = {
+      send: vi.fn(async (_text: string) => {
+        void _text
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          expect(asRecord(threadStart.params)).not.toHaveProperty('dynamicTools')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-progress-disabled',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-progress-disabled',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 99,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'send_progress_update',
+                arguments: {
+                  text: 'Checking the file now.',
+                },
+              },
+            }),
+          )
+
+          const messages = await waitForRpcMessages(child, 5)
+          expect(messages[4]).toEqual({
+            id: 99,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress updates are not available for this turn',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-progress-disabled',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'try disabled progress tool',
+        progressDelivery,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-progress-disabled',
+    })
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+  })
+
   it('sends one current-channel progress update when Codex compacts context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-context-compact-')
     const onProgress = vi.fn()
@@ -2455,6 +2565,7 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        modelProgressUpdatesEnabled: true,
         onProgress,
         onTraceEvent,
         prompt: 'answer after compacting context',
@@ -2698,7 +2809,9 @@ describe('assistant codex runtime', () => {
           await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          expect(asRecord(threadResume.params)).not.toHaveProperty('dynamicTools')
+          expect(asRecord(threadResume.params)).toMatchObject({
+            dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          })
           child.stdout.write(
             jsonLine({
               id: 2,
