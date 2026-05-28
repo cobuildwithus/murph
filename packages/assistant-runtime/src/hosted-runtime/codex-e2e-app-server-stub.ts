@@ -10,6 +10,7 @@ import {
 
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
 } from "./launch-spec.ts";
 
@@ -32,6 +33,9 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
     runtimeEnv: input.runtimeEnv,
     source: buildHostedE2ECodexAppServerStubSource({
       assistantProviderBaseUrl,
+      expectedThreadStartDynamicTools: readHostedE2ECodexAppServerStubExpectedDynamicTools(
+        input.runtimeEnv,
+      ),
       turnDelayMs: readHostedE2ECodexAppServerStubTurnDelayMs(input.runtimeEnv),
     }),
   });
@@ -39,15 +43,18 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
 
 export function buildHostedE2ECodexAppServerStubSource(input: {
   assistantProviderBaseUrl: string;
+  expectedThreadStartDynamicTools?: readonly string[] | null;
   turnDelayMs?: number | null;
 }): string {
   const turnDelayMs = input.turnDelayMs ?? 25;
+  const expectedThreadStartDynamicTools = input.expectedThreadStartDynamicTools ?? [];
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
 
 const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
+const expectedThreadStartDynamicTools = ${JSON.stringify(expectedThreadStartDynamicTools)};
 const turnDelayMs = ${JSON.stringify(turnDelayMs)};
 const processThreadPrefix = String(process.pid % 1000000).padStart(6, "0");
 let threadCounter = 0;
@@ -120,6 +127,54 @@ function appendThreadRolloutEvent(threadId, event) {
   );
   fs.chmodSync(rolloutPath, 0o600);
   return rolloutPath;
+}
+
+function readThreadStartDynamicToolNames(params) {
+  const dynamicTools = params && Array.isArray(params.dynamicTools)
+    ? params.dynamicTools
+    : [];
+  return dynamicTools.flatMap((tool) => {
+    const name = readDynamicToolName(tool);
+    return name ? [name] : [];
+  });
+}
+
+function readDynamicToolName(tool) {
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) {
+    return null;
+  }
+
+  const namespace = typeof tool.namespace === "string" && tool.namespace.trim()
+    ? tool.namespace.trim()
+    : null;
+  const name = typeof tool.name === "string" && tool.name.trim()
+    ? tool.name.trim()
+    : null;
+  if (!namespace || !name) {
+    return null;
+  }
+
+  return namespace + "." + name;
+}
+
+function validateThreadStartDynamicTools(params) {
+  if (expectedThreadStartDynamicTools.length === 0) {
+    return null;
+  }
+
+  const actual = readThreadStartDynamicToolNames(params);
+  const matches =
+    actual.length === expectedThreadStartDynamicTools.length
+    && actual.every((name, index) => name === expectedThreadStartDynamicTools[index]);
+  if (matches) {
+    return null;
+  }
+
+  return "thread/start dynamic tools mismatch: expected ["
+    + expectedThreadStartDynamicTools.join(", ")
+    + "] but received ["
+    + (actual.length === 0 ? "none" : actual.join(", "))
+    + "]";
 }
 
 function loadThreadHistoryFromRollout(threadId) {
@@ -427,6 +482,13 @@ async function handleRpc(message) {
   }
 
   if ((method === "thread/start" || method === "thread/resume") && id !== null) {
+    if (method === "thread/start") {
+      const validationError = validateThreadStartDynamicTools(params);
+      if (validationError) {
+        writeRpcError(id, validationError);
+        return;
+      }
+    }
     const requestedThreadId = typeof params.threadId === "string" && params.threadId.trim()
       ? params.threadId.trim()
       : null;
@@ -438,7 +500,11 @@ async function handleRpc(message) {
         return;
       }
     }
+    const dynamicToolNames = method === "thread/start"
+      ? readThreadStartDynamicToolNames(params)
+      : [];
     const threadPath = appendThreadRolloutEvent(threadId, {
+      ...(dynamicToolNames.length > 0 ? { dynamicToolNames } : {}),
       event: method === "thread/resume" ? "thread.resumed" : "thread.started",
     });
     writeRpc({
@@ -548,6 +614,55 @@ rl.on("line", (line) => {
   });
 });
 `;
+}
+
+const HOSTED_CODEX_DYNAMIC_TOOL_NAME_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})+$/u;
+
+function readHostedE2ECodexAppServerStubExpectedDynamicTools(
+  runtimeEnv: Record<string, string>,
+): readonly string[] {
+  const rawValue =
+    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV];
+  if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
+    return [];
+  }
+
+  const values = rawValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (values.length === 0) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must list at least one dynamic tool name.`,
+    );
+  }
+  if (values.length > 16) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must list at most 16 dynamic tool names.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!HOSTED_CODEX_DYNAMIC_TOOL_NAME_PATTERN.test(value)) {
+      throw new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_INVALID",
+        `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} contains an invalid dynamic tool name.`,
+      );
+    }
+    if (seen.has(value)) {
+      throw new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_INVALID",
+        `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must not contain duplicate dynamic tool names.`,
+      );
+    }
+    seen.add(value);
+  }
+
+  return values;
 }
 
 function readHostedE2ECodexAppServerStubTurnDelayMs(

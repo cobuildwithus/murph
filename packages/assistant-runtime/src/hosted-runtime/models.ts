@@ -185,6 +185,7 @@ export interface HostedMaintenanceMetrics {
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
   readinessElapsedMs?: number | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
+  stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   totalElapsedMs?: number | null;
 }
 

@@ -1656,11 +1656,25 @@ describe("hosted device-sync runtime", () => {
         }),
         secret: DEVICE_SYNC_SECRET,
         service,
+        stagedDirtyAcks: [
+          {
+            connectionId: "hosted_conn_dirty_wake",
+            processedDirtyPayloadIds: ["dsp_payload_previous"],
+            processedRevision: "41",
+          },
+        ],
       });
 
       assert.deepEqual(pendingRequests, [
         {
           limit: 10,
+          stagedDirtyAcks: [
+            {
+              connectionId: "hosted_conn_dirty_wake",
+              processedDirtyPayloadIds: ["dsp_payload_previous"],
+              processedRevision: "41",
+            },
+          ],
         },
       ]);
       assert.deepEqual(state.pendingDirtyAcks, [{

@@ -25,6 +25,7 @@ export const CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS = [
 ] as const
 
 export type CodexEventState = 'completed' | 'running'
+export type CodexAssistantMessagePhase = 'commentary' | 'final_answer'
 
 export type CodexNormalizedEvent =
   | {
@@ -35,11 +36,12 @@ export type CodexNormalizedEvent =
     }
   | {
       kind: 'assistant_message'
-      itemId: string | null
-      itemState: CodexEventState
-      rawEvent: unknown
-      text: string
-    }
+	      itemId: string | null
+	      itemState: CodexEventState
+	      messagePhase: CodexAssistantMessagePhase | null
+	      rawEvent: unknown
+	      text: string
+	    }
   | {
       kind: 'error'
       message: string
@@ -239,13 +241,14 @@ export function normalizeCodexEvent(event: unknown): CodexNormalizedEvent {
       }
     }
 
-    return {
-      kind: 'assistant_message',
-      itemId,
-      itemState,
-      rawEvent: event,
-      text,
-    }
+	    return {
+	      kind: 'assistant_message',
+	      itemId,
+	      itemState,
+	      messagePhase: extractAssistantMessagePhase(record, item),
+	      rawEvent: event,
+	      text,
+	    }
   }
 
   if (!itemType || !itemState) {
@@ -378,6 +381,14 @@ export function extractCodexProgressEventFromNormalized(
 export function extractCodexCurrentChannelProgressTextFromNormalized(
   normalized: CodexNormalizedEvent,
 ): string | null {
+  if (
+    normalized.kind === 'assistant_message' &&
+    normalized.itemState === 'completed' &&
+    normalized.messagePhase === 'commentary'
+  ) {
+    return normalized.text
+  }
+
   if (normalized.kind !== 'status_item') {
     return null
   }
@@ -843,7 +854,31 @@ function extractAssistantTextFromItem(
       : typeof item.message === 'string'
         ? item.message
         : collectTextParts(item.content) ?? collectTextParts(item.parts),
-  )
+	  )
+}
+
+function extractAssistantMessagePhase(
+  event: Record<string, unknown>,
+  item: Record<string, unknown> | null,
+): CodexAssistantMessagePhase | null {
+  const params = asRecord(event.params)
+  const candidate =
+    typeof item?.phase === 'string'
+      ? item.phase
+      : typeof event.phase === 'string'
+        ? event.phase
+        : typeof params?.phase === 'string'
+          ? params.phase
+          : null
+
+  switch (normalizeIdentifier(candidate)) {
+    case 'commentary':
+      return 'commentary'
+    case 'final.answer':
+      return 'final_answer'
+    default:
+      return null
+  }
 }
 
 function extractReasoningTextFromItem(
