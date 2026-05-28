@@ -2321,46 +2321,17 @@ describe('assistant codex runtime', () => {
     expect(turnProgress.send).toHaveBeenCalledWith(
       CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
     )
-    expect(onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'context-compact-1',
-        kind: 'status',
-        state: 'running',
-        text: CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
-      }),
-    )
-    expect(onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'context-compact-1',
-        kind: 'status',
-        state: 'completed',
-        text: 'Compacted conversation history.',
-      }),
-    )
-    expect(onTraceEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        updates: [
-          {
-            kind: 'status',
-            mode: 'replace',
-            streamKey: 'status:context-compact-1',
-            text: CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
-          },
-        ],
-      }),
-    )
-    expect(onTraceEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        updates: [
-          {
-            kind: 'status',
-            mode: 'replace',
-            streamKey: 'status:context-compact-1',
-            text: 'Compacted conversation history.',
-          },
-        ],
-      }),
-    )
+    expect(
+      onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
+    ).toBe(false)
+    expect(
+      onTraceEvent.mock.calls.some(([event]) =>
+        event?.updates?.some(
+          (update: { streamKey?: string }) =>
+            update.streamKey === 'status:context-compact-1',
+        ),
+      ),
+    ).toBe(false)
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
