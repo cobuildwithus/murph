@@ -41,9 +41,6 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
-  buildHostedExecutionDeviceSyncWake,
-} from "@murphai/hosted-execution";
-import {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
@@ -114,9 +111,6 @@ import {
   readHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
-import {
-  enqueueHostedSystemMailboxItem,
-} from "../src/hosted-runtime/system-mailbox.ts";
 import type {
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeMailboxPort,
@@ -6758,8 +6752,9 @@ describe("hosted workspace runtime entrypoint", () => {
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
       ]);
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
+      const shouldRunDeviceSync = input.nextWakeReason === "device-sync.reconcile";
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, shouldRunDeviceSync ? 1 : 0);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, shouldRunDeviceSync ? 1 : 0);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, null);
@@ -6783,19 +6778,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const firstNextWakeAt = "2026-04-27T00:01:00.000Z";
     const secondNow = "2026-04-27T00:01:01.000Z";
     const secondNextWakeAt = "2026-04-27T00:02:00.000Z";
-    const firstWake = buildHostedExecutionDeviceSyncWake({
-      connectionId,
-      eventId: "evt_device_sync_entrypoint_connected",
-      hint: {
-        jobs: [],
-        nextReconcileAt: firstNextWakeAt,
-        occurredAt: TEST_NOW,
-      },
-      occurredAt: TEST_NOW,
-      provider: "whoop",
-      reason: "connected",
-      userId: TEST_USER_ID,
-    });
     const firstDeviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId,
       nextReconcileAt: firstNextWakeAt,
@@ -6811,6 +6793,7 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_device_sync_first",
             reason: "nudge",
+            source: "device_sync_recovery",
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -6826,26 +6809,14 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
-            assert.equal(item.route.action, "run-device-sync-wake");
-            return await enqueueHostedSystemMailboxItem({
-              item,
-              vaultRoot,
-              wake: firstWake,
-            });
+          async importItem() {
+            throw new Error("Device-sync recovery nudges should not import mailbox items.");
           },
           platform: createPlatform({
             deviceSyncPort: firstDeviceSyncPort,
             mailboxPort: createMailboxPort({
               events,
-              items: [
-                createMailboxItem({
-                  id: "mailbox_item_device_sync_first",
-                  kind: "device-sync.wake",
-                  lane: "system",
-                  laneSeq: "1",
-                }),
-              ],
+              items: [],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests: firstCheckpointRequests,

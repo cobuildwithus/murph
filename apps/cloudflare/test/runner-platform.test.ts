@@ -2433,7 +2433,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const usageRecord = createAssistantUsageRecord();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      await expect(request.json()).resolves.toEqual({
+      await expect(request.clone().json()).resolves.toEqual({
         usage: usageRecord,
       });
 
@@ -2502,8 +2502,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("fetches pending hosted device-sync dirty state through the signed web callback seam", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      await expect(request.json()).resolves.toEqual({
+      await expect(request.clone().json()).resolves.toEqual({
         limit: 1,
+        stagedDirtyAcks: [
+          {
+            connectionId: "dsc_123",
+            processedDirtyPayloadIds: ["dsp_1"],
+            processedRevision: "7",
+          },
+        ],
         userId: "member_123",
       });
 

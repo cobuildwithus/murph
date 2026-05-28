@@ -1,0 +1,27 @@
+# Idle Device Sync Priority
+
+## Goal
+
+Make hosted device sync idle-only so foreground assistant replies never run or wait on device-sync work, while keeping idle device-sync failures from blocking the runtime idle checkpoint.
+
+## Constraints
+
+- Preserve the single hosted workspace writer.
+- Do not add a detached same-container background promise, queue, table, worker, or scheduler.
+- Preserve the existing staged dirty-ack work owned by the parallel dirty-ack task; this slice must not redesign that contract.
+- If foreground input arrives, device-sync maintenance must yield/reschedule and assistant reply work must not depend on device-sync completion.
+- Device-sync maintenance failures must reschedule device sync without throwing through an already-dirty idle checkpoint.
+
+## Plan
+
+1. Remove device-sync execution from the assistant automation lane.
+2. Route due/recovery device-sync work through idle maintenance only.
+3. Preserve or reschedule skipped device-sync wakes when foreground work takes priority.
+4. Pass through the existing staged dirty-ack surface only where needed, without changing dirty-ack semantics.
+5. Add focused regression coverage for foreground priority and idle checkpoint-safe device-sync failure.
+
+## Verification
+
+- Focused hosted assistant-runtime tests for workspace assistant phase and maintenance.
+- `pnpm typecheck`
+- Scoped diff or owner coverage command covering touched files.

@@ -437,7 +437,7 @@ test("hosted Codex runtime local E2E app-server stub enforces expected dynamic t
   const requests: string[] = [];
   const server = await startResponsesStubServer({
     requests,
-    responseText: "shim response",
+    responseTexts: ["first shim response", "second shim response"],
   });
 
   try {
@@ -481,7 +481,7 @@ test("hosted Codex runtime local E2E app-server stub enforces expected dynamic t
     });
     const messages = await runHostedLocalCodexStubTurn(
       child,
-      ["hello hosted local"],
+      ["hello hosted local", "resume hosted local"],
       {
         dynamicTools: [
           {
@@ -495,7 +495,7 @@ test("hosted Codex runtime local E2E app-server stub enforces expected dynamic t
       },
     );
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
     const threadId = readHostedLocalCodexStubThreadId(messages);
     const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
     assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
@@ -506,7 +506,19 @@ test("hosted Codex runtime local E2E app-server stub enforces expected dynamic t
         threadId,
       },
       {
-        assistantText: "shim response",
+        assistantText: "first shim response",
+        event: "assistant.message",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+      {
+        dynamicToolNames: ["murph.send_progress_update"],
+        event: "thread.resumed",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+      {
+        assistantText: "second shim response",
         event: "assistant.message",
         schema: "murph.hosted-e2e-codex-shim-rollout.v1",
         threadId,
