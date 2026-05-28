@@ -278,7 +278,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
 
       const itemId =
         readNormalizedItemId(input.normalizedEvent) ?? readRawItemId(input.rawEvent)
-      const actionKey = itemId !== null ? `${kind}:${itemId}` : null
+      const actionKey =
+        itemId !== null
+          ? `${kind}:${itemId}`
+          : fallbackActionKeyFromNormalized(input.normalizedEvent, kind)
       const item = readEventItem(input.rawEvent)
       const counted = registerAction({
         actionKey,
@@ -433,6 +436,40 @@ function readToolIdentifierPart(...values: unknown[]): string | null {
     return null
   }
   return value
+}
+
+function fallbackActionKeyFromNormalized(
+  normalized: CodexNormalizedEvent,
+  kind: CodexActionKind,
+): string | null {
+  if (normalized.kind === 'status_item') {
+    if (normalizeIdentifier(normalized.itemType) !== kind) {
+      return null
+    }
+    return JSON.stringify({
+      commandLabel: normalized.commandLabel,
+      filePaths: normalized.filePaths,
+      itemType: normalized.itemType,
+      kind,
+    })
+  }
+
+  if (normalized.kind === 'tool_call' && kind === 'mcp.tool.call') {
+    return JSON.stringify({
+      kind,
+      toolName: normalized.toolName,
+      toolServer: normalized.toolServer,
+    })
+  }
+
+  if (normalized.kind === 'web_search' && kind === 'web.search') {
+    return JSON.stringify({
+      kind,
+      query: normalized.query,
+    })
+  }
+
+  return null
 }
 
 function markActionKey(set: Set<string>, key: string | null): boolean {
