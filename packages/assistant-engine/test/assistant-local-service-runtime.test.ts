@@ -519,10 +519,10 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Late follow up',
   )
-  expect(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.turnProgress)
+  expect(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery)
     .toBeTruthy()
-  expect(mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.turnProgress)
-    .toBeNull()
+  expect(mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.progressDelivery)
+    .toBeTruthy()
   assert.deepEqual(
     mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
       .resumeState,
@@ -3325,6 +3325,11 @@ test('sendAssistantMessageLocal preserves boundary admission for hosted queue-on
     ['input_available', 'request_boundary', 'commit_barrier'],
   )
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.modelProgressUpdatesEnabled,
+    true,
+  )
+  assert.ok(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 

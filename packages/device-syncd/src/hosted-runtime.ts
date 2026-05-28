@@ -12,6 +12,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH =
   "/api/internal/device-sync/runtime/dirty-pending";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
+export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
+export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
 const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
 const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 2048;
@@ -617,6 +619,12 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
   trustedUserId: string | null = null,
 ): HostedExecutionDeviceSyncDirtyPendingRequest {
   const record = requireObject(value, "Hosted device-sync dirty pending request");
+  const stagedDirtyAcks = record.stagedDirtyAcks === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncStagedDirtyAcks(
+      record.stagedDirtyAcks,
+      "Hosted device-sync dirty pending request stagedDirtyAcks",
+    );
 
   return {
     ...(record.limit === undefined
@@ -627,21 +635,46 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
             "Hosted device-sync dirty pending request limit",
           ),
         }),
-    ...(record.stagedDirtyAcks === undefined
-      ? {}
-      : {
-          stagedDirtyAcks: requireArray(
-            record.stagedDirtyAcks,
-            "Hosted device-sync dirty pending request stagedDirtyAcks",
-          ).map((entry, index) =>
-            parseHostedExecutionDeviceSyncStagedDirtyAck(
-              entry,
-              `Hosted device-sync dirty pending request stagedDirtyAcks[${index}]`,
-            )
-          ),
-        }),
+    ...(stagedDirtyAcks === undefined ? {} : { stagedDirtyAcks }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
+}
+
+function parseHostedExecutionDeviceSyncStagedDirtyAcks(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncStagedDirtyAck[] {
+  const entries = requireBoundedArray(
+    value,
+    label,
+    HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
+  );
+  const stagedDirtyAcks = entries.map((entry, index) =>
+    parseHostedExecutionDeviceSyncStagedDirtyAck(entry, `${label}[${index}]`)
+  );
+  const payloadIdCount = stagedDirtyAcks.reduce(
+    (total, ack) => total + (ack.processedDirtyPayloadIds?.length ?? 0),
+    0,
+  );
+
+  if (payloadIdCount > HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT) {
+    throw new TypeError(
+      `${label} processedDirtyPayloadIds must include no more than `
+        + `${HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT} total entries.`,
+    );
+  }
+
+  return stagedDirtyAcks;
+}
+
+function requireBoundedArray(value: unknown, label: string, limit: number): unknown[] {
+  const array = requireArray(value, label);
+
+  if (array.length > limit) {
+    throw new TypeError(`${label} must include no more than ${limit} entries.`);
+  }
+
+  return array;
 }
 
 function parseHostedExecutionDeviceSyncStagedDirtyAck(
@@ -655,9 +688,10 @@ function parseHostedExecutionDeviceSyncStagedDirtyAck(
     ...(record.processedDirtyPayloadIds === undefined
       ? {}
       : {
-          processedDirtyPayloadIds: requireArray(
+          processedDirtyPayloadIds: requireBoundedArray(
             record.processedDirtyPayloadIds,
             `${label}.processedDirtyPayloadIds`,
+            HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
           ).map((entry, index) =>
             requireString(entry, `${label}.processedDirtyPayloadIds[${index}]`)
           ),

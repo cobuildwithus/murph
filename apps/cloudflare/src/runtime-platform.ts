@@ -1247,6 +1247,7 @@ function createHostedWebDeviceSyncPort(input: {
   return {
     async applyUpdates(runtimeInput: {
       occurredAt?: string | null;
+      signal?: AbortSignal | null;
       updates: unknown;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
@@ -1259,6 +1260,7 @@ function createHostedWebDeviceSyncPort(input: {
         description: "Hosted device-sync runtime apply",
         fetchImpl: input.fetchImpl,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+        signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -1291,6 +1293,7 @@ function createHostedWebDeviceSyncPort(input: {
     async fetchSnapshot(runtimeInput: {
       connectionId?: string | null;
       provider?: string | null;
+      signal?: AbortSignal | null;
       sourceProviderSlug?: string | null;
     } = {}) {
       const payload = await fetchHostedWebControlPlaneJson({
@@ -1305,6 +1308,7 @@ function createHostedWebDeviceSyncPort(input: {
         description: "Hosted device-sync runtime snapshot",
         fetchImpl: input.fetchImpl,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+        signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -1318,6 +1322,7 @@ function createHostedWebDeviceSyncPort(input: {
         processedDirtyPayloadIds?: string[];
         processedRevision: string;
       }>;
+      signal?: AbortSignal | null;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
@@ -1331,6 +1336,7 @@ function createHostedWebDeviceSyncPort(input: {
         description: "Hosted device-sync pending dirty state",
         fetchImpl: input.fetchImpl,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
+        signal: runtimeInput?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

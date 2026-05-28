@@ -45,7 +45,7 @@ import type {
   AssistantActiveTurnLiveProviderSteering,
 } from './turn-input.js'
 import type {
-  AssistantTurnProgress,
+  AssistantProgressDelivery,
 } from './turn-progress.js'
 import type { AssistantCodexContinuation } from './active-turn-input-journal.js'
 import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
@@ -143,7 +143,8 @@ export async function executeCodexTurnWithRecovery(input: {
   providerRequestOrdinal?: number | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
-  turnProgress?: AssistantTurnProgress | null
+  modelProgressUpdatesEnabled?: boolean | null
+  progressDelivery?: AssistantProgressDelivery | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnRecoveryOutcome> {
@@ -420,7 +421,8 @@ async function executeAssistantCodexAttempt(input: {
         userMessageContent: executionPlan.input.userMessageContent,
       }),
       systemPrompt: attemptPlan.routePlan.systemPrompt,
-      turnProgress: executionPlan.turnProgress ?? null,
+      modelProgressUpdatesEnabled: executionPlan.modelProgressUpdatesEnabled,
+      progressDelivery: executionPlan.progressDelivery ?? null,
       turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {

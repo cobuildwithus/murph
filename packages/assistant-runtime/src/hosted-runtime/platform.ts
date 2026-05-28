@@ -195,6 +195,7 @@ export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegra
 export interface HostedRuntimeDeviceSyncPort {
   applyUpdates(input: {
     occurredAt?: string | null;
+    signal?: AbortSignal | null;
     updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   createConnectLink(input: {
@@ -204,11 +205,12 @@ export interface HostedRuntimeDeviceSyncPort {
   fetchSnapshot(input?: {
     connectionId?: string | null;
     provider?: string | null;
+    signal?: AbortSignal | null;
     sourceProviderSlug?: string | null;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId">): Promise<
-    HostedExecutionDeviceSyncDirtyPendingResponse
-  >;
+  fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId"> & {
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncDirtyPendingResponse>;
   ackDirtyStateProcessed(input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId">): Promise<
     HostedExecutionDeviceSyncDirtyAckResponse
   >;

@@ -10,6 +10,10 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -252,8 +256,6 @@ export {
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
-const HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
-const HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
 interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
@@ -808,9 +810,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ...records,
       ]);
       if (
-        stagedDeviceSyncDirtyAcks.length >= HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT
+        stagedDeviceSyncDirtyAcks.length >= HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT
         || countHostedDeviceSyncStagedDirtyAckPayloadIds(stagedDeviceSyncDirtyAcks)
-          >= HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT
+          >= HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT
       ) {
         suppressDirtyPendingFetchUntilCheckpoint = true;
       }
@@ -1999,7 +2001,8 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
             fetchDirtyStates: (dirtyInput) =>
               guard(() => platform.deviceSyncPort!.fetchDirtyStates(dirtyInput)),
-            fetchSnapshot: platform.deviceSyncPort.fetchSnapshot,
+            fetchSnapshot: (snapshotInput) =>
+              guard(() => platform.deviceSyncPort!.fetchSnapshot(snapshotInput)),
           },
         }
       : {}),
