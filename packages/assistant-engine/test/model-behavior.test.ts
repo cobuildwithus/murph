@@ -591,161 +591,32 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
-  it('requires vault-first evidence reads before setup questions', () => {
+  it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
     }))
 
+    expect(prompt).toContain('Murph skill files:')
+    expect(prompt).toContain('experiment-onboarding')
     expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
+    )
+    expect(prompt).toContain(
+      'read exactly that skill file before acting',
+    )
+    expect(prompt).toContain(
+      'Do not preload unrelated skill files.',
+    )
+    expect(prompt).not.toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
     )
-    expect(prompt).toContain(
-      'This is a prerequisite, not an optional courtesy.',
-    )
-    expect(prompt).toContain(
-      'Read the protocol page, active experiments, saved memory/preferences, relevant journal notes, regimens/supplements/medications, labs, documents, wearable summaries',
-    )
-    expect(prompt).toContain(
-      'the protocol onboarding block `contextReview.vaultChecks[].readHints`',
-    )
-    expect(prompt).toContain(
-      'Treat `ask_if_unknown` setup slots as unknown only after that vault-first pass.',
-    )
-    expect(prompt).toContain(
-      'Do not ask the user to restate labs, wearable signals, notes, active experiments, regimen details, goals, conditions, allergies, preferences, or other saved context',
-    )
-    expect(prompt).toContain(
-      'For lab-backed protocols, inspect structured lab surfaces such as `vault-cli blood-test list --format json`',
-    )
-    expect(prompt).toContain(
-      'If a usable panel exists, propose it and ask only for confirmation when selection or freshness is ambiguous.',
-    )
-    expect(prompt).toContain(
-      'keep "baseline lab/panel evidence" separate from the experiment\'s run baseline or pre-intervention window.',
-    )
-    expect(prompt).toContain(
-      'label both plainly, for example "baseline lipid panel: <date>" and "pre-intervention run-in: <date range>"',
-    )
-    expect(prompt).toContain(
-      'For wearable-backed protocols, inspect normalized wearable reads before asking about baseline coverage, recent values, or device availability.',
-    )
-    expect(prompt).toContain(
-      'If a required evidence read is unavailable, stale, sparse, or inconclusive, say the specific gap briefly and ask one targeted question for that gap.',
-    )
-    expect(prompt).toContain(
-      'ask the safety screen even when the vault is silent.',
-    )
-  })
-
-  it('points richer experiment setup at the typed edit command', () => {
-    const prompt = buildAssistantSystemPrompt({
-      assistantCliContract: null,
-      allowSensitiveHealthContext: true,
-      assistantHostedDeviceConnectAvailable: true,
-      assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: true,
-      murphProductBaseUrl: 'https://withmurph.ai',
-      channel: 'telegram',
-      cliAccess: {
-        rawCommand: 'vault-cli',
-        setupCommand: 'murph',
-      },
-      currentLocalDate: '2026-04-15',
-      currentTimeZone: 'Asia/Kuala_Lumpur',
-      onboardingGuidance: false,
-      modelBehaviorProfile: 'gpt5-agentic',
-      turnTrigger: null,
-      vaultOverview: null,
-    })
-
-    expect(prompt).toContain('vault-cli experiment start <slug>')
-    expect(prompt).toContain('--from-protocol <key-or-route>')
-    expect(prompt).toContain(
-      'supports a custom run baseline window with `--baseline-start`, `--baseline-end`, and `--baseline-days`',
-    )
-    expect(prompt).toContain(
-      'write observed panels to `analysisPlan.measurementAnchors`',
-    )
-    expect(prompt).toContain(
-      '--analysis-anchor role=baseline,kind=lab_panel,recordId=<evt_id>,biomarkerKeys=<biomarker:key>',
-    )
-    expect(prompt).toContain(
-      '--planned-measurement role=followup,kind=lab_panel,window=<YYYY-MM-DD>..<YYYY-MM-DD>,biomarkerKeys=<biomarker:key>',
-    )
-    expect(prompt).toContain(
-      'vault-cli experiment start <slug> --custom --no-public-protocol',
-    )
-    expect(prompt).toContain(
-      'For custom runs, include an explicit `--primary-biomarker-key biomarker:<metric-slug>`',
-    )
-    expect(prompt).toContain('custom runs have no protocol/test-plan default primary metric')
-    expect(prompt).not.toContain('vault-cli experiment start <slug> --protocol-key')
-    expect(prompt).toContain('vault-cli experiment edit <id>')
-    expect(prompt).toContain('--dry-run --format json')
-    expect(prompt).toContain('using typed flags only')
-    expect(prompt).toContain('Always prefer protocol-linked runs.')
-    expect(prompt).toContain(
-      'Do not create an unlinked/private/custom experiment when a same-family public protocol exists',
-    )
-    expect(prompt).toContain(
-      'If the user\'s plan is a variant of an existing public protocol or protocol family',
-    )
-    expect(prompt).toContain(
-      'only when Health Commons has no same-family protocol',
-    )
-    expect(prompt).toContain(
-      'Prefer a same-family public protocol even when the user\'s dosage, schedule, metric, or variant differs.',
-    )
-    expect(prompt).toContain('commonsProtocolRef')
-    expect(prompt).toContain(
-      'Current Murph product base URL for user-facing app links: https://withmurph.ai',
-    )
-    expect(prompt).toContain(
-      'After successfully creating a protocol-linked run, send the public experiment page link',
-    )
-    expect(prompt).toContain(
-      '<murph-product-base-url>/experiments/<routeId>',
-    )
-    expect(prompt).toContain(
-      'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
-    )
-    expect(prompt).toContain(
-      'make the absolute experiment page URL the final line of the message with no text after it',
-    )
-    expect(prompt).toContain(
-      'Do not invent a page URL for custom unlinked runs.',
-    )
-    expect(prompt).not.toContain('http://localhost:3000/experiments/finnish-sauna')
-    expect(prompt).toContain('Match the user\'s energy')
-    expect(prompt).toContain('Never restate information the user has already acknowledged')
-    expect(prompt).toContain('Do not surface raw revision hashes, field names, or test-plan ids')
-    expect(prompt).toContain('Ask what the user wants to get out of the experiment')
-    expect(prompt).toContain(
-      'When a connected wearable or relevant wearable history is visible',
-    )
-    expect(prompt).toContain(
-      'Do not ask the user to text or manually restate those fields',
-    )
-    expect(prompt).toContain(
-      'If wearable coverage is stale, sparse, or missing the needed signal',
-    )
-    expect(prompt).toContain('Stop gathering info and create the run when you have enough context')
-    expect(prompt).not.toContain('scaffold and update the experiment record')
-    expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
-  })
-
-  it('does not allow relative experiment page routes when no product base URL is injected', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      murphProductBaseUrl: null,
-    }))
-
-    expect(prompt).not.toContain(
-      'Current Murph product base URL for user-facing app links:',
-    )
-    expect(prompt).toContain(
-      'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
-    )
-    expect(prompt).not.toContain('otherwise use the relative route')
+    expect(prompt).not.toContain('# First-session prep reminders')
+    expect(prompt).not.toContain('vault-cli experiment start <slug>')
+    expect(prompt).not.toContain('vault-cli experiment edit <id>')
+    expect(prompt).not.toContain('vault-cli automation save <title>')
+    expect(prompt).not.toContain('first_session_start_at')
+    expect(prompt).not.toContain('/tmp/')
+    expect(prompt).not.toContain('.codex-hosted')
   })
 
   it('resolves the injected Murph product base URL from hosted public env', () => {
@@ -761,66 +632,6 @@ describe('assistant experiment onboarding guidance', () => {
     })).toBe('https://join.example.test')
   })
 
-  it('guides first-session prep reminders through one-shot automations after run creation', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      currentLocalDate: '2026-05-05',
-      currentTimeZone: 'America/New_York',
-    }))
-
-    expect(prompt).toContain('# First-session prep reminders')
-    expect(prompt).toContain(
-      'During experiment onboarding, try to resolve the user\'s first planned intervention session date and time.',
-    )
-    expect(prompt).toContain(
-      'Use the user\'s canonical timezone and current local date from the prompt context',
-    )
-    expect(prompt).toContain(
-      'create the run first, then automatically schedule one first-session prep reminder',
-    )
-    expect(prompt).toContain(
-      'Do not ask a separate permission question for this first prep reminder.',
-    )
-    expect(prompt).toContain(
-      'Default lead time is 15 minutes before the planned first session',
-    )
-    expect(prompt).toContain('first_session_start_at')
-    expect(prompt).toContain('first_session_prep_reminder_at')
-    expect(prompt).toContain('first_session_prep_automation_slug')
-    expect(prompt).toContain(
-      'apply them immediately after run creation with `vault-cli experiment edit <id> --setup-answer first_session_start_at=<ISO timestamp>',
-    )
-    expect(prompt).toContain(
-      'do not silently treat a user-provided time as session one',
-    )
-    expect(prompt).toContain(
-      'vault-cli automation save <title> --slug experiment-first-prep-<experiment-slug>-<YYYY-MM-DD> --instructions "<scheduled instructions>" --schedule-kind at --schedule-at <ISO timestamp>',
-    )
-    expect(prompt).toContain(
-      'Include the current route fields, not just `--channel`',
-    )
-    expect(prompt).toContain('`--delivery-target`, `--identity-id`, `--participant-id`, and/or `--thread-id`')
-    expect(prompt).toContain(
-      'For iMessage, use the internal channel `linq` and preserve the bound participant/thread route fields.',
-    )
-    expect(prompt).toContain(
-      'Do not create a scheduled first-session prep reminder with only a bare channel',
-    )
-    expect(prompt).toContain(
-      'Use generic tags by default: `assistant`, `scheduled`, `experiment`, and `first-session-prep`.',
-    )
-    expect(prompt).toContain(
-      'Add protocol-specific tags only when they are necessary and non-sensitive.',
-    )
-    expect(prompt).toContain(
-      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <firstSessionDate> --format json` before sending',
-    )
-    expect(prompt).toContain(
-      'skip if the experiment is inactive, completed intervention sessions are already present',
-    )
-    expect(prompt).toContain(
-      'Protocol `assistantPolicy.askBeforeCreatingAutomations` applies to recurring or post-session support',
-    )
-  })
 })
 
 describe('assistant notification decision guidance', () => {

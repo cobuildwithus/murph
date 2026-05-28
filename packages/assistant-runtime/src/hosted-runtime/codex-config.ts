@@ -2,6 +2,10 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+  resolveAssistantSkillsRoot,
+} from "@murphai/assistant-engine/assistant-skill-assets";
+import {
   HostedAssistantConfigurationError,
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -113,6 +117,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
+    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
     ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)

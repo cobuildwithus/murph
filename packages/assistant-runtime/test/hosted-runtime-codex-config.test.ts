@@ -13,6 +13,9 @@ import {
   executeCodexAppServerTurn,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from "@murphai/assistant-engine/assistant-skill-assets";
+import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
@@ -88,6 +91,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(result.codexHome, path.join(operatorHomeRoot, ".codex-hosted"));
   assert.equal(result.codexConfigPath, path.join(operatorHomeRoot, ".codex-hosted", "config.toml"));
   assert.equal(result.runtimeEnv.CODEX_HOME, result.codexHome);
+  assert.ok(result.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV]);
+  assert.match(
+    result.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV] ?? "",
+    /assistant-engine[/\\]skills$/,
+  );
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
     "hosted-openai",
@@ -125,10 +133,13 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[features\]\nplugins = false/u);
   assert.doesNotMatch(config, /^plugins = true$/mu);
+  assert.match(config, /\[skills\]\ninclude_instructions = false/u);
+  assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
+  assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
   assert.match(config, /\[shell_environment_policy\.set\]/u);
@@ -1266,7 +1277,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
@@ -1293,10 +1304,50 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
   assert.match(config, /\[features\]\nplugins = false/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
+  assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
   assert.doesNotMatch(config, /include_instructions = true/u);
   assert.doesNotMatch(config, /\[skills\.bundled\]\nenabled = true/u);
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /break provider prefix caching/u);
+});
+
+test("hosted Codex runtime exposes a stable package-owned assistant skill root", async () => {
+  const workspaceRoot = await createTemporaryDirectory();
+  const operatorHomeRootA = path.join(workspaceRoot, "murph-test-a", "home");
+  const operatorHomeRootB = path.join(workspaceRoot, "murph-test-b", "home");
+
+  const resultA = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot: operatorHomeRootA,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+  const resultB = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot: operatorHomeRootB,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  assert.ok(resultA.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV]);
+  assert.equal(
+    resultA.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV],
+    resultB.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV],
+  );
+  assert.match(
+    resultA.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV] ?? "",
+    /assistant-engine[/\\]skills$/,
+  );
+
+  const configA = await readFile(resultA.codexConfigPath, "utf8");
+  const configB = await readFile(resultB.codexConfigPath, "utf8");
+
+  assert.doesNotMatch(configA, /murph-test-a/u);
+  assert.doesNotMatch(configB, /murph-test-b/u);
+  assert.match(configA, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
+  assert.match(configB, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
 });
 
 async function createTemporaryDirectory(): Promise<string> {
