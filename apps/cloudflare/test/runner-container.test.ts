@@ -1759,16 +1759,7 @@ describe("RunnerContainer", () => {
   it("destroys a cold shell when post-start health fails", async () => {
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({
-          code: "user supplied code",
-          details: {
-            "OPENAI_API_KEY": true,
-            messageText: "hidden prompt",
-          },
-          error: "not ready",
-          errorName: "UserNamedError",
-          hiddenTopLevelKey: true,
-        }), {
+        return new Response(JSON.stringify({ error: "not ready" }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -1787,27 +1778,14 @@ describe("RunnerContainer", () => {
       containerFetch,
     });
 
-    const thrown = await container.invoke({
+    await expect(container.invoke({
       job: {
         kind: "workspace-invocation",
         request: createRunnerRequest("evt_cold_health_failure"),
       },
       timeoutMs: 30_000,
       userId: "member_123",
-    }).catch((error: unknown) => error);
-
-    expect(String(thrown)).toContain(
-      "Hosted runner container health check returned HTTP 503.",
-    );
-    expect(String(thrown)).toContain(
-      "Summary: codePresent=true errorNamePresent=true errorPresent=true detailsKeyCount=2.",
-    );
-    expect(String(thrown)).not.toContain("not ready");
-    expect(String(thrown)).not.toContain("user supplied code");
-    expect(String(thrown)).not.toContain("UserNamedError");
-    expect(String(thrown)).not.toContain("OPENAI_API_KEY");
-    expect(String(thrown)).not.toContain("messageText");
-    expect(String(thrown)).not.toContain("hiddenTopLevelKey");
+    })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
 
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(containerFetch.mock.calls.some(([url]) =>

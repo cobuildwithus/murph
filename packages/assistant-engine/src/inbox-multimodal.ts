@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -12,10 +12,7 @@ import {
   type InboxModelInputMode,
 } from './inbox-model-contracts.js'
 import {
-  MAX_NATIVE_ROUTING_IMAGE_BYTES,
-  MAX_NATIVE_ROUTING_IMAGE_TOTAL_BYTES,
   getRoutingImageEligibility,
-  renderNativeRoutingImageSizeBucket,
   type RoutingImageEligibility,
 } from './inbox-routing-vision.js'
 import {
@@ -61,21 +58,13 @@ export async function buildInboxModelAttachmentBundle(input: {
     input.attachment.storedPath ?? null,
     input.captureId,
   )
-  const allowedDerivedPrefixes = buildAllowedDerivedPrefixes(
-    input.captureId,
-    input.attachment,
-  )
   const inlineDerivedPath = normalizeAnchoredVaultRelativePath(
     input.attachment.derivedPath ?? null,
-    allowedDerivedPrefixes,
+    buildAllowedDerivedPrefixes(input.captureId, input.attachment),
   )
   const routingImage = getRoutingImageEligibility({
     ...input.attachment,
     storedPath: storedAttachmentPath,
-  })
-  const shouldRedactImageReference = shouldRedactNativeImageReference({
-    kind: input.attachment.kind,
-    routingImage,
   })
   const evidenceSources = [
     ...buildInlineTextSources({
@@ -89,26 +78,17 @@ export async function buildInboxModelAttachmentBundle(input: {
       vaultRoot: input.vaultRoot,
     })),
   ]
-  const modelEvidenceSources = shouldRedactImageReference
-    ? redactModelEvidenceSourcePaths(evidenceSources)
-    : evidenceSources
   const fragments = [
     buildMetadataFragment(input.attachment, routingImage, storedAttachmentPath),
     ...projectAttachmentEvidenceForModel({
       attachment: {
-        byteSize: shouldRedactImageReference
-          ? null
-          : input.attachment.byteSize ?? null,
+        byteSize: input.attachment.byteSize ?? null,
         derivedPath: inlineDerivedPath,
-        fileName: shouldRedactImageReference
-          ? null
-          : input.attachment.fileName ?? null,
+        fileName: input.attachment.fileName ?? null,
         mime: input.attachment.mime ?? null,
-        storedPath: shouldRedactImageReference
-          ? null
-          : storedAttachmentPath,
+        storedPath: storedAttachmentPath,
       },
-      sources: modelEvidenceSources,
+      sources: evidenceSources,
     }),
   ]
   const combinedText = fragments
@@ -241,68 +221,37 @@ function buildMetadataFragment(
   routingImage: RoutingImageEligibility,
   storedAttachmentPath: string | null,
 ) {
-  const shouldRedactImageReference = shouldRedactNativeImageReference({
-    kind: attachment.kind,
-    routingImage,
-  })
   const metadataLines = [
-    shouldRedactImageReference
-      ? null
-      : `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
+    `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
     `ordinal: ${attachment.ordinal}`,
     `kind: ${attachment.kind}`,
     `mime: ${attachment.mime ?? 'unknown'}`,
-    shouldRedactImageReference
-      ? null
-      : `fileName: ${attachment.fileName ?? 'unknown'}`,
-    shouldRedactImageReference
-      ? `byteSizeBucket: ${renderNativeRoutingImageSizeBucket(attachment.byteSize ?? null)}`
-      : `byteSize: ${attachment.byteSize ?? 'unknown'}`,
-    shouldRedactImageReference
-      ? null
-      : `storedPath: ${storedAttachmentPath ?? 'missing'}`,
+    `fileName: ${attachment.fileName ?? 'unknown'}`,
+    `byteSize: ${attachment.byteSize ?? 'unknown'}`,
+    `storedPath: ${storedAttachmentPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
           'automaticImageCodeScan: if inbox parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
         ]
       : []),
-    shouldRedactImageReference
-      ? 'nativeImageEvidence: omitted_non_addressable'
-      : null,
     `routingImageEligible: ${String(routingImage.eligible)}`,
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
     `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
-  ].filter((line): line is string => line !== null)
+  ]
   const text = metadataLines.join('\n')
   return {
     kind: 'attachment_metadata' as const,
     label: `attachment-${attachment.ordinal}-metadata`,
-    path: shouldRedactImageReference ? null : storedAttachmentPath,
+    path: storedAttachmentPath,
     text,
     truncated: false,
   }
 }
 
-function shouldRedactNativeImageReference(input: {
-  kind: InboxShowResult['capture']['attachments'][number]['kind']
-  routingImage: RoutingImageEligibility
-}): boolean {
-  return input.kind === 'image' && input.routingImage.eligible
-}
-
-function redactModelEvidenceSourcePaths(
-  sources: readonly ModelEvidenceSource[],
-): ModelEvidenceSource[] {
-  return sources.map((source) => ({
-    ...source,
-    path: null,
-  }))
-}
-
 function buildInlineTextSources(input: {
-  attachment: InboxShowResult['capture']['attachments'][number]
+  attachment: InboxShowResult['capture']['attachments'][number],
   derivedPath: string | null
   storedPath: string | null
 }): ModelEvidenceSource[] {
@@ -417,7 +366,6 @@ async function readPreparedRoutingEvidence(input: {
 }> {
   const evidence: PreparedRoutingEvidence[] = []
   const errors: string[] = []
-  let totalImageBytes = 0
 
   for (const source of input.attachmentSources) {
     const { attachment } = source
@@ -439,21 +387,7 @@ async function readPreparedRoutingEvidence(input: {
         storedPath,
         'file path',
       )
-      const fileStats = await stat(absolutePath)
-      if (!fileStats.isFile()) {
-        throw new TypeError('attachment image path is not a file')
-      }
-      if (
-        fileStats.size > MAX_NATIVE_ROUTING_IMAGE_BYTES ||
-        totalImageBytes + fileStats.size > MAX_NATIVE_ROUTING_IMAGE_TOTAL_BYTES
-      ) {
-        throw new RangeError('attachment image exceeds native image input budget')
-      }
       const bytes = await readFile(absolutePath)
-      if (bytes.byteLength > MAX_NATIVE_ROUTING_IMAGE_BYTES) {
-        throw new RangeError('attachment image exceeds native image input budget')
-      }
-      totalImageBytes += bytes.byteLength
 
       evidence.push({
         kind: 'image',

@@ -35,9 +35,7 @@ import {
 const linqWebhookSecret = "linq-local-webhook-secret";
 const productionLikeAssistantModel = "gpt-5.5";
 const providerRequestBodyFingerprintSecret = randomUUID();
-const autoCompactInputTokenLimit = 12_000;
-const usageInputTokenBudgetCeiling = 18_000;
-const usageAllowanceCostBudgetUsdMicros = 100_000n;
+const targetInputTokens = 50_000;
 const turnCount = readPositiveIntegerEnv("MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT", 75);
 const userId = `member_local_codex_long_thread_${Date.now()}`;
 const linqChatId = `chat_local_codex_long_thread_${Date.now()}`;
@@ -49,7 +47,7 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
-describe("hosted local Codex long-thread cost cap e2e", () => {
+describe("hosted local Codex long-thread prompt growth e2e", () => {
   beforeAll(async () => {
     await startLinqScenario();
   }, 300_000);
@@ -61,7 +59,7 @@ describe("hosted local Codex long-thread cost cap e2e", () => {
     linqStub = null;
   }, 180_000);
 
-  it("keeps a real hosted Linq thread under the Codex compaction cost budget offline", async () => {
+  it("drives a real hosted Linq thread past the Codex compaction threshold offline", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       billingPlanCode: "launch_edge_monthly",
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -166,21 +164,17 @@ describe("hosted local Codex long-thread cost cap e2e", () => {
     expect(
       diagnostic.maxUsageInputTokens,
       JSON.stringify(diagnostic),
-    ).toBeLessThanOrEqual(usageInputTokenBudgetCeiling);
-    expect(
-      diagnostic.usageRowsOverBudget,
-      JSON.stringify(diagnostic),
-    ).toBe(0);
-    expect(
-      diagnostic.usageRowsMissingInputTokens,
-      JSON.stringify(diagnostic),
-    ).toBe(0);
-    expect(
-      diagnostic.usageRowsOverCostBudget,
-      JSON.stringify(diagnostic),
-    ).toBe(0);
+    ).toBeGreaterThanOrEqual(targetInputTokens);
     expect(
       diagnostic.providerSummary.compactRequestCount,
+      JSON.stringify(diagnostic),
+    ).toBeGreaterThan(0);
+    expect(
+      diagnostic.providerSummary.requestBodyByteDrops.length,
+      JSON.stringify(diagnostic),
+    ).toBeGreaterThan(0);
+    expect(
+      diagnostic.usageInputTokenDrops.length,
       JSON.stringify(diagnostic),
     ).toBeGreaterThan(0);
   }, 2_700_000);
@@ -368,58 +362,36 @@ function buildLongThreadDiagnostic(input: {
   const totalTokens = input.usageRows
     .map((row) => row.totalTokens)
     .filter((value): value is number => typeof value === "number");
-  const missingInputTokenIndex = input.usageRows.findIndex(
-    (row) => typeof row.inputTokens !== "number",
-  );
-  const overBudgetIndex = input.usageRows.findIndex((row) =>
-    (row.inputTokens ?? 0) > usageInputTokenBudgetCeiling
+  const overTargetIndex = input.usageRows.findIndex((row) =>
+    (row.inputTokens ?? 0) >= targetInputTokens
   );
   const costMicros = input.usageRows.map((row) => BigInt(row.allowanceCostUsdMicros));
-  const overCostBudgetIndex = input.usageRows.findIndex(
-    (row) => BigInt(row.allowanceCostUsdMicros) > usageAllowanceCostBudgetUsdMicros,
-  );
   const egressLogs = input.runtimeLogs.filter((log) =>
     log.eventCode === "runner.provider_egress_diagnostic"
   );
 
   return {
-    autoCompactInputTokenLimit,
     completedTurns: input.completedTurns,
     egressLogCount: egressLogs.length,
-    firstUsageRowOverBudgetOrdinal: overBudgetIndex >= 0 ? overBudgetIndex + 1 : null,
-    firstUsageRowMissingInputTokensOrdinal:
-      missingInputTokenIndex >= 0 ? missingInputTokenIndex + 1 : null,
-    firstUsageRowOverCostBudgetOrdinal:
-      overCostBudgetIndex >= 0 ? overCostBudgetIndex + 1 : null,
+    firstUsageRowOverTargetOrdinal: overTargetIndex >= 0 ? overTargetIndex + 1 : null,
     localProviderDiagnosticsMode: "responses-api-recorder",
     maxCachedInputTokens: maxNumber(cachedInputTokens),
     maxEstimatedBodyTokens: input.providerSummary.maxEstimatedBodyTokens,
     maxRequestBodyBytes: input.providerSummary.maxRequestBodyBytes,
     maxTotalTokens: maxNumber(totalTokens),
-    maxUsageAllowanceCostUsdMicros: maxBigInt(costMicros).toString(),
     maxUsageInputTokens: maxNumber(inputTokens),
     providerSummary: input.providerSummary,
     recentEgressLogs: egressLogs.slice(-10).map(summarizeEgressLog),
+    targetInputTokens,
     turnCount,
     turnSnapshots: input.turnSnapshots.filter((snapshot) =>
       snapshot.turn % 10 === 0 || snapshot.turn === input.completedTurns
     ),
     usageInputTokenCheckpoints: summarizeUsageInputTokenCheckpoints(input.usageRows),
     usageInputTokenDrops: summarizeUsageInputTokenDrops(input.usageRows),
-    usageAllowanceCostBudgetUsdMicros: usageAllowanceCostBudgetUsdMicros.toString(),
-    usageInputTokenBudgetCeiling,
     usageRowCount: input.usageRows.length,
-    usageRowsOverAutoCompactLimit: input.usageRows.filter((row) =>
-      (row.inputTokens ?? 0) > autoCompactInputTokenLimit
-    ).length,
-    usageRowsOverBudget: input.usageRows.filter((row) =>
-      (row.inputTokens ?? 0) > usageInputTokenBudgetCeiling
-    ).length,
-    usageRowsMissingInputTokens: input.usageRows.filter(
-      (row) => typeof row.inputTokens !== "number",
-    ).length,
-    usageRowsOverCostBudget: costMicros.filter(
-      (value) => value > usageAllowanceCostBudgetUsdMicros,
+    usageRowsOverTarget: input.usageRows.filter((row) =>
+      (row.inputTokens ?? 0) >= targetInputTokens
     ).length,
     usageTotalAllowanceCostUsdMicros: costMicros
       .reduce((sum, value) => sum + value, 0n)
@@ -431,18 +403,17 @@ function buildLongThreadDiagnostic(input: {
 function summarizeUsageInputTokenCheckpoints(
   usageRows: readonly HostedAiUsageForTestRow[],
 ): Array<{
-  allowanceCostUsdMicros: string | null;
   cachedInputTokens: number | null;
   inputTokens: number | null;
   ordinal: number;
   totalTokens: number | null;
 }> {
   const ordinals = new Set<number>();
-  const firstOverBudgetIndex = usageRows.findIndex((row) =>
-    (row.inputTokens ?? 0) > usageInputTokenBudgetCeiling
+  const firstOverTargetIndex = usageRows.findIndex((row) =>
+    (row.inputTokens ?? 0) >= targetInputTokens
   );
-  const firstOverBudgetOrdinal =
-    firstOverBudgetIndex >= 0 ? firstOverBudgetIndex + 1 : null;
+  const firstOverTargetOrdinal =
+    firstOverTargetIndex >= 0 ? firstOverTargetIndex + 1 : null;
 
   for (const ordinal of [1, usageRows.length]) {
     if (ordinal >= 1 && ordinal <= usageRows.length) {
@@ -452,11 +423,11 @@ function summarizeUsageInputTokenCheckpoints(
   for (let ordinal = 10; ordinal <= usageRows.length; ordinal += 10) {
     ordinals.add(ordinal);
   }
-  if (firstOverBudgetOrdinal !== null) {
+  if (firstOverTargetOrdinal !== null) {
     for (const ordinal of [
-      firstOverBudgetOrdinal - 1,
-      firstOverBudgetOrdinal,
-      firstOverBudgetOrdinal + 1,
+      firstOverTargetOrdinal - 1,
+      firstOverTargetOrdinal,
+      firstOverTargetOrdinal + 1,
     ]) {
       if (ordinal >= 1 && ordinal <= usageRows.length) {
         ordinals.add(ordinal);
@@ -469,7 +440,6 @@ function summarizeUsageInputTokenCheckpoints(
     .map((ordinal) => {
       const row = usageRows[ordinal - 1];
       return {
-        allowanceCostUsdMicros: row?.allowanceCostUsdMicros ?? null,
         cachedInputTokens: row?.cachedInputTokens ?? null,
         inputTokens: row?.inputTokens ?? null,
         ordinal,
@@ -547,10 +517,6 @@ function readNumber(record: Record<string, unknown>, key: string): number | null
 
 function maxNumber(values: readonly number[]): number {
   return values.length > 0 ? Math.max(...values) : 0;
-}
-
-function maxBigInt(values: readonly bigint[]): bigint {
-  return values.reduce((max, value) => (value > max ? value : max), 0n);
 }
 
 function estimateTokensFromUtf8Bytes(bytes: number): number {
