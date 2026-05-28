@@ -189,13 +189,19 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        turnProgress: {
-          async send() {},
-        },
+        modelProgressUpdatesEnabled: true,
       }),
     ).toMatchObject({
       dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
     })
+    expect(
+      buildCodexThreadStartParams({
+        ...baseInput,
+        progressDelivery: {
+          async send() {},
+        },
+      }),
+    ).not.toHaveProperty('dynamicTools')
 
     expect(
       buildCodexThreadResumeParams({
@@ -2221,7 +2227,7 @@ describe('assistant codex runtime', () => {
 
   it('handles the Murph progress dynamic tool without changing the final response', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-tool-')
-    const turnProgress = {
+    const progressDelivery = {
       send: vi.fn(async (_text: string) => {
         void _text
       }),
@@ -2325,8 +2331,9 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        modelProgressUpdatesEnabled: true,
         prompt: 'process this blood test',
-        turnProgress,
+        progressDelivery,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -2335,10 +2342,10 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-progress-tool',
     })
 
-    expect(turnProgress.send).toHaveBeenCalledWith(
+    expect(progressDelivery.send).toHaveBeenCalledWith(
       'Blood test received - I will extract the PDF and check the relevant results.',
     )
-    expect(turnProgress.send).not.toHaveBeenCalledWith('Provider-side status text')
+    expect(progressDelivery.send).not.toHaveBeenCalledWith('Provider-side status text')
   })
 
   it('sends one current-channel progress update when Codex compacts context', async () => {
@@ -2347,7 +2354,7 @@ describe('assistant codex runtime', () => {
     const onTraceEvent = vi.fn()
     const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[2]
     vi.spyOn(Math, 'random').mockReturnValue(0.5)
-    const turnProgress = {
+    const progressDelivery = {
       send: vi.fn(async (_text: string) => {
         void _text
       }),
@@ -2451,7 +2458,7 @@ describe('assistant codex runtime', () => {
         onProgress,
         onTraceEvent,
         prompt: 'answer after compacting context',
-        turnProgress,
+        progressDelivery,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -2460,8 +2467,8 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-context-compact',
     })
 
-    expect(turnProgress.send).toHaveBeenCalledTimes(1)
-    expect(turnProgress.send).toHaveBeenCalledWith(selectedProgressText)
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(selectedProgressText)
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
     ).toBe(false)
@@ -2488,7 +2495,7 @@ describe('assistant codex runtime', () => {
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-unsupported-')
-    const turnProgress = {
+    const progressDelivery = {
       send: vi.fn(async (_text: string) => {
         void _text
       }),
@@ -2567,19 +2574,20 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        modelProgressUpdatesEnabled: true,
         prompt: 'try unsupported tool',
-        turnProgress,
+        progressDelivery,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-unsupported',
     })
-    expect(turnProgress.send).not.toHaveBeenCalled()
+    expect(progressDelivery.send).not.toHaveBeenCalled()
   })
 
   it('returns a tool failure for invalid progress arguments without sending progress', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-invalid-')
-    const turnProgress = {
+    const progressDelivery = {
       send: vi.fn(async (_text: string) => {
         void _text
       }),
@@ -2663,19 +2671,20 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        modelProgressUpdatesEnabled: true,
         prompt: 'try invalid progress tool',
-        turnProgress,
+        progressDelivery,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-invalid',
     })
-    expect(turnProgress.send).not.toHaveBeenCalled()
+    expect(progressDelivery.send).not.toHaveBeenCalled()
   })
 
   it('handles progress dynamic tool calls on resumed threads when a real sink exists', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-resume-')
-    const turnProgress = {
+    const progressDelivery = {
       send: vi.fn(async (_text: string) => {
         void _text
       }),
@@ -2760,15 +2769,16 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
+        modelProgressUpdatesEnabled: true,
         prompt: 'resume and try progress',
         resumeSessionId: 'existing-thread-without-progress-tool',
-        turnProgress,
+        progressDelivery,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-resume',
     })
-    expect(turnProgress.send).toHaveBeenCalledWith('Checking the file now.')
+    expect(progressDelivery.send).toHaveBeenCalledWith('Checking the file now.')
   })
 
   it('counts slash-form and dot-form provider actions from normalized events and skips pure image.view reads', async () => {

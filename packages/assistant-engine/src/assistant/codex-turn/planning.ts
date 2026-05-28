@@ -46,7 +46,7 @@ import type {
   AssistantActiveTurnLiveProviderSteering,
 } from '../turn-input.js'
 import type {
-  AssistantTurnProgress,
+  AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
@@ -231,7 +231,8 @@ export interface AssistantCodexTurnExecutionPlan {
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
-  turnProgress?: AssistantTurnProgress | null
+  modelProgressUpdatesEnabled: boolean
+  progressDelivery?: AssistantProgressDelivery | null
   turnId: string
 }
 
@@ -312,7 +313,8 @@ export async function buildCodexTurnExecutionPlan(input: {
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
-  turnProgress?: AssistantTurnProgress | null
+  modelProgressUpdatesEnabled?: boolean | null
+  progressDelivery?: AssistantProgressDelivery | null
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantCodexTurnExecutionPlan> {
@@ -340,7 +342,8 @@ export async function buildCodexTurnExecutionPlan(input: {
     promptTimeContext,
     route: input.route,
     sharedPlan: input.plan,
-    turnProgress: input.turnProgress ?? null,
+    modelProgressUpdatesEnabled: input.modelProgressUpdatesEnabled === true,
+    progressDelivery: input.progressDelivery ?? null,
     turnId: input.turnId,
   }
 }
@@ -363,7 +366,8 @@ export async function buildCodexTurnAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
-      turnProgress: input.executionPlan.turnProgress ?? null,
+      modelProgressUpdatesEnabled: input.executionPlan.modelProgressUpdatesEnabled,
+      progressDelivery: input.executionPlan.progressDelivery ?? null,
     }),
     session: input.session,
   }
@@ -378,7 +382,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   route: CodexThreadIdentity
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
-  turnProgress?: AssistantTurnProgress | null
+  modelProgressUpdatesEnabled?: boolean | null
+  progressDelivery?: AssistantProgressDelivery | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
   const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
@@ -561,9 +566,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     'primarySystemPromptElapsedMs',
     () => buildRouteSystemPromptResult({
       assistantCliContract: actualAssistantCliContract,
-      assistantTurnProgressAvailable:
-        input.turnProgress !== null && input.turnProgress !== undefined &&
-        resumeCodexThreadId === null,
+      assistantTurnProgressAvailable: input.modelProgressUpdatesEnabled === true,
       injectBootstrapContext: shouldPrepareBootstrapContext,
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     }),
@@ -574,8 +577,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         'freshThreadFallbackPromptElapsedMs',
         () => buildRouteSystemPromptResult({
           assistantCliContract: bootstrapAssistantCliContract,
-          assistantTurnProgressAvailable:
-            input.turnProgress !== null && input.turnProgress !== undefined,
+          assistantTurnProgressAvailable: input.modelProgressUpdatesEnabled === true,
           injectBootstrapContext: true,
           injectOnboardingGuidance: shouldInjectOnboardingGuidance,
         }),

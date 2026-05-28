@@ -77,6 +77,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
+  signal?: AbortSignal | null;
   skipDirtyPendingFetch?: boolean;
   stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
   wake: HostedRuntimeEvent;
@@ -88,7 +89,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
-  const snapshot = await client.fetchSnapshot();
+  const snapshot = input.signal
+    ? await client.fetchSnapshot({ signal: input.signal })
+    : await client.fetchSnapshot();
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(
     snapshot ? { ...snapshot, connections: [] } : null,
   );
@@ -150,6 +153,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     state.pendingDirtyAcks = await applyHostedPendingDirtyDeviceSyncState({
       deviceSyncPort: client,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      signal: input.signal ?? null,
       service: input.service,
       stagedDirtyAcks: input.stagedDirtyAcks ?? null,
       wake: input.wake,
@@ -162,6 +166,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
+  signal?: AbortSignal | null;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
@@ -214,6 +219,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
 
   await client.applyUpdates({
     occurredAt: input.wake.occurredAt,
+    ...(input.signal ? { signal: input.signal } : {}),
     updates,
   });
 }
@@ -354,12 +360,14 @@ async function applyHostedDeviceSyncWakeHint(input: {
 async function applyHostedPendingDirtyDeviceSyncState(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   hostedToLocalAccountIds: Map<string, string>;
+  signal?: AbortSignal | null;
   service: DeviceSyncService;
   stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
   wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeDirtyAck[]> {
   const pending = await input.deviceSyncPort.fetchDirtyStates({
     limit: HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+    ...(input.signal ? { signal: input.signal } : {}),
     ...(input.stagedDirtyAcks && input.stagedDirtyAcks.length > 0
       ? { stagedDirtyAcks: [...input.stagedDirtyAcks] }
       : {}),

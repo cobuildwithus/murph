@@ -1,15 +1,16 @@
 Goal (incl. success criteria):
-- Add a hosted-local Linq/iMessage E2E guard that proves the first Codex `thread/start` request exposes exactly one dynamic tool, `murph.send_progress_update`, whenever the hosted turn has a current-turn progress sink.
-- Success: the Linq delivery scenario fails if the Codex app-server shim receives no dynamic tool, more than one dynamic tool, or a different dynamic tool on `thread/start`, and the guard uses metadata-only validation without logging prompts, messages, secrets, or local paths.
+- Make model-authored progress updates a structural capability for user-facing assistant turns instead of conditional plumbing tied to final-response dispatch mode.
+- Success: hosted Linq/iMessage queue-only turns still register exactly one Codex dynamic tool, `murph.send_progress_update`, while final responses continue to use the existing queue-only outbox path.
 
 Constraints/Assumptions:
 - Keep the existing `murph.send_progress_update` dynamic tool and `AssistantTurnProgress` current-audience delivery primitive.
-- Do not broaden provider progress forwarding or add a parallel progress-delivery abstraction.
-- Keep the hosted-local check narrow, test-only, and metadata-only.
+- Do not add a model-facing final-response tool or parallel final-delivery path.
+- Keep progress best-effort, deduped, capped, and metadata-only in hosted-local assertions.
 
 Key decisions:
 - Use the existing hosted-local Codex app-server shim as the validation point because it receives the actual JSON-RPC `thread/start` params.
 - Gate validation behind a test-only expected dynamic-tools env var so unrelated hosted-local scenarios are not forced into a progress-enabled shape.
+- Register the progress dynamic tool from user-facing turn policy, not from final outbox dispatch mode or a nullable progress sink.
 
 State:
 - Active.
@@ -25,15 +26,23 @@ Done:
 - Truthful full bundle run `pnpm hosted-local e2e linq-delivery` assembled successfully but failed before any assistant provider request; hosted logs showed `assistant.input_candidates.listed` with `candidateCount: 0` and `assistant provider requests: []`, so the dynamic-tool shim was not reached.
 
 Now:
-- Completion review and handoff.
+- Refactor assistant-engine progress capability boundary and update regression tests.
 
 Next:
-- Investigate the full-bundle Linq input-candidate regression separately from the dynamic-tool shim guard if needed.
+- Run focused assistant-engine tests, hosted-local Linq E2E guard, typecheck, and scoped diff checks.
 
 Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files/ids/commands):
+- `packages/assistant-engine/src/assistant/turn-progress.ts`
+- `packages/assistant-engine/src/assistant-codex.ts`
+- `packages/assistant-engine/src/assistant-codex/app-server-requests.ts`
+- `packages/assistant-engine/src/assistant/local-service.ts`
+- `packages/assistant-engine/src/assistant/codex-turn/**`
+- `packages/assistant-engine/src/assistant/providers/**`
+- `packages/assistant-engine/test/assistant-local-service-runtime.test.ts`
+- `packages/assistant-engine/test/assistant-codex-runtime.test.ts`
 - `packages/assistant-runtime/src/hosted-runtime/codex-e2e-app-server-stub.ts`
 - `packages/assistant-runtime/src/hosted-runtime/launch-spec.ts`
 - `packages/assistant-runtime/src/hosted-runtime-contracts.ts`

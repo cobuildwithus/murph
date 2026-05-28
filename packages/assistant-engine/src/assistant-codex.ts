@@ -85,7 +85,7 @@ import type {
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
 import type {
-  AssistantTurnProgress,
+  AssistantProgressDelivery,
 } from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
@@ -129,6 +129,7 @@ export interface CodexAppServerTurnInput {
   refreshThreadInstructions?: boolean
   model?: string | null
   modelProvider?: string | null
+  modelProgressUpdatesEnabled?: boolean | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
@@ -140,7 +141,7 @@ export interface CodexAppServerTurnInput {
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
-  turnProgress?: AssistantTurnProgress | null
+  progressDelivery?: AssistantProgressDelivery | null
   workingDirectory: string
 }
 
@@ -646,12 +647,12 @@ async function runCodexAppServerTurn(
   }
 
   const notifyContextCompactionProgress = (text: string) => {
-    if (!input.turnProgress || contextCompactionProgressNotified) {
+    if (!input.progressDelivery || contextCompactionProgressNotified) {
       return
     }
 
     contextCompactionProgressNotified = true
-    void input.turnProgress.send(text).catch(() => undefined)
+    void input.progressDelivery.send(text).catch(() => undefined)
   }
 
   const handleParsedMessage = (message: CodexRpcMessage) => {
@@ -677,7 +678,7 @@ async function runCodexAppServerTurn(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       const dynamicToolRequest = readMurphDynamicToolRequest(message)
-      if (!dynamicToolRequest || !input.turnProgress) {
+      if (!dynamicToolRequest) {
         denyUnsupportedCodexServerRequest({
           message,
           requestId,
@@ -715,7 +716,26 @@ async function runCodexAppServerTurn(
         return
       }
 
-      void input.turnProgress.send(dynamicToolRequest.text)
+      if (
+        input.modelProgressUpdatesEnabled !== true ||
+        !input.progressDelivery
+      ) {
+        void tryWriteRpcMessage({
+          id: requestId,
+          result: {
+            success: false,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: 'progress updates are not available for this turn',
+              },
+            ],
+          },
+        })
+        return
+      }
+
+      void input.progressDelivery.send(dynamicToolRequest.text)
         .then(() => {
           void tryWriteRpcMessage({
             id: requestId,
@@ -782,10 +802,10 @@ async function runCodexAppServerTurn(
       })
     }
 
-    const turnProgressText =
+    const progressDeliveryText =
       extractCodexCurrentChannelProgressTextFromNormalized(normalizedEvent)
-    if (turnProgressText) {
-      notifyContextCompactionProgress(turnProgressText)
+    if (progressDeliveryText) {
+      notifyContextCompactionProgress(progressDeliveryText)
     }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)

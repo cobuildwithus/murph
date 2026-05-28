@@ -77,7 +77,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   runHostedAssistantAutomation,
-  runHostedAssistantRuntimeTimerLane,
+  runHostedAssistantAutomationLane,
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
@@ -115,7 +115,7 @@ type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
 >[0];
-type HostedTimerRuntime = Parameters<typeof runHostedAssistantRuntimeTimerLane>[0]["runtime"];
+type HostedTimerRuntime = Parameters<typeof runHostedAssistantAutomationLane>[0]["runtime"];
 
 const DEVICE_SYNC_CONFIG = {
   providerConfigs: {
@@ -1039,6 +1039,51 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("reschedules idle device sync when its abort signal fires during control-plane sync", async () => {
+    await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () => {
+      const controller = new AbortController();
+      const close = vi.fn();
+      const service = {
+        close,
+        drainWorker: vi.fn(async () => 0),
+        getNextWakeAt: () => null,
+        listJobFailureDiagnostics: vi.fn(() => []),
+        runSchedulerOnce: vi.fn(async () => undefined),
+      };
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+      mocks.syncHostedDeviceSyncControlPlaneState.mockImplementationOnce(async () => {
+        controller.abort(new DOMException("foreground input arrived", "AbortError"));
+        throw controller.signal.reason;
+      });
+
+      const result = await runHostedDeviceSyncPass(
+        {
+          eventId: "evt_idle_preempt",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        {
+          signal: controller.signal,
+        },
+      );
+
+      expect(result).toEqual({
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
+        postCheckpointRecord: null,
+        processedJobs: 0,
+        skipped: true,
+      });
+      expect(service.runSchedulerOnce).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("hydrates Junction provider config from hosted runtime platform env", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -1529,6 +1574,80 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("carries staged dirty acks when foreground input arrives after scheduler work", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      runSchedulerOnce,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map(),
+      localToHostedAccountIds: new Map(),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [{
+        connectionId: "dsc_yield_after_scheduler",
+        nextWakeAt: "2026-04-08T00:06:00.000Z",
+        processedDirtyPayloadIds: ["dsp_scheduler"],
+        processedRevision: "42",
+      }],
+      snapshot: {
+        connections: [],
+        schema: "murph.hosted-device-sync-runtime-snapshot.v1",
+      },
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:00:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_yield_after_scheduler",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        { shouldYield },
+      ),
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      postCheckpointRecord: {
+        connectionId: "dsc_yield_after_scheduler",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: "2026-04-08T00:06:00.000Z",
+        processedDirtyPayloadIds: ["dsp_scheduler"],
+        processedRevision: "42",
+      },
+      processedJobs: 0,
+      skipped: true,
+      stagedDirtyAcks: [{
+        connectionId: "dsc_yield_after_scheduler",
+        nextWakeAt: "2026-04-08T00:06:00.000Z",
+        processedDirtyPayloadIds: ["dsp_scheduler"],
+        processedRevision: "42",
+      }],
+    });
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("yields device-sync worker draining between jobs when requested", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -1919,7 +2038,7 @@ describe("runHostedDeviceSyncPass", () => {
   });
 });
 
-describe("runHostedAssistantRuntimeTimerLane", () => {
+describe("runHostedAssistantAutomationLane", () => {
   it("runs assistant automation without sweeping parser or device-sync work", async () => {
     const latencyTraceRecord = vi.fn(async () => ({
       matchedCount: 1,
@@ -1950,7 +2069,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       };
     });
 
-    const result = await runHostedAssistantRuntimeTimerLane({
+    const result = await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_assistant_lane",
         kind: "runtime.timer",
@@ -1978,10 +2097,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     });
 
     expect(result).toMatchObject({
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
       nextWakeAt: "2026-04-08T01:00:00.000Z",
-      parserProcessed: 0,
       redactedLogEntries: [
         expect.objectContaining({
           message: "Hosted assistant automation pass starting.",
@@ -2002,6 +2118,9 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         }),
       ],
     });
+    expect(result).not.toHaveProperty("deviceSyncProcessed");
+    expect(result).not.toHaveProperty("deviceSyncSkipped");
+    expect(result).not.toHaveProperty("parserProcessed");
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
@@ -2069,7 +2188,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       progressed: false,
     });
 
-    await runHostedAssistantRuntimeTimerLane({
+    await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_assistant_latency_retry",
         kind: "runtime.timer",
@@ -2131,14 +2250,14 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     }
   });
 
-  it("keeps device-sync out of the assistant timer lane even when configured", async () => {
+  it("keeps device-sync out of the assistant automation lane even when configured", async () => {
     const nextWakeAt = "2026-04-08T00:30:00.000Z";
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       nextWakeAt,
       progressed: false,
     });
 
-    const result = await runHostedAssistantRuntimeTimerLane({
+    const result = await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_tied_device_sync_wake",
         kind: "runtime.timer",
@@ -2160,11 +2279,9 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    expect(result).toMatchObject({
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt,
-    });
+    expect(result).toMatchObject({ nextWakeAt });
+    expect(result).not.toHaveProperty("deviceSyncProcessed");
+    expect(result).not.toHaveProperty("deviceSyncSkipped");
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
@@ -2174,7 +2291,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       progressed: true,
     });
 
-    await runHostedAssistantRuntimeTimerLane({
+    await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_foreground_replay_window",
         kind: "runtime.timer",
@@ -2218,7 +2335,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         progressed: true,
       });
 
-      const result = await runHostedAssistantRuntimeTimerLane({
+      const result = await runHostedAssistantAutomationLane({
         wake: {
           eventId: "evt_assistant_progress",
           kind: "runtime.timer",
@@ -2239,10 +2356,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       });
 
       expect(result).toMatchObject({
-        deviceSyncProcessed: 0,
-        deviceSyncSkipped: true,
         nextWakeAt: null,
-        parserProcessed: 0,
         redactedLogEntries: [
           expect.objectContaining({
             message: "Hosted assistant automation pass starting.",
@@ -2252,6 +2366,9 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
           }),
         ],
       });
+      expect(result).not.toHaveProperty("deviceSyncProcessed");
+      expect(result).not.toHaveProperty("deviceSyncSkipped");
+      expect(result).not.toHaveProperty("parserProcessed");
       expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -2283,7 +2400,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       });
 
-      const result = await runHostedAssistantRuntimeTimerLane({
+      const result = await runHostedAssistantAutomationLane({
         wake: {
           eventId: "evt_assistant_backlog",
           kind: "runtime.timer",
@@ -2310,7 +2427,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
   });
 
   it("skips assistant automation without warning when the caller explicitly disables it", async () => {
-    const result = await runHostedAssistantRuntimeTimerLane({
+    const result = await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_skip_requested",
         kind: "runtime.timer",
@@ -2331,25 +2448,17 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    assert.deepEqual({
-      deviceSyncProcessed: result.deviceSyncProcessed,
-      deviceSyncSkipped: result.deviceSyncSkipped,
-      nextWakeAt: result.nextWakeAt,
-      parserProcessed: result.parserProcessed,
-      postCheckpointRecord: result.postCheckpointRecord,
-    }, {
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-    });
+    assert.deepEqual({ nextWakeAt: result.nextWakeAt }, { nextWakeAt: null });
+    expect(result).not.toHaveProperty("deviceSyncProcessed");
+    expect(result).not.toHaveProperty("deviceSyncSkipped");
+    expect(result).not.toHaveProperty("parserProcessed");
+    expect(result).not.toHaveProperty("postCheckpointRecord");
     assert.equal(typeof result.totalElapsedMs, "number");
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
-  it("always skips device-sync in the assistant timer lane", async () => {
+  it("does not expose device-sync metrics from the assistant automation lane", async () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 1),
@@ -2358,7 +2467,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     };
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
 
-    const result = await runHostedAssistantRuntimeTimerLane({
+    const result = await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_skip_device_sync",
         kind: "runtime.timer",
@@ -2380,10 +2489,8 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    expect(result).toMatchObject({
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-    });
+    expect(result).not.toHaveProperty("deviceSyncProcessed");
+    expect(result).not.toHaveProperty("deviceSyncSkipped");
     expect(service.runSchedulerOnce).not.toHaveBeenCalled();
     expect(service.drainWorker).not.toHaveBeenCalled();
   });
@@ -2395,7 +2502,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       assistantProvider: null,
     });
 
-    const result = await runHostedAssistantRuntimeTimerLane({
+    const result = await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_skip_automation",
         kind: "runtime.timer",
@@ -2416,10 +2523,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     });
 
     expect(result).toMatchObject({
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
       nextWakeAt: null,
-      parserProcessed: 0,
       redactedLogEntries: [
         expect.objectContaining({
           message:
@@ -2449,7 +2553,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       assistantProvider: null,
     });
 
-    await runHostedAssistantRuntimeTimerLane({
+    await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_invalid_automation",
         kind: "runtime.timer",
@@ -2490,7 +2594,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       assistantProvider: "codex-cli",
     });
 
-    await runHostedAssistantRuntimeTimerLane({
+    await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_unready_automation",
         kind: "runtime.timer",

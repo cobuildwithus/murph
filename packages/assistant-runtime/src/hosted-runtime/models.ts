@@ -189,6 +189,16 @@ export interface HostedMaintenanceMetrics {
   totalElapsedMs?: number | null;
 }
 
+export type HostedAssistantAutomationLaneMetrics = Omit<
+  HostedMaintenanceMetrics,
+  | "deviceSyncElapsedMs"
+  | "deviceSyncProcessed"
+  | "deviceSyncSkipped"
+  | "parserProcessed"
+  | "postCheckpointRecord"
+  | "stagedDirtyAcks"
+>;
+
 export interface HostedWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>;
   missingArtifactPaths: ReadonlySet<string>;

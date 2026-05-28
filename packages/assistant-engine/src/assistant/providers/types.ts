@@ -19,7 +19,7 @@ import type {
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
-import type { AssistantTurnProgress } from '../turn-progress.js'
+import type { AssistantProgressDelivery } from '../turn-progress.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -69,6 +69,7 @@ export interface AssistantProviderTurnInput {
   env?: NodeJS.ProcessEnv
   model?: string | null
   modelProvider?: string | null
+  modelProgressUpdatesEnabled?: boolean | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -86,7 +87,7 @@ export interface AssistantProviderTurnInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  turnProgress?: AssistantTurnProgress | null
+  progressDelivery?: AssistantProgressDelivery | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
@@ -126,7 +127,8 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  turnProgress?: AssistantTurnProgress | null
+  modelProgressUpdatesEnabled?: boolean | null
+  progressDelivery?: AssistantProgressDelivery | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

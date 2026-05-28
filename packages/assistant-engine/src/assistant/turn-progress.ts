@@ -17,19 +17,30 @@ import type {
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
 
-export interface AssistantTurnProgress {
+export interface AssistantProgressDelivery {
   send(text: string): Promise<void>
 }
 
 type DeliverAssistantProgressUpdate = typeof deliverAssistantProgressUpdate
+type AssistantProgressDeliveryContext = {
+  messageInput: AssistantMessageInput
+  session: AssistantSession
+}
 
-export function createHostedAssistantTurnProgress(input: {
+export function shouldEnableAssistantModelProgressUpdates(
+  input: Pick<AssistantMessageInput, 'deliverResponse'>,
+): boolean {
+  return input.deliverResponse === true
+}
+
+export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
+  getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
-}): AssistantTurnProgress {
+}): AssistantProgressDelivery {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
   const sentTexts = new Set<string>()
   let sentCount = 0
@@ -49,10 +60,14 @@ export function createHostedAssistantTurnProgress(input: {
       sentTexts.add(text)
 
       try {
-        await deliver({
-          input: input.messageInput,
-          ordinal,
+        const deliveryContext = input.getDeliveryContext?.() ?? {
+          messageInput: input.messageInput,
           session: input.session,
+        }
+        await deliver({
+          input: deliveryContext.messageInput,
+          ordinal,
+          session: deliveryContext.session,
           sharedPlan: input.sharedPlan,
           text,
           turnId: input.turnId,
