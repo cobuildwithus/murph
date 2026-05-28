@@ -34,7 +34,7 @@ Speed up hosted device-sync dirty work handoff without adding a second queue, le
 ## Outcome
 
 - Runtime collects multiple exact dirty acks per bounded pending fetch.
-- System mailbox persists split singular dirty-processed recording items for rollback-compatible post-checkpoint retry, while still accepting existing batch records.
+- System mailbox persists a bounded dirty-processed batch record for rollback-compatible post-checkpoint retry, while still accepting existing singular records.
 - Dirty pending hydration is capped per connection and across a response.
 - Dirty ack no longer hydrates/decrypts remaining payload rows after delete.
 - Oversized direct webhook JSON is omitted from inline payloads without changing durable payload-row storage class.
