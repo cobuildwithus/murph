@@ -303,6 +303,7 @@ import {
 } from "@/src/lib/device-sync/control-plane";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  requestHostedDeviceSyncScheduledReconcileRecovery,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
@@ -726,6 +727,40 @@ describe("appendHostedDeviceSyncWake", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("signals direct scheduled recovery before recording the retry marker", async () => {
+    await expect(requestHostedDeviceSyncScheduledReconcileRecovery({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      userId: "user-123",
+    })).resolves.toEqual({
+      recoveryRequested: true,
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventType: null,
+      kind: "reconcile_due",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      reason: null,
+      resourceCategory: null,
+      revokeWarning: null,
+      traceId: null,
+      userId: "user-123",
+    });
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "user-123",
+    });
+    expect(mocks.signalHostedDeviceSyncBackgroundMaintenanceRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createSignal.mock.invocationCallOrder[0],
+    );
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
   it("uses the dedicated device-sync wake path for disconnect events", async () => {

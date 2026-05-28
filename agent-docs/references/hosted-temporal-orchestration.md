@@ -152,16 +152,18 @@ Temporal may remember that demand exists. It must not become the place where
 Murph decides what demand means.
 
 Manual, browser-vault refresh, and device-sync recovery demand is durable
-web-owned demand. Web appends a system-mailbox control row
-(`runtime.manual-requested`, `runtime.browser-vault-refresh-requested`, or
-`runtime.device-sync-recovery-requested`) before signaling Temporal with the
-resulting mailbox pointer. Historical `runtime.mailbox-lag-observed` rows remain
-valid runtime-control rows for drain compatibility, but web no longer produces
-them from a Vercel lag-recovery cron. The legacy kind-only signals remain
-deploy-skew wake hints only; they carry no event id, source label, device
-reason, or dedupe key. Future command surfaces that need
-accepted/duplicate/rejected response semantics should use a durable web command
-ledger or Temporal Updates instead of expanding wake signals.
+web-owned demand. Manual and browser-vault refresh append system-mailbox control
+rows before signaling Temporal with the resulting mailbox pointer. Device-sync
+recovery is dirty-state-owned instead: dirty webhooks and recovery sweeps request
+the pointer-only `device_sync_recovery_requested` signal after the owning dirty
+or due-reconcile marker is durable, without appending foreground mailbox work.
+Historical `runtime.mailbox-lag-observed` rows remain valid runtime-control rows
+for drain compatibility, but web no longer produces them from a Vercel
+lag-recovery cron. The legacy kind-only signals remain deploy-skew wake hints
+only; they carry no event id, source label, device reason, or dedupe key. Future
+command surfaces that need accepted/duplicate/rejected response semantics should
+use a durable web command ledger or Temporal Updates instead of expanding wake
+signals.
 
 Workflow implementations must version-gate flag clearing around awaited demand
 and execution calls. If a signal arrives while an Activity is running, the loop

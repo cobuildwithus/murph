@@ -6,21 +6,21 @@ import {
   requestHostedDeviceSyncDirtyRecovery,
 } from "./wake-service";
 
-const DEFAULT_WAKE_LIMIT = 25;
+const DEFAULT_RECOVERY_LIMIT = 25;
 const DEFAULT_STALE_AFTER_MS = 30_000;
-const MAX_WAKE_LIMIT = 250;
-const WAKE_CONCURRENCY = 5;
+const MAX_RECOVERY_LIMIT = 250;
+const RECOVERY_CONCURRENCY = 5;
 
 export interface HostedDeviceSyncDirtySweeperResult {
   dirtyConnections: number;
-  skippedDirtyConnections: number;
+  dirtyUsers: number;
+  recoveryAttempted: number;
+  recoveryFailed: number;
+  recoveryLimit: number;
+  recoveryNotRequested: number;
+  recoveryRequested: number;
+  skippedDirtyUsers: number;
   staleAfterMs: number;
-  wakeAppended: number;
-  wakeAttempted: number;
-  wakeDuplicate: number;
-  wakeFailed: number;
-  wakeLimit: number;
-  wakeNotAppended: number;
 }
 
 type HostedDeviceSyncDirtySweeperLogger = Pick<Console, "info" | "warn">;
@@ -32,118 +32,108 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
   nudgeLimit?: number;
   requestDirtyRecovery?: HostedDeviceSyncDirtyRecoveryRequest;
   staleAfterMs?: number;
-  store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDirtyConnectionsForSweep">;
+  store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDirtyUsersForSweep">;
 } = {}): Promise<HostedDeviceSyncDirtySweeperResult> {
   const logger = input.logger ?? console;
   const now = input.now ?? new Date();
-  const wakeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_WAKE_LIMIT, MAX_WAKE_LIMIT);
+  const recoveryLimit = normalizeLimit(input.nudgeLimit, DEFAULT_RECOVERY_LIMIT, MAX_RECOVERY_LIMIT);
   const staleAfterMs = normalizeStaleAfterMs(input.staleAfterMs);
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
   const requestDirtyRecovery = input.requestDirtyRecovery ?? requestHostedDeviceSyncDirtyRecovery;
-  const dirtyConnections = await store.listDirtyConnectionsForSweep({
-    limit: wakeLimit + 1,
+  const dirtyUsers = await store.listDirtyUsersForSweep({
+    limit: recoveryLimit + 1,
     staleBefore: new Date(now.getTime() - staleAfterMs),
   });
-  const selectedDirtyConnections = dirtyConnections.slice(0, wakeLimit);
+  const selectedDirtyUsers = dirtyUsers.slice(0, recoveryLimit);
 
-  logger.info("Hosted device-sync dirty sweeper scanned dirty connections.", {
-    dirtyConnections: dirtyConnections.length,
-    selectedDirtyConnections: selectedDirtyConnections.length,
+  logger.info("Hosted device-sync dirty sweeper scanned dirty users.", {
+    dirtyConnections: sumDirtyConnectionCounts(dirtyUsers),
+    dirtyUsers: dirtyUsers.length,
+    selectedDirtyUsers: selectedDirtyUsers.length,
     staleAfterMs,
-    wakeLimit,
+    recoveryLimit,
   });
 
-  let wakeAppended = 0;
-  let wakeAttempted = 0;
-  let wakeDuplicate = 0;
-  let wakeFailed = 0;
-  let wakeNotAppended = 0;
+  let recoveryAttempted = 0;
+  let recoveryFailed = 0;
+  let recoveryNotRequested = 0;
+  let recoveryRequested = 0;
 
   await runWithConcurrency(
-    selectedDirtyConnections,
-    WAKE_CONCURRENCY,
-    async (dirtyConnection) => {
-      wakeAttempted += 1;
-      const connectionFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyConnection.connectionId);
-      const userFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyConnection.userId);
-      logger.warn("Hosted device-sync dirty sweeper requesting background recovery for dirty state.", {
-        connectionFingerprint,
-        dirtyRevision: dirtyConnection.dirtyRevision.toString(),
-        latestDirtyAt: dirtyConnection.latestDirtyAt,
-        provider: dirtyConnection.provider,
+    selectedDirtyUsers,
+    RECOVERY_CONCURRENCY,
+    async (dirtyUser) => {
+      recoveryAttempted += 1;
+      const userFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyUser.userId);
+      logger.warn("Hosted device-sync dirty sweeper requesting background recovery for dirty user state.", {
+        dirtyConnectionCount: dirtyUser.dirtyConnectionCount.toString(),
+        latestDirtyAt: dirtyUser.latestDirtyAt,
         userFingerprint,
       });
-      let wake;
+      let recovery;
       try {
-        wake = await requestDirtyRecovery({
-          connectionId: dirtyConnection.connectionId,
-          dirtyRevision: dirtyConnection.dirtyRevision,
-          eventType: dirtyConnection.latestEventType,
-          occurredAt: dirtyConnection.latestDirtyAt,
-          provider: dirtyConnection.provider,
-          resourceCategory: dirtyConnection.latestResourceCategory,
-          userId: dirtyConnection.userId,
+        recovery = await requestDirtyRecovery({
+          userId: dirtyUser.userId,
         });
       } catch (error) {
-        wakeFailed += 1;
-        wakeNotAppended += 1;
+        recoveryFailed += 1;
+        recoveryNotRequested += 1;
         logger.warn("Hosted device-sync dirty sweeper background recovery request failed.", {
-          connectionFingerprint,
           errorName: error instanceof Error ? error.name : "unknown",
           userFingerprint,
         });
         return;
       }
 
-      if (wake.wakeInserted) {
-        wakeAppended += 1;
+      if (recovery.recoveryRequested) {
+        recoveryRequested += 1;
         logger.info("Hosted device-sync dirty sweeper background recovery requested.", {
-          connectionFingerprint,
           userFingerprint,
         });
         return;
       }
 
-      if (wake.wakeDuplicate) {
-        wakeDuplicate += 1;
-        logger.info("Hosted device-sync dirty sweeper background recovery was already requested.", {
-          connectionFingerprint,
-          userFingerprint,
-        });
-        return;
-      }
-
-      wakeFailed += 1;
-      wakeNotAppended += 1;
+      recoveryFailed += 1;
+      recoveryNotRequested += 1;
       logger.warn("Hosted device-sync dirty sweeper background recovery was not requested.", {
-        connectionFingerprint,
-        reason: wake.reason ?? null,
+        reason: recovery.reason ?? null,
         userFingerprint,
       });
     },
   );
 
-  const skippedDirtyConnections = Math.max(0, dirtyConnections.length - selectedDirtyConnections.length);
-  if (skippedDirtyConnections > 0) {
-    logger.warn("Hosted device-sync dirty sweeper skipped dirty connections after wake limit.", {
-      skippedDirtyConnections,
-      wakeLimit,
+  const skippedDirtyUsers = Math.max(0, dirtyUsers.length - selectedDirtyUsers.length);
+  if (skippedDirtyUsers > 0) {
+    logger.warn("Hosted device-sync dirty sweeper skipped dirty users after recovery limit.", {
+      recoveryLimit,
+      skippedDirtyUsers,
     });
   }
 
   return {
-    dirtyConnections: dirtyConnections.length,
-    skippedDirtyConnections,
+    dirtyConnections: sumDirtyConnectionCounts(dirtyUsers),
+    dirtyUsers: dirtyUsers.length,
+    recoveryAttempted,
+    recoveryFailed,
+    recoveryLimit,
+    recoveryNotRequested,
+    recoveryRequested,
+    skippedDirtyUsers,
     staleAfterMs,
-    wakeAppended,
-    wakeAttempted,
-    wakeDuplicate,
-    wakeFailed,
-    wakeLimit,
-    wakeNotAppended,
   };
+}
+
+function sumDirtyConnectionCounts(rows: Array<{ dirtyConnectionCount: bigint }>): number {
+  let total = 0n;
+  for (const row of rows) {
+    total += row.dirtyConnectionCount;
+    if (total > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+  }
+  return Number(total);
 }
 
 function normalizeLimit(value: number | null | undefined, fallback: number, max: number): number {

@@ -29,8 +29,8 @@ describe("hosted device-sync recovery sweeper", () => {
     await expect(runHostedDeviceSyncRecoverySweep({
       logger,
       runDirtySweeper: vi.fn(async () => buildDirtySweepResult({
-        wakeFailed: 1,
-        wakeNotAppended: 1,
+        recoveryFailed: 1,
+        recoveryNotRequested: 1,
       })),
       runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult()),
     })).rejects.toThrow("Hosted device-sync dirty sweeper failed to request one or more recoveries.");
@@ -38,8 +38,8 @@ describe("hosted device-sync recovery sweeper", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync recovery sweep failed.",
       expect.objectContaining({
-        dirtyWakeAppendFailed: true,
-        dueReconcileWakeAppendFailed: false,
+        dirtyRecoveryRequestFailed: true,
+        dueReconcileRecoveryRequestFailed: false,
       }),
     );
   });
@@ -53,15 +53,15 @@ describe("hosted device-sync recovery sweeper", () => {
       logger,
       runDirtySweeper: vi.fn(async () => buildDirtySweepResult()),
       runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult({
-        wakeFailed: 1,
+        recoveryFailed: 1,
       })),
     })).rejects.toThrow("Hosted device-sync due reconcile sweeper failed to request one or more recoveries.");
 
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync recovery sweep failed.",
       expect.objectContaining({
-        dirtyWakeAppendFailed: false,
-        dueReconcileWakeAppendFailed: true,
+        dirtyRecoveryRequestFailed: false,
+        dueReconcileRecoveryRequestFailed: true,
       }),
     );
   });
@@ -69,48 +69,46 @@ describe("hosted device-sync recovery sweeper", () => {
 
 function buildDirtySweepResult(overrides: Partial<{
   dirtyConnections: number;
-  skippedDirtyConnections: number;
+  dirtyUsers: number;
+  recoveryAttempted: number;
+  recoveryFailed: number;
+  recoveryLimit: number;
+  recoveryNotRequested: number;
+  recoveryRequested: number;
+  skippedDirtyUsers: number;
   staleAfterMs: number;
-  wakeAppended: number;
-  wakeAttempted: number;
-  wakeDuplicate: number;
-  wakeFailed: number;
-  wakeLimit: number;
-  wakeNotAppended: number;
 }> = {}) {
   return {
     dirtyConnections: 1,
-    skippedDirtyConnections: 0,
+    dirtyUsers: 1,
+    recoveryAttempted: 1,
+    recoveryFailed: 0,
+    recoveryLimit: 25,
+    recoveryNotRequested: 0,
+    recoveryRequested: 1,
+    skippedDirtyUsers: 0,
     staleAfterMs: 30_000,
-    wakeAppended: 1,
-    wakeAttempted: 1,
-    wakeDuplicate: 0,
-    wakeFailed: 0,
-    wakeLimit: 25,
-    wakeNotAppended: 0,
     ...overrides,
   };
 }
 
 function buildDueReconcileSweepResult(overrides: Partial<{
   dueConnections: number;
+  recoveryAttempted: number;
+  recoveryFailed: number;
+  recoveryLimit: number;
+  recoveryNotRequested: number;
+  recoveryRequested: number;
   skippedDueConnections: number;
-  wakeAppended: number;
-  wakeAttempted: number;
-  wakeDuplicate: number;
-  wakeFailed: number;
-  wakeLimit: number;
-  wakeNotAppended: number;
 }> = {}) {
   return {
     dueConnections: 1,
+    recoveryAttempted: 1,
+    recoveryFailed: 0,
+    recoveryLimit: 25,
+    recoveryNotRequested: 0,
+    recoveryRequested: 1,
     skippedDueConnections: 0,
-    wakeAppended: 1,
-    wakeAttempted: 1,
-    wakeDuplicate: 0,
-    wakeFailed: 0,
-    wakeLimit: 25,
-    wakeNotAppended: 0,
     ...overrides,
   };
 }

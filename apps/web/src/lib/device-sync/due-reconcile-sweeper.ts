@@ -1,23 +1,20 @@
-import { createHash } from "node:crypto";
-
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import { requestHostedDeviceSyncScheduledReconcileRecovery } from "./wake-service";
 
-const DEFAULT_WAKE_LIMIT = 25;
-const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
-const MAX_WAKE_LIMIT = 250;
-const WAKE_CONCURRENCY = 5;
+const DEFAULT_RECOVERY_LIMIT = 25;
+const DUE_RECONCILE_RECOVERY_BUCKET_MS = 5 * 60_000;
+const MAX_RECOVERY_LIMIT = 250;
+const RECOVERY_CONCURRENCY = 5;
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
+  recoveryAttempted: number;
+  recoveryFailed: number;
+  recoveryLimit: number;
+  recoveryNotRequested: number;
+  recoveryRequested: number;
   skippedDueConnections: number;
-  wakeAppended: number;
-  wakeAttempted: number;
-  wakeDuplicate: number;
-  wakeFailed: number;
-  wakeLimit: number;
-  wakeNotAppended: number;
 }
 
 type HostedDeviceSyncDueReconcileSweeperLogger = Pick<Console, "info" | "warn">;
@@ -35,137 +32,99 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const recoveryBucketStartedAt = new Date(
-    Math.floor(now.getTime() / DUE_RECONCILE_WAKE_BUCKET_MS) * DUE_RECONCILE_WAKE_BUCKET_MS,
+    Math.floor(now.getTime() / DUE_RECONCILE_RECOVERY_BUCKET_MS) * DUE_RECONCILE_RECOVERY_BUCKET_MS,
   );
   const recoveryBucketStartedAtIso = recoveryBucketStartedAt.toISOString();
-  const wakeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_WAKE_LIMIT, MAX_WAKE_LIMIT);
+  const recoveryLimit = normalizeLimit(input.nudgeLimit, DEFAULT_RECOVERY_LIMIT, MAX_RECOVERY_LIMIT);
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
   const requestRecovery = input.requestRecovery ?? requestHostedDeviceSyncScheduledReconcileRecovery;
   const dueConnections = await store.listDueReconcileConnectionsForSweep({
     dueAt: now,
-    limit: wakeLimit + 1,
+    limit: recoveryLimit + 1,
     recoveryBucketStartedAt,
   });
-  const selectedDueConnections = dueConnections.slice(0, wakeLimit);
+  const selectedDueConnections = dueConnections.slice(0, recoveryLimit);
 
   logger.info("Hosted device-sync due reconcile sweeper scanned due connections.", {
     dueAt: nowIso,
     dueConnections: dueConnections.length,
     recoveryBucketStartedAt: recoveryBucketStartedAtIso,
+    recoveryLimit,
     selectedDueConnections: selectedDueConnections.length,
-    wakeLimit,
   });
 
-  let wakeAppended = 0;
-  let wakeAttempted = 0;
-  let wakeDuplicate = 0;
-  let wakeFailed = 0;
-  let wakeNotAppended = 0;
+  let recoveryAttempted = 0;
+  let recoveryFailed = 0;
+  let recoveryNotRequested = 0;
+  let recoveryRequested = 0;
 
   await runWithConcurrency(
     selectedDueConnections,
-    WAKE_CONCURRENCY,
+    RECOVERY_CONCURRENCY,
     async (dueConnection) => {
-      wakeAttempted += 1;
+      recoveryAttempted += 1;
 
-      let wake;
+      let recovery;
       try {
-        wake = await requestRecovery({
+        recovery = await requestRecovery({
           connectionId: dueConnection.connectionId,
           createdAt: nowIso,
-          eventId: buildHostedDeviceSyncDueReconcileEventId({
-            ...dueConnection,
-            recoveryBucketStartedAt: recoveryBucketStartedAtIso,
-          }),
           nextReconcileAt: dueConnection.nextReconcileAt,
           provider: dueConnection.provider,
           traceId: null,
           userId: dueConnection.userId,
         });
       } catch (error) {
-        wakeFailed += 1;
-        wakeNotAppended += 1;
+        recoveryFailed += 1;
+        recoveryNotRequested += 1;
         logger.warn("Hosted device-sync due reconcile sweeper background recovery request failed.", {
           errorName: error instanceof Error ? error.name : "unknown",
         });
         return;
       }
 
-      if (wake.wakeInserted) {
-        wakeAppended += 1;
+      if (recovery.recoveryRequested) {
+        recoveryRequested += 1;
         return;
       }
 
-      if (wake.wakeDuplicate) {
-        wakeDuplicate += 1;
-        return;
-      }
-
-      wakeFailed += 1;
-      wakeNotAppended += 1;
+      recoveryFailed += 1;
+      recoveryNotRequested += 1;
       logger.warn("Hosted device-sync due reconcile sweeper background recovery was not requested.", {
-        reason: wake.reason ?? null,
+        reason: recovery.reason ?? null,
       });
     },
   );
 
   const skippedDueConnections = Math.max(0, dueConnections.length - selectedDueConnections.length);
   if (skippedDueConnections > 0) {
-    logger.warn("Hosted device-sync due reconcile sweeper skipped due connections after wake limit.", {
+    logger.warn("Hosted device-sync due reconcile sweeper skipped due connections after recovery limit.", {
+      recoveryLimit,
       skippedDueConnections,
-      wakeLimit,
     });
   }
 
   logger.info("Hosted device-sync due reconcile sweeper finished.", {
     dueConnections: dueConnections.length,
+    recoveryAttempted,
+    recoveryFailed,
+    recoveryLimit,
+    recoveryNotRequested,
+    recoveryRequested,
     skippedDueConnections,
-    wakeAppended,
-    wakeAttempted,
-    wakeDuplicate,
-    wakeFailed,
-    wakeLimit,
-    wakeNotAppended,
   });
 
   return {
     dueConnections: dueConnections.length,
+    recoveryAttempted,
+    recoveryFailed,
+    recoveryLimit,
+    recoveryNotRequested,
+    recoveryRequested,
     skippedDueConnections,
-    wakeAppended,
-    wakeAttempted,
-    wakeDuplicate,
-    wakeFailed,
-    wakeLimit,
-    wakeNotAppended,
   };
-}
-
-function buildHostedDeviceSyncDueReconcileEventId(input: {
-  connectionId: string;
-  nextReconcileAt: string;
-  provider: string;
-  recoveryBucketStartedAt: string;
-  userId: string;
-}): string {
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({
-      connectionId: input.connectionId,
-      nextReconcileAt: input.nextReconcileAt,
-      provider: input.provider,
-      recoveryBucketStartedAt: input.recoveryBucketStartedAt,
-      userId: input.userId,
-      version: 1,
-    }))
-    .digest("hex")
-    .slice(0, 32);
-
-  return [
-    "device-sync",
-    "scheduled-reconcile",
-    fingerprint,
-  ].join(":");
 }
 
 function normalizeLimit(value: number | null | undefined, fallback: number, max: number): number {

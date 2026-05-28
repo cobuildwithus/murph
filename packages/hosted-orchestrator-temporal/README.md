@@ -125,7 +125,8 @@ starts `hostedDeviceSyncReconcilerWorkflow`. The Workflow runs one
 `runHostedDeviceSyncRecoverySweep` Activity and exits. The Activity signs an
 empty JSON request to the hosted web command at
 `/api/internal/device-sync/recovery-sweep`; web reads Postgres dirty/due facts,
-appends idempotent mailbox wake pointers, and returns count-only summaries.
+coalesces dirty recovery by user, records due-reconcile recovery markers,
+requests bounded background recovery nudges, and returns count-only summaries.
 
 The Vercel dirty-sweeper cron is removed; Temporal is the only production owner
 of this recovery cadence. Do not move dirty resources, provider tokens, external
