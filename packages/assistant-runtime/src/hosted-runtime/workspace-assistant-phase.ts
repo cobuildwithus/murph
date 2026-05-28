@@ -518,10 +518,10 @@ export async function runHostedWorkspaceAssistantPhase(
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
-          : {}),
+        : {}),
         progressed: false,
         redactedStatus,
-        stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
+        ...buildStagedDirtyAcksResultPatch(assistantMetrics.stagedDirtyAcks),
       });
     }
     return mergeContinuingSystemMailboxResult({
@@ -532,7 +532,7 @@ export async function runHostedWorkspaceAssistantPhase(
         : {}),
       progressed: true,
       redactedStatus,
-      stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
+      ...buildStagedDirtyAcksResultPatch(assistantMetrics.stagedDirtyAcks),
     });
     }
 
@@ -601,7 +601,7 @@ export async function runHostedWorkspaceAssistantPhase(
         : {}),
         progressed: false,
         redactedStatus,
-        stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
+        ...buildStagedDirtyAcksResultPatch(assistantMetrics.stagedDirtyAcks),
       });
     }
 
@@ -678,7 +678,7 @@ export async function runHostedWorkspaceAssistantPhase(
         : {}),
       progressed: true,
       redactedStatus,
-      stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
+      ...buildStagedDirtyAcksResultPatch(assistantMetrics.stagedDirtyAcks),
     });
   } finally {
     typingAbortController.abort();
@@ -771,7 +771,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         : {}),
       progressed: true,
       ...(redactedStatus ? { redactedStatus } : {}),
-      stagedDirtyAcks,
+      ...buildStagedDirtyAcksResultPatch(stagedDirtyAcks),
     };
   }
 
@@ -782,8 +782,18 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       : {}),
     progressed: false,
     ...(redactedStatus ? { redactedStatus } : {}),
-    stagedDirtyAcks,
+    ...buildStagedDirtyAcksResultPatch(stagedDirtyAcks),
   };
+}
+
+function buildStagedDirtyAcksResultPatch(
+  stagedDirtyAcks: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined,
+): {
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+} {
+  return stagedDirtyAcks && stagedDirtyAcks.length > 0
+    ? { stagedDirtyAcks }
+    : {};
 }
 
 function composeHostedAssistantPhaseAfterCheckpoint(input: {
@@ -1063,6 +1073,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       initialProviderCleanupCheckpoint,
       result: null,
+      stagedDirtyAcks: [],
     };
   }
 
@@ -1226,7 +1237,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         systemMailboxRetryableFailed:
           systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
       }),
-      stagedDirtyAcks: dirtyDeviceSyncMetrics?.stagedDirtyAcks ?? [],
+      ...buildStagedDirtyAcksResultPatch(dirtyDeviceSyncMetrics?.stagedDirtyAcks),
     },
     stagedDirtyAcks: dirtyDeviceSyncMetrics?.stagedDirtyAcks ?? [],
   };

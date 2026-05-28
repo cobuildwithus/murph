@@ -905,7 +905,6 @@ export async function runHostedDeviceSyncPass(
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
-        skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
         wake,
       });
@@ -914,9 +913,11 @@ export async function runHostedDeviceSyncPass(
     if (secret) {
       syncState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake,
         secret,
         service,
+        skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
+        stagedDirtyAcks: options.stagedDirtyAcks ?? null,
+        wake,
       });
       controlPlaneSynced = true;
     }
@@ -1003,6 +1004,7 @@ function shouldYieldHostedDeviceSync(shouldYield: (() => boolean) | null): boole
 function buildHostedDeviceSyncYieldedPassResult(input: {
   processedJobs: number;
   service: DeviceSyncService;
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   wake: HostedRuntimeEvent;
 }): {
   nextWakeAt: string | null;
@@ -1011,11 +1013,15 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   skipped: boolean;
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 } {
+  const stagedDirtyAcks = input.stagedDirtyAcks ?? [];
   return {
     nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
     postCheckpointRecord: null,
     processedJobs: input.processedJobs,
     skipped: true,
+    ...(stagedDirtyAcks.length > 0
+      ? { stagedDirtyAcks: [...stagedDirtyAcks] }
+      : {}),
   };
 }
 
