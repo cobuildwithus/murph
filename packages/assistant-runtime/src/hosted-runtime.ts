@@ -252,6 +252,7 @@ export {
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
+const HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 const HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
 interface HostedInitialMailboxImportResult {
@@ -807,7 +808,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ...records,
       ]);
       if (
-        countHostedDeviceSyncStagedDirtyAckPayloadIds(stagedDeviceSyncDirtyAcks)
+        stagedDeviceSyncDirtyAcks.length >= HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT
+        || countHostedDeviceSyncStagedDirtyAckPayloadIds(stagedDeviceSyncDirtyAcks)
           >= HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT
       ) {
         suppressDirtyPendingFetchUntilCheckpoint = true;

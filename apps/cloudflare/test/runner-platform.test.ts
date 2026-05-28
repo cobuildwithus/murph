@@ -2531,6 +2531,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     const pending = await platform.deviceSyncPort!.fetchDirtyStates({
       limit: 1,
+      stagedDirtyAcks: [
+        {
+          connectionId: "dsc_123",
+          processedDirtyPayloadIds: ["dsp_1"],
+          processedRevision: "7",
+        },
+      ],
     });
 
     expect(pending).toEqual({
@@ -2546,6 +2553,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(request.url).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-pending");
     expect(request.method).toBe("POST");
+    await expect(request.text()).resolves.toBe(JSON.stringify({
+      limit: 1,
+      stagedDirtyAcks: [
+        {
+          connectionId: "dsc_123",
+          processedDirtyPayloadIds: ["dsp_1"],
+          processedRevision: "7",
+        },
+      ],
+      userId: "member_123",
+    }));
     const headers = request.headers;
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
