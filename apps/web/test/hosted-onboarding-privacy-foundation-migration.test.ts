@@ -7,6 +7,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
+    'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
@@ -250,6 +251,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedSignupWelcomeEmailAttemptMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026052800_hosted_signup_welcome_email_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -284,6 +292,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026052600_device_sync_dirty_payload",
       "2026052700_hosted_ingress_latency_trace",
       "2026052700_hosted_runtime_log_event_cooldown_index",
+      "2026052800_hosted_signup_welcome_email_attempt",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -444,6 +453,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedIngressLatencyTraceMigrationSql).not.toContain(
       'REFERENCES "hosted_member"("id")',
     );
+    expect(hostedSignupWelcomeEmailAttemptMigrationSql).toContain(
+      'ADD COLUMN "signup_welcome_email_attempted_at" TIMESTAMP(3)',
+    );
+    expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("UPDATE");
+    expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("member.activated");
+    expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
+    expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');

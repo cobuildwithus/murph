@@ -73,6 +73,8 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
   return {
     ...actual,
     sendHostedSignupWelcomeEmailForMember: mocks.sendHostedSignupWelcomeEmailForMember,
+    sendHostedSignupWelcomeEmailForMemberBestEffort:
+      mocks.sendHostedSignupWelcomeEmailForMember,
   };
 });
 
@@ -133,12 +135,14 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     });
     mocks.applyStripeCheckoutExpired.mockResolvedValue(undefined);
     mocks.applyStripeDisputeUpdated.mockResolvedValue(undefined);
     mocks.applyStripeInvoicePaid.mockResolvedValue({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "dispatch_123",
+      welcomeEmailMemberId: "member_123",
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
     mocks.applyStripeRefundCreated.mockResolvedValue(undefined);
@@ -231,6 +235,11 @@ describe("hosted Stripe event reconciliation", () => {
       memberId: "member_123",
       prisma: prisma.client,
     });
+    expect(
+      mocks.sendHostedSignupWelcomeEmailForMember.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prisma.client.hostedStripeEvent.update).mock.invocationCallOrder[0],
+    );
   });
 
   it("routes checkout completion through the live Stripe event without activating access", async () => {
@@ -277,6 +286,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeInvoicePaid.mockResolvedValueOnce({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     });
 
     await recordHostedStripeEvent({
@@ -297,6 +307,39 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+  });
+
+  it("uses checkout completion as a welcome candidate so invoice-before-checkout email ordering can recover", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: "member_123",
+    });
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      eventId: event.id,
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prisma.client,
+    });
   });
 
   it("retrieves Pulse Trial checkout subscription before opening the reconciliation transaction", async () => {
@@ -342,14 +385,11 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
-  it("does not fail Stripe reconciliation when the welcome email provider fails", async () => {
+  it("leaves welcome provider failure handling inside the centralized best-effort helper", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.sendHostedSignupWelcomeEmailForMember.mockRejectedValueOnce(
-      new Error("Resend unavailable"),
-    );
+    mocks.sendHostedSignupWelcomeEmailForMember.mockResolvedValueOnce(undefined);
 
     await recordHostedStripeEvent({
       event,
@@ -371,8 +411,9 @@ describe("hosted Stripe event reconciliation", () => {
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       status: HostedStripeEventStatus.completed,
     }));
-    expect(warnSpy).toHaveBeenCalledWith("Hosted signup welcome email send failed.", {
-      errorName: "Error",
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prisma.client,
     });
   });
 

@@ -1,3 +1,5 @@
+import { HostedBillingStatus } from "@prisma/client";
+
 import { MURPH_CONTACT_EMAIL, MURPH_TELEGRAM_BOT_USERNAME } from "../murph-contact-routing";
 import { getPrisma } from "../prisma";
 import { normalizeNullableString, parseInteger } from "../primitives";
@@ -6,8 +8,10 @@ import {
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-store";
 import {
+  claimHostedMemberSignupWelcomeEmailAttempt,
   readHostedMemberCoreState,
   readHostedMemberEmailAuthorization,
+  type HostedMemberCoreState,
 } from "./hosted-member-store";
 
 const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
@@ -22,6 +26,8 @@ type HostedSignupWelcomeEmailEnv = Readonly<Record<string, string | undefined>>;
 export type HostedSignupWelcomeEmailResult =
   | {
       reason:
+        | "already_attempted"
+        | "member_not_active"
         | "member_not_found"
         | "member_too_old"
         | "no_welcome_email_recipient"
@@ -83,7 +89,9 @@ export async function sendHostedSignupWelcomeEmailForRecentMember(input: {
   return sendHostedSignupWelcomeEmailForMember({
     env: input.env,
     fetchImpl: input.fetchImpl,
+    member,
     memberId: input.memberId,
+    now: input.now,
     prisma,
   });
 }
@@ -91,21 +99,49 @@ export async function sendHostedSignupWelcomeEmailForRecentMember(input: {
 export async function sendHostedSignupWelcomeEmailForMember(input: {
   env?: HostedSignupWelcomeEmailEnv;
   fetchImpl?: typeof fetch;
+  member?: HostedMemberCoreState;
   memberId: string;
+  now?: Date;
   prisma?: Parameters<typeof readHostedMemberEmailAuthorization>[0]["prisma"];
 }): Promise<HostedSignupWelcomeEmailResult> {
   const prisma = input.prisma ?? getPrisma();
+  const member = input.member ?? await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma,
+  });
+
+  if (!member) {
+    return {
+      reason: "member_not_found",
+      status: "skipped",
+    };
+  }
+
+  if (member.billingStatus !== HostedBillingStatus.active || member.suspendedAt) {
+    return {
+      reason: "member_not_active",
+      status: "skipped",
+    };
+  }
+
   const emailAuthorization = await readHostedMemberEmailAuthorization({
     memberId: input.memberId,
     prisma,
   });
-  const recipientEmail = emailAuthorization?.verifiedEmail?.address
-    ?? emailAuthorization?.stripeCheckoutEmail?.address
-    ?? null;
+  const recipient = readHostedSignupWelcomeEmailRecipient(emailAuthorization);
 
-  if (!recipientEmail) {
+  if (!recipient) {
     return {
       reason: "no_welcome_email_recipient",
+      status: "skipped",
+    };
+  }
+
+  const config = readHostedSignupWelcomeEmailConfig(input.env ?? process.env);
+
+  if (!config) {
+    return {
+      reason: "not_configured",
       status: "skipped",
     };
   }
@@ -115,16 +151,30 @@ export async function sendHostedSignupWelcomeEmailForMember(input: {
     prisma,
   });
   const murphStartLine = buildHostedSignupWelcomeEmailMurphStartLine({
+    allowDirectEmailRoute: recipient.source === "verifiedEmail",
     routing,
     source: input.env ?? process.env,
   });
 
-  return sendHostedSignupWelcomeEmail({
-    env: input.env,
+  const claimed = await claimHostedMemberSignupWelcomeEmailAttempt({
+    attemptedAt: input.now ?? new Date(),
+    memberId: input.memberId,
+    prisma,
+  });
+
+  if (!claimed) {
+    return {
+      reason: "already_attempted",
+      status: "skipped",
+    };
+  }
+
+  return sendHostedSignupWelcomeEmailWithConfig({
+    config,
     fetchImpl: input.fetchImpl,
     memberId: input.memberId,
     murphStartLine,
-    recipientEmail,
+    recipientEmail: recipient.address,
   });
 }
 
@@ -144,23 +194,61 @@ export async function sendHostedSignupWelcomeEmail(input: {
     };
   }
 
+  return sendHostedSignupWelcomeEmailWithConfig({
+    config,
+    fetchImpl: input.fetchImpl,
+    memberId: input.memberId,
+    murphStartLine: input.murphStartLine,
+    recipientEmail: input.recipientEmail,
+  });
+}
+
+export async function sendHostedSignupWelcomeEmailForMemberBestEffort(input: {
+  env?: HostedSignupWelcomeEmailEnv;
+  fetchImpl?: typeof fetch;
+  memberId: string;
+  prisma?: Parameters<typeof readHostedMemberEmailAuthorization>[0]["prisma"];
+}): Promise<void> {
+  try {
+    await sendHostedSignupWelcomeEmailForMember(input);
+  } catch (error) {
+    console.warn("Hosted signup welcome email send failed.", {
+      ...(error instanceof HostedSignupWelcomeEmailError
+        ? {
+            errorCode: error.code,
+            providerStatus: error.providerStatus,
+          }
+        : {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          }),
+    });
+  }
+}
+
+async function sendHostedSignupWelcomeEmailWithConfig(input: {
+  config: HostedSignupWelcomeEmailConfig;
+  fetchImpl?: typeof fetch;
+  memberId: string;
+  murphStartLine?: string | null;
+  recipientEmail: string;
+}): Promise<HostedSignupWelcomeEmailResult> {
   const response = await (input.fetchImpl ?? fetch)(RESEND_EMAILS_ENDPOINT, {
     body: JSON.stringify({
-      from: config.from,
+      from: input.config.from,
       subject: HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT,
       text: buildHostedSignupWelcomeEmailText({
-        founderName: config.founderName,
+        founderName: input.config.founderName,
         murphStartLine: input.murphStartLine,
       }),
       to: [input.recipientEmail],
     }),
     headers: {
-      Authorization: `Bearer ${config.apiKey}`,
+      Authorization: `Bearer ${input.config.apiKey}`,
       "Content-Type": "application/json",
       "Idempotency-Key": buildHostedSignupWelcomeEmailIdempotencyKey(input.memberId),
     },
     method: "POST",
-    signal: AbortSignal.timeout(config.timeoutMs),
+    signal: AbortSignal.timeout(input.config.timeoutMs),
   });
 
   if (!response.ok) {
@@ -178,12 +266,41 @@ export async function sendHostedSignupWelcomeEmail(input: {
   };
 }
 
-function readHostedSignupWelcomeEmailConfig(source: HostedSignupWelcomeEmailEnv): {
+type HostedSignupWelcomeEmailConfig = {
   apiKey: string;
   founderName: string;
   from: string;
   timeoutMs: number;
-} | null {
+};
+
+type HostedSignupWelcomeEmailRecipient = {
+  address: string;
+  source: "stripeCheckoutEmail" | "verifiedEmail";
+};
+
+function readHostedSignupWelcomeEmailRecipient(
+  emailAuthorization: Awaited<ReturnType<typeof readHostedMemberEmailAuthorization>>,
+): HostedSignupWelcomeEmailRecipient | null {
+  if (emailAuthorization?.verifiedEmail?.address) {
+    return {
+      address: emailAuthorization.verifiedEmail.address,
+      source: "verifiedEmail",
+    };
+  }
+
+  if (emailAuthorization?.stripeCheckoutEmail?.address) {
+    return {
+      address: emailAuthorization.stripeCheckoutEmail.address,
+      source: "stripeCheckoutEmail",
+    };
+  }
+
+  return null;
+}
+
+function readHostedSignupWelcomeEmailConfig(
+  source: HostedSignupWelcomeEmailEnv,
+): HostedSignupWelcomeEmailConfig | null {
   const apiKey = normalizeNullableString(source.RESEND_API_KEY);
   const from = normalizeNullableString(source.HOSTED_SIGNUP_WELCOME_EMAIL_FROM);
   const founderName = normalizeNullableString(source.HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME);
@@ -228,7 +345,7 @@ function buildHostedSignupWelcomeEmailText(input: {
   const murphStartLine = normalizeNullableString(input.murphStartLine);
   const nextStep = murphStartLine
     ? "Best next step: sync your data and text Murph."
-    : "Best next step: sync your data and text Murph to kick off your first experiment.";
+    : "Best next step: sync your data to kick off your first experiment.";
 
   return [
     "Hey, welcome to Murph!",
@@ -249,9 +366,10 @@ function buildHostedSignupWelcomeEmailText(input: {
 }
 
 function buildHostedSignupWelcomeEmailMurphStartLine(input: {
+  allowDirectEmailRoute: boolean;
   routing: HostedMemberRoutingStateSnapshot | null;
   source: HostedSignupWelcomeEmailEnv;
-}): string {
+}): string | null {
   const linqRecipientPhone = normalizeNullableString(input.routing?.linqRecipientPhone)
     ?? normalizeNullableString(input.routing?.pendingLinqRecipientPhone);
 
@@ -271,7 +389,9 @@ function buildHostedSignupWelcomeEmailMurphStartLine(input: {
     return `Shoot Murph a message on Telegram at ${username} to start your first experiment.`;
   }
 
-  return `Shoot Murph an email at ${MURPH_CONTACT_EMAIL} to start your first experiment.`;
+  return input.allowDirectEmailRoute
+    ? `Shoot Murph an email at ${MURPH_CONTACT_EMAIL} to start your first experiment.`
+    : null;
 }
 
 function readHostedSignupWelcomeEmailTelegramUsername(

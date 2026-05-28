@@ -295,30 +295,31 @@ enum HostedCryptoEnvelopeStatus {
 }
 
 model HostedMember {
-  id                        String                          @id
-  billingStatus             HostedBillingStatus             @default(not_started) @map("billing_status")
-  pendingActivationTimeZone String?                         @map("pending_activation_time_zone")
-  suspendedAt               DateTime?                       @map("suspended_at")
-  createdAt                 DateTime                        @default(now()) @map("created_at")
-  updatedAt                 DateTime                        @updatedAt @map("updated_at")
-  invites                   HostedInvite[]
-  aiUsage                   HostedAiUsage[]
-  linqDailyStates           HostedLinqDailyState[]
-  identity                  HostedMemberIdentity?
-  routing                   HostedMemberRouting?
-  billingRef                HostedMemberBillingRef?
-  emailAuthorization        HostedMemberEmailAuthorization?
-  hostedMailboxItems        HostedMailboxItem[]
-  hostedMailboxPayloads     HostedMailboxPayload[]
-  hostedMailboxLaneCounters HostedMailboxLaneCounter[]
-  hostedWorkspace           HostedWorkspace?
-  hostedRuntimeLogs         HostedRuntimeLog[]
-  hostedAiUsagePeriods      HostedAiUsagePeriod[]
-  consentEvents             HostedConsentEvent[]
-  consentGrants             HostedConsentGrant[]
-  hostedCryptoEnvelopes     HostedUserCryptoEnvelope[]
-  hostedCryptoAudits        HostedUserCryptoAudit[]
-  webSessions               HostedWebSession[]
+  id                             String                          @id
+  billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
+  pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
+  signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
+  suspendedAt                    DateTime?                       @map("suspended_at")
+  createdAt                      DateTime                        @default(now()) @map("created_at")
+  updatedAt                      DateTime                        @updatedAt @map("updated_at")
+  invites                        HostedInvite[]
+  aiUsage                        HostedAiUsage[]
+  linqDailyStates                HostedLinqDailyState[]
+  identity                       HostedMemberIdentity?
+  routing                        HostedMemberRouting?
+  billingRef                     HostedMemberBillingRef?
+  emailAuthorization             HostedMemberEmailAuthorization?
+  hostedMailboxItems             HostedMailboxItem[]
+  hostedMailboxPayloads          HostedMailboxPayload[]
+  hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
+  hostedWorkspace                HostedWorkspace?
+  hostedRuntimeLogs              HostedRuntimeLog[]
+  hostedAiUsagePeriods           HostedAiUsagePeriod[]
+  consentEvents                  HostedConsentEvent[]
+  consentGrants                  HostedConsentGrant[]
+  hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
+  hostedCryptoAudits             HostedUserCryptoAudit[]
+  webSessions                    HostedWebSession[]
 
   @@index([billingStatus])
   @@map("hosted_member")

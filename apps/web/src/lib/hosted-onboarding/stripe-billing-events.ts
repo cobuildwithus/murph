@@ -49,6 +49,7 @@ import { requireHostedStripeApi } from "./runtime";
 type HostedStripeActivationOutcome = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  welcomeEmailMemberId: string | null;
 };
 
 export async function applyStripeCheckoutCompleted(
@@ -66,6 +67,7 @@ export async function applyStripeCheckoutCompleted(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -89,6 +91,7 @@ export async function applyStripeCheckoutCompleted(
   return {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    welcomeEmailMemberId: member.core.id,
   };
 }
 
@@ -129,6 +132,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -140,6 +144,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -147,6 +152,12 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: isHostedStripeSamePulseTrialCheckoutSubscription({
+        billingRefSubscriptionId: input.member.billingRef.stripeSubscriptionId,
+        session: input.session,
+      })
+        ? input.member.core.id
+        : null,
     };
   }
 
@@ -160,6 +171,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -182,6 +194,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -220,6 +233,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -240,6 +254,9 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   return {
     activatedMemberId: activation.activated ? updatedMember.core.id : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
+      ? updatedMember.core.id
+      : null,
   };
 }
 
@@ -279,6 +296,26 @@ function buildHostedPulseTrialCheckoutCurrentPeriodSnapshot(input: {
     currentPeriodEnd: input.currentPeriodEnd,
     currentPeriodStart: input.currentPeriodStart,
   };
+}
+
+function isHostedStripeActivationWelcomeCandidate(input: {
+  activated: boolean;
+  hostedExecutionEventId: string | null;
+}): boolean {
+  return input.activated || Boolean(input.hostedExecutionEventId);
+}
+
+function isHostedStripeSamePulseTrialCheckoutSubscription(input: {
+  billingRefSubscriptionId?: string | null;
+  session: Stripe.Checkout.Session;
+}): boolean {
+  const sessionSubscriptionId = coerceStripeSubscriptionId(input.session.subscription);
+
+  return Boolean(
+    input.billingRefSubscriptionId &&
+    sessionSubscriptionId &&
+    input.billingRefSubscriptionId === sessionSubscriptionId,
+  );
 }
 
 export async function applyStripeCheckoutExpired(
@@ -343,6 +380,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -354,6 +392,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -368,6 +407,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -406,6 +446,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -420,6 +461,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
     };
   }
 
@@ -434,6 +476,9 @@ export async function applyStripeInvoicePaid(
   return {
     activatedMemberId: activation.activated ? updatedMember.core.id : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
+      ? updatedMember.core.id
+      : null,
   };
 }
 

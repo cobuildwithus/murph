@@ -2806,6 +2806,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
     id: "member_123",
     pendingActivationTimeZone: null,
+    signupWelcomeEmailAttemptedAt: null,
     suspendedAt: null,
     updatedAt: new Date("2026-04-06T00:00:00.000Z"),
     ...overrides,

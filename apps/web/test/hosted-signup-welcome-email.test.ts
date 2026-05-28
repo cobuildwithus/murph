@@ -3,12 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HostedSignupWelcomeEmailError,
   sendHostedSignupWelcomeEmail,
+  sendHostedSignupWelcomeEmailForMemberBestEffort,
   sendHostedSignupWelcomeEmailForMember,
   sendHostedSignupWelcomeEmailForRecentMember,
 } from "@/src/lib/hosted-onboarding/signup-welcome-email";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  prisma: {
+    hostedMember: {
+      updateMany: vi.fn(),
+    },
+    readonly: true,
+  },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
@@ -51,8 +58,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
 describe("hosted signup welcome email", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getPrisma.mockReturnValue({
-      readonly: true,
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.prisma.hostedMember.updateMany.mockResolvedValue({
+      count: 1,
     });
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "active",
@@ -69,7 +77,7 @@ describe("hosted signup welcome email", () => {
       expect(input).toBe("https://api.resend.com/emails");
       expect(init?.method).toBe("POST");
       expect(init?.headers).toMatchObject({
-        Authorization: "Bearer re_test",
+        Authorization: expect.stringMatching(/^Bearer\s+\S+$/u),
         "Content-Type": "application/json",
         "Idempotency-Key": "hosted-signup-welcome/member_123",
       });
@@ -108,7 +116,7 @@ describe("hosted signup welcome email", () => {
   });
 
   it("includes the assigned Murph text route for member welcome sends", async () => {
-    const fetchMock: typeof fetch = async (_input, init) => {
+    const fetchMock = vi.fn(async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
         "Best next step: sync your data and text Murph.",
@@ -124,7 +132,7 @@ describe("hosted signup welcome email", () => {
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
       });
-    };
+    }) as unknown as typeof fetch;
 
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
       directPublicSender: null,
@@ -160,10 +168,22 @@ describe("hosted signup welcome email", () => {
 
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
-      prisma: {
-        readonly: true,
+      prisma: mocks.prisma,
+    });
+    expect(mocks.prisma.hostedMember.updateMany).toHaveBeenCalledWith({
+      data: {
+        signupWelcomeEmailAttemptedAt: expect.any(Date),
+      },
+      where: {
+        billingStatus: "active",
+        id: "member_123",
+        signupWelcomeEmailAttemptedAt: null,
+        suspendedAt: null,
       },
     });
+    expect(
+      mocks.prisma.hostedMember.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(fetchMock).mock.invocationCallOrder[0]);
   });
 
   it("falls back to the Murph Telegram route when the member is linked on Telegram", async () => {
@@ -284,9 +304,7 @@ describe("hosted signup welcome email", () => {
 
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
       memberId: "member_123",
-      prisma: {
-        readonly: true,
-      },
+      prisma: mocks.prisma,
     });
   });
 
@@ -318,6 +336,11 @@ describe("hosted signup welcome email", () => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.to).toEqual(["payer@example.com"]);
       expect(payload.text).toContain("Hey, welcome to Murph!");
+      expect(payload.text).toContain(
+        "Best next step: sync your data to kick off your first experiment.",
+      );
+      expect(payload.text).not.toContain("Shoot Murph an email at");
+      expect(payload.text).not.toContain("murph@mail.withmurph.ai");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -348,7 +371,7 @@ describe("hosted signup welcome email", () => {
     });
   });
 
-  it("skips sending for members without a verified email address", async () => {
+  it("skips sending for members without a welcome email recipient", async () => {
     const fetchMock: typeof fetch = async () => {
       throw new Error("fetch should not be called");
     };
@@ -374,11 +397,100 @@ describe("hosted signup welcome email", () => {
 
     expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
       memberId: "member_123",
-      prisma: {
-        readonly: true,
-      },
+      prisma: mocks.prisma,
     });
     expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(mocks.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("skips member sends until the member has active billing", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+      billingStatus: "not_started",
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      reason: "member_not_active",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(mocks.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("skips member sends without burning the durable attempt marker when Resend is not configured", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      reason: "not_configured",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(mocks.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("skips member sends when the durable attempt marker is already claimed", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+
+    mocks.prisma.hostedMember.updateMany.mockResolvedValueOnce({
+      count: 0,
+    });
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      reason: "already_attempted",
+      status: "skipped",
+    });
   });
 
   it("skips sending until all sender env config is present", async () => {
@@ -422,5 +534,36 @@ describe("hosted signup welcome email", () => {
       code: "RESEND_SEND_FAILED",
       providerStatus: 401,
     } satisfies Partial<HostedSignupWelcomeEmailError>);
+  });
+
+  it("logs sanitized metadata and resolves when the best-effort member send fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock: typeof fetch = async () =>
+      new Response(JSON.stringify({ message: "invalid key" }), {
+        status: 401,
+      });
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMemberBestEffort({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith("Hosted signup welcome email send failed.", {
+      errorCode: "RESEND_SEND_FAILED",
+      providerStatus: 401,
+    });
   });
 });
