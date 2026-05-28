@@ -102,6 +102,10 @@ type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
   createScheduledJobs?: DeviceJobExecutor["createScheduledJobs"];
   verifyAndParseWebhook?: DeviceWebhookHandler["verifyAndParseWebhook"];
   executeJob?: DeviceJobExecutor["executeJob"];
+  describeJobBatch?: DeviceJobExecutor["describeJobBatch"];
+  executeJobBatch?: DeviceJobExecutor["executeJobBatch"];
+  maxJobBatchEstimatedBytes?: DeviceJobExecutor["maxJobBatchEstimatedBytes"];
+  maxJobBatchSize?: DeviceJobExecutor["maxJobBatchSize"];
 };
 
 function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncProvider {
@@ -191,6 +195,18 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
   const executeJob = Object.hasOwn(overrides, "executeJob")
     ? overrides.executeJob
     : defaultExecuteJob;
+  const describeJobBatch = Object.hasOwn(overrides, "describeJobBatch")
+    ? overrides.describeJobBatch
+    : undefined;
+  const executeJobBatch = Object.hasOwn(overrides, "executeJobBatch")
+    ? overrides.executeJobBatch
+    : undefined;
+  const maxJobBatchEstimatedBytes = Object.hasOwn(overrides, "maxJobBatchEstimatedBytes")
+    ? overrides.maxJobBatchEstimatedBytes
+    : undefined;
+  const maxJobBatchSize = Object.hasOwn(overrides, "maxJobBatchSize")
+    ? overrides.maxJobBatchSize
+    : undefined;
   const {
     buildConnectUrl: _buildConnectUrl,
     exchangeAuthorizationCode: _exchangeAuthorizationCode,
@@ -199,6 +215,10 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     createScheduledJobs: _createScheduledJobs,
     verifyAndParseWebhook: _verifyAndParseWebhook,
     executeJob: _executeJob,
+    describeJobBatch: _describeJobBatch,
+    executeJobBatch: _executeJobBatch,
+    maxJobBatchEstimatedBytes: _maxJobBatchEstimatedBytes,
+    maxJobBatchSize: _maxJobBatchSize,
     ...providerOverrides
   } = overrides;
   const baseProvider: DeviceSyncProvider = {
@@ -257,7 +277,11 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     ...(verifyAndParseWebhook ? { webhookHandler: { verifyAndParseWebhook } } : {}),
     jobExecutor: {
       ...(createScheduledJobs ? { createScheduledJobs } : {}),
+      ...(describeJobBatch ? { describeJobBatch } : {}),
       executeJob: executeJob ?? defaultExecuteJob,
+      ...(executeJobBatch ? { executeJobBatch } : {}),
+      ...(maxJobBatchEstimatedBytes !== undefined ? { maxJobBatchEstimatedBytes } : {}),
+      ...(maxJobBatchSize !== undefined ? { maxJobBatchSize } : {}),
     },
   };
 
@@ -1231,6 +1255,202 @@ test("device sync service preserves scheduler-owned reconcile cursor when job re
   const processedClear = await service.runWorkerOnce();
   assert.equal(processedClear?.kind, "manual-clear");
   assert.equal(store.getAccountById(connected.account.id)?.nextReconcileAt, null);
+
+  close();
+});
+
+test("device sync service lets providers execute compatible due jobs as one bounded batch", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch");
+  const batchCalls: string[][] = [];
+  const singleCalls: string[] = [];
+  const imports: unknown[] = [];
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input.snapshot);
+      return { ok: true };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer,
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          const group = typeof job.payload.group === "string" ? job.payload.group : null;
+          return job.kind === "resource" && group
+            ? { key: `resource:${group}`, estimatedBytes: 5 }
+            : null;
+        },
+        maxJobBatchEstimatedBytes: 16,
+        maxJobBatchSize: 3,
+        async executeJob(context, job) {
+          singleCalls.push(String(job.payload.label));
+          await context.importSnapshot({ single: job.payload.label });
+          return {};
+        },
+        async executeJobBatch(context, jobs) {
+          batchCalls.push(jobs.map((job) => String(job.payload.label)));
+          await context.importSnapshot({
+            batch: jobs.map((job) => job.payload.label),
+          });
+          return {
+            nextReconcileAt: "2026-03-18T12:00:00.000Z",
+          };
+        },
+      }),
+    ],
+  });
+
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch",
+    displayName: "Demo Provider Batch",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch", "batch-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const otherAccount = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-other",
+    displayName: "Demo Provider Batch Other",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-other-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-other", "batch-other-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const third = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "third" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+  const cappedByBytes = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "capped-by-bytes" },
+    availableAt: "2026-03-17T10:00:03.000Z",
+  });
+  const incompatible = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "sleep", label: "incompatible" },
+    availableAt: "2026-03-17T10:00:04.000Z",
+  });
+  const otherAccountJob = store.enqueueJob({
+    accountId: otherAccount.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "other-account" },
+    availableAt: "2026-03-17T10:00:05.000Z",
+  });
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.deepEqual(batchCalls, [["first", "second", "third"]]);
+  assert.deepEqual(singleCalls, []);
+  assert.deepEqual(imports, [{ batch: ["first", "second", "third"] }]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(second.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "succeeded");
+  assert.equal(store.getJobById(cappedByBytes.id)?.status, "queued");
+  assert.equal(store.getJobById(incompatible.id)?.status, "queued");
+  assert.equal(store.getJobById(otherAccountJob.id)?.status, "queued");
+  assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-03-18T12:00:00.000Z");
+
+  close();
+});
+
+test("device sync service falls back to single-job execution when no compatible batch exists", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-fallback");
+  let batchCalls = 0;
+  const singleCalls: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && typeof job.payload.group === "string"
+            ? { key: `resource:${job.payload.group}`, estimatedBytes: 1 }
+            : null;
+        },
+        async executeJob(context, job) {
+          singleCalls.push(String(job.payload.label));
+          return {};
+        },
+        async executeJobBatch() {
+          batchCalls += 1;
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-fallback",
+    displayName: "Demo Provider Batch Fallback",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-fallback-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-fallback", "batch-fallback-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const incompatible = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "sleep", label: "incompatible" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.equal(batchCalls, 0);
+  assert.deepEqual(singleCalls, ["first"]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(incompatible.id)?.status, "queued");
 
   close();
 });

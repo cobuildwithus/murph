@@ -51,6 +51,7 @@ import type {
   ProviderBeginConnectionResult,
   ProviderCompleteConnectionContext,
   ProviderConnectionResult,
+  ProviderJobBatchDescriptor,
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
@@ -98,6 +99,17 @@ export {
 
 interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
+}
+
+interface JunctionDirectResourceJobBatchInput {
+  estimatedBytes: number;
+  key: string;
+  record: Record<string, unknown>;
+  resource: string;
+  resourceCategory: "summary" | "timeseries";
+  sourceProviderSlug: string;
+  windowEnd: string;
+  windowStart: string;
 }
 
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
@@ -210,6 +222,8 @@ const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
 const JUNCTION_WEBHOOK_DATA_JOB_JSON_MAX_BYTES = 64_000;
+const JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_JOBS = 50;
+const JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_BYTES = 2 * 1024 * 1024;
 const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   15 * 60_000,
   60 * 60_000,
@@ -471,6 +485,126 @@ export function createJunctionDeviceSyncProvider(
     return {
       ...backfillFollowUp,
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+    };
+  }
+
+  function describeJobBatch(job: DeviceSyncJobRecord): ProviderJobBatchDescriptor | null {
+    const batchInput = readJunctionDirectResourceJobBatchInput(job);
+    return batchInput
+      ? {
+          key: batchInput.key,
+          estimatedBytes: batchInput.estimatedBytes,
+        }
+      : null;
+  }
+
+  async function executeJobBatch(
+    context: ProviderJobContext,
+    jobs: readonly DeviceSyncJobRecord[],
+  ): Promise<ProviderJobResult> {
+    const batchInputs: JunctionDirectResourceJobBatchInput[] = [];
+    for (const job of jobs) {
+      const batchInput = readJunctionDirectResourceJobBatchInput(job);
+      if (!batchInput) {
+        throw deviceSyncError({
+          code: "JUNCTION_RESOURCE_BATCH_UNSUPPORTED",
+          message: "Junction direct resource batch contains an unsupported job.",
+          httpStatus: 400,
+          retryable: false,
+        });
+      }
+      batchInputs.push(batchInput);
+    }
+
+    const [first] = batchInputs;
+    if (!first || batchInputs.some((entry) => entry.key !== first.key)) {
+      throw deviceSyncError({
+        code: "JUNCTION_RESOURCE_BATCH_UNSUPPORTED",
+        message: "Junction direct resource batch contains incompatible jobs.",
+        httpStatus: 400,
+        retryable: false,
+      });
+    }
+
+    await importJunctionDirectResourceSnapshot(
+      context,
+      [],
+      first.windowStart,
+      first.windowEnd,
+      first.resource,
+      first.resourceCategory,
+      batchInputs.map((entry) => entry.record),
+    );
+    await tryProjectJunctionSourcesBestEffort(context);
+    return {
+      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+    };
+  }
+
+  function readJunctionDirectResourceJobBatchInput(
+    job: DeviceSyncJobRecord,
+  ): JunctionDirectResourceJobBatchInput | null {
+    if (job.kind !== "resource") {
+      return null;
+    }
+
+    const resource = normalizeJunctionResourceName(job.payload.resource);
+    if (!resource) {
+      return null;
+    }
+
+    const windowStart = normalizeString(job.payload.windowStart);
+    const windowEnd = normalizeString(job.payload.windowEnd);
+    if (!windowStart || !windowEnd) {
+      return null;
+    }
+
+    const resourceCategory = inferJunctionResourceJobCategory(
+      normalizeString(job.payload.resourceCategory),
+      resource,
+    );
+    if (!isConfiguredJunctionResource(resourceCategory, resource)) {
+      return null;
+    }
+
+    const webhookDataJson = normalizeString(job.payload.webhookDataJson);
+    if (!webhookDataJson) {
+      return null;
+    }
+    const record = parseJunctionWebhookDataJobRecord(webhookDataJson);
+    if (!record) {
+      return null;
+    }
+
+    const sourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(record);
+    if (
+      !sourceProviderSlug
+      || !canImportJunctionWebhookDataJobRecord({
+        record,
+        resource,
+        resourceCategory,
+        sourceProviderSlug: normalizeProviderSlug(job.payload.sourceProviderSlug),
+      })
+    ) {
+      return null;
+    }
+
+    return {
+      estimatedBytes: Buffer.byteLength(webhookDataJson, "utf8"),
+      key: [
+        "junction:direct-resource",
+        resourceCategory,
+        resource,
+        sourceProviderSlug,
+        windowStart,
+        windowEnd,
+      ].join(":"),
+      record,
+      resource,
+      resourceCategory,
+      sourceProviderSlug,
+      windowEnd,
+      windowStart,
     };
   }
 
@@ -796,7 +930,7 @@ export function createJunctionDeviceSyncProvider(
           window.windowEnd,
           resource,
           inferredCategory,
-          webhookDataRecord,
+          [webhookDataRecord],
         );
         await tryProjectJunctionSourcesBestEffort(context);
         return {
@@ -1110,14 +1244,16 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     resource: string,
     resourceCategory: "summary" | "timeseries",
-    record: Record<string, unknown>,
+    records: readonly Record<string, unknown>[],
   ): Promise<void> {
-    const redactedRecord = readPlainObject(sanitizeJunctionImportSnapshotValue(
-      record,
-      new Map(),
-      { blockedStringValues: [context.account.externalAccountId] },
-    )) ?? record;
-    const snapshots = { [resource]: [redactedRecord] };
+    const redactedRecords = records.map((record) =>
+      readPlainObject(sanitizeJunctionImportSnapshotValue(
+        record,
+        new Map(),
+        { blockedStringValues: [context.account.externalAccountId] },
+      )) ?? record
+    );
+    const snapshots = { [resource]: redactedRecords };
 
     await context.importSnapshot({
       provider: "junction",
@@ -1267,7 +1403,11 @@ export function createJunctionDeviceSyncProvider(
     },
     jobExecutor: {
       createScheduledJobs,
+      describeJobBatch,
       executeJob,
+      executeJobBatch,
+      maxJobBatchEstimatedBytes: JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_BYTES,
+      maxJobBatchSize: JUNCTION_DIRECT_RESOURCE_JOB_BATCH_MAX_JOBS,
     },
   };
 }

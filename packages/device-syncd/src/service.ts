@@ -54,6 +54,8 @@ import type {
   HandleWebhookResult,
   ListDeviceSyncAccountsInput,
   ProviderAuthTokens,
+  ProviderJobContext,
+  ProviderJobBatchDescriptor,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
   QueueManualReconcileResult,
@@ -66,6 +68,9 @@ export { SqliteDeviceSyncStore } from "./store.ts";
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
 const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
+const DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS = 50;
+const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
+const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
 const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
@@ -546,18 +551,21 @@ class DeviceSyncServiceController {
       return job;
     }
 
-    const ensureJobLeaseOwned = (): void => {
+    let activeJobs: DeviceSyncJobRecord[] = [job];
+    const ensureJobLeasesOwned = (): void => {
       const fenceNow = currentNow();
-      const currentJob = this.store.getJobById(job.id);
+      for (const activeJob of activeJobs) {
+        const currentJob = this.store.getJobById(activeJob.id);
 
-      if (
-        !currentJob
-        || currentJob.status !== "running"
-        || currentJob.leaseOwner !== this.workerId
-        || currentJob.leaseExpiresAt === null
-        || currentJob.leaseExpiresAt <= fenceNow
-      ) {
-        throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
+        if (
+          !currentJob
+          || currentJob.status !== "running"
+          || currentJob.leaseOwner !== this.workerId
+          || currentJob.leaseExpiresAt === null
+          || currentJob.leaseExpiresAt <= fenceNow
+        ) {
+          throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, activeJob.id);
+        }
       }
     };
     const ensureAccountActive = (): void => {
@@ -589,7 +597,7 @@ class DeviceSyncServiceController {
     };
     const ensureExecutionActive = (): void => {
       assertJobExecutionNotYielded();
-      ensureJobLeaseOwned();
+      ensureJobLeasesOwned();
       ensureAccountActive();
     };
     const stopYieldPolling = startDeviceSyncJobYieldPolling({
@@ -604,95 +612,107 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      const result = await jobExecutor.executeJob(
-        {
-          account: currentAccount,
-          now,
-          signal: jobAbortController.signal,
-          ...(this.shouldYieldJobExecution
-            ? { shouldYield: this.shouldYieldJobExecution }
-            : {}),
-          throwIfAborted: assertJobExecutionNotYielded,
-          importSnapshot: async (snapshot: unknown) => {
-            ensureExecutionActive();
-            return this.importer.importDeviceProviderSnapshot({
-              provider: provider.provider,
-              snapshot,
-              vaultRoot: this.vaultRoot,
-            });
-          },
-          upsertConnectionSource: (input) => {
-            ensureExecutionActive();
-            return this.store.upsertConnectionSource({
-              ...input,
-              connectionId: currentAccount.id,
-            });
-          },
-          listConnectionSources: (input = {}) => {
-            ensureExecutionActive();
-            return this.store.listConnectionSources({
-              ...input,
-              connectionId: currentAccount.id,
-            });
-          },
-          refreshAccountTokens: async () => {
-            ensureExecutionActive();
-            if (currentAccount.credential.kind !== "oauth_tokens") {
-              throw deviceSyncError({
-                code: "DEVICE_SYNC_CREDENTIAL_REFRESH_UNSUPPORTED",
-                message: "Provider-config device sync credentials cannot be refreshed as OAuth tokens.",
-                retryable: false,
-                httpStatus: 409,
-              });
-            }
-
-            const refreshTokens = resolveProviderTokenRefresher(provider);
-
-            if (!refreshTokens) {
-              throw deviceSyncError({
-                code: "TOKEN_REFRESH_NOT_SUPPORTED",
-                message: `Device sync provider ${provider.provider} does not support account token refresh.`,
-                retryable: false,
-                httpStatus: 409,
-              });
-            }
-            const refreshed = await refreshTokens(currentAccount);
-            ensureJobLeaseOwned();
-            ensureAccountActive();
-            const updated = this.store.updateAccountTokens(
-              currentAccount.id,
-              this.encryptTokens(currentAccount, refreshed),
-              disconnectGeneration,
-            );
-
-            if (!updated) {
-              throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
-            }
-
-            currentAccount = this.toDecryptedAccount(updated);
-            assertJobExecutionNotYielded();
-            return currentAccount;
-          },
-          disconnectAccount: async () => {
-            ensureExecutionActive();
-            this.store.markPendingJobsDeadForAccount(
-              currentAccount.id,
-              now,
-              "ACCOUNT_DISCONNECTED",
-              "Device account disconnected.",
-            );
-            const disconnected = this.store.disconnectAccount(currentAccount.id, now);
-            currentAccount = this.toDecryptedAccount(disconnected);
-          },
-          logger: this.logger,
-        },
-        normalizedJob,
+      activeJobs = this.claimProviderJobBatch({
+        accountId: storedAccount.id,
+        jobExecutor,
+        normalizedSeedJob: normalizedJob,
+        now,
+        provider: provider.provider,
+      });
+      const normalizedJobs = activeJobs.map((activeJob) =>
+        activeJob.id === normalizedJob.id
+          ? normalizedJob
+          : normalizeConfiguredDeviceSyncJobRecord(provider.provider, activeJob, "execution")
       );
+      const jobContext: ProviderJobContext = {
+        account: currentAccount,
+        now,
+        signal: jobAbortController.signal,
+        ...(this.shouldYieldJobExecution
+          ? { shouldYield: this.shouldYieldJobExecution }
+          : {}),
+        throwIfAborted: assertJobExecutionNotYielded,
+        importSnapshot: async (snapshot: unknown) => {
+          ensureExecutionActive();
+          return this.importer.importDeviceProviderSnapshot({
+            provider: provider.provider,
+            snapshot,
+            vaultRoot: this.vaultRoot,
+          });
+        },
+        upsertConnectionSource: (input) => {
+          ensureExecutionActive();
+          return this.store.upsertConnectionSource({
+            ...input,
+            connectionId: currentAccount.id,
+          });
+        },
+        listConnectionSources: (input = {}) => {
+          ensureExecutionActive();
+          return this.store.listConnectionSources({
+            ...input,
+            connectionId: currentAccount.id,
+          });
+        },
+        refreshAccountTokens: async () => {
+          ensureExecutionActive();
+          if (currentAccount.credential.kind !== "oauth_tokens") {
+            throw deviceSyncError({
+              code: "DEVICE_SYNC_CREDENTIAL_REFRESH_UNSUPPORTED",
+              message: "Provider-config device sync credentials cannot be refreshed as OAuth tokens.",
+              retryable: false,
+              httpStatus: 409,
+            });
+          }
 
-      ensureJobLeaseOwned();
+          const refreshTokens = resolveProviderTokenRefresher(provider);
+
+          if (!refreshTokens) {
+            throw deviceSyncError({
+              code: "TOKEN_REFRESH_NOT_SUPPORTED",
+              message: `Device sync provider ${provider.provider} does not support account token refresh.`,
+              retryable: false,
+              httpStatus: 409,
+            });
+          }
+          const refreshed = await refreshTokens(currentAccount);
+          ensureJobLeasesOwned();
+          ensureAccountActive();
+          const updated = this.store.updateAccountTokens(
+            currentAccount.id,
+            this.encryptTokens(currentAccount, refreshed),
+            disconnectGeneration,
+          );
+
+          if (!updated) {
+            throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
+          }
+
+          currentAccount = this.toDecryptedAccount(updated);
+          assertJobExecutionNotYielded();
+          return currentAccount;
+        },
+        disconnectAccount: async () => {
+          ensureExecutionActive();
+          this.store.markPendingJobsDeadForAccount(
+            currentAccount.id,
+            now,
+            "ACCOUNT_DISCONNECTED",
+            "Device account disconnected.",
+          );
+          const disconnected = this.store.disconnectAccount(currentAccount.id, now);
+          currentAccount = this.toDecryptedAccount(disconnected);
+        },
+        logger: this.logger,
+      };
+      const result = normalizedJobs.length > 1 && jobExecutor.executeJobBatch
+        ? await jobExecutor.executeJobBatch(jobContext, normalizedJobs)
+        : await jobExecutor.executeJob(jobContext, normalizedJob);
+
+      ensureJobLeasesOwned();
       ensureAccountActive();
 
-      if (!this.store.completeJobIfOwned(job.id, this.workerId, currentNow())) {
+      if (!this.store.completeJobsIfOwned(activeJobs.map((activeJob) => activeJob.id), this.workerId, currentNow())) {
         return job;
       }
 
@@ -724,10 +744,14 @@ class DeviceSyncServiceController {
       return job;
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
-        const released = this.store.releaseJobIfOwned(job.id, this.workerId, currentNow());
+        const releaseNow = currentNow();
+        const released = activeJobs.filter((activeJob) =>
+          this.store.releaseJobIfOwned(activeJob.id, this.workerId, releaseNow)
+        ).length;
         this.logger.debug?.("Device sync job yielded before completion.", {
           provider: provider.provider,
           jobId: job.id,
+          jobCount: activeJobs.length,
           released,
         });
         return job;
@@ -745,7 +769,19 @@ class DeviceSyncServiceController {
       const failure = normalizeExecutionError(error);
       const failureNow = currentNow();
       const retryAt = failure.retryable ? addMilliseconds(failureNow, computeRetryDelayMs(job.attempts)) : null;
-      const failed = failClaimedJob(failure.code, failure.message, retryAt, failure.retryable);
+      const failed = activeJobs
+        .map((activeJob) =>
+          this.store.failJobIfOwned(
+            activeJob.id,
+            this.workerId,
+            failureNow,
+            failure.code,
+            failure.message,
+            retryAt,
+            failure.retryable,
+          )
+        )
+        .some(Boolean);
 
       if (!failed) {
         return job;
@@ -796,6 +832,88 @@ class DeviceSyncServiceController {
     }
 
     return processed;
+  }
+
+  private claimProviderJobBatch(input: {
+    accountId: string;
+    jobExecutor: DeviceJobExecutor;
+    normalizedSeedJob: DeviceSyncJobRecord;
+    now: string;
+    provider: string;
+  }): DeviceSyncJobRecord[] {
+    if (!input.jobExecutor.executeJobBatch || !input.jobExecutor.describeJobBatch) {
+      return [input.normalizedSeedJob];
+    }
+
+    const seedDescriptor = input.jobExecutor.describeJobBatch(input.normalizedSeedJob);
+    if (!isValidProviderJobBatchDescriptor(seedDescriptor)) {
+      return [input.normalizedSeedJob];
+    }
+
+    const maxBatchSize = normalizeProviderJobBatchLimit(
+      input.jobExecutor.maxJobBatchSize,
+      DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS,
+    );
+    if (maxBatchSize <= 1) {
+      return [input.normalizedSeedJob];
+    }
+
+    const maxEstimatedBytes = normalizeProviderJobBatchLimit(
+      input.jobExecutor.maxJobBatchEstimatedBytes,
+      DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES,
+    );
+    const seedEstimatedBytes = normalizeProviderJobBatchEstimatedBytes(seedDescriptor);
+    if (seedEstimatedBytes > maxEstimatedBytes) {
+      return [input.normalizedSeedJob];
+    }
+
+    const candidates = this.store.listDueJobBatchCandidates({
+      accountId: input.accountId,
+      excludeJobId: input.normalizedSeedJob.id,
+      limit: Math.max(DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT, maxBatchSize - 1),
+      now: input.now,
+      provider: input.provider,
+    });
+    const selectedJobIds: string[] = [];
+    let totalEstimatedBytes = seedEstimatedBytes;
+
+    for (const candidate of candidates) {
+      if (selectedJobIds.length >= maxBatchSize - 1) {
+        break;
+      }
+
+      let normalizedCandidate: DeviceSyncJobRecord;
+      try {
+        normalizedCandidate = normalizeConfiguredDeviceSyncJobRecord(input.provider, candidate, "execution");
+      } catch {
+        continue;
+      }
+
+      const descriptor = input.jobExecutor.describeJobBatch(normalizedCandidate);
+      if (!isValidProviderJobBatchDescriptor(descriptor) || descriptor.key !== seedDescriptor.key) {
+        continue;
+      }
+
+      const estimatedBytes = normalizeProviderJobBatchEstimatedBytes(descriptor);
+      if (totalEstimatedBytes + estimatedBytes > maxEstimatedBytes) {
+        continue;
+      }
+
+      selectedJobIds.push(candidate.id);
+      totalEstimatedBytes += estimatedBytes;
+    }
+
+    const claimed = this.store.claimJobBatchCandidatesIfSeedOwned({
+      accountId: input.accountId,
+      jobIds: selectedJobIds,
+      leaseMs: this.workerLeaseMs,
+      now: input.now,
+      provider: input.provider,
+      seedJobId: input.normalizedSeedJob.id,
+      workerId: this.workerId,
+    });
+
+    return [input.normalizedSeedJob, ...claimed];
   }
 
   async runWorkerBatchOnceInternal(): Promise<void> {
@@ -1092,6 +1210,30 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
 
 function resolveProviderJobExecutor(provider: DeviceSyncProvider): DeviceJobExecutor | undefined {
   return provider.jobExecutor;
+}
+
+function isValidProviderJobBatchDescriptor(
+  descriptor: ProviderJobBatchDescriptor | null | undefined,
+): descriptor is ProviderJobBatchDescriptor {
+  return typeof descriptor?.key === "string" && descriptor.key.length > 0;
+}
+
+function normalizeProviderJobBatchLimit(value: number | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizeProviderJobBatchEstimatedBytes(
+  descriptor: ProviderJobBatchDescriptor,
+): number {
+  if (typeof descriptor.estimatedBytes !== "number" || !Number.isFinite(descriptor.estimatedBytes)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.floor(descriptor.estimatedBytes));
 }
 
 function resolveProviderTokenRefresher(
