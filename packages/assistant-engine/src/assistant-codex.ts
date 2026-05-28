@@ -22,6 +22,7 @@ import {
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
+  extractCodexTurnProgressUpdateTextFromNormalized,
   normalizeCodexEvent,
   normalizeStreamingText,
 } from './assistant-codex-events.js'
@@ -425,6 +426,7 @@ async function runCodexAppServerTurn(
   let failTurn: ((error: unknown) => void) | null = null
   let liveTurnOpen = false
   let providerRequestStartedNotified = false
+  let contextCompactionProgressNotified = false
   let releaseLiveTurn = () => {}
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
@@ -643,6 +645,15 @@ async function runCodexAppServerTurn(
     })
   }
 
+  const notifyContextCompactionProgress = (text: string) => {
+    if (!input.turnProgress || contextCompactionProgressNotified) {
+      return
+    }
+
+    contextCompactionProgressNotified = true
+    void input.turnProgress.send(text).catch(() => undefined)
+  }
+
   const handleParsedMessage = (message: CodexRpcMessage) => {
     jsonEvents.push(message)
 
@@ -765,6 +776,12 @@ async function runCodexAppServerTurn(
       rawEvent: message,
       updates,
     })
+
+    const turnProgressText =
+      extractCodexTurnProgressUpdateTextFromNormalized(normalizedEvent)
+    if (turnProgressText) {
+      notifyContextCompactionProgress(turnProgressText)
+    }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {

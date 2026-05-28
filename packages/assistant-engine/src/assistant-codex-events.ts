@@ -17,6 +17,9 @@ import {
 
 export type CodexProgressEvent = AssistantProviderProgressEvent
 
+export const CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT =
+  'Compacting conversation history - this can take a moment.'
+
 export type CodexEventState = 'completed' | 'running'
 
 export type CodexNormalizedEvent =
@@ -368,6 +371,20 @@ export function extractCodexProgressEventFromNormalized(
   return null
 }
 
+export function extractCodexTurnProgressUpdateTextFromNormalized(
+  normalized: CodexNormalizedEvent,
+): string | null {
+  if (
+    normalized.kind !== 'status_item' ||
+    normalized.itemType !== 'context.compaction' ||
+    normalized.itemState !== 'running'
+  ) {
+    return null
+  }
+
+  return CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT
+}
+
 export function extractCodexStatusEventFromStderrLine(
   line: string,
 ): CodexProgressEvent | null {
@@ -592,6 +609,12 @@ function statusItemProgressText(
       : 'Updated the plan.'
   }
 
+  if (event.itemType === 'context.compaction') {
+    return event.itemState === 'running'
+      ? CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT
+      : 'Compacted conversation history.'
+  }
+
   return null
 }
 
@@ -635,6 +658,12 @@ function statusItemTraceText(
     }
 
     return `Updated files: ${event.filePaths.slice(0, 3).join(', ')}${event.filePaths.length > 3 ? ', …' : ''}.`
+  }
+
+  if (event.itemType === 'context.compaction') {
+    return event.itemState === 'running'
+      ? CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT
+      : 'Compacted conversation history.'
   }
 
   return null
