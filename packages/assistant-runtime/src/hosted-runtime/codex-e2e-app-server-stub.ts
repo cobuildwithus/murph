@@ -61,6 +61,7 @@ let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
 const threadAssistantHistory = new Map();
+const threadDynamicToolNames = new Map();
 
 function writeRpc(payload) {
   process.stdout.write(JSON.stringify(payload) + "\\n");
@@ -157,24 +158,64 @@ function readDynamicToolName(tool) {
   return namespace + "." + name;
 }
 
-function validateThreadStartDynamicTools(params) {
+function dynamicToolNamesMatch(actual, expected) {
+  return actual.length === expected.length
+    && actual.every((name, index) => name === expected[index]);
+}
+
+function formatDynamicToolNames(names) {
+  return names.length === 0 ? "none" : names.join(", ");
+}
+
+function validateExpectedDynamicTools(scope, actualLabel, actual) {
   if (expectedThreadStartDynamicTools.length === 0) {
     return null;
   }
 
-  const actual = readThreadStartDynamicToolNames(params);
-  const matches =
-    actual.length === expectedThreadStartDynamicTools.length
-    && actual.every((name, index) => name === expectedThreadStartDynamicTools[index]);
-  if (matches) {
+  if (dynamicToolNamesMatch(actual, expectedThreadStartDynamicTools)) {
     return null;
   }
 
-  return "thread/start dynamic tools mismatch: expected ["
-    + expectedThreadStartDynamicTools.join(", ")
-    + "] but received ["
-    + (actual.length === 0 ? "none" : actual.join(", "))
+  return scope + " dynamic tools mismatch: expected ["
+    + formatDynamicToolNames(expectedThreadStartDynamicTools)
+    + "] but " + actualLabel + " ["
+    + formatDynamicToolNames(actual)
     + "]";
+}
+
+function loadThreadDynamicToolNamesFromRollout(threadId) {
+  const rolloutPath = readRolloutPath(threadId);
+  if (!rolloutPath || !fs.existsSync(rolloutPath)) {
+    return [];
+  }
+
+  let dynamicToolNames = [];
+  for (const line of fs.readFileSync(rolloutPath, "utf8").trim().split(/\\r?\\n/u)) {
+    if (!line.trim()) {
+      continue;
+    }
+    const parsed = JSON.parse(line);
+    if (!Array.isArray(parsed.dynamicToolNames)) {
+      continue;
+    }
+    dynamicToolNames = parsed.dynamicToolNames.flatMap((name) => {
+      return typeof name === "string" && name.trim() ? [name.trim()] : [];
+    });
+  }
+  return dynamicToolNames;
+}
+
+function readThreadDynamicToolNames(threadId) {
+  const cached = threadDynamicToolNames.get(threadId);
+  if (Array.isArray(cached)) {
+    return cached;
+  }
+
+  const restored = loadThreadDynamicToolNamesFromRollout(threadId);
+  if (restored.length > 0) {
+    threadDynamicToolNames.set(threadId, restored);
+  }
+  return restored;
 }
 
 function loadThreadHistoryFromRollout(threadId) {
@@ -482,13 +523,6 @@ async function handleRpc(message) {
   }
 
   if ((method === "thread/start" || method === "thread/resume") && id !== null) {
-    if (method === "thread/start") {
-      const validationError = validateThreadStartDynamicTools(params);
-      if (validationError) {
-        writeRpcError(id, validationError);
-        return;
-      }
-    }
     const requestedThreadId = typeof params.threadId === "string" && params.threadId.trim()
       ? params.threadId.trim()
       : null;
@@ -502,7 +536,19 @@ async function handleRpc(message) {
     }
     const dynamicToolNames = method === "thread/start"
       ? readThreadStartDynamicToolNames(params)
-      : [];
+      : readThreadDynamicToolNames(threadId);
+    const validationError = validateExpectedDynamicTools(
+      method,
+      method === "thread/start" ? "received" : "restored",
+      dynamicToolNames,
+    );
+    if (validationError) {
+      writeRpcError(id, validationError);
+      return;
+    }
+    if (method === "thread/start") {
+      threadDynamicToolNames.set(threadId, dynamicToolNames);
+    }
     const threadPath = appendThreadRolloutEvent(threadId, {
       ...(dynamicToolNames.length > 0 ? { dynamicToolNames } : {}),
       event: method === "thread/resume" ? "thread.resumed" : "thread.started",
