@@ -673,6 +673,10 @@ describe("executeHostedMailboxEvent", () => {
             "/tmp/raw-slow-path",
           ],
           codexActionThreadIdPresent: true,
+          codexActionToolCallCounts: [1, 1],
+          codexActionToolNames: ["dynamic:vault.readSummary", "command.execution"],
+          codexActionToolOutputBytesMax: [64, 32],
+          codexActionToolOutputBytesTotal: [96, 32],
           codexActionTotalUnitMax: 82500,
           codexActionUsageSampleCount: 1,
           codexActionTurnIdPresent: true,
@@ -703,6 +707,10 @@ describe("executeHostedMailboxEvent", () => {
         codexActionProviderActionCount: 2,
         codexActionSlowDurationMs: [123, 60],
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionToolCallCounts: [1, 1],
+        codexActionToolNames: ["dynamic:vault.readSummary", "command.execution"],
+        codexActionToolOutputBytesMax: [64, 32],
+        codexActionToolOutputBytesTotal: [96, 32],
         codexActionTraceType: "action-diagnostics",
         providerTraceKind: "codex.action_diagnostics",
         requestId: "req_123",
@@ -714,7 +722,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-slow-path");
     expect(entry?.redacted).not.toHaveProperty("codexActionLabels");
     expect(entry?.redacted).not.toHaveProperty("codexActionSlowLabels");
-    expect(JSON.stringify(entry?.redacted)).not.toContain("readSummary");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw tool output");
   });

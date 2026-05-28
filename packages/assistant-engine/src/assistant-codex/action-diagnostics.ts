@@ -12,6 +12,8 @@ const ACTION_DEDUPE_LIMIT = 1024
 const SLOW_ACTION_SAMPLE_LIMIT = 8
 const OUTPUT_ITEM_SCAN_LIMIT = 64
 const TRACKED_ACTION_LIMIT = 256
+const TOOL_DIAGNOSTIC_LIMIT = 16
+const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -36,6 +38,13 @@ type TrackedAction = {
 type ActionOutputMetrics = {
   bytesTotal: number
   itemCount: number
+}
+
+type ToolDiagnosticMetrics = {
+  bytesMax: number
+  bytesTotal: number
+  callCount: number
+  name: string
 }
 
 export interface CodexActionDiagnosticsReducer {
@@ -80,6 +89,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   const itemStarts = new Map<string, number>()
   const startedActionKeys = new Set<string>()
   const trackedActions: TrackedAction[] = []
+  const toolMetrics = new Map<string, ToolDiagnosticMetrics>()
 
   const recordActionSample = (kind: CodexActionKind) => {
     if (!actionKinds.includes(kind) && actionKinds.length < ACTION_SAMPLE_LIMIT) {
@@ -110,6 +120,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
     durationMs: number | null
     kind: CodexActionKind
     output: ActionOutputMetrics
+    toolName: string
   }) => {
     if (input.durationMs !== null) {
       durationMsTotal += input.durationMs
@@ -118,6 +129,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
     outputBytesTotal += input.output.bytesTotal
     outputBytesMax = Math.max(outputBytesMax, input.output.bytesTotal)
     outputItemCount += input.output.itemCount
+    recordToolMetrics(toolMetrics, {
+      name: input.toolName,
+      outputBytes: input.output.bytesTotal,
+    })
 
     if (trackedActions.length < TRACKED_ACTION_LIMIT) {
       trackedActions.push({
@@ -174,6 +189,20 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
           return durationDelta
         })
         .slice(0, SLOW_ACTION_SAMPLE_LIMIT)
+      const topTools = [...toolMetrics.values()]
+        .sort((left, right) => {
+          const bytesDelta = right.bytesTotal - left.bytesTotal
+          if (bytesDelta !== 0) {
+            return bytesDelta
+          }
+          const maxDelta = right.bytesMax - left.bytesMax
+          if (maxDelta !== 0) {
+            return maxDelta
+          }
+          const countDelta = right.callCount - left.callCount
+          return countDelta !== 0 ? countDelta : left.name.localeCompare(right.name)
+        })
+        .slice(0, TOOL_DIAGNOSTIC_LIMIT)
 
       return pruneNullishRecord({
         schema: CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
@@ -205,6 +234,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionSlowKinds: slowActions.map((action) => action.kind),
         codexActionStartedCount: startedCount,
         codexActionThreadIdPresent: input.codexThreadId !== null,
+        codexActionToolCallCounts: topTools.map((tool) => tool.callCount),
+        codexActionToolNames: topTools.map((tool) => tool.name),
+        codexActionToolOutputBytesMax: topTools.map((tool) => tool.bytesMax),
+        codexActionToolOutputBytesTotal: topTools.map((tool) => tool.bytesTotal),
         codexActionTotalUnitMax: totalTokensMax,
         codexActionUsageSampleCount: tokenSampleCount,
         codexActionTurnIdPresent: input.turnId !== null,
@@ -275,9 +308,70 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         durationMs,
         kind,
         output: measureActionOutput(item),
+        toolName: resolveToolDiagnosticName(kind, item),
       })
     },
   }
+}
+
+function recordToolMetrics(
+  metrics: Map<string, ToolDiagnosticMetrics>,
+  input: {
+    name: string
+    outputBytes: number
+  },
+): void {
+  const existing = metrics.get(input.name)
+  if (existing) {
+    existing.bytesMax = Math.max(existing.bytesMax, input.outputBytes)
+    existing.bytesTotal += input.outputBytes
+    existing.callCount += 1
+    return
+  }
+
+  metrics.set(input.name, {
+    bytesMax: input.outputBytes,
+    bytesTotal: input.outputBytes,
+    callCount: 1,
+    name: input.name,
+  })
+}
+
+function resolveToolDiagnosticName(
+  kind: CodexActionKind,
+  item: Record<string, unknown> | null,
+): string {
+  if (kind === 'dynamic.tool.call') {
+    const namespace = readToolIdentifierPart(item?.namespace)
+    const tool = readToolIdentifierPart(item?.tool, item?.toolName, item?.tool_name)
+    if (namespace && tool) {
+      return `dynamic:${namespace}.${tool}`
+    }
+    return tool ? `dynamic:${tool}` : kind
+  }
+
+  if (kind === 'mcp.tool.call') {
+    const server = readToolIdentifierPart(
+      item?.server,
+      item?.serverName,
+      item?.server_name,
+    )
+    const tool = readToolIdentifierPart(item?.tool, item?.toolName, item?.tool_name)
+    if (server && tool) {
+      return `mcp:${server}.${tool}`
+    }
+    return tool ? `mcp:${tool}` : kind
+  }
+
+  return kind
+}
+
+function readToolIdentifierPart(...values: unknown[]): string | null {
+  const value = readNonemptyString(...values)
+  if (!value || !TOOL_IDENTIFIER_PART_PATTERN.test(value)) {
+    return null
+  }
+  return value
 }
 
 function markActionKey(set: Set<string>, key: string | null): boolean {

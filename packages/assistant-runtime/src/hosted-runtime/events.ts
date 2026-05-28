@@ -165,6 +165,8 @@ const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "mcp.tool.call",
   "web.search",
 ]);
+const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_NAME_PATTERN =
+  /^(?:command\.execution|file\.change|web\.search|dynamic:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?|mcp:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?)$/u;
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
   "rpc.error",
@@ -299,6 +301,9 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
   "codexActionSlowDurationMs",
+  "codexActionToolCallCounts",
+  "codexActionToolOutputBytesMax",
+  "codexActionToolOutputBytesTotal",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "activeTurnHistoryPresent",
@@ -1313,6 +1318,14 @@ function readHostedAssistantCodexActionDiagnosticTrace(
       ),
     );
   }
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexActionToolNames",
+    readHostedAssistantProviderDiagnosticToolNameArray(
+      record,
+      "codexActionToolNames",
+    ),
+  );
   return details;
 }
 
@@ -1496,6 +1509,34 @@ function readHostedAssistantProviderDiagnosticAllowedStringArray(
     }
     const normalized = entry.trim();
     return allowedValues.has(normalized) ? [normalized] : [];
+  });
+  return output.length > 0 ? output : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticToolNameArray(
+  record: Record<string, unknown>,
+  key: string,
+): string[] | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry) => {
+    if (typeof entry !== "string") {
+      return [];
+    }
+    const normalized = entry.trim();
+    return HOSTED_ASSISTANT_CODEX_ACTION_TOOL_NAME_PATTERN.test(normalized)
+      ? [normalized]
+      : [];
   });
   return output.length > 0 ? output : undefined;
 }

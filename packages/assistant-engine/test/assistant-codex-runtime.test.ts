@@ -730,12 +730,15 @@ describe('assistant codex runtime', () => {
       codexActionProviderActionCount: 2,
       codexActionSlowDurationMs: [123, 60],
       codexActionSlowKinds: ['dynamic.tool.call', 'command.execution'],
+      codexActionToolCallCounts: [1, 1],
+      codexActionToolNames: ['dynamic:vault.readSummary', 'command.execution'],
+      codexActionToolOutputBytesMax: [59, 34],
+      codexActionToolOutputBytesTotal: [59, 34],
       codexActionUsageSampleCount: 1,
     })
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
-    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('readSummary')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
   })
@@ -852,6 +855,10 @@ describe('assistant codex runtime', () => {
       codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
       codexActionStartedCount: 1,
+      codexActionToolCallCounts: [1],
+      codexActionToolNames: ['command.execution'],
+      codexActionToolOutputBytesMax: [26],
+      codexActionToolOutputBytesTotal: [26],
       codexActionTotalUnitMax: 168,
       codexActionUsageSampleCount: 1,
     })
