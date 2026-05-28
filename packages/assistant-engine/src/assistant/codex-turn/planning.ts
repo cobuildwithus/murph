@@ -493,7 +493,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const toolSchemaHash = null
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
-    assistantTurnProgressAvailable: boolean
+    assistantModelProgressUpdatesAvailable: boolean
     injectBootstrapContext: boolean
     injectOnboardingGuidance: boolean
   }) =>
@@ -529,8 +529,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
-            assistantTurnProgressAvailable:
-              options.assistantTurnProgressAvailable,
+            assistantModelProgressUpdatesAvailable:
+              options.assistantModelProgressUpdatesAvailable,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -566,7 +566,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     'primarySystemPromptElapsedMs',
     () => buildRouteSystemPromptResult({
       assistantCliContract: actualAssistantCliContract,
-      assistantTurnProgressAvailable: input.modelProgressUpdatesEnabled === true,
+      assistantModelProgressUpdatesAvailable:
+        input.modelProgressUpdatesEnabled === true,
       injectBootstrapContext: shouldPrepareBootstrapContext,
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     }),
@@ -577,7 +578,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         'freshThreadFallbackPromptElapsedMs',
         () => buildRouteSystemPromptResult({
           assistantCliContract: bootstrapAssistantCliContract,
-          assistantTurnProgressAvailable: input.modelProgressUpdatesEnabled === true,
+          assistantModelProgressUpdatesAvailable:
+            input.modelProgressUpdatesEnabled === true,
           injectBootstrapContext: true,
           injectOnboardingGuidance: shouldInjectOnboardingGuidance,
         }),
