@@ -70,6 +70,7 @@ export interface AssistantProviderTurnInput {
   model?: string | null
   modelProvider?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
+  onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean | null
   profile?: string | null
@@ -113,6 +114,7 @@ export interface AssistantProviderTurnExecutionInput {
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
+  onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt?: string | null
   providerConfig: AssistantProviderConfig

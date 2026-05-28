@@ -130,6 +130,7 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
+  onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
   profile?: string | null
@@ -423,6 +424,7 @@ async function runCodexAppServerTurn(
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
   let liveTurnOpen = false
+  let providerRequestStartedNotified = false
   let releaseLiveTurn = () => {}
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
@@ -630,6 +632,17 @@ async function runCodexAppServerTurn(
     )
   }
 
+  const notifyProviderRequestStarted = () => {
+    if (providerRequestStartedNotified) {
+      return
+    }
+    providerRequestStartedNotified = true
+    notifyCodexAppServerProviderRequestStartedBestEffort({
+      hook: input.onProviderRequestStarted ?? null,
+      startedAt: new Date().toISOString(),
+    })
+  }
+
   const handleParsedMessage = (message: CodexRpcMessage) => {
     jsonEvents.push(message)
 
@@ -762,6 +775,7 @@ async function runCodexAppServerTurn(
     }
 
     if (method === 'turn/started') {
+      notifyProviderRequestStarted()
       registerLiveTurn()
     }
 
@@ -1036,6 +1050,7 @@ async function runCodexAppServerTurn(
     )
     turnId = extractCodexTurnIdFromResult(turnResult) ?? turnId
     emitAppServerTimingTrace('turn-started')
+    notifyProviderRequestStarted()
     registerLiveTurn()
 
     await turnCompleted
@@ -1087,6 +1102,23 @@ async function runCodexAppServerTurn(
     stdout: stdout.trim(),
     threadId: codexThreadId,
     turnId,
+  }
+}
+
+function notifyCodexAppServerProviderRequestStartedBestEffort(input: {
+  hook?: ((event: { startedAt: string }) => Promise<void> | void) | null
+  startedAt: string
+}): void {
+  if (!input.hook) {
+    return
+  }
+
+  try {
+    void Promise.resolve(input.hook({ startedAt: input.startedAt })).catch(() => {
+      // Provider-start hooks are diagnostic-only and must not block turns.
+    })
+  } catch {
+    // Provider-start hooks are diagnostic-only and must not block turns.
   }
 }
 

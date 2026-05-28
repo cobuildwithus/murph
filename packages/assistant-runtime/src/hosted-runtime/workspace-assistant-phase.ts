@@ -356,6 +356,7 @@ export async function runHostedWorkspaceAssistantPhase(
         platformEnv: input.runtime.platformEnv,
         resolvedConfig: input.runtime.resolvedConfig,
       },
+      runtimeAttemptId: input.request.attemptId,
       signal: input.signal ?? undefined,
       ...(input.shouldYieldBackgroundMaintenance
         ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }

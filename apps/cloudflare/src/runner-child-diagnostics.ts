@@ -135,6 +135,7 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS = [
   "runtime_crypto_context_fetch",
   "runtime_crypto_root_fetch",
   "runtime_internal_request",
+  "runtime_latency_trace",
   "runtime_log_write",
   "telegram_file_download",
   "telegram_file_lookup",

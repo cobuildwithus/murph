@@ -22,6 +22,8 @@ export type {
   HostedRuntimeLinqMarkReadRequest,
   HostedRuntimeLinqSendRequest,
   HostedRuntimeLinqSendResponse,
+  HostedRuntimeLatencyTracePort,
+  HostedRuntimeLatencyTraceRecordResponse,
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
@@ -47,6 +49,7 @@ export {
 } from "./hosted-runtime/parsers.ts";
 export {
   parseHostedRuntimeIssueRecordResponse,
+  parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {

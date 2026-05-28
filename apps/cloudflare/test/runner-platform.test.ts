@@ -2244,6 +2244,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith("/api/internal/hosted-runtime/latency")) {
+        return new Response(JSON.stringify({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith("/api/internal/hosted-execution/issues/record")) {
         return new Response(JSON.stringify({
           issueIds: ["issue_123"],
@@ -2290,6 +2300,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.mailboxPort).toBeDefined();
     expect(platform.workspacePort).toBeDefined();
     expect(platform.logPort).toBeDefined();
+    expect(platform.latencyTracePort).toBeDefined();
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.deviceSyncPort).toBeDefined();
@@ -2317,13 +2328,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
       ],
     });
+    await platform.latencyTracePort!.record({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:03.000Z",
+        mailboxItemId: "mailbox_item_1",
+        runtimeAttemptId: "runtime_write_123",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
     await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
     await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -2331,6 +2352,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-mailbox/fetch",
       "http://web-control.worker/api/internal/hosted-workspace",
       "http://web-control.worker/api/internal/hosted-runtime/log",
+      "http://web-control.worker/api/internal/hosted-runtime/latency",
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",

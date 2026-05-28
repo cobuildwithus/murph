@@ -520,6 +520,17 @@ export async function sendAssistantMessageLocal(
                 providerRequestJournal?.inputIds ?? acceptedInputIdsForNextProviderRequest
               acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
             },
+            onProviderRequestStarted: (event) => {
+              if (!currentInput.onProviderRequestStarted) {
+                return
+              }
+              return currentInput.onProviderRequestStarted({
+                acceptedInputIds: providerRequestAcceptedInputIds,
+                providerRequestOrdinal:
+                  event.providerRequestOrdinal ?? providerRequestOrdinal,
+                startedAt: event.startedAt,
+              })
+            },
             route: activeTurnRouteLock ?? route,
             plan: sharedPlan,
             profile: {

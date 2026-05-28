@@ -1303,6 +1303,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
+  const providerRequestStarted = vi.fn()
   const liveSteeredPrompts: string[] = []
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
@@ -1333,6 +1334,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   })
 
   const firstResultPromise = sendAssistantMessageLocal({
+    onProviderRequestStarted: providerRequestStarted,
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })
@@ -1364,6 +1366,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   assert.equal(steeredResult.response, 'final after live-steered input')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
+  expect(providerRequestStarted).not.toHaveBeenCalled()
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
       .map((call) => call[0])

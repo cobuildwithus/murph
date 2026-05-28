@@ -1693,6 +1693,11 @@ describe("runHostedDeviceSyncPass", () => {
 
 describe("runHostedAssistantRuntimeTimerLane", () => {
   it("runs assistant automation without sweeping parser or device-sync work", async () => {
+    const latencyTraceRecord = vi.fn(async () => ({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    }));
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onTraceEvent?.({
         providerSessionId: null,
@@ -1733,7 +1738,14 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         },
       },
       requestId: "req_123",
-      runtime: createHostedAutomationRuntime(),
+      runtime: createHostedAutomationRuntime({
+        platform: {
+          latencyTracePort: {
+            record: latencyTraceRecord,
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_123",
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -1775,12 +1787,120 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       inboxServices: expect.anything(),
       inputSource: expect.any(Object),
       onEvent: expect.any(Function),
+      onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
+      signal: undefined,
       vault: "/tmp/vault-root",
       vaultServices: expect.anything(),
     });
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_1"],
+      providerRequestOrdinal: 0,
+      source: "linq",
+      startedAt: "2026-04-08T00:00:01.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledWith({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-08T00:00:01.000Z",
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: "attempt_123",
+        source: "linq",
+        type: "provider_started",
+      },
+    });
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_2"],
+      providerRequestOrdinal: 0,
+      source: "telegram",
+      startedAt: "2026-04-08T00:00:02.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+  });
+
+  it("retries provider-start latency traces when staged rows have not landed yet", async () => {
+    const latencyTraceRecord = vi.fn()
+      .mockResolvedValueOnce({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      })
+      .mockResolvedValueOnce({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      });
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: false,
+    });
+
+    await runHostedAssistantRuntimeTimerLane({
+      wake: {
+        eventId: "evt_assistant_latency_retry",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_123",
+      runtime: createHostedAutomationRuntime({
+        platform: {
+          latencyTracePort: {
+            record: latencyTraceRecord,
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_123",
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+
+    vi.useFakeTimers();
+    try {
+      automationPassInput.onProviderRequestStarted?.({
+        assistantInputIds: ["input_1"],
+        providerRequestOrdinal: 0,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+      expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+        event: {
+          assistantInputIds: ["input_1"],
+          at: "2026-04-08T00:00:01.000Z",
+          providerRequestOrdinal: 0,
+          runtimeAttemptId: "attempt_123",
+          source: "linq",
+          type: "provider_started",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps device-sync ownership when assistant and device-sync wake times tie", async () => {

@@ -282,6 +282,7 @@ export async function processAssistantAutoReplyGroup(input: {
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
@@ -357,6 +358,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   enabledChannels: readonly string[]
   executionContext?: AssistantExecutionContext | null
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onAcceptedContext?: (context: AssistantAutoReplyGroupContext) => void
   providerHeartbeatMs?: number | null
@@ -447,6 +449,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     signal: input.signal,
     maxSessionAgeMs: input.sessionMaxAgeMs,
     onEvent: input.onEvent,
+    onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: decision.operatorAuthority,
     conversationRef: decision.primaryInput.conversation,
@@ -454,6 +457,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     replyInputId: primaryAutoReplyInputId(context),
     activeTurnInput: activeTurnHooks?.admit,
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
+    source: context.firstItem.summary.source,
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
@@ -1113,11 +1117,13 @@ async function executeAssistantAutoReply(input: {
   signal?: AbortSignal
   maxSessionAgeMs: number | null
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
   conversationRef: AssistantInputConversationRef
   prompt: string
   replyInputId: string
+  source: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
@@ -1156,6 +1162,14 @@ async function executeAssistantAutoReply(input: {
       turnTrigger: 'automation-auto-reply',
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: watchdog.onProviderEvent,
+      onProviderRequestStarted: input.onProviderRequestStarted
+        ? (event) => input.onProviderRequestStarted?.({
+            assistantInputIds: event.acceptedInputIds,
+            providerRequestOrdinal: event.providerRequestOrdinal,
+            source: input.source,
+            startedAt: event.startedAt,
+          })
+        : null,
       onTraceEvent: input.onTraceEvent,
     })
     return resolveAssistantAutoReplySendResult({
@@ -1171,6 +1185,13 @@ async function executeAssistantAutoReply(input: {
     watchdog.dispose()
   }
 }
+
+export type AssistantAutoReplyProviderRequestStartHook = (event: {
+  assistantInputIds: readonly string[]
+  providerRequestOrdinal: number
+  source: string
+  startedAt: string
+}) => Promise<void> | void
 
 function shouldUseAssistantAutoReplyReceiptFallback(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode

@@ -134,6 +134,10 @@ export async function executeCodexTurnWithRecovery(input: {
     providerAttemptId: string | null
     codexContinuation: AssistantCodexContinuation
   }) => Promise<void>
+  onProviderRequestStarted?: (event: {
+    providerRequestOrdinal: number | null
+    startedAt: string
+  }) => Promise<void> | void
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   providerRequestOrdinal?: number | null
@@ -158,6 +162,7 @@ export async function executeCodexTurnWithRecovery(input: {
   const attemptOutcome = await executeAssistantCodexAttempt({
     attemptPlan,
     executionPlan,
+    onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
   })
 
@@ -304,6 +309,10 @@ function emitCodexPlanTraceEvent(input: {
 async function executeAssistantCodexAttempt(input: {
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
+  onProviderRequestStarted?: ((event: {
+    providerRequestOrdinal: number | null
+    startedAt: string
+  }) => Promise<void> | void) | null
   providerRequestOrdinal: number | null
 }): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
@@ -391,6 +400,15 @@ async function executeAssistantCodexAttempt(input: {
       activeTurnId: executionPlan.turnId,
       activeTurnSteering: executionPlan.activeTurnSteering,
       activeTurnSessionId: attemptPlan.session.sessionId,
+      onProviderRequestStarted: (event) => {
+        notifyProviderRequestStartedBestEffort({
+          event: {
+            providerRequestOrdinal: input.providerRequestOrdinal,
+            startedAt: event.startedAt,
+          },
+          hook: input.onProviderRequestStarted ?? null,
+        })
+      },
       provider: attemptPlan.route.provider,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,
@@ -524,6 +542,29 @@ async function executeAssistantCodexAttempt(input: {
       usage: failedAttemptUsage,
       usageAttribution,
     }
+  }
+}
+
+function notifyProviderRequestStartedBestEffort(input: {
+  event: {
+    providerRequestOrdinal: number | null
+    startedAt: string
+  }
+  hook?: ((event: {
+    providerRequestOrdinal: number | null
+    startedAt: string
+  }) => Promise<void> | void) | null
+}): void {
+  if (!input.hook) {
+    return
+  }
+
+  try {
+    void Promise.resolve(input.hook(input.event)).catch(() => {
+      // Provider-start hooks are diagnostic-only and must not block turns.
+    })
+  } catch {
+    // Provider-start hooks are diagnostic-only and must not block turns.
   }
 }
 

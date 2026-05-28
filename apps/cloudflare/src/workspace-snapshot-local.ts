@@ -807,6 +807,7 @@ async function listHostedWorkspaceSnapshotVerboseTarEntries(
       }
     }
     await archivePipe;
+    await Promise.all([zstdExit, tarExit]);
   } catch (error) {
     zstd.kill("SIGTERM");
     tar.kill("SIGTERM");
@@ -823,7 +824,6 @@ async function listHostedWorkspaceSnapshotVerboseTarEntries(
     }
     throw error;
   }
-  await Promise.all([zstdExit, tarExit]);
   return entries;
 }
 

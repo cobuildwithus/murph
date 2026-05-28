@@ -11,7 +11,9 @@ import {
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
+  HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
+  HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
@@ -42,6 +44,11 @@ import {
   type HostedRuntimeDeviceSyncBridgeKind,
   type HostedRuntimeIssueExportRequest,
   type HostedRuntimeIssueExportResponse,
+  type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
+  type HostedRuntimeLatencyTraceEvent,
+  type HostedRuntimeLatencyTraceProviderStartedEvent,
+  type HostedRuntimeLatencyTraceRequest,
+  type HostedRuntimeLatencyTraceResponse,
   type HostedRuntimeLogComponent,
   type HostedRuntimeLogEntry,
   type HostedRuntimeLogEventCode,
@@ -57,6 +64,7 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedIngressLatencySource,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -167,6 +175,25 @@ const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
   "phase",
   "redactedJson",
   "workspaceVersion",
+]);
+const HOSTED_RUNTIME_LATENCY_TRACE_REQUEST_KEYS = new Set([
+  "event",
+]);
+const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_STAGED_KEYS = new Set([
+  "assistantInputId",
+  "at",
+  "mailboxItemId",
+  "runtimeAttemptId",
+  "source",
+  "type",
+]);
+const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
+  "assistantInputIds",
+  "at",
+  "providerRequestOrdinal",
+  "runtimeAttemptId",
+  "source",
+  "type",
 ]);
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "checkpointNextWakeAt",
@@ -445,6 +472,142 @@ export function parseHostedRuntimeIssueExportResponse(
   return {
     issueIds: response.ids,
     recorded: response.recorded,
+  };
+}
+
+export function parseHostedIngressLatencySource(value: unknown): HostedIngressLatencySource {
+  return parseAllowedString(
+    value,
+    "Hosted ingress latency source",
+    HOSTED_INGRESS_LATENCY_SOURCES,
+  );
+}
+
+export function parseHostedRuntimeLatencyTraceEvent(
+  value: unknown,
+): HostedRuntimeLatencyTraceEvent {
+  const record = requireObject(value, "Hosted runtime latency trace event");
+  const type = requireString(record.type, "Hosted runtime latency trace event type");
+
+  switch (type) {
+    case "assistant_input_staged":
+      return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
+    case "provider_started":
+      return parseHostedRuntimeLatencyTraceProviderStartedEvent(record);
+    default:
+      throw new TypeError("Hosted runtime latency trace event type is not supported.");
+  }
+}
+
+export function parseHostedRuntimeLatencyTraceRequest(
+  value: unknown,
+): HostedRuntimeLatencyTraceRequest {
+  const record = requireObject(value, "Hosted runtime latency trace request");
+  assertAllowedObjectKeys(
+    record,
+    HOSTED_RUNTIME_LATENCY_TRACE_REQUEST_KEYS,
+    "Hosted runtime latency trace request",
+  );
+
+  return {
+    event: parseHostedRuntimeLatencyTraceEvent(record.event),
+  };
+}
+
+export function parseHostedRuntimeLatencyTraceResponse(
+  value: unknown,
+): HostedRuntimeLatencyTraceResponse {
+  const record = requireObject(value, "Hosted runtime latency trace response");
+
+  return {
+    matchedCount: requireNonNegativeInteger(
+      record.matchedCount,
+      "Hosted runtime latency trace response matchedCount",
+    ),
+    recorded: requireBoolean(
+      record.recorded,
+      "Hosted runtime latency trace response recorded",
+    ),
+    unmatchedCount: requireNonNegativeInteger(
+      record.unmatchedCount,
+      "Hosted runtime latency trace response unmatchedCount",
+    ),
+  };
+}
+
+function parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(
+  record: Record<string, unknown>,
+): HostedRuntimeLatencyTraceAssistantInputStagedEvent {
+  assertAllowedObjectKeys(
+    record,
+    HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_STAGED_KEYS,
+    "Hosted runtime latency trace assistant_input_staged event",
+  );
+
+  return {
+    assistantInputId: requireString(
+      record.assistantInputId,
+      "Hosted runtime latency trace assistantInputId",
+    ),
+    at: requireString(record.at, "Hosted runtime latency trace at"),
+    mailboxItemId: requireString(
+      record.mailboxItemId,
+      "Hosted runtime latency trace mailboxItemId",
+    ),
+    ...(record.runtimeAttemptId === undefined
+      ? {}
+      : {
+          runtimeAttemptId: readNullableString(
+            record.runtimeAttemptId,
+            "Hosted runtime latency trace runtimeAttemptId",
+          ),
+        }),
+    source: parseHostedIngressLatencySource(record.source),
+    type: "assistant_input_staged",
+  };
+}
+
+function parseHostedRuntimeLatencyTraceProviderStartedEvent(
+  record: Record<string, unknown>,
+): HostedRuntimeLatencyTraceProviderStartedEvent {
+  assertAllowedObjectKeys(
+    record,
+    HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS,
+    "Hosted runtime latency trace provider_started event",
+  );
+  const assistantInputIds = requireArray(
+    record.assistantInputIds,
+    "Hosted runtime latency trace assistantInputIds",
+  ).map((entry, index) =>
+    requireString(entry, `Hosted runtime latency trace assistantInputIds[${index}]`)
+  );
+
+  if (assistantInputIds.length === 0) {
+    throw new TypeError("Hosted runtime latency trace assistantInputIds must not be empty.");
+  }
+  if (assistantInputIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+    throw new TypeError(
+      `Hosted runtime latency trace assistantInputIds must contain at most ${HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS} ids.`,
+    );
+  }
+
+  return {
+    assistantInputIds,
+    at: requireString(record.at, "Hosted runtime latency trace at"),
+    providerRequestOrdinal: requireNonNegativeInteger(
+      record.providerRequestOrdinal,
+      "Hosted runtime latency trace providerRequestOrdinal",
+    ),
+    ...(record.runtimeAttemptId === undefined
+      ? {}
+      : {
+          runtimeAttemptId: readNullableString(
+            record.runtimeAttemptId,
+            "Hosted runtime latency trace runtimeAttemptId",
+          ),
+        }),
+    source: parseHostedIngressLatencySource(record.source),
+    type: "provider_started",
   };
 }
 
@@ -1395,6 +1558,18 @@ function assertNoForbiddenRuntimeLogKeys(
   for (const key of Object.keys(record)) {
     if (!HOSTED_RUNTIME_LOG_ENTRY_KEYS.has(key)) {
       throw new TypeError(`${label}.${key} is not allowed in hosted runtime log entries.`);
+    }
+  }
+}
+
+function assertAllowedObjectKeys(
+  record: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+  label: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new TypeError(`${label}.${key} is not allowed.`);
     }
   }
 }

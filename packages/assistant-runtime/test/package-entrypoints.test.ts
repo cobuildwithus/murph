@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 
 import {
+  parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseRootPublic,
   runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessPublic,
 } from "@murphai/assistant-runtime";
 import {
@@ -28,11 +29,13 @@ import {
   buildHostedRuntimeForwardedEnv as buildHostedRuntimeForwardedEnvPublic,
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecPublic,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputPublic,
+  parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponsePublic,
   projectHostedRuntimeToChildEnv as projectHostedRuntimeToChildEnvPublic,
   readHostedRunnerCommitTimeoutMs as readHostedRunnerCommitTimeoutMsPublic,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedAssistantRuntimeConfig as parseHostedAssistantRuntimeConfigWorkerPublic,
+  parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseWorkerPublic,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES as HOSTED_ASSISTANT_CONFIG_ENV_NAMES_DIRECT,
@@ -53,17 +56,20 @@ import {
   sendHostedProviderTelegramMessage as sendHostedProviderTelegramMessageDirect,
 } from "../src/hosted-provider-effects.ts";
 import {
+  parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseRootDirect,
   runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessDirect,
 } from "../src/hosted-runtime.ts";
 import {
   buildHostedRuntimeForwardedEnv as buildHostedRuntimeForwardedEnvDirect,
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecDirect,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputDirect,
+  parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseDirect,
   projectHostedRuntimeToChildEnv as projectHostedRuntimeToChildEnvDirect,
   readHostedRunnerCommitTimeoutMs as readHostedRunnerCommitTimeoutMsDirect,
 } from "../src/hosted-runtime-contracts.ts";
 import {
   parseHostedAssistantRuntimeConfig as parseHostedAssistantRuntimeConfigWorkerDirect,
+  parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseWorkerDirect,
 } from "../src/hosted-runtime-worker-contracts.ts";
 
 const expectedAssistantRuntimePublicExportKeys = [
@@ -102,6 +108,10 @@ test("package root export re-exports the hosted runtime surface only", () => {
   assert.equal(
     runHostedWorkspaceRuntimeJobInProcessPublic,
     runHostedWorkspaceRuntimeJobInProcessDirect,
+  );
+  assert.equal(
+    parseHostedRuntimeLatencyTraceResponseRootPublic,
+    parseHostedRuntimeLatencyTraceResponseRootDirect,
   );
 });
 
@@ -192,12 +202,20 @@ test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted run
   assert.equal(buildHostedRuntimeForwardedEnvPublic, buildHostedRuntimeForwardedEnvDirect);
   assert.equal(buildHostedRuntimeLaunchSpecPublic, buildHostedRuntimeLaunchSpecDirect);
   assert.equal(projectHostedRuntimeToChildEnvPublic, projectHostedRuntimeToChildEnvDirect);
+  assert.equal(
+    parseHostedRuntimeLatencyTraceResponsePublic,
+    parseHostedRuntimeLatencyTraceResponseDirect,
+  );
 });
 
 test("hosted-runtime-worker-contracts subpath stays wired to the worker contracts source surface", () => {
   assert.equal(
     parseHostedAssistantRuntimeConfigWorkerPublic,
     parseHostedAssistantRuntimeConfigWorkerDirect,
+  );
+  assert.equal(
+    parseHostedRuntimeLatencyTraceResponseWorkerPublic,
+    parseHostedRuntimeLatencyTraceResponseWorkerDirect,
   );
 });
 

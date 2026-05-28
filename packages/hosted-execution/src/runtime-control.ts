@@ -585,6 +585,48 @@ export interface HostedRuntimeIssueExportResponse {
   recorded: number;
 }
 
+export const HOSTED_INGRESS_LATENCY_SOURCES = [
+  "linq",
+] as const;
+
+export type HostedIngressLatencySource =
+  (typeof HOSTED_INGRESS_LATENCY_SOURCES)[number];
+
+export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
+export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
+
+export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent {
+  assistantInputId: string;
+  at: string;
+  mailboxItemId: string;
+  runtimeAttemptId?: string | null;
+  source: HostedIngressLatencySource;
+  type: "assistant_input_staged";
+}
+
+export interface HostedRuntimeLatencyTraceProviderStartedEvent {
+  assistantInputIds: string[];
+  at: string;
+  providerRequestOrdinal: number;
+  runtimeAttemptId?: string | null;
+  source: HostedIngressLatencySource;
+  type: "provider_started";
+}
+
+export type HostedRuntimeLatencyTraceEvent =
+  | HostedRuntimeLatencyTraceAssistantInputStagedEvent
+  | HostedRuntimeLatencyTraceProviderStartedEvent;
+
+export interface HostedRuntimeLatencyTraceRequest {
+  event: HostedRuntimeLatencyTraceEvent;
+}
+
+export interface HostedRuntimeLatencyTraceResponse {
+  matchedCount: number;
+  recorded: boolean;
+  unmatchedCount: number;
+}
+
 export interface HostedWorkspaceState {
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   checkpointedAt?: string | null;
