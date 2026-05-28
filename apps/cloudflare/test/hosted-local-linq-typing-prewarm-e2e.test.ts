@@ -6,6 +6,9 @@ import {
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  type HostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
@@ -87,6 +90,10 @@ describe("hosted local Linq typing prewarm e2e", () => {
     });
 
     const workflowId = hostedUserRuntimeWorkflowId(prewarmUserId);
+    const statusBeforeTyping = await activeScenario.harness.readUserStatus(prewarmUserId);
+    expectIdleStatusWithoutMailboxLag(statusBeforeTyping);
+    const workspaceVersionBeforeTyping = statusBeforeTyping.workspace?.version ?? null;
+    const lastInvocationAtBeforeTyping = statusBeforeTyping.lastInvocationAt ?? null;
     const outboundRequestCountBeforeTyping = activeLinqStub.observedRequests.length;
     const providerRequestCountBeforeTyping = activeScenario.assistantProviderRequests.length;
 
@@ -94,9 +101,8 @@ describe("hosted local Linq typing prewarm e2e", () => {
       chatId: prewarmChatId,
       eventId: `evt_linq_typing_prewarm_${prewarmUserId}`,
     }));
-    const typingResponseBody = await readWebhookResponseBody(typingResponse);
-    expect(typingResponse.status, typingResponseBody).toBe(202);
-    expect(parseWebhookJsonBody(typingResponseBody)).toMatchObject({
+    const typingResponseJson = await expectLinqWebhookJsonResponse(typingResponse, 202);
+    expect(typingResponseJson).toMatchObject({
       ok: true,
       reason: "typing-prewarm-signaled",
     });
@@ -135,6 +141,10 @@ describe("hosted local Linq typing prewarm e2e", () => {
     expect(activeScenario.assistantProviderRequests).toHaveLength(
       providerRequestCountBeforeTyping,
     );
+    const statusAfterTyping = await activeScenario.harness.readUserStatus(prewarmUserId);
+    expectIdleStatusWithoutMailboxLag(statusAfterTyping);
+    expect(statusAfterTyping.workspace?.version ?? null).toBe(workspaceVersionBeforeTyping);
+    expect(statusAfterTyping.lastInvocationAt ?? null).toBe(lastInvocationAtBeforeTyping);
 
     activeScenario.queueAssistantResponses([prewarmReplyText]);
     const replyChatPath = `/chats/${encodeURIComponent(prewarmChatId)}/messages`;
@@ -148,16 +158,18 @@ describe("hosted local Linq typing prewarm e2e", () => {
       userId: prewarmUserId,
     }));
 
-    const messageResponseBody = await readWebhookResponseBody(messageResponse);
-    expect(messageResponse.status, messageResponseBody).toBe(202);
-    expect(parseWebhookJsonBody(messageResponseBody)).toMatchObject({
+    const messageResponseJson = await expectLinqWebhookJsonResponse(messageResponse, 202);
+    expect(messageResponseJson).toMatchObject({
       ok: true,
       reason: "wake-appended-active-member",
     });
+    expect(activeLinqStub.countObservedSends(replyChatPath)).toBe(outboundCountBeforeReply);
 
-    const mailboxState = await waitForWorkflowExecutionState({
+    const mailboxState = await waitForWorkflowExecutionStateBeforeLinqSend({
+      baselineSendCount: outboundCountBeforeReply,
       description: "mailbox processing after typing prewarm",
       env: activeScenario.runtimeEnv,
+      expectedSendPath: replyChatPath,
       predicate: (state) =>
         state.prewarmSignalCount === prewarmState.prewarmSignalCount
         && state.lastDemandSource === "mailbox_backlog"
@@ -178,6 +190,9 @@ describe("hosted local Linq typing prewarm e2e", () => {
       userId: prewarmUserId,
     });
     expect(activeLinqStub.readObservedMessageText(replySend)).toBe(prewarmReplyText);
+    expect(activeLinqStub.countObservedSends(replyChatPath)).toBe(
+      outboundCountBeforeReply + 1,
+    );
 
     const finalStatus = await activeScenario.waitForHostedIdle(prewarmUserId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
@@ -190,7 +205,7 @@ describe("hosted local Linq typing prewarm e2e", () => {
     );
     expect(providerRequests).toHaveLength(1);
     expect(providerRequests[0]?.body).toContain("Reply to this after the typing prewarm.");
-  }, 420_000);
+  }, 900_000);
 });
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
@@ -217,17 +232,64 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-async function readWebhookResponseBody(response: Response): Promise<string> {
-  return await response.text();
+async function expectLinqWebhookJsonResponse(
+  response: Response,
+  expectedStatus: number,
+): Promise<Record<string, unknown>> {
+  const body = await response.text();
+  const parsed = parseWebhookJsonBody(body);
+  if (response.status !== expectedStatus || parsed === null) {
+    throw new Error([
+      `Expected Linq webhook JSON response with status ${expectedStatus}.`,
+      `observed status: ${response.status}`,
+      `json object body: ${parsed !== null}`,
+      ...summarizeWebhookJsonBody(parsed),
+    ].join("\n"));
+  }
+
+  return parsed;
 }
 
-function parseWebhookJsonBody(body: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(body);
+function parseWebhookJsonBody(body: string): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`Expected webhook response JSON object, got: ${body}`);
+    return null;
   }
 
   return parsed as Record<string, unknown>;
+}
+
+function summarizeWebhookJsonBody(parsed: Record<string, unknown> | null): string[] {
+  if (!parsed) {
+    return [];
+  }
+
+  return [
+    summarizeWebhookJsonField(parsed, "ok"),
+    summarizeWebhookJsonField(parsed, "reason"),
+    summarizeWebhookJsonField(parsed, "errorCode"),
+  ].filter((line): line is string => line !== null);
+}
+
+function summarizeWebhookJsonField(
+  parsed: Record<string, unknown>,
+  field: string,
+): string | null {
+  const value = parsed[field];
+  if (typeof value === "boolean") {
+    return `${field}: ${String(value)}`;
+  }
+  if (typeof value === "string") {
+    return `${field}: ${value.slice(0, 80)}`;
+  }
+
+  return null;
 }
 
 function buildTypingStartedEvent(input: {
@@ -338,11 +400,14 @@ async function waitForWorkflowExecutionState(input: {
         latestState = await handle.query<HostedRuntimeWorkflowState>(
           HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
         );
-        if (input.predicate(latestState)) {
-          return latestState;
-        }
       } catch (error) {
         latestError = error instanceof Error ? error.message : String(error);
+        await sleep(1_000);
+        continue;
+      }
+
+      if (input.predicate(latestState)) {
+        return latestState;
       }
 
       await sleep(1_000);
@@ -360,6 +425,40 @@ async function waitForWorkflowExecutionState(input: {
       .filter((line): line is string => Boolean(line))
       .join("\n"),
   );
+}
+
+async function waitForWorkflowExecutionStateBeforeLinqSend(input: {
+  baselineSendCount: number;
+  description: string;
+  env: NodeJS.ProcessEnv;
+  expectedSendPath: string;
+  predicate(state: HostedRuntimeWorkflowState): boolean;
+  workflowId: string;
+}): Promise<HostedRuntimeWorkflowState> {
+  return await waitForWorkflowExecutionState({
+    description: input.description,
+    env: input.env,
+    predicate: (state) => {
+      if (input.predicate(state)) {
+        return true;
+      }
+
+      const sendCount = requireLinqStub().countObservedSends(input.expectedSendPath);
+      if (sendCount > input.baselineSendCount) {
+        throw new Error([
+          "Observed Linq reply before Temporal accepted mailbox execution.",
+          `expected path: ${input.expectedSendPath}`,
+          `baseline count: ${input.baselineSendCount}`,
+          `observed count: ${sendCount}`,
+          `last demand source: ${state.lastDemandSource ?? "null"}`,
+          `last execution kind: ${state.lastExecutionKind ?? "null"}`,
+        ].join("\n"));
+      }
+
+      return false;
+    },
+    workflowId: input.workflowId,
+  });
 }
 
 async function waitForAdditionalObservedLinqSendWithoutNudge(input: {
@@ -395,6 +494,13 @@ function summarizeObservedLinqRequestsForFailure(): Array<{ method: string; url:
     method: request.method,
     url: request.url,
   }));
+}
+
+function expectIdleStatusWithoutMailboxLag(status: HostedRunnerStatusResponse): void {
+  expect(status.userId).toBe(prewarmUserId);
+  expect(status.lastErrorCode ?? null).toBeNull();
+  expect(status.inFlight).toBe(false);
+  expect(status.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 }
 
 function buildActivationWake(memberId: string) {
