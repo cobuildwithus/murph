@@ -545,10 +545,11 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     });
 
     const dirtyResource = Object.values(result.dirty.dirtyResources)[0];
+    const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
 
     expect(dirtyResource?.payload?.ordinary).toBe("kept");
     expect(dirtyResource?.payload).not.toHaveProperty("webhookDataJson");
-    expect(String(payloadCreateData?.[0]?.resourceEncrypted ?? ""))
+    expect(String(payloadRow.resourceEncrypted ?? ""))
       .not.toContain(oversizedWebhookDataJson.slice(0, 256));
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
   });
