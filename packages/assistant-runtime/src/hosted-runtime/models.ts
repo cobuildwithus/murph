@@ -130,13 +130,21 @@ export interface HostedMailboxEffect {
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
 }
 
+export interface HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
+  connectionId: string;
+  nextWakeAt?: string | null;
+  processedDirtyPayloadIds?: string[];
+  processedRevision: string;
+}
+
 export type HostedSystemMailboxPostCheckpointRecord =
-  | {
-      connectionId: string;
+  | (HostedDeviceSyncDirtyProcessedPostCheckpointRecord & {
       kind: "device-sync.dirty-processed";
+    })
+  | {
+      kind: "device-sync.dirty-processed-batch";
       nextWakeAt?: string | null;
-      processedDirtyPayloadIds?: string[];
-      processedRevision: string;
+      records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
     };
 
 export interface HostedConversationWakeMetrics {

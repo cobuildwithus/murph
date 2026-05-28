@@ -28,6 +28,7 @@ import {
 import type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
+  HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedConnectionRefreshLeaseClaimResult,
@@ -62,6 +63,7 @@ export {
 export type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
+  HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedDeviceSyncDirtyResource,
@@ -285,6 +287,13 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.hasPendingDirtyConnection(connectionId, tx);
   }
 
+  async hasPendingDirtyConnectionForUser(
+    userId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<boolean> {
+    return this.dirtyConnections.hasPendingDirtyConnectionForUser(userId, tx);
+  }
+
   async listPendingDirtyConnectionsForUser(input: {
     limit: number;
     userId: string;
@@ -321,7 +330,7 @@ export class PrismaDeviceSyncControlPlaneStore
     processedRevision: bigint;
     userId: string;
     tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+  }): Promise<HostedDeviceSyncDirtyConnectionAckRecord | null> {
     return this.dirtyConnections.markDirtyConnectionProcessed(input);
   }
 

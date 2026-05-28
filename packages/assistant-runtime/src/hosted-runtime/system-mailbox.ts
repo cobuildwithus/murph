@@ -31,7 +31,11 @@ import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
+import {
+  HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+} from "../hosted-device-sync-limits.ts";
 import type {
+  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedMailboxExecutionMetrics,
   HostedSystemMailboxPostCheckpointRecord,
   NormalizedHostedAssistantRuntimeConfig,
@@ -45,6 +49,8 @@ import {
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION = 1;
 const HOSTED_SYSTEM_MAILBOX_STATE_LABEL = "hosted system mailbox state";
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS = HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT;
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS = 500;
 
 type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -100,7 +106,7 @@ export type HostedSystemMailboxRuntime = Pick<
 
 interface HostedSystemMailboxPostCheckpointRecordResult {
   nextWakeAt: string | null;
-  recorded: boolean;
+  recorded: number;
   stillDirty: boolean;
 }
 
@@ -200,16 +206,23 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
-    const processedItem: HostedSystemMailboxPendingItem = {
-      ...prepared,
-      postCheckpointRecord: metrics.postCheckpointRecord ?? null,
-      status: metrics.postCheckpointRecord ? "recording" : "sending",
-    };
-    if (processedItem.postCheckpointRecord) {
+    const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
+    if (postCheckpointRecord) {
+      const processedItem: HostedSystemMailboxPendingItem = {
+        ...prepared,
+        postCheckpointRecord,
+        status: "recording",
+      };
       await updateHostedSystemMailboxPendingItem({
         item: processedItem,
         vaultRoot: input.vaultRoot,
       });
+      return {
+        item: processedItem,
+        itemId: prepared.itemId,
+        metrics,
+        status: "processed",
+      };
     } else {
       await removeHostedSystemMailboxPendingItem({
         itemId: prepared.itemId,
@@ -217,7 +230,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     return {
-      item: processedItem,
+      item: prepared,
       itemId: prepared.itemId,
       metrics,
       status: "processed",
@@ -302,7 +315,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       ...(nextWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
         ? { nextWakeReason: nextWake.reason }
         : {}),
-      recorded: recordResult.recorded ? 1 : 0,
+      recorded: recordResult.recorded,
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
@@ -389,9 +402,20 @@ async function removeHostedSystemMailboxPendingItem(input: {
   itemId: string;
   vaultRoot: string;
 }): Promise<void> {
+  await removeHostedSystemMailboxPendingItems({
+    itemIds: [input.itemId],
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function removeHostedSystemMailboxPendingItems(input: {
+  itemIds: readonly string[];
+  vaultRoot: string;
+}): Promise<void> {
+  const itemIds = new Set(input.itemIds);
   const state = await readHostedSystemMailboxState(input.vaultRoot);
   await writeHostedSystemMailboxState(input.vaultRoot, {
-    pending: state.pending.filter((item) => item.itemId !== input.itemId),
+    pending: state.pending.filter((item) => !itemIds.has(item.itemId)),
   });
 }
 
@@ -562,6 +586,11 @@ function readOptionalStringArray(value: unknown, label: string): string[] | unde
   if (!Array.isArray(value)) {
     throw new TypeError(`${label} must be an array when present.`);
   }
+  if (value.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS} entries.`,
+    );
+  }
   return value.map((entry, index) => readRequiredString(entry, `${label}[${index}]`));
 }
 
@@ -589,11 +618,27 @@ function parseHostedSystemMailboxRecordRequest(
 
   if (record.kind === "device-sync.dirty-processed") {
     return {
-      connectionId: readRequiredString(
-        record.connectionId,
-        "hosted system mailbox postCheckpointRecord connectionId",
-      ),
       kind: "device-sync.dirty-processed",
+      ...parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+        record,
+        "hosted system mailbox postCheckpointRecord",
+      ),
+    };
+  }
+
+  if (record.kind === "device-sync.dirty-processed-batch") {
+    if (!Array.isArray(record.records) || record.records.length === 0) {
+      throw new TypeError(
+        "hosted system mailbox postCheckpointRecord records must be a non-empty array.",
+      );
+    }
+    if (record.records.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS) {
+      throw new TypeError(
+        "hosted system mailbox postCheckpointRecord records exceeds the dirty ack batch limit.",
+      );
+    }
+    return {
+      kind: "device-sync.dirty-processed-batch",
       ...(record.nextWakeAt === undefined
         ? {}
         : {
@@ -602,22 +647,47 @@ function parseHostedSystemMailboxRecordRequest(
               "hosted system mailbox postCheckpointRecord nextWakeAt",
             ),
           }),
-      ...(record.processedDirtyPayloadIds === undefined
-        ? {}
-        : {
-            processedDirtyPayloadIds: readOptionalStringArray(
-              record.processedDirtyPayloadIds,
-              "hosted system mailbox postCheckpointRecord processedDirtyPayloadIds",
-            ),
-          }),
-      processedRevision: readRequiredString(
-        record.processedRevision,
-        "hosted system mailbox postCheckpointRecord processedRevision",
+      records: record.records.map((entry, index) =>
+        parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+          entry,
+          `hosted system mailbox postCheckpointRecord records[${index}]`,
+        )
       ),
     };
   }
 
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
+}
+
+function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+
+  return {
+    connectionId: readRequiredString(record.connectionId, `${label} connectionId`),
+    ...(record.nextWakeAt === undefined
+      ? {}
+      : {
+          nextWakeAt: readNullableIsoTimestamp(
+            record.nextWakeAt,
+            `${label} nextWakeAt`,
+          ),
+        }),
+    ...(record.processedDirtyPayloadIds === undefined
+      ? {}
+      : {
+          processedDirtyPayloadIds: readOptionalStringArray(
+            record.processedDirtyPayloadIds,
+            `${label} processedDirtyPayloadIds`,
+          ),
+        }),
+    processedRevision: readRequiredString(record.processedRevision, `${label} processedRevision`),
+  };
 }
 
 export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {
@@ -631,24 +701,69 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  if (!input.runtime.platform.deviceSyncPort) {
+    throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
+  }
+
   switch (input.record.kind) {
     case "device-sync.dirty-processed":
-      if (!input.runtime.platform.deviceSyncPort) {
-        throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
-      }
-      const response = await input.runtime.platform.deviceSyncPort.ackDirtyStateProcessed({
-        connectionId: input.record.connectionId,
-        ...(input.record.processedDirtyPayloadIds
-          ? { processedDirtyPayloadIds: input.record.processedDirtyPayloadIds }
-          : {}),
-        processedRevision: input.record.processedRevision,
+      return await recordHostedDeviceSyncDirtyProcessedRecords({
+        records: [input.record],
+        runtime: input.runtime,
       });
-      return {
-        nextWakeAt: response.nextWakeAt,
-        recorded: response.recorded,
-        stillDirty: response.stillDirty,
-      };
+    case "device-sync.dirty-processed-batch":
+      return await recordHostedDeviceSyncDirtyProcessedRecords({
+        nextWakeAt: input.record.nextWakeAt ?? null,
+        records: input.record.records,
+        runtime: input.runtime,
+      });
   }
+}
+
+async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
+  nextWakeAt?: string | null;
+  records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  const port = input.runtime.platform.deviceSyncPort;
+  if (!port) {
+    throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
+  }
+
+  let nextWakeAt = input.records.length === 0 ? input.nextWakeAt ?? null : null;
+  let recorded = 0;
+  let stillDirty = false;
+
+  for (const [index, record] of input.records.entries()) {
+    const response = await port.ackDirtyStateProcessed({
+      connectionId: record.connectionId,
+      ...(record.processedDirtyPayloadIds
+        ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }
+        : {}),
+      processedRevision: record.processedRevision,
+    });
+    if (response.recorded) {
+      recorded += 1;
+    }
+    stillDirty = stillDirty || response.stillDirty;
+    if (shouldUseHostedDirtyAckWake(index, input.records.length, response.stillDirty)) {
+      nextWakeAt = earliestHostedSystemMailboxWakeAt(nextWakeAt, response.nextWakeAt);
+    }
+  }
+
+  return {
+    nextWakeAt,
+    recorded,
+    stillDirty,
+  };
+}
+
+function shouldUseHostedDirtyAckWake(
+  index: number,
+  length: number,
+  stillDirty: boolean,
+): boolean {
+  return stillDirty || index === length - 1;
 }
 
 function readNullableIsoTimestamp(value: unknown, label: string): string | null {
@@ -663,6 +778,17 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
     throw new TypeError(`${label} must be an ISO timestamp.`);
   }
   return value;
+}
+
+function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) <= Date.parse(right) ? left : right;
 }
 
 function systemMailboxItemIsDue(
