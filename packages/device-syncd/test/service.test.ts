@@ -1396,7 +1396,7 @@ test("device sync service lets providers execute compatible due jobs as one boun
   close();
 });
 
-test("device sync service drainWorker limits seed passes while provider batches complete job rows", async () => {
+test("device sync service counts provider batch rows against drainWorker limits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-drain");
   const batchCalls: string[][] = [];
   const { service, store, close } = createServiceFixture({
@@ -1461,13 +1461,13 @@ test("device sync service drainWorker limits seed passes while provider batches 
     availableAt: "2026-03-17T10:00:03.000Z",
   });
 
-  const seedPasses = await service.drainWorker(1);
+  const processedRows = await service.drainWorker(2);
 
-  assert.equal(seedPasses, 1);
-  assert.deepEqual(batchCalls, [["first", "second", "third"]]);
+  assert.equal(processedRows, 2);
+  assert.deepEqual(batchCalls, [["first", "second"]]);
   assert.equal(store.getJobById(first.id)?.status, "succeeded");
   assert.equal(store.getJobById(second.id)?.status, "succeeded");
-  assert.equal(store.getJobById(third.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "queued");
   assert.equal(store.getJobById(fourth.id)?.status, "queued");
 
   close();
@@ -1619,10 +1619,11 @@ test("device sync service falls back to single-job execution when seed batch des
   close();
 });
 
-test("device sync service skips batch candidates whose description throws", async () => {
+test("device sync service treats batch candidate description failures as order barriers", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-candidate-describe-error");
   const debugLog = vi.fn();
   const batchCalls: string[][] = [];
+  const singleCalls: string[] = [];
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
@@ -1645,6 +1646,10 @@ test("device sync service skips batch candidates whose description throws", asyn
             : null;
         },
         maxJobBatchSize: 3,
+        async executeJob(_context, job) {
+          singleCalls.push(String(job.payload.label));
+          return {};
+        },
         async executeJobBatch(_context, jobs) {
           batchCalls.push(jobs.map((job) => String(job.payload.label)));
           return {};
@@ -1692,10 +1697,11 @@ test("device sync service skips batch candidates whose description throws", asyn
   const processed = await service.runWorkerOnce();
 
   assert.equal(processed?.id, first.id);
-  assert.deepEqual(batchCalls, [["first", "third"]]);
+  assert.deepEqual(singleCalls, ["first"]);
+  assert.deepEqual(batchCalls, []);
   assert.equal(store.getJobById(first.id)?.status, "succeeded");
   assert.equal(store.getJobById(badCandidate.id)?.status, "queued");
-  assert.equal(store.getJobById(third.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "queued");
   expect(debugLog).toHaveBeenCalledWith(
     "Device sync provider batch descriptor failed; using single-job fallback.",
     expect.objectContaining({
@@ -1763,6 +1769,13 @@ test("device sync service falls back to single-job execution when no compatible 
     payload: { group: "sleep", label: "incompatible" },
     availableAt: "2026-03-17T10:00:01.000Z",
   });
+  const laterCompatible = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "later-compatible" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
 
   const processed = await service.runWorkerOnce();
 
@@ -1771,6 +1784,7 @@ test("device sync service falls back to single-job execution when no compatible 
   assert.deepEqual(singleCalls, ["first"]);
   assert.equal(store.getJobById(first.id)?.status, "succeeded");
   assert.equal(store.getJobById(incompatible.id)?.status, "queued");
+  assert.equal(store.getJobById(laterCompatible.id)?.status, "queued");
 
   close();
 });

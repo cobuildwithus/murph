@@ -46,8 +46,8 @@ export interface DeviceSyncServiceConfig {
   sessionTtlMs?: number;
   workerLeaseMs?: number;
   workerPollMs?: number;
-  // Number of seed worker passes per drain tick. A pass may complete more
-  // than one durable job row when a provider batches compatible work.
+  // Number of durable job rows per drain tick. A provider batch may complete
+  // multiple compatible rows in one worker pass, and each row counts here.
   workerBatchSize?: number;
   schedulerPollMs?: number;
   log?: DeviceSyncLogger;

@@ -134,8 +134,8 @@ export interface DeviceSyncService {
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(): Promise<void>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
-  // Drains up to `limit` worker passes. One pass starts from one claimed
-  // seed job; provider batching may complete additional compatible job rows.
+  // Drains up to `limit` durable job rows. One worker pass starts from one
+  // claimed seed job, but provider batching still counts every claimed row.
   drainWorker(limit?: number): Promise<number>;
 }
 
@@ -468,6 +468,26 @@ class DeviceSyncServiceController {
   }
 
   async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
+    const result = await this.runWorkerPassOnce({
+      maxJobRows: Number.POSITIVE_INFINITY,
+    });
+    return result?.job ?? null;
+  }
+
+  private async runWorkerPassOnce(input: {
+    maxJobRows: number;
+  }): Promise<{
+    job: DeviceSyncJobRecord;
+    processedJobRows: number;
+  } | null> {
+    const maxJobRows = normalizeProviderJobBatchLimit(
+      input.maxJobRows,
+      DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS,
+    );
+    if (maxJobRows <= 0) {
+      return null;
+    }
+
     if (this.shouldYieldJobExecution?.() === true) {
       return null;
     }
@@ -480,6 +500,14 @@ class DeviceSyncServiceController {
       return null;
     }
 
+    let activeJobs: DeviceSyncJobRecord[] = [job];
+    const finishPass = (): {
+      job: DeviceSyncJobRecord;
+      processedJobRows: number;
+    } => ({
+      job,
+      processedJobRows: Math.max(1, activeJobs.length),
+    });
     const failClaimedJob = (
       code: string,
       message: string,
@@ -508,19 +536,19 @@ class DeviceSyncServiceController {
         null,
         false,
       );
-      return job;
+      return finishPass();
     }
 
     const storedAccount = this.store.getAccountById(job.accountId);
 
     if (!storedAccount) {
       failClaimedJob("ACCOUNT_NOT_FOUND", `Device sync account ${job.accountId} does not exist.`, null, false);
-      return job;
+      return finishPass();
     }
 
     if (storedAccount.status === "disconnected") {
       this.store.completeJob(job.id, now);
-      return job;
+      return finishPass();
     }
 
     if (storedAccount.status === "reauthorization_required") {
@@ -536,7 +564,7 @@ class DeviceSyncServiceController {
         "ACCOUNT_REAUTHORIZATION_REQUIRED",
         "Device sync account requires reconnection before queued jobs can run.",
       );
-      return job;
+      return finishPass();
     }
 
     this.store.markSyncStarted(storedAccount.id, now);
@@ -551,10 +579,9 @@ class DeviceSyncServiceController {
         null,
         false,
       );
-      return job;
+      return finishPass();
     }
 
-    let activeJobs: DeviceSyncJobRecord[] = [job];
     const ensureJobLeasesOwned = (): void => {
       const fenceNow = currentNow();
       for (const activeJob of activeJobs) {
@@ -618,6 +645,7 @@ class DeviceSyncServiceController {
       activeJobs = this.claimProviderJobBatch({
         accountId: storedAccount.id,
         jobExecutor,
+        maxJobRows,
         normalizedSeedJob: normalizedJob,
         now,
         provider: provider.provider,
@@ -716,7 +744,7 @@ class DeviceSyncServiceController {
       ensureAccountActive();
 
       if (!this.store.completeJobsIfOwned(activeJobs.map((activeJob) => activeJob.id), this.workerId, currentNow())) {
-        return job;
+        return finishPass();
       }
 
       const successOptions: {
@@ -740,11 +768,11 @@ class DeviceSyncServiceController {
       );
 
       if (!markedSucceeded) {
-        return job;
+        return finishPass();
       }
 
       this.enqueueJobs(storedAccount, result.scheduledJobs ?? []);
-      return job;
+      return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
         const releaseNow = currentNow();
@@ -757,7 +785,7 @@ class DeviceSyncServiceController {
           jobCount: activeJobs.length,
           released,
         });
-        return job;
+        return finishPass();
       }
 
       if (error instanceof DeviceSyncJobExecutionCancelledError) {
@@ -766,7 +794,7 @@ class DeviceSyncServiceController {
           accountId: storedAccount.id,
           jobId: job.id,
         });
-        return job;
+        return finishPass();
       }
 
       const failure = normalizeExecutionError(error);
@@ -789,7 +817,7 @@ class DeviceSyncServiceController {
         .some(Boolean);
 
       if (!failed) {
-        return job;
+        return finishPass();
       }
 
       this.recordJobFailureDiagnostic({
@@ -817,31 +845,35 @@ class DeviceSyncServiceController {
         accountStatus: failure.accountStatus ?? null,
         ...failure.details,
       });
-      return job;
+      return finishPass();
     } finally {
       stopYieldPolling();
     }
   }
 
   async drainWorker(limit = this.workerBatchSize): Promise<number> {
-    let seedPasses = 0;
+    const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
+    let processedJobRows = 0;
 
-    for (let index = 0; index < limit; index += 1) {
-      const job = await this.runWorkerOnce();
+    while (processedJobRows < maxJobRows) {
+      const result = await this.runWorkerPassOnce({
+        maxJobRows: maxJobRows - processedJobRows,
+      });
 
-      if (!job) {
+      if (!result) {
         break;
       }
 
-      seedPasses += 1;
+      processedJobRows += result.processedJobRows;
     }
 
-    return seedPasses;
+    return processedJobRows;
   }
 
   private claimProviderJobBatch(input: {
     accountId: string;
     jobExecutor: DeviceJobExecutor;
+    maxJobRows: number;
     normalizedSeedJob: DeviceSyncJobRecord;
     now: string;
     provider: string;
@@ -862,9 +894,12 @@ class DeviceSyncServiceController {
       return [input.normalizedSeedJob];
     }
 
-    const maxBatchSize = normalizeProviderJobBatchLimit(
-      batchExecutor.maxJobs,
-      DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS,
+    const maxBatchSize = Math.min(
+      normalizeProviderJobBatchLimit(
+        batchExecutor.maxJobs,
+        DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS,
+      ),
+      normalizeProviderJobBatchLimit(input.maxJobRows, DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS),
     );
     if (maxBatchSize <= 1) {
       return [input.normalizedSeedJob];
@@ -898,7 +933,7 @@ class DeviceSyncServiceController {
       try {
         normalizedCandidate = normalizeConfiguredDeviceSyncJobRecord(input.provider, candidate, "execution");
       } catch {
-        continue;
+        break;
       }
 
       const descriptor = readProviderJobBatchDescriptor({
@@ -909,12 +944,12 @@ class DeviceSyncServiceController {
         role: "candidate",
       });
       if (!isValidProviderJobBatchDescriptor(descriptor) || descriptor.key !== seedDescriptor.key) {
-        continue;
+        break;
       }
 
       const estimatedBytes = normalizeProviderJobBatchEstimatedBytes(descriptor);
       if (totalEstimatedBytes + estimatedBytes > maxEstimatedBytes) {
-        continue;
+        break;
       }
 
       selectedJobIds.push(candidate.id);
