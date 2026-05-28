@@ -152,10 +152,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   runtimeAttemptId?: string | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
-  skipDeviceSync?: boolean;
-  skipDirtyPendingFetch?: boolean;
-  shouldYieldDeviceSync?: (() => boolean) | null;
-  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const startedAt = Date.now();
@@ -171,30 +167,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation),
     );
   }
-
-  const deviceSyncStartedAt = Date.now();
-  const deviceSyncResult = input.skipDeviceSync === true
-    ? {
-        nextWakeAt: null,
-        postCheckpointRecord: null,
-        processedJobs: 0,
-        skipped: true,
-      }
-    : await runHostedDeviceSyncPass(
-        input.wake,
-        input.vaultRoot,
-        input.runtime.resolvedConfig.deviceSync,
-        input.runtime.platform.deviceSyncPort,
-        input.runtime.commitTimeoutMs,
-        {
-          platformEnv: input.runtime.platformEnv,
-          runtimeLogPlatform: input.runtime.platform,
-          shouldYield: input.shouldYieldDeviceSync ?? null,
-          skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
-          stagedDirtyAcks: input.stagedDirtyAcks ?? null,
-        },
-      );
-  const deviceSyncElapsedMs = elapsedSince(deviceSyncStartedAt);
 
   const assistantStartedAt = Date.now();
   const assistantResult = assistantAutomation.shouldRun
@@ -222,21 +194,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
-  const deviceSyncNextWake = selectHostedRuntimeWakeCandidate([
-    createHostedRuntimeWakeCandidate(
-      deviceSyncResult.nextWakeAt,
-      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    ),
-    createHostedRuntimeWakeCandidate(
-      deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
-      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    ),
-  ]);
-  const nextWake = selectHostedRuntimeWakeCandidate([
-    createHostedRuntimeWakeCandidate(assistantResult.nextWakeAt, null),
-    deviceSyncNextWake,
-  ]);
-
   return {
     activeTurnInputIngested:
       assistantResult.timings?.activeTurnInputIngested ?? false,
@@ -254,18 +211,13 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       assistantResult.timings?.inputCandidateListed ?? false,
     assistantInputCandidateQueryCount:
       assistantResult.timings?.inputCandidateQueryCount ?? 0,
-    deviceSyncElapsedMs,
-    deviceSyncProcessed: deviceSyncResult.processedJobs,
-    deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: nextWake.at,
-    ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    nextWakeAt: assistantResult.nextWakeAt,
     parserProcessed: 0,
-    postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
+    postCheckpointRecord: null,
     readinessElapsedMs,
     ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
-    ...(deviceSyncResult.stagedDirtyAcks
-      ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
-      : {}),
     totalElapsedMs: elapsedSince(startedAt),
   };
 }
@@ -913,11 +865,11 @@ export async function runHostedDeviceSyncPass(
     if (secret) {
       syncState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
+        wake,
         secret,
         service,
         skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
-        wake,
       });
       controlPlaneSynced = true;
     }
@@ -926,6 +878,7 @@ export async function runHostedDeviceSyncPass(
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
+        syncState,
         wake,
       });
     }
@@ -956,6 +909,7 @@ export async function runHostedDeviceSyncPass(
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
         service,
+        syncState,
         wake,
       });
     }
@@ -974,6 +928,7 @@ export async function runHostedDeviceSyncPass(
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
         service,
+        syncState,
         wake,
       });
     }
@@ -1005,6 +960,7 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   processedJobs: number;
   service: DeviceSyncService;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
+  syncState?: HostedDeviceSyncRuntimeSyncState | null;
   wake: HostedRuntimeEvent;
 }): {
   nextWakeAt: string | null;
@@ -1013,10 +969,15 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   skipped: boolean;
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 } {
-  const stagedDirtyAcks = input.stagedDirtyAcks ?? [];
+  const syncState = input.syncState ?? null;
+  const stagedDirtyAcks = syncState
+    ? listHostedDeviceSyncDirtyProcessedRecords({ state: syncState })
+    : input.stagedDirtyAcks ?? [];
   return {
     nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
-    postCheckpointRecord: null,
+    postCheckpointRecord: syncState
+      ? resolveHostedDeviceSyncDirtyPostCheckpointRecord({ state: syncState })
+      : null,
     processedJobs: input.processedJobs,
     skipped: true,
     ...(stagedDirtyAcks.length > 0

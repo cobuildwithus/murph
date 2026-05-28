@@ -18,13 +18,17 @@ Done:
 - Existing code path confirmed: `buildCodexThreadStartParams` includes `dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL]` only when `turnProgress` exists.
 - Existing Linq delivery E2E confirmed as the hosted-local iMessage-facing scenario.
 - Added a test-only hosted Codex shim expected-dynamic-tools control and wired Linq delivery to require `murph.send_progress_update`.
+- Extended the shim guard so `thread/resume` validates the expected dynamic tool was restored from the thread rollout rather than requiring unsupported `dynamicTools` resume params.
 - Focused shim/config test passed: `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-codex-config.test.ts --no-coverage`.
+- Supplemental Linq hosted-local run passed with the current runner bundle: `pnpm hosted-local e2e linq-delivery --no-bundle` (7 passed, 1 skipped).
+- Focused typecheck passed: `pnpm --dir packages/assistant-runtime typecheck`.
+- Truthful full bundle run `pnpm hosted-local e2e linq-delivery` assembled successfully but failed before any assistant provider request; hosted logs showed `assistant.input_candidates.listed` with `candidateCount: 0` and `assistant provider requests: []`, so the dynamic-tool shim was not reached.
 
 Now:
-- Run hosted-local Linq delivery E2E and scoped verification.
+- Completion review and handoff.
 
 Next:
-- Run the focused shim unit test, `pnpm hosted-local e2e linq-delivery`, and scoped verification for touched files.
+- Investigate the full-bundle Linq input-candidate regression separately from the dynamic-tool shim guard if needed.
 
 Open questions (UNCONFIRMED if needed):
 - None.
