@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest'
 import {
   ASSISTANT_SKILLS,
   buildAssistantSkillFileRef,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_REF,
   resolveAssistantSkillsRoot,
+  withAssistantSkillsRootEnv,
 } from '../src/assistant-skill-assets.js'
 
 describe('assistant skill assets', () => {
@@ -31,6 +33,21 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('experiment-onboarding')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
+  })
+
+  it('fills the assistant skills root env without overriding explicit roots', () => {
+    const fallback = withAssistantSkillsRootEnv({
+      [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: '   ',
+    })
+    expect(fallback[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toBe(
+      resolveAssistantSkillsRoot(),
+    )
+
+    const explicitRoot = path.join('custom', 'assistant-skills')
+    const preserved = withAssistantSkillsRootEnv({
+      [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: explicitRoot,
+    })
+    expect(preserved[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toBe(explicitRoot)
   })
 
   it('keeps experiment onboarding details in the skill file, not the prompt', async () => {

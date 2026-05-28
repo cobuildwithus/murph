@@ -27,3 +27,6 @@ Move the long experiment-onboarding assistant workflow out of the stable system 
 - `pnpm --filter @murphai/assistant-engine build`
 - `pnpm --filter @murphai/assistant-runtime build`
 - Direct prompt/config readback for stable skill-root references and absence of long onboarding body/path leakage.
+Status: completed
+Updated: 2026-05-28
+Completed: 2026-05-28
