@@ -126,7 +126,7 @@ describe("PrismaHostedDirtyConnectionStore dirty payload preseal concurrency", (
     });
 
     expect(sealState.calls).toBe(20);
-    expect(sealState.maxActive).toBe(8);
+    expect(sealState.maxActive).toBe(16);
     expect(readPayloadCreateData()).toHaveLength(20);
   });
 
@@ -152,7 +152,7 @@ describe("PrismaHostedDirtyConnectionStore dirty payload preseal concurrency", (
     await Promise.resolve();
 
     expect(sealState.active).toBe(0);
-    expect(sealState.calls).toBe(8);
+    expect(sealState.calls).toBe(16);
     expect(readPayloadCreateData()).toBeNull();
   });
 });

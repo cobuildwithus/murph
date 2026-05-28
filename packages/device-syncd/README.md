@@ -26,6 +26,7 @@ What it does:
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race
 - may execute compatible already-durable jobs as bounded provider-owned batches while keeping job rows granular for retry, ack, and idempotency
+- treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as worker passes/seed jobs per tick; one pass may complete multiple durable job rows when a provider batch is claimed
 - imports provider snapshots through `@murphai/importers`
 
 Current providers:

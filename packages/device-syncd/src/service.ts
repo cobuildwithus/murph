@@ -35,6 +35,7 @@ import type {
   BeginConnectionResult,
   CompleteConnectionResult,
   DeviceConnectionHandler,
+  DeviceJobBatchExecutor,
   DeviceJobExecutor,
   DeviceSyncAccountCredential,
   DeviceSyncAccount,
@@ -133,6 +134,8 @@ export interface DeviceSyncService {
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(): Promise<void>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
+  // Drains up to `limit` worker passes. One pass starts from one claimed
+  // seed job; provider batching may complete additional compatible job rows.
   drainWorker(limit?: number): Promise<number>;
 }
 
@@ -821,7 +824,7 @@ class DeviceSyncServiceController {
   }
 
   async drainWorker(limit = this.workerBatchSize): Promise<number> {
-    let processed = 0;
+    let seedPasses = 0;
 
     for (let index = 0; index < limit; index += 1) {
       const job = await this.runWorkerOnce();
@@ -830,10 +833,10 @@ class DeviceSyncServiceController {
         break;
       }
 
-      processed += 1;
+      seedPasses += 1;
     }
 
-    return processed;
+    return seedPasses;
   }
 
   private claimProviderJobBatch(input: {
@@ -848,7 +851,13 @@ class DeviceSyncServiceController {
       return [input.normalizedSeedJob];
     }
 
-    const seedDescriptor = batchExecutor.describe(input.normalizedSeedJob);
+    const seedDescriptor = readProviderJobBatchDescriptor({
+      batchExecutor,
+      job: input.normalizedSeedJob,
+      logger: this.logger,
+      provider: input.provider,
+      role: "seed",
+    });
     if (!isValidProviderJobBatchDescriptor(seedDescriptor)) {
       return [input.normalizedSeedJob];
     }
@@ -892,7 +901,13 @@ class DeviceSyncServiceController {
         continue;
       }
 
-      const descriptor = batchExecutor.describe(normalizedCandidate);
+      const descriptor = readProviderJobBatchDescriptor({
+        batchExecutor,
+        job: normalizedCandidate,
+        logger: this.logger,
+        provider: input.provider,
+        role: "candidate",
+      });
       if (!isValidProviderJobBatchDescriptor(descriptor) || descriptor.key !== seedDescriptor.key) {
         continue;
       }
@@ -1219,6 +1234,26 @@ function isValidProviderJobBatchDescriptor(
   descriptor: ProviderJobBatchDescriptor | null | undefined,
 ): descriptor is ProviderJobBatchDescriptor {
   return typeof descriptor?.key === "string" && descriptor.key.length > 0;
+}
+
+function readProviderJobBatchDescriptor(input: {
+  batchExecutor: DeviceJobBatchExecutor;
+  job: DeviceSyncJobRecord;
+  logger: DeviceSyncLogger;
+  provider: string;
+  role: "candidate" | "seed";
+}): ProviderJobBatchDescriptor | null {
+  try {
+    return input.batchExecutor.describe(input.job);
+  } catch (error) {
+    input.logger.debug?.("Device sync provider batch descriptor failed; using single-job fallback.", {
+      error: summarizeError(error),
+      jobId: input.job.id,
+      provider: input.provider,
+      role: input.role,
+    });
+    return null;
+  }
 }
 
 function normalizeProviderJobBatchLimit(value: number | undefined, fallback: number): number {
