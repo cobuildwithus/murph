@@ -162,7 +162,7 @@ describe("runner bundle pnpm install config", () => {
         "#!/usr/bin/env node",
         "import { appendFileSync } from 'node:fs';",
         `const logPath = ${JSON.stringify(pnpmLogPath)};`,
-        "appendFileSync(logPath, `${process.argv.slice(2).join(' ')}\\n`, 'utf8');",
+        "appendFileSync(logPath, `${process.argv.slice(2).join(' ')} SHARP_IGNORE_GLOBAL_LIBVIPS=${process.env.SHARP_IGNORE_GLOBAL_LIBVIPS ?? ''}\\n`, 'utf8');",
       ].join("\n"),
       "utf8",
     );
@@ -191,7 +191,11 @@ describe("runner bundle pnpm install config", () => {
     }
 
     await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
-      "install --prod --lockfile-only\ninstall --prod --frozen-lockfile\n",
+      [
+        "install --prod --lockfile-only SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+        "install --prod --frozen-lockfile SHARP_IGNORE_GLOBAL_LIBVIPS=1",
+        "",
+      ].join("\n"),
     );
     await expect(readFile(path.join(bundleDir, ".npmrc"), "utf8")).resolves.toBe(
       [

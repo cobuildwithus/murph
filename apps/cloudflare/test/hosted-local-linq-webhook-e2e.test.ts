@@ -113,7 +113,10 @@ describe("hosted local Linq webhook e2e", () => {
       assistantProviderRequests,
       "nickname webhook provider request",
     );
-    expect(assistantProviderBody).toContain("U can call me Rocket Man");
+    expect(
+      assistantProviderBody.includes("U can call me Rocket Man"),
+      summarizeProviderTextRequestShape(assistantProviderBody),
+    ).toBe(true);
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -253,7 +256,10 @@ describe("hosted local Linq webhook e2e", () => {
     );
     const providerBody = parseAssistantProviderRequestBody(assistantProviderBody);
     const inputFiles = collectProviderInputPartsByType(providerBody, "input_file");
-    expect(inputFiles).toEqual([]);
+    expect(
+      inputFiles.length,
+      summarizeProviderFileRequestShape(providerBody, assistantProviderBody),
+    ).toBe(0);
     expect(assistantProviderBody.includes("\"input_file\"")).toBe(false);
     expect(assistantProviderBody.includes("\"file_data\"")).toBe(false);
     expect(assistantProviderBody.includes("\"file_id\"")).toBe(false);
@@ -365,6 +371,9 @@ describe("hosted local Linq webhook e2e", () => {
     expect(inputImages.length, imageShapeSummary).toBeGreaterThan(0);
     const imagePayload = decodeSingleProviderDataImageUrl(inputImages, imageShapeSummary);
     expect(imagePayload.mediaType, imageShapeSummary).toBe("image/webp");
+    expect(imagePayload.bytes.byteLength, imageShapeSummary).toBeGreaterThan(12);
+    expect(hasWebpSignature(imagePayload.bytes), imageShapeSummary).toBe(true);
+    expect(hasPngSignature(imagePayload.bytes), imageShapeSummary).toBe(false);
     expect(imagePayload.bytes.byteLength, imageShapeSummary).toBeLessThan(
       originalImageBytes.byteLength,
     );
@@ -572,6 +581,23 @@ function decodeSingleProviderDataImageUrl(
   };
 }
 
+function hasWebpSignature(bytes: Uint8Array): boolean {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return (
+    buffer.byteLength >= 12
+    && buffer.subarray(0, 4).toString("ascii") === "RIFF"
+    && buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  );
+}
+
+function hasPngSignature(bytes: Uint8Array): boolean {
+  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return (
+    bytes.byteLength >= pngSignature.length
+    && pngSignature.every((byte, index) => bytes[index] === byte)
+  );
+}
+
 function requireSingleAssistantProviderRequestBody(
   requests: readonly { body: string; method: string; url: string }[],
   context: string,
@@ -604,6 +630,34 @@ function safeProviderRequestUrlPath(url: string): string {
   } catch {
     return "unparseable";
   }
+}
+
+function summarizeProviderTextRequestShape(rawBody: string): string {
+  return JSON.stringify({
+    bodyBytes: Buffer.byteLength(rawBody, "utf8"),
+    hasAttachmentContext: rawBody.includes("Attachment context:"),
+    hasDataImage: rawBody.includes("data:image"),
+    hasInputFile: rawBody.includes("\"input_file\""),
+    hasInputImage: rawBody.includes("\"input_image\""),
+  });
+}
+
+function summarizeProviderFileRequestShape(
+  body: Record<string, unknown>,
+  rawBody: string,
+): string {
+  return JSON.stringify({
+    hasAttachmentContext: rawBody.includes("Attachment context:"),
+    hasFileData: rawBody.includes("\"file_data\""),
+    hasFileId: rawBody.includes("\"file_id\""),
+    hasInputFile: rawBody.includes("\"input_file\""),
+    inputFileCount: collectProviderInputPartsByType(body, "input_file").length,
+    inputItemCount: Array.isArray(body.input) ? body.input.length : null,
+    inputTypes: collectJsonTypeFields(body).slice(0, 24),
+    rawPathExtensions: Array.from(rawBody.matchAll(/attachments\/\d+\.([A-Za-z0-9]+)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
+  });
 }
 
 function summarizeProviderImageRequestShape(
@@ -640,7 +694,7 @@ function summarizeGroupedWebhookProviderRequests(
     hasFirstWebhookText: request.body.includes("U can call me Comet Rider"),
     hasSecondWebhookText: request.body.includes("I want to build more strength"),
     method: request.method,
-    url: request.url,
+    urlPath: safeProviderRequestUrlPath(request.url),
   })));
 }
 
