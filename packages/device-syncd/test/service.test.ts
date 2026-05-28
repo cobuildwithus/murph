@@ -1290,8 +1290,9 @@ test("device sync service lets providers execute compatible due jobs as one boun
       createFakeProvider({
         describeJobBatch(job) {
           const group = typeof job.payload.group === "string" ? job.payload.group : null;
+          const estimatedBytes = typeof job.payload.estimatedBytes === "number" ? job.payload.estimatedBytes : 5;
           return job.kind === "resource" && group
-            ? { key: `resource:${group}`, estimatedBytes: 5 }
+            ? { key: `resource:${group}`, estimatedBytes }
             : null;
         },
         maxJobBatchEstimatedBytes: 16,
@@ -1364,19 +1365,26 @@ test("device sync service lets providers execute compatible due jobs as one boun
     payload: { group: "activity", label: "capped-by-bytes" },
     availableAt: "2026-03-17T10:00:03.000Z",
   });
+  const laterCompatibleAfterByteBarrier = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { estimatedBytes: 1, group: "activity", label: "later-compatible-after-byte-barrier" },
+    availableAt: "2026-03-17T10:00:04.000Z",
+  });
   const incompatible = store.enqueueJob({
     accountId: account.id,
     provider: "demo",
     kind: "resource",
     payload: { group: "sleep", label: "incompatible" },
-    availableAt: "2026-03-17T10:00:04.000Z",
+    availableAt: "2026-03-17T10:00:05.000Z",
   });
   const otherAccountJob = store.enqueueJob({
     accountId: otherAccount.id,
     provider: "demo",
     kind: "resource",
     payload: { group: "activity", label: "other-account" },
-    availableAt: "2026-03-17T10:00:05.000Z",
+    availableAt: "2026-03-17T10:00:06.000Z",
   });
 
   const processed = await service.runWorkerOnce();
@@ -1389,6 +1397,7 @@ test("device sync service lets providers execute compatible due jobs as one boun
   assert.equal(store.getJobById(second.id)?.status, "succeeded");
   assert.equal(store.getJobById(third.id)?.status, "succeeded");
   assert.equal(store.getJobById(cappedByBytes.id)?.status, "queued");
+  assert.equal(store.getJobById(laterCompatibleAfterByteBarrier.id)?.status, "queued");
   assert.equal(store.getJobById(incompatible.id)?.status, "queued");
   assert.equal(store.getJobById(otherAccountJob.id)?.status, "queued");
   assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-03-18T12:00:00.000Z");
@@ -1469,6 +1478,98 @@ test("device sync service counts provider batch rows against drainWorker limits"
   assert.equal(store.getJobById(second.id)?.status, "succeeded");
   assert.equal(store.getJobById(third.id)?.status, "queued");
   assert.equal(store.getJobById(fourth.id)?.status, "queued");
+
+  close();
+});
+
+test("device sync service reclaims expired running batch candidates in due order", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-expired-running");
+  const batchCalls: string[][] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 3,
+        async executeJobBatch(_context, jobs) {
+          batchCalls.push(jobs.map((job) => String(job.payload.label)));
+          return {};
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-expired-running",
+    displayName: "Demo Provider Batch Expired Running",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-expired-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-expired-running", "batch-expired-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const third = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "third" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+  const staleNow = "2026-03-17T10:01:00.000Z";
+  const staleSeed = store.claimDueJob("stale-worker", staleNow, 60_000);
+
+  assert.equal(staleSeed?.id, first.id);
+  assert.deepEqual(
+    store.claimJobBatchCandidatesIfSeedOwned({
+      accountId: account.id,
+      jobIds: [second.id],
+      leaseMs: 60_000,
+      now: staleNow,
+      provider: "demo",
+      seedJobId: first.id,
+      workerId: "stale-worker",
+    }).map((job) => job.id),
+    [second.id],
+  );
+
+  const expiredLeaseAt = "2026-03-17T10:00:30.000Z";
+  expireJobLeaseForTesting(store, first.id, expiredLeaseAt);
+  expireJobLeaseForTesting(store, second.id, expiredLeaseAt);
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.deepEqual(batchCalls, [["first", "second", "third"]]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(second.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "succeeded");
+  assert.equal(store.getJobById(first.id)?.attempts, 2);
+  assert.equal(store.getJobById(second.id)?.attempts, 2);
+  assert.equal(store.getJobById(third.id)?.attempts, 1);
 
   close();
 });
