@@ -560,7 +560,7 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     const webhookDataJson = JSON.stringify({ sampleCount: 1, source: "garmin" });
     const payloadResource = {
       count: 1,
-      dirtyPayloadId: "dsp_payload_pending_after_revision_ack",
+      dirtyPayloadId: "dsp_payload_embedded_id_should_not_win",
       jobKind: "resource",
       payload: {
         webhookDataJson,
@@ -571,10 +571,11 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
       windowEnd: "2026-05-26T12:10:00.000Z",
       windowStart: "2026-05-26T12:00:00.000Z",
     };
+    const payloadRowId = "dsp_payload_pending_after_revision_ack";
     const resourceEncrypted = await sealHostedDeviceSyncDirtyPayloadJson({
       connectionId: "dsc_junction_revision_ack",
       dirtyRevision: 4n,
-      payloadId: payloadResource.dirtyPayloadId,
+      payloadId: payloadRowId,
       provider: "junction",
       userId: "member_123",
       value: payloadResource,
@@ -614,7 +615,7 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
           {
             connectionId: "dsc_junction_revision_ack",
             dirtyRevision: 4n,
-            id: payloadResource.dirtyPayloadId,
+            id: payloadRowId,
             provider: "junction",
             resourceEncrypted,
           },
@@ -634,13 +635,14 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
       processedRevision: 4n,
     });
     const dirtyResource = Object.values(result.items[0]?.dirtyResources ?? {})[0];
-    expect(dirtyResource?.dirtyPayloadId).toBe(payloadResource.dirtyPayloadId);
+    expect(dirtyResource?.dirtyPayloadId).toBe(payloadRowId);
     expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
     const query = queryCalls[0] as {
       text: string;
     };
-    expect(query.text).toContain('"dirty_revision" > "processed_revision"');
-    expect(query.text).toContain('from "device_sync_dirty_payload" as "payload"');
+    expect(query.text).toMatch(
+      /and\s*\(\s*"dirty_revision"\s*>\s*"processed_revision"\s*or\s+exists\s*\(/su,
+    );
     expect(query.text).toContain(
       '"payload"."connection_id" = "device_sync_dirty_connection"."connection_id"',
     );
@@ -1164,6 +1166,9 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(query.text).toContain('join "hosted_member" as "member"');
     expect(query.text).toContain('"member"."id" = "dirty"."user_id"');
     expect(query.text).toContain('"dirty"."dirty_revision" > "dirty"."processed_revision"');
+    expect(query.text).toContain('from "device_sync_dirty_payload" as "payload"');
+    expect(query.text).toContain('"payload"."connection_id" = "dirty"."connection_id"');
+    expect(query.text).toContain('"payload"."user_id" = "dirty"."user_id"');
     expect(query.text).toContain('"dirty"."latest_dirty_at" <= $1');
     expect(query.text).toContain('"connection"."status" = \'active\'');
     expect(query.text).toContain('"member"."billing_status" = \'active\'');
@@ -1211,6 +1216,10 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(query.text).toContain('from "device_sync_dirty_connection" as "dirty"');
     expect(query.text).toContain('join "device_connection" as "connection"');
     expect(query.text).toContain('join "hosted_member" as "member"');
+    expect(query.text).toContain('"dirty"."dirty_revision" > "dirty"."processed_revision"');
+    expect(query.text).toContain('from "device_sync_dirty_payload" as "payload"');
+    expect(query.text).toContain('"payload"."connection_id" = "dirty"."connection_id"');
+    expect(query.text).toContain('"payload"."user_id" = "dirty"."user_id"');
     expect(query.text).toContain('"connection"."status" = \'active\'');
     expect(query.text).toContain('"member"."billing_status" = \'active\'');
     expect(query.text).toContain('"member"."suspended_at" is null');
