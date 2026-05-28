@@ -21,7 +21,39 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS,
+  JUNCTION_SLEEP_AWAKE_MINUTE_PATHS,
+  JUNCTION_SLEEP_AWAKE_SECOND_PATHS,
+  JUNCTION_SLEEP_DEEP_MINUTE_PATHS,
+  JUNCTION_SLEEP_DEEP_SECOND_PATHS,
+  JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS,
+  JUNCTION_SLEEP_DURATION_MINUTE_PATHS,
+  JUNCTION_SLEEP_DURATION_SECOND_PATHS,
+  JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
+  JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+  JUNCTION_SLEEP_HRV_PATHS,
+  JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
+  JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
+  JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
+  JUNCTION_SLEEP_REM_MINUTE_PATHS,
+  JUNCTION_SLEEP_REM_SECOND_PATHS,
+  JUNCTION_SLEEP_RESPIRATORY_RATE_PATHS,
+  JUNCTION_SLEEP_RESTING_HEART_RATE_PATHS,
+  JUNCTION_SLEEP_SCORE_PATHS,
+  JUNCTION_SLEEP_SPO2_PATHS,
+  JUNCTION_SLEEP_STAGE_ARRAY_PATHS,
+  JUNCTION_SLEEP_STAGE_DURATION_MILLISECOND_PATHS,
+  JUNCTION_SLEEP_STAGE_DURATION_MINUTE_PATHS,
+  JUNCTION_SLEEP_STAGE_DURATION_SECOND_PATHS,
+  JUNCTION_SLEEP_STAGE_VALUE_PATHS,
+  JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  JUNCTION_SLEEP_TEMPERATURE_DEVIATION_PATHS,
+  JUNCTION_SLEEP_TEMPERATURE_PATHS,
+  JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
+  JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
+  normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
+  type JunctionSleepStageValue,
 } from "./junction-resources.ts";
 import {
   normalizeJunctionSourceProviderSlug,
@@ -164,27 +196,27 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
 ];
 
 const SLEEP_METRICS: readonly MetricDescriptor[] = [
-  { metric: "sleep-score", unit: "%", title: "Junction sleep score", paths: ["sleepScore", "sleep_score", "score"] },
+  { metric: "sleep-score", unit: "%", title: "Junction sleep score", paths: JUNCTION_SLEEP_SCORE_PATHS },
   {
     metric: "sleep-total-minutes",
     unit: "minutes",
     title: "Junction total sleep",
-    paths: ["totalSleepMinutes", "total_sleep_minutes", "asleep_minutes"],
-    secondsPaths: ["total"],
+    paths: JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
+    secondsPaths: JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
   },
-  { metric: "sleep-deep-minutes", unit: "minutes", title: "Junction deep sleep", paths: ["deepMinutes", "deep_minutes"], secondsPaths: ["deep"] },
-  { metric: "sleep-rem-minutes", unit: "minutes", title: "Junction REM sleep", paths: ["remMinutes", "rem_minutes"], secondsPaths: ["rem"] },
-  { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: ["lightMinutes", "light_minutes"], secondsPaths: ["light"] },
-  { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: ["awakeMinutes", "awake_minutes"], secondsPaths: ["awake"] },
-  { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: ["sleepEfficiency", "sleep_efficiency", "efficiency"] },
-  { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: ["hrv", "hrvRmssd", "hrv_rmssd", "average_hrv"] },
-  { metric: "average-heart-rate", unit: "bpm", title: "Junction sleep average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr", "hr_average"] },
-  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction sleep lowest heart rate", paths: ["lowestHeartRate", "lowest_heart_rate", "min_hr", "hr_lowest"] },
-  { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "hr_resting"] },
-  { metric: "respiratory-rate", unit: "breaths_per_minute", title: "Junction respiratory rate", paths: ["respiratoryRate", "respiratory_rate"] },
-  { metric: "spo2", unit: "%", title: "Junction blood oxygen", paths: ["spo2", "bloodOxygen", "blood_oxygen", "oxygen_saturation"] },
-  { metric: "temperature", unit: "celsius", title: "Junction sleep skin temperature", paths: ["skin_temperature"] },
-  { metric: "temperature-deviation", unit: "celsius", title: "Junction sleep temperature delta", paths: ["temperatureDelta", "temperature_delta", "skin_temperature_delta"] },
+  { metric: "sleep-deep-minutes", unit: "minutes", title: "Junction deep sleep", paths: JUNCTION_SLEEP_DEEP_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_DEEP_SECOND_PATHS },
+  { metric: "sleep-rem-minutes", unit: "minutes", title: "Junction REM sleep", paths: JUNCTION_SLEEP_REM_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_REM_SECOND_PATHS },
+  { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: JUNCTION_SLEEP_LIGHT_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LIGHT_SECOND_PATHS },
+  { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
+  { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
+  { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: JUNCTION_SLEEP_HRV_PATHS },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction sleep average heart rate", paths: JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS },
+  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction sleep lowest heart rate", paths: JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS },
+  { metric: "resting-heart-rate", unit: "bpm", title: "Junction resting heart rate", paths: JUNCTION_SLEEP_RESTING_HEART_RATE_PATHS },
+  { metric: "respiratory-rate", unit: "breaths_per_minute", title: "Junction respiratory rate", paths: JUNCTION_SLEEP_RESPIRATORY_RATE_PATHS },
+  { metric: "spo2", unit: "%", title: "Junction blood oxygen", paths: JUNCTION_SLEEP_SPO2_PATHS },
+  { metric: "temperature", unit: "celsius", title: "Junction sleep skin temperature", paths: JUNCTION_SLEEP_TEMPERATURE_PATHS },
+  { metric: "temperature-deviation", unit: "celsius", title: "Junction sleep temperature delta", paths: JUNCTION_SLEEP_TEMPERATURE_DEVIATION_PATHS },
 ];
 
 type WorkoutSessionMetrics = NonNullable<WorkoutSession["metrics"]>;
@@ -199,68 +231,7 @@ const WORKOUT_SESSION_METRICS: readonly {
   { key: "maxHeartRate", paths: ["maxHeartRate", "max_heart_rate", "max_hr"] },
 ];
 
-type JunctionSleepStage = "awake" | "light" | "deep" | "rem";
-
-const SLEEP_STAGE_VALUE_PATHS = Object.freeze([
-  "stage",
-  "sleepStage",
-  "sleep_stage",
-  "sleepStageType",
-  "sleep_stage_type",
-  "stageType",
-  "stage_type",
-  "level",
-  "state",
-  "name",
-  "type",
-  "value",
-] as const);
-const SLEEP_STAGE_START_PATHS = Object.freeze([
-  "start",
-  "startAt",
-  "start_at",
-  "startTime",
-  "start_time",
-  "startTimestamp",
-  "start_timestamp",
-  "timeStart",
-  "time_start",
-  "bedtimeStart",
-  "bedtime_start",
-] as const);
-const SLEEP_STAGE_END_PATHS = Object.freeze([
-  "end",
-  "endAt",
-  "end_at",
-  "endTime",
-  "end_time",
-  "endTimestamp",
-  "end_timestamp",
-  "timeEnd",
-  "time_end",
-  "bedtimeEnd",
-  "bedtime_end",
-  "bedtimeStop",
-  "bedtime_stop",
-] as const);
-const SLEEP_STAGE_INTERVAL_CONTAINER_PATHS = Object.freeze([
-  "stages",
-  "sleepStages",
-  "sleep_stages",
-  "sleepLevels",
-  "sleep_levels",
-  "sleepCycle",
-  "sleep_cycle",
-  "hypnogram",
-  "intervals",
-  "segments",
-  "stageIntervals",
-  "stage_intervals",
-  "levels",
-  "records",
-  "items",
-  "data",
-] as const);
+type JunctionSleepStage = JunctionSleepStageValue;
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return junctionSnapshotSchema.parse(snapshot);
@@ -521,22 +492,22 @@ function pushSleepSummary(
 ): void {
   const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const startAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["startAt", "start_at", "bedtimeStart", "bedtime_start"]),
+    firstValueFromPaths(entry, JUNCTION_SLEEP_START_TIMESTAMP_PATHS),
     resourceContext.sourceProviderSlug,
   );
   const endAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["endAt", "end_at", "bedtimeEnd", "bedtime_end", "bedtimeStop", "bedtime_stop"]),
+    firstValueFromPaths(entry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS),
     resourceContext.sourceProviderSlug,
   );
   const durationMinutes =
     normalizePositiveIntegerMinutes(
-      firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "totalSleepMinutes", "total_sleep_minutes"]),
+      firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MINUTE_PATHS),
     ) ??
     normalizePositiveIntegerMinutes(
-      secondsToMinutes(firstNumberFromPaths(entry, ["durationSeconds", "duration_seconds", "duration", "total"])),
+      secondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_SECOND_PATHS)),
     ) ??
     normalizePositiveIntegerMinutes(
-      millisecondsToMinutes(firstNumberFromPaths(entry, ["durationMillis", "duration_millis"])),
+      millisecondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS)),
     ) ??
     normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
 
@@ -573,28 +544,24 @@ function pushSleepCycle(
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
 
   for (const [index, intervalEntry] of sleepStageIntervalEntries(entry).entries()) {
-    const stage = firstSleepStageFromPaths(intervalEntry, SLEEP_STAGE_VALUE_PATHS);
+    const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS);
     if (!stage) {
       continue;
     }
 
-    const startAtRaw = firstValueFromPaths(intervalEntry, SLEEP_STAGE_START_PATHS);
-    const endAtRaw = firstValueFromPaths(intervalEntry, SLEEP_STAGE_END_PATHS);
+    const startAtRaw = firstValueFromPaths(intervalEntry, JUNCTION_SLEEP_START_TIMESTAMP_PATHS);
+    const endAtRaw = firstValueFromPaths(intervalEntry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS);
     const startAt = resolveSafeTimestamp(startAtRaw, resourceContext.sourceProviderSlug);
     const endAt = resolveSafeTimestamp(endAtRaw, resourceContext.sourceProviderSlug);
     const durationMinutes =
       normalizePositiveIntegerMinutes(
-        firstNumberFromPaths(intervalEntry, ["durationMinutes", "duration_minutes", "durationInMinutes", "duration_in_minutes", "minutes"]),
+        firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MINUTE_PATHS),
       ) ??
       normalizePositiveIntegerMinutes(
-        secondsToMinutes(
-          firstNumberFromPaths(intervalEntry, ["durationSeconds", "duration_seconds", "durationInSeconds", "duration_in_seconds", "duration"]),
-        ),
+        secondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_SECOND_PATHS)),
       ) ??
       normalizePositiveIntegerMinutes(
-        millisecondsToMinutes(
-          firstNumberFromPaths(intervalEntry, ["durationMillis", "duration_millis", "durationInMilliseconds", "duration_in_milliseconds"]),
-        ),
+        millisecondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MILLISECOND_PATHS)),
       ) ??
       normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
     const resolvedStartAt = startAt ?? subtractMinutes(endAt, durationMinutes);
@@ -1286,11 +1253,11 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
     return [];
   }
 
-  if (firstSleepStageFromPaths(entry, SLEEP_STAGE_VALUE_PATHS)) {
+  if (firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS)) {
     return [entry];
   }
 
-  return SLEEP_STAGE_INTERVAL_CONTAINER_PATHS.flatMap((path) => {
+  return JUNCTION_SLEEP_STAGE_ARRAY_PATHS.flatMap((path) => {
     const nested = readPath(entry, path);
     if (nested === value) {
       return [];
@@ -1350,54 +1317,13 @@ function listAllowedResourceKeys(
 
 function firstSleepStageFromPaths(source: PlainObject | undefined, paths: readonly string[]): JunctionSleepStage | undefined {
   for (const path of paths) {
-    const stage = normalizeJunctionSleepStage(readPath(source, path));
+    const stage = normalizeJunctionSleepStageValue(readPath(source, path));
     if (stage) {
       return stage;
     }
   }
 
   return undefined;
-}
-
-function normalizeJunctionSleepStage(value: unknown): JunctionSleepStage | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "_")
-    .replace(/^_+|_+$/gu, "");
-
-  switch (normalized) {
-    case "awake":
-    case "wake":
-    case "waking":
-    case "wakefulness":
-      return "awake";
-    case "light":
-    case "light_sleep":
-    case "core":
-    case "core_sleep":
-    case "n1":
-    case "n2":
-      return "light";
-    case "deep":
-    case "deep_sleep":
-    case "slow_wave":
-    case "slow_wave_sleep":
-    case "sws":
-    case "n3":
-      return "deep";
-    case "rem":
-    case "rem_sleep":
-    case "rapid_eye_movement":
-    case "rapid_eye_movement_sleep":
-      return "rem";
-    default:
-      return undefined;
-  }
 }
 
 function normalizeTimestamp(value: unknown): string | undefined {
