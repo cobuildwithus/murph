@@ -25,10 +25,9 @@ Success criteria:
 1. Add the approved compaction progress text array and random selector.
 2. Use the selector from the existing compaction turn-progress extraction helper.
 3. Rename the helper for current-channel intent and remove unreachable completed-copy logic. Done.
-4. Correct the prior completed-plan note that overstated trace/completed-progress coverage. Done.
-5. Update focused runtime tests. Done.
-6. Filter compaction raw events out of `onTraceEvent`. Done.
-7. Run focused verification and required completion audits. In progress.
+4. Update focused runtime tests. Done.
+5. Filter compaction raw events out of `onTraceEvent`. Done.
+6. Run focused verification and required completion audits. Done.
 
 ## Verification
 
