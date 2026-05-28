@@ -50,6 +50,7 @@ import {
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
   extractAssistantMessageFallback,
   extractCodexErrorMessage,
   extractCodexProgressEventFromNormalized,
@@ -2197,6 +2198,169 @@ describe('assistant codex runtime', () => {
       'Blood test received - I will extract the PDF and check the relevant results.',
     )
     expect(turnProgress.send).not.toHaveBeenCalledWith('Provider-side status text')
+  })
+
+  it('sends one current-channel progress update when Codex compacts context', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-context-compact-')
+    const onProgress = vi.fn()
+    const onTraceEvent = vi.fn()
+    const turnProgress = {
+      send: vi.fn(async (_text: string) => {
+        void _text
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-context-compact',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-context-compact',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                item: {
+                  id: 'context-compact-1',
+                  type: 'ContextCompaction',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                item: {
+                  id: 'context-compact-1',
+                  type: 'context_compaction',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'context-compact-1',
+                  type: 'context.compaction',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-context-compact-final',
+                  type: 'assistant_message',
+                  message: 'Final answer after compaction.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-context-compact',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        onProgress,
+        onTraceEvent,
+        prompt: 'answer after compacting context',
+        turnProgress,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Final answer after compaction.',
+      sessionId: 'thread-context-compact',
+      turnId: 'turn-context-compact',
+    })
+
+    expect(turnProgress.send).toHaveBeenCalledTimes(1)
+    expect(turnProgress.send).toHaveBeenCalledWith(
+      CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
+    )
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'context-compact-1',
+        kind: 'status',
+        state: 'running',
+        text: CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
+      }),
+    )
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'context-compact-1',
+        kind: 'status',
+        state: 'completed',
+        text: 'Compacted conversation history.',
+      }),
+    )
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        updates: [
+          {
+            kind: 'status',
+            mode: 'replace',
+            streamKey: 'status:context-compact-1',
+            text: CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
+          },
+        ],
+      }),
+    )
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        updates: [
+          {
+            kind: 'status',
+            mode: 'replace',
+            streamKey: 'status:context-compact-1',
+            text: 'Compacted conversation history.',
+          },
+        ],
+      }),
+    )
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
