@@ -21,9 +21,6 @@ import {
 import {
   readCodexThreadRouteFingerprint,
 } from './codex-thread-route.js'
-import {
-  shouldClearHostedAssistantCodexResumeAfterUsage,
-} from './codex-resume-budget.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -124,11 +121,6 @@ export async function persistAssistantTurnAndSession(input: {
     : input.session.providerOptions
   const nextResumeState = resolveAssistantNextResumeState({
     action: input.providerResumeStateAction,
-    clearForHostedUsageBudget: shouldClearHostedAssistantCodexResumeAfterUsage({
-      hostedMemberId: input.input.executionContext?.hosted?.memberId ?? null,
-      turnTrigger: input.input.turnTrigger ?? null,
-      usage: input.providerResult.usage,
-    }),
     codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
     codexThreadId: input.providerResult.codexThreadId,
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
@@ -153,16 +145,11 @@ export async function persistAssistantTurnAndSession(input: {
 
 function resolveAssistantNextResumeState(input: {
   action: AssistantProviderResumeStateAction
-  clearForHostedUsageBudget: boolean
   codexRolloutRelativePath?: string | null
   codexThreadId: string | null
   routeFingerprint: string
   sessionResumeState: AssistantSession['resumeState']
 }): AssistantSession['resumeState'] {
-  if (input.clearForHostedUsageBudget) {
-    return null
-  }
-
   switch (input.action) {
     case 'clear':
       return null

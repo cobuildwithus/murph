@@ -42,14 +42,9 @@ const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
-// Keep resumed hosted replies cheap even after cold starts lose provider prompt
-// cache. At current hosted gpt-5.5 pricing, 12k uncached input tokens leaves
-// room for a normal short reply under the per-message cost target.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 12_000;
-// Command output is useful evidence, but raw CLI dumps can dominate hosted
-// reply cost. Keep per-tool output bounded; Codex can re-query narrowly when
-// the truncated head/tail is insufficient.
-const DEFAULT_HOSTED_CODEX_TOOL_OUTPUT_TOKEN_LIMIT = 2_000;
+// Keep the limit above the observed compacted steady-state prompt so resumed
+// hosted replies do not repeatedly compact and churn the prompt-cache prefix.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 120_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
@@ -342,7 +337,6 @@ export function buildHostedCodexConfigToml(input: {
     `model_provider = ${tomlString(input.provider.id)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
-    `tool_output_token_limit = ${DEFAULT_HOSTED_CODEX_TOOL_OUTPUT_TOKEN_LIMIT}`,
     `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,

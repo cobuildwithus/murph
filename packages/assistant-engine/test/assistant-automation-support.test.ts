@@ -1336,7 +1336,9 @@ describe('assistant auto-reply prompt builder support', () => {
 
     expect(result).toEqual({
       kind: 'ready',
-      prompt: expect.stringContaining('[metadata]\nmime: image/png'),
+      prompt: expect.stringContaining(
+        'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+      ),
       userMessageContent: [
         {
           text: 'image prompt payload',
@@ -1344,10 +1346,6 @@ describe('assistant auto-reply prompt builder support', () => {
         },
       ],
     })
-    if (result.kind !== 'ready') {
-      throw new Error('Expected a ready prepared input.')
-    }
-    expect(result.prompt).not.toContain('inspect those files with local tools')
   })
 })
 

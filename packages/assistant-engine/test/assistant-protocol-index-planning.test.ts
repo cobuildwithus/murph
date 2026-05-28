@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -47,9 +47,6 @@ import {
   resolveAssistantRouteTurnPlan,
   type AssistantCodexTurnResolvedExecutionProfile,
 } from '../src/assistant/codex-turn/planning.js'
-import {
-  HOSTED_ASSISTANT_CODEX_RESUME_MAX_ROLLOUT_BYTES,
-} from '../src/assistant/codex-resume-budget.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import type { AssistantActiveTurnProviderHistory } from '../src/assistant/active-turn-history.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
@@ -169,195 +166,6 @@ describe('assistant protocol index planning', () => {
     expect(
       planningMocks.resolveAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
-  })
-
-  it('rejects oversized hosted Codex rollout resumes before model compaction', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
-    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
-      promptProfile: 'conversation',
-      threadScope: 'session-thread',
-      toolProfile: 'provider-turn',
-    }
-    const route = createRoute()
-    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'assistant-hosted-codex-home-'))
-    const threadId = '00000000-0000-0000-0000-000000000001'
-    const rolloutRelativePath = createRolloutRelativePath(threadId)
-    const rolloutPath = path.join(codexHome, rolloutRelativePath)
-
-    try {
-      await mkdir(path.dirname(rolloutPath), { recursive: true })
-      await writeFile(
-        rolloutPath,
-        'x'.repeat(HOSTED_ASSISTANT_CODEX_RESUME_MAX_ROLLOUT_BYTES + 1),
-        'utf8',
-      )
-
-      const executionContext = createHostedExecutionContext()
-      const plan = await resolveAssistantRouteTurnPlan({
-        executionContext,
-        input: {
-          ...createMessageInput(),
-          executionContext,
-          turnTrigger: 'automation-auto-reply',
-        },
-        profile: executionProfile,
-        promptTimeContext: {
-          currentLocalDate: '2026-05-04',
-          currentTimeZone: 'Asia/Kuala_Lumpur',
-        },
-        route,
-        session: createSession({
-          resumeState: {
-            rolloutRelativePath,
-            routeFingerprint: route.routeFingerprint ?? route.routeId,
-            threadId,
-          },
-        }),
-        sharedPlan: createSharedPlan({
-          cliEnv: {
-            CODEX_HOME: codexHome,
-          },
-        }),
-      })
-
-      expect(plan.resumeCodexThreadId).toBeNull()
-      expect(plan.refreshThreadInstructions).toBe(true)
-      expect(plan.developerInstructions).toContain('inspect the one needed command')
-      expect(plan.planningDiagnostics.nativeResumeRejectReason).toBe(
-        'rollout-too-large',
-      )
-      expect(plan.planningDiagnostics.nativeResumeRolloutSizeBucket).toBe(
-        '33-64kb',
-      )
-    } finally {
-      await rm(codexHome, { force: true, recursive: true })
-    }
-  })
-
-  it('allows hosted Codex rollout resumes when the saved rollout is bounded', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
-    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
-      promptProfile: 'conversation',
-      threadScope: 'session-thread',
-      toolProfile: 'provider-turn',
-    }
-    const route = createRoute()
-    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'assistant-hosted-codex-home-'))
-    const threadId = '00000000-0000-0000-0000-000000000002'
-    const rolloutRelativePath = createRolloutRelativePath(threadId)
-    const rolloutPath = path.join(codexHome, rolloutRelativePath)
-
-    try {
-      await mkdir(path.dirname(rolloutPath), { recursive: true })
-      await writeFile(rolloutPath, '{"type":"session"}\n', 'utf8')
-
-      const executionContext = createHostedExecutionContext()
-      const plan = await resolveAssistantRouteTurnPlan({
-        executionContext,
-        input: {
-          ...createMessageInput(),
-          executionContext,
-          turnTrigger: 'automation-auto-reply',
-        },
-        profile: executionProfile,
-        promptTimeContext: {
-          currentLocalDate: '2026-05-04',
-          currentTimeZone: 'Asia/Kuala_Lumpur',
-        },
-        route,
-        session: createSession({
-          resumeState: {
-            rolloutRelativePath,
-            routeFingerprint: route.routeFingerprint ?? route.routeId,
-            threadId,
-          },
-        }),
-        sharedPlan: createSharedPlan({
-          cliEnv: {
-            CODEX_HOME: codexHome,
-          },
-        }),
-      })
-
-      expect(plan.resumeCodexThreadId).toBe(threadId)
-      expect(plan.refreshThreadInstructions).toBe(false)
-      expect(plan.developerInstructions).toBeNull()
-      expect(plan.planningDiagnostics.nativeResumeRejectReason).toBeNull()
-      expect(plan.planningDiagnostics.nativeResumeRolloutSizeBucket).toBe(
-        '0-32kb',
-      )
-    } finally {
-      await rm(codexHome, { force: true, recursive: true })
-    }
-  })
-
-  it('rejects hosted Codex rollout resumes when the saved rollout belongs to a different thread', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
-    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
-      promptProfile: 'conversation',
-      threadScope: 'session-thread',
-      toolProfile: 'provider-turn',
-    }
-    const route = createRoute()
-    const codexHome = await mkdtemp(path.join(os.tmpdir(), 'assistant-hosted-codex-home-'))
-    const savedThreadId = '00000000-0000-0000-0000-000000000003'
-    const differentThreadId = '00000000-0000-0000-0000-000000000004'
-    const rolloutRelativePath = createRolloutRelativePath(differentThreadId)
-    const rolloutPath = path.join(codexHome, rolloutRelativePath)
-
-    try {
-      await mkdir(path.dirname(rolloutPath), { recursive: true })
-      await writeFile(rolloutPath, '{"type":"session"}\n', 'utf8')
-
-      const executionContext = createHostedExecutionContext()
-      const plan = await resolveAssistantRouteTurnPlan({
-        executionContext,
-        input: {
-          ...createMessageInput(),
-          executionContext,
-          turnTrigger: 'automation-auto-reply',
-        },
-        profile: executionProfile,
-        promptTimeContext: {
-          currentLocalDate: '2026-05-04',
-          currentTimeZone: 'Asia/Kuala_Lumpur',
-        },
-        route,
-        session: createSession({
-          resumeState: {
-            rolloutRelativePath,
-            routeFingerprint: route.routeFingerprint ?? route.routeId,
-            threadId: savedThreadId,
-          },
-        }),
-        sharedPlan: createSharedPlan({
-          cliEnv: {
-            CODEX_HOME: codexHome,
-          },
-        }),
-      })
-
-      expect(plan.resumeCodexThreadId).toBeNull()
-      expect(plan.refreshThreadInstructions).toBe(true)
-      expect(plan.planningDiagnostics.nativeResumeRejectReason).toBe(
-        'rollout-thread-mismatch',
-      )
-      expect(plan.planningDiagnostics.nativeResumeRolloutSizeBucket).toBeNull()
-    } finally {
-      await rm(codexHome, { force: true, recursive: true })
-    }
   })
 
   it('plans native resume while keeping active-turn history available for fallback', async () => {
@@ -582,48 +390,6 @@ describe('assistant protocol index planning', () => {
       planningMocks.resolveAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
   })
-
-  it('omits the generated CLI catalog from hosted bootstrap instructions', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
-    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
-      promptProfile: 'conversation',
-      threadScope: 'session-thread',
-      toolProfile: 'provider-turn',
-    }
-    const executionContext = createHostedExecutionContext()
-
-    const plan = await resolveAssistantRouteTurnPlan({
-      executionContext,
-      input: {
-        ...createMessageInput(),
-        executionContext,
-        turnTrigger: 'automation-auto-reply',
-      },
-      profile: executionProfile,
-      promptTimeContext: {
-        currentLocalDate: '2026-05-04',
-        currentTimeZone: 'Asia/Kuala_Lumpur',
-      },
-      route: createRoute(),
-      session: createSession(),
-      sharedPlan: createSharedPlan(),
-    })
-
-    expect(plan.assistantCliContract).toBeNull()
-    expect(plan.developerInstructions).not.toContain('bootstrap contract')
-    expect(plan.developerInstructions).toContain('inspect the one needed command')
-    expect(plan.developerInstructions).not.toContain('# First-session prep reminders')
-    expect(Buffer.byteLength(plan.developerInstructions ?? '', 'utf8')).toBeLessThan(
-      20_000,
-    )
-    expect(
-      planningMocks.resolveAssistantCliSurfaceBootstrapContext,
-    ).not.toHaveBeenCalled()
-  })
 })
 
 function createMessageInput(): AssistantMessageInput {
@@ -651,15 +417,6 @@ function createMessageInput(): AssistantMessageInput {
     threadIsDirect: true,
     vault: '/vault',
     workingDirectory: '/work',
-  }
-}
-
-function createHostedExecutionContext(): NonNullable<AssistantMessageInput['executionContext']> {
-  return {
-    hosted: {
-      memberId: 'member-test',
-      userEnvKeys: [],
-    },
   }
 }
 
@@ -718,13 +475,11 @@ function createSession(input?: {
   }
 }
 
-function createSharedPlan(input?: {
-  cliEnv?: NodeJS.ProcessEnv
-}): AssistantTurnSharedPlan {
+function createSharedPlan(): AssistantTurnSharedPlan {
   return {
     allowSensitiveHealthContext: false,
     cliAccess: {
-      env: input?.cliEnv ?? {},
+      env: {},
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
@@ -750,8 +505,4 @@ function createSharedPlan(input?: {
     persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/work',
   }
-}
-
-function createRolloutRelativePath(threadId: string): string {
-  return `sessions/2026/05/04/rollout-2026-05-04T00-00-00-000Z-${threadId}.jsonl`
 }

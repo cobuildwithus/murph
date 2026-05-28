@@ -53,7 +53,6 @@ const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
-const RUNNER_METADATA_RESPONSE_BODY_SUMMARY_BYTES = 2 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
 const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
   "Hosted bundle archive validation failed.",
@@ -2102,32 +2101,26 @@ async function assertRunnerHealthy(
   );
 
   const responseOk = response.ok;
-  const bodySummary = await drainRunnerContainerMetadataResponseBody(response, {
+  await drainRunnerContainerMetadataResponseBody(response, {
     signal: abortSignal,
   });
 
   if (!responseOk) {
-    throw new Error(
-      `Hosted runner container health check returned HTTP ${response.status}.${
-        bodySummary ? ` Summary: ${bodySummary}.` : ""
-      }`,
-    );
+    throw new Error(`Hosted runner container health check returned HTTP ${response.status}.`);
   }
 }
 
 async function drainRunnerContainerMetadataResponseBody(
   response: Response,
   options: { signal?: AbortSignal } = {},
-): Promise<string | null> {
+): Promise<void> {
   const body = response.body;
   if (body === null || response.bodyUsed) {
-    return null;
+    return;
   }
 
   // Cloudflare Containers decrements containerFetch in-flight activity after small metadata bodies are drained.
   let bytesRead = 0;
-  let capturedBytes = 0;
-  const capturedChunks: Uint8Array[] = [];
   const drainTimeoutSignal = AbortSignal.timeout(RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS);
   const drainSignal = options.signal
     ? combineRunnerContainerAbortSignals(options.signal, drainTimeoutSignal)
@@ -2135,12 +2128,6 @@ async function drainRunnerContainerMetadataResponseBody(
   await body.pipeTo(new WritableStream<Uint8Array>({
     write(chunk) {
       bytesRead += chunk.byteLength;
-      if (capturedBytes < RUNNER_METADATA_RESPONSE_BODY_SUMMARY_BYTES) {
-        const remaining = RUNNER_METADATA_RESPONSE_BODY_SUMMARY_BYTES - capturedBytes;
-        const captured = chunk.byteLength > remaining ? chunk.slice(0, remaining) : chunk;
-        capturedChunks.push(captured);
-        capturedBytes += captured.byteLength;
-      }
       if (bytesRead > RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES) {
         throw new Error("Runner container metadata response body exceeded the drain limit.");
       }
@@ -2148,92 +2135,6 @@ async function drainRunnerContainerMetadataResponseBody(
   }), {
     signal: drainSignal,
   });
-
-  if (capturedBytes === 0) {
-    return null;
-  }
-
-  return summarizeRunnerMetadataResponseBody(
-    Buffer.concat(capturedChunks, capturedBytes).toString("utf8"),
-  );
-}
-
-function summarizeRunnerMetadataResponseBody(body: string): string | null {
-  const sanitized = sanitizeHostedExecutionStructuredLogText(body);
-  if (!sanitized) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(sanitized) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return `bodyBytes=${Buffer.byteLength(sanitized, "utf8")}`;
-    }
-
-    const record = parsed as Record<string, unknown>;
-    const fragments: string[] = [];
-    const code = readSafeRunnerMetadataResponseCode(record.code);
-    const codePresent = typeof record.code === "string" && !code;
-    const errorPresent = typeof record.error === "string";
-    const errorName = readSafeRunnerMetadataResponseErrorName(record.errorName);
-    const errorNamePresent = typeof record.errorName === "string" && !errorName;
-    const details = record.details;
-    if (code) {
-      fragments.push(`code=${code}`);
-    } else if (codePresent) {
-      fragments.push("codePresent=true");
-    }
-    if (errorName) {
-      fragments.push(`errorName=${errorName}`);
-    } else if (errorNamePresent) {
-      fragments.push("errorNamePresent=true");
-    }
-    if (errorPresent) {
-      fragments.push("errorPresent=true");
-    }
-    if (details && typeof details === "object" && !Array.isArray(details)) {
-      fragments.push(`detailsKeyCount=${Object.keys(details).length}`);
-    }
-
-    return fragments.length > 0
-      ? fragments.join(" ")
-      : `jsonKeyCount=${Object.keys(record).length}`;
-  } catch {
-    return `bodyBytes=${Buffer.byteLength(sanitized, "utf8")}`;
-  }
-}
-
-const SAFE_RUNNER_METADATA_RESPONSE_CODES = new Set([
-  "HOSTED_ASSISTANT_CONFIG_REQUIRED",
-  "bundle_archive_validation_error",
-  "container_not_ready",
-  "health_check_failed",
-  "not_ready",
-  "runner_not_ready",
-  "runtime_error",
-  "type_error",
-]);
-
-const SAFE_RUNNER_METADATA_RESPONSE_ERROR_NAMES = new Set([
-  "AbortError",
-  "Error",
-  "HostedExecutionConfigurationError",
-  "TimeoutError",
-  "TypeError",
-]);
-
-function readSafeRunnerMetadataResponseCode(value: unknown): string | null {
-  return typeof value === "string" &&
-    SAFE_RUNNER_METADATA_RESPONSE_CODES.has(value)
-    ? value
-    : null;
-}
-
-function readSafeRunnerMetadataResponseErrorName(value: unknown): string | null {
-  return typeof value === "string" &&
-    SAFE_RUNNER_METADATA_RESPONSE_ERROR_NAMES.has(value)
-    ? value
-    : null;
 }
 
 function readContainerStatus(state: unknown): string | null {
