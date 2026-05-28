@@ -179,7 +179,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         postCheckpointRecord: null,
         processedJobs: 0,
         skipped: true,
-        stagedDirtyAcks: [],
       }
     : await runHostedDeviceSyncPass(
         input.wake,
@@ -861,7 +860,7 @@ export async function runHostedDeviceSyncPass(
   postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"];
   processedJobs: number;
   skipped: boolean;
-  stagedDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+  stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
   const platformEnv = options.platformEnv ?? {};
   await writeHostedLegacyDeviceSyncPlatformEnvLog({
@@ -886,7 +885,6 @@ export async function runHostedDeviceSyncPass(
       postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
-      stagedDirtyAcks: [],
     };
   }
 
@@ -989,7 +987,7 @@ export async function runHostedDeviceSyncPass(
       postCheckpointRecord,
       processedJobs,
       skipped: false,
-      stagedDirtyAcks,
+      ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     };
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
@@ -1009,14 +1007,13 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"];
   processedJobs: number;
   skipped: boolean;
-  stagedDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+  stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 } {
   return {
     nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
     postCheckpointRecord: null,
     processedJobs: input.processedJobs,
     skipped: true,
-    stagedDirtyAcks: [],
   };
 }
 
@@ -1095,7 +1092,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
     ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
     parserProcessed: 0,
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
-    stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks,
+    ...(deviceSyncResult.stagedDirtyAcks
+      ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
+      : {}),
   };
 }
 
