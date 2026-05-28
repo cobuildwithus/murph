@@ -165,8 +165,8 @@ const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "mcp.tool.call",
   "web.search",
 ]);
-const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_NAME_PATTERN =
-  /^(?:command\.execution|file\.change|web\.search|dynamic:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?|mcp:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?)$/u;
+const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
   "rpc.error",
@@ -301,9 +301,6 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
   "codexActionSlowDurationMs",
-  "codexActionToolCallCounts",
-  "codexActionToolOutputBytesMax",
-  "codexActionToolOutputBytesTotal",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "activeTurnHistoryPresent",
@@ -1320,10 +1317,10 @@ function readHostedAssistantCodexActionDiagnosticTrace(
   }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
-    "codexActionToolNames",
-    readHostedAssistantProviderDiagnosticToolNameArray(
+    "codexActionToolSummaries",
+    readHostedAssistantProviderDiagnosticToolSummaryArray(
       record,
-      "codexActionToolNames",
+      "codexActionToolSummaries",
     ),
   );
   return details;
@@ -1513,10 +1510,10 @@ function readHostedAssistantProviderDiagnosticAllowedStringArray(
   return output.length > 0 ? output : undefined;
 }
 
-function readHostedAssistantProviderDiagnosticToolNameArray(
+function readHostedAssistantProviderDiagnosticToolSummaryArray(
   record: Record<string, unknown>,
   key: string,
-): string[] | null | undefined {
+): HostedExecutionStructuredLogDetails[] | null | undefined {
   if (!(key in record)) {
     return undefined;
   }
@@ -1529,16 +1526,78 @@ function readHostedAssistantProviderDiagnosticToolNameArray(
     return undefined;
   }
 
-  const output = value.flatMap((entry) => {
-    if (typeof entry !== "string") {
+  const output = value.flatMap((entry): HostedExecutionStructuredLogDetails[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       return [];
     }
-    const normalized = entry.trim();
-    return HOSTED_ASSISTANT_CODEX_ACTION_TOOL_NAME_PATTERN.test(normalized)
-      ? [normalized]
-      : [];
+    const entryRecord = entry as Record<string, unknown>;
+    const kind = readHostedAssistantProviderPlanAllowedString(
+      entryRecord,
+      "kind",
+      HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES,
+    );
+    const callCount = readHostedAssistantProviderDiagnosticNonnegativeNumber(
+      entryRecord,
+      "callCount",
+    );
+    const outputBytesMax = readHostedAssistantProviderDiagnosticNonnegativeNumber(
+      entryRecord,
+      "outputBytesMax",
+    );
+    const outputBytesTotal = readHostedAssistantProviderDiagnosticNonnegativeNumber(
+      entryRecord,
+      "outputBytesTotal",
+    );
+    if (
+      !kind
+      || typeof callCount !== "number"
+      || typeof outputBytesMax !== "number"
+      || typeof outputBytesTotal !== "number"
+    ) {
+      return [];
+    }
+
+    const summary: HostedExecutionStructuredLogDetails = {
+      callCount,
+      kind,
+      outputBytesMax,
+      outputBytesTotal,
+    };
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      summary,
+      "namespace",
+      readHostedAssistantProviderDiagnosticToolIdentifierPart(
+        entryRecord,
+        "namespace",
+      ),
+    );
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      summary,
+      "server",
+      readHostedAssistantProviderDiagnosticToolIdentifierPart(entryRecord, "server"),
+    );
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      summary,
+      "tool",
+      readHostedAssistantProviderDiagnosticToolIdentifierPart(entryRecord, "tool"),
+    );
+    return [summary];
   });
   return output.length > 0 ? output : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticToolIdentifierPart(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 function readHostedAssistantProviderDiagnosticKeySummaryArray(
