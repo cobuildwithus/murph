@@ -696,16 +696,6 @@ export class PrismaHostedDirtyConnectionStore {
           },
         });
       }
-    } else {
-      await prisma.deviceSyncDirtyPayload.deleteMany({
-        where: {
-          connectionId: input.connectionId,
-          dirtyRevision: {
-            lte: nextProcessedRevision,
-          },
-          userId: input.userId,
-        },
-      });
     }
 
     const stillDirty = nextProcessedRevision < existing.dirtyRevision

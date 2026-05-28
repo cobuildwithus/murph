@@ -395,7 +395,7 @@ describe("hosted system mailbox notification execution context", () => {
 
       assert.equal(prepared?.status, "processed");
       expect(ackDirtyStateProcessed).not.toHaveBeenCalled();
-      assert.equal(prepared?.item.postCheckpointRecord?.kind, "device-sync.dirty-processed");
+      assert.equal(prepared?.item.postCheckpointRecord?.kind, "device-sync.dirty-processed-batch");
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,
@@ -415,6 +415,124 @@ describe("hosted system mailbox notification execution context", () => {
         connectionId: "dsc_dirty_batch_2",
         processedDirtyPayloadIds: ["dsp_payload_22", "dsp_payload_23"],
         processedRevision: "22",
+      });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("preserves a batched dirty ack wake when an earlier ack remains dirty", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const ackDirtyStateProcessed = vi.fn()
+      .mockResolvedValueOnce({
+        connectionId: "dsc_dirty_batch_still_dirty_1",
+        dirtyRevision: "41",
+        nextWakeAt: "2026-04-05T00:03:00.000Z",
+        processedRevision: "41",
+        recorded: true,
+        stillDirty: true,
+        userId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        connectionId: "dsc_dirty_batch_still_dirty_2",
+        dirtyRevision: "42",
+        nextWakeAt: null,
+        processedRevision: "42",
+        recorded: true,
+        stillDirty: false,
+        userId: "member_123",
+      });
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:dirty-ack-batch-still-dirty",
+      memberId: "member_123",
+      notification: {
+        instructions: "Process the still-dirty ack batch.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "device-sync",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        kind: "device-sync.dirty-processed-batch",
+        records: [
+          {
+            connectionId: "dsc_dirty_batch_still_dirty_1",
+            processedDirtyPayloadIds: ["dsp_payload_41"],
+            processedRevision: "41",
+          },
+          {
+            connectionId: "dsc_dirty_batch_still_dirty_2",
+            processedDirtyPayloadIds: ["dsp_payload_42"],
+            processedRevision: "42",
+          },
+        ],
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          id: "mailbox_item_system_dirty_ack_batch_still_dirty",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const runtime = createRuntime({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called");
+          },
+          ackDirtyStateProcessed,
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            throw new Error("fetchSnapshot should not be called");
+          },
+        },
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: "2026-04-05T00:03:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 2,
       });
     } finally {
       await workspace.cleanup();

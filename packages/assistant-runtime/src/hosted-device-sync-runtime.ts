@@ -41,6 +41,9 @@ import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
 import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
+import {
+  HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+} from "./hosted-device-sync-limits.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -68,8 +71,6 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "provider_not_registered"
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
-
-const HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT = 10;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;

@@ -1194,39 +1194,19 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(prisma.deviceSyncDirtyPayload.findMany).not.toHaveBeenCalled();
   });
 
-  it("removes durable payload rows after their dirty revision is acknowledged", async () => {
+  it("leaves durable payload rows pending when ack omits explicit payload ids", async () => {
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      $queryRaw: vi.fn(async () => [{ pending: true }]),
       deviceSyncDirtyConnection: {
-        findFirst: vi.fn()
-          .mockResolvedValueOnce({
-            connectionId: "dsc_junction_123",
-            dirtyRevision: 5n,
-            latestDirtyAt: dirtyAt,
-            processedRevision: 1n,
-            userId: "member_123",
-          })
-          .mockResolvedValueOnce({
-            connectionId: "dsc_junction_123",
-            createdAt: dirtyAt,
-            dirtyResourcesJson: {},
-            dirtyRevision: 5n,
-            eventCount: 5n,
-            firstDirtyAt: dirtyAt,
-            latestDirtyAt: dirtyAt,
-            latestEventType: "daily.data.steps.created",
-            latestResourceCategory: "timeseries",
-            latestTraceId: "trace_junction_123",
-            processedRevision: 3n,
-            provider: "junction",
-            resourceCategoryCountsJson: { timeseries: 5 },
-            sourceProviderCountsJson: { garmin: 5 },
-            updatedAt: dirtyAt,
-            userId: "member_123",
-            windowEnd: new Date("2026-05-26T12:10:00.000Z"),
-            windowStart: dirtyAt,
-          }),
+        findFirst: vi.fn(async () => ({
+          connectionId: "dsc_junction_123",
+          dirtyRevision: 3n,
+          latestDirtyAt: dirtyAt,
+          processedRevision: 1n,
+          userId: "member_123",
+        })),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
       deviceSyncDirtyPayload: {
@@ -1244,22 +1224,15 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
       userId: "member_123",
     });
 
-    expect(prisma.deviceSyncDirtyPayload.deleteMany).toHaveBeenCalledWith({
-      where: {
-        connectionId: "dsc_junction_123",
-        dirtyRevision: {
-          lte: 3n,
-        },
-        userId: "member_123",
-      },
-    });
+    expect(prisma.deviceSyncDirtyPayload.deleteMany).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       connectionId: "dsc_junction_123",
-      dirtyRevision: 5n,
+      dirtyRevision: 3n,
       processedRevision: 3n,
       stillDirty: true,
       userId: "member_123",
     });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(prisma.deviceSyncDirtyPayload.findMany).not.toHaveBeenCalled();
   });
 
