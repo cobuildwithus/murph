@@ -66,6 +66,7 @@ import {
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
+import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -83,6 +84,7 @@ export interface RunAssistantAutomationInput {
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
@@ -887,6 +889,7 @@ export async function runAssistantAutomationPass(
     inboxServices,
     maxPerScan: input.maxPerScan,
     onEvent: input.onEvent,
+    onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,
     signal: input.signal,

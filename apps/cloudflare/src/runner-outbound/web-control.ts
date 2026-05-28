@@ -16,6 +16,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -123,12 +124,16 @@ export async function handleRunnerWebControlRequest(input: {
   const isDeviceSyncRuntimeSnapshotRequest =
     input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     && input.request.method === "POST";
+  const isRuntimeLatencyTraceRequest =
+    input.url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
     isCheckpointRequest
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest
+    || isRuntimeLatencyTraceRequest
   ) {
     try {
       writeAuthority = await (

@@ -1300,117 +1300,197 @@ describe("RunnerContainer", () => {
   });
 
   it("fails active workspace invocations when lifecycle status becomes stopped", async () => {
-    let currentStatus: "running" | "stopped" | "stopped_with_code" = "stopped";
-    let markRunnerRequestStarted!: () => void;
-    const runnerRequestStarted = new Promise<void>((resolve) => {
-      markRunnerRequestStarted = resolve;
-    });
-    const hangingRunnerResponse = new Promise<Response>(() => undefined);
-    const containerFetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+    vi.useFakeTimers();
+
+    try {
+      let currentStatus: "running" | "stopped" | "stopped_with_code" = "stopped";
+      let markRunnerRequestStarted!: () => void;
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+      const hangingRunnerResponse = new Promise<Response>(() => undefined);
+      const containerFetch = vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        markRunnerRequestStarted();
+        return await hangingRunnerResponse;
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: currentStatus,
+      }));
+      const startAndWaitForPorts = vi.fn(async () => {
+        currentStatus = "running";
+      });
+      const { container, destroy } = createContainerDouble({
+        containerFetch,
+        getState,
+        startAndWaitForPorts,
+      });
+
+      const invocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_container_status_stop_during_work"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      const assertion = expect(invocation).rejects.toThrow("workspace invocation container stopped");
+      await runnerRequestStarted;
+      currentStatus = "stopped_with_code";
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      await assertion;
+      expect(destroy).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            lifecycleStage: "active-request-status-watch",
+            statusAfterStop: "stopped_with_code",
+          }),
+          level: "warn",
+          message: "Hosted execution container stopped before workspace request settled.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts a runner response that arrives just after lifecycle status becomes stopped", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let currentStatus: "running" | "stopped" | "stopped_with_code" = "stopped";
+      let markRunnerRequestStarted!: () => void;
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+      const runnerResponse = createDeferred<Response>();
+      const containerFetch = vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        markRunnerRequestStarted();
+        return await runnerResponse.promise;
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: currentStatus,
+      }));
+      const startAndWaitForPorts = vi.fn(async () => {
+        currentStatus = "running";
+      });
+      const { container } = createContainerDouble({
+        containerFetch,
+        getState,
+        startAndWaitForPorts,
+      });
+
+      const invocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_container_status_stop_response_race"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      const assertion = expect(invocation).resolves.toEqual(createRunnerResult());
+      await runnerRequestStarted;
+
+      currentStatus = "stopped_with_code";
+      setTimeout(() => {
+        runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
           status: 200,
-        });
-      }
+        }));
+      }, 251);
+      await vi.advanceTimersByTimeAsync(251);
 
-      markRunnerRequestStarted();
-      return await hangingRunnerResponse;
-    });
-    const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
-      status: currentStatus,
-    }));
-    const startAndWaitForPorts = vi.fn(async () => {
-      currentStatus = "running";
-    });
-    const { container, destroy } = createContainerDouble({
-      containerFetch,
-      getState,
-      startAndWaitForPorts,
-    });
-
-    const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_container_status_stop_during_work"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    await runnerRequestStarted;
-    currentStatus = "stopped_with_code";
-
-    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
-    expect(destroy).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        details: expect.objectContaining({
-          lifecycleStage: "active-request-status-watch",
-          statusAfterStop: "stopped_with_code",
-        }),
-        level: "warn",
-        message: "Hosted execution container stopped before workspace request settled.",
-        phase: "failed",
-      }),
-    );
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails active workspace invocations when lifecycle status reports a missing shell", async () => {
-    let currentStatus: "running" | "stopped" = "stopped";
-    let statusMissing = false;
-    let markRunnerRequestStarted!: () => void;
-    const runnerRequestStarted = new Promise<void>((resolve) => {
-      markRunnerRequestStarted = resolve;
-    });
-    const hangingRunnerResponse = new Promise<Response>(() => undefined);
-    const containerFetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
+    vi.useFakeTimers();
 
-      markRunnerRequestStarted();
-      return await hangingRunnerResponse;
-    });
-    const getState = vi.fn(async () => {
-      if (statusMissing) {
-        throw new Error("No such container");
-      }
-      return {
-        lastChange: Date.now(),
-        status: currentStatus,
-      };
-    });
-    const startAndWaitForPorts = vi.fn(async () => {
-      currentStatus = "running";
-    });
-    const { container, destroy } = createContainerDouble({
-      containerFetch,
-      getState,
-      startAndWaitForPorts,
-    });
+    try {
+      let currentStatus: "running" | "stopped" = "stopped";
+      let statusMissing = false;
+      let markRunnerRequestStarted!: () => void;
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+      const hangingRunnerResponse = new Promise<Response>(() => undefined);
+      const containerFetch = vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
 
-    const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_container_missing_during_work"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-    await runnerRequestStarted;
-    statusMissing = true;
+        markRunnerRequestStarted();
+        return await hangingRunnerResponse;
+      });
+      const getState = vi.fn(async () => {
+        if (statusMissing) {
+          throw new Error("No such container");
+        }
+        return {
+          lastChange: Date.now(),
+          status: currentStatus,
+        };
+      });
+      const startAndWaitForPorts = vi.fn(async () => {
+        currentStatus = "running";
+      });
+      const { container, destroy } = createContainerDouble({
+        containerFetch,
+        getState,
+        startAndWaitForPorts,
+      });
 
-    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
-    expect(destroy).not.toHaveBeenCalled();
+      const invocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_container_missing_during_work"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      const assertion = expect(invocation).rejects.toThrow("workspace invocation container stopped");
+      await runnerRequestStarted;
+      statusMissing = true;
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      await assertion;
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps activity-expiry cleanup best-effort when destroy fails", async () => {

@@ -148,6 +148,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   foregroundReplayInputIds?: readonly string[] | null;
   foregroundReplayPromptInputIds?: readonly string[] | null;
   preferredInputIds?: readonly string[] | null;
+  runtimeAttemptId?: string | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
@@ -201,6 +202,10 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.signal,
         input.foregroundReplayInputIds ?? [],
         input.foregroundReplayPromptInputIds ?? [],
+        {
+          latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          runtimeAttemptId: input.runtimeAttemptId ?? null,
+        },
       )
     : {
         currentTurnDeliveryIntentIds: [],
@@ -266,6 +271,10 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   foregroundReplayInputIds: readonly string[] = [],
   foregroundReplayPromptInputIds: readonly string[] = [],
+  latencyTrace?: {
+    latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+    runtimeAttemptId?: string | null;
+  },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
   nextWakeAt: string | null;
@@ -398,6 +407,13 @@ export async function runHostedAssistantAutomation(
           redactedLogEntries.push(logEntry);
           redactedAutomationEventLogCount += 1;
         }
+      },
+      onProviderRequestStarted: (event) => {
+        recordHostedAssistantProviderStartLatencyTraceBestEffort({
+          ...event,
+          latencyTracePort: latencyTrace?.latencyTracePort ?? null,
+          runtimeAttemptId: latencyTrace?.runtimeAttemptId ?? null,
+        });
       },
       onTraceEvent: (event) => {
         const contextEntry = emitHostedAssistantContextTraceLog({
@@ -541,6 +557,58 @@ export async function runHostedAssistantAutomation(
     });
     throw error;
   }
+}
+
+function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
+  assistantInputIds: readonly string[];
+  latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  providerRequestOrdinal: number;
+  runtimeAttemptId?: string | null;
+  source: string;
+  startedAt: string;
+}): void {
+  if (input.source !== "linq") {
+    return;
+  }
+  if (!input.latencyTracePort || input.assistantInputIds.length === 0) {
+    return;
+  }
+
+  void recordHostedAssistantProviderStartLatencyTraceWithRetry(input.latencyTracePort, {
+    event: {
+      assistantInputIds: [...input.assistantInputIds],
+      at: input.startedAt,
+      providerRequestOrdinal: input.providerRequestOrdinal,
+      runtimeAttemptId: input.runtimeAttemptId ?? null,
+      source: "linq",
+      type: "provider_started",
+    },
+  }).catch(() => {
+    // Latency traces are diagnostic-only and must not affect runtime progress.
+  });
+}
+
+const HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS = [250, 1_000] as const;
+
+async function recordHostedAssistantProviderStartLatencyTraceWithRetry(
+  latencyTracePort: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
+  request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
+): Promise<void> {
+  let response = await latencyTracePort.record(request);
+
+  for (const delayMs of HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS) {
+    if (response.unmatchedCount === 0) {
+      return;
+    }
+    await sleep(delayMs);
+    response = await latencyTracePort.record(request);
+  }
+}
+
+async function sleep(delayMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 function normalizeHostedForegroundReplayScanLimit(count: number): number {

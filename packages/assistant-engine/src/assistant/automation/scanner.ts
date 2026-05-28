@@ -25,6 +25,7 @@ import {
   createAssistantAutoReplyGroupContext,
   createAssistantAutoReplyReceiptReader,
   processAssistantAutoReplyGroup,
+  type AssistantAutoReplyProviderRequestStartHook,
 } from './reply.js'
 import {
   createEmptyAutoReplyScanResult,
@@ -52,6 +53,7 @@ export async function scanAssistantAutomationOnce(input: {
   inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
+  onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
@@ -213,6 +215,7 @@ export async function scanAssistantAutomationOnce(input: {
       executionContext: input.executionContext,
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
+      onProviderRequestStarted: input.onProviderRequestStarted ?? null,
       onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:

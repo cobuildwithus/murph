@@ -1246,6 +1246,42 @@ export class HostedUserRunner {
     try {
       result = await this.invokePreparedWorkspaceRunner(input.prepared);
     } catch (error) {
+      if (input.acceptedProcessingAttempt) {
+        const committedResult =
+          await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
+            executionInput,
+            workspaceVersion,
+          });
+        if (committedResult) {
+          const completion = await this.recordRuntimeCompletionAfterInvoke({
+            input: executionInput,
+            token,
+            workspaceVersion,
+          });
+          await this.syncWatchdogAlarmAfterCompletion({
+            executionInput,
+            record: completion.record,
+            token,
+            workspaceVersion,
+          });
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+              orchestrationAttemptId: executionInput.orchestrationAttemptId,
+              workspaceAttemptId: token.attemptId,
+              workspaceReason: executionInput.reason,
+              workspaceVersion,
+            },
+            level: "warn",
+            message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
+            phase: "checkpoint",
+            userId: executionInput.userId,
+          });
+          return committedResult;
+        }
+      }
+
       const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
         error,
         finishedAt: new Date().toISOString(),
@@ -1307,6 +1343,51 @@ export class HostedUserRunner {
     });
 
     return result;
+  }
+
+  private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {
+    executionInput: RuntimeInvocationInput;
+    workspaceVersion: string;
+  }): Promise<HostedWorkspaceInvocationResult | null> {
+    let status: HostedRuntimeWebStatusResponse;
+    try {
+      status = await this.readHostedRuntimeStatusFromWeb(
+        input.executionInput.userId,
+      );
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
+          workspaceReason: input.executionInput.reason,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted runner accepted runtime progress recheck failed after transport failure.",
+        phase: "failed",
+        userId: input.executionInput.userId,
+      });
+      return null;
+    }
+
+    if (
+      !status.workspace
+      || !isHostedRuntimeWorkspaceVersionAfter(
+        status.workspace.version,
+        input.workspaceVersion,
+      )
+      || !hostedRuntimeMailboxLagDrained(status.mailboxLag)
+    ) {
+      return null;
+    }
+
+    return {
+      nextWakeAt: status.workspace.nextWakeAt,
+      nextWakeReason: status.workspace.nextWakeReason,
+      redactedStatus: status.workspace.redactedStatus,
+      status: "idle",
+    };
   }
 
   private async recordRuntimeCompletionAfterInvoke(input: {
@@ -2326,6 +2407,29 @@ function buildRunnerRecordTimingLogDetails(
     lastErrorCode: record.lastErrorCode,
     watchdogAlarmAt: readWriteFenceWatchdogAlarmAt(record),
   };
+}
+
+function isHostedRuntimeWorkspaceVersionAfter(
+  nextVersion: string,
+  previousVersion: string,
+): boolean {
+  try {
+    return BigInt(nextVersion) > BigInt(previousVersion);
+  } catch {
+    return false;
+  }
+}
+
+function hostedRuntimeMailboxLagDrained(
+  mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"],
+): boolean {
+  return mailboxLag.every((lane) => {
+    try {
+      return BigInt(lane.lag) === 0n;
+    } catch {
+      return lane.lag === "0";
+    }
+  });
 }
 
 function buildRunnerWriteFenceValidationRejectedDetails(input: {

@@ -74,6 +74,12 @@ export interface AssistantHostedDeliveryIdempotencyContext {
   recipientKey?: string | null
 }
 
+export type AssistantProviderRequestStartHook = (event: {
+  acceptedInputIds: readonly string[]
+  providerRequestOrdinal: number
+  startedAt: string
+}) => Promise<void> | void
+
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
   acceptedTurnInput?: {
@@ -94,6 +100,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   hostedDeliveryIdempotency?: AssistantHostedDeliveryIdempotencyContext | null
   includeEarlySessionOnboarding?: boolean
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
+  onProviderRequestStarted?: AssistantProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean

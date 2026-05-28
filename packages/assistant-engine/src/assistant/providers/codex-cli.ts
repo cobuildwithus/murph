@@ -225,6 +225,7 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : undefined,
     onProgress: input.onEvent ?? undefined,
+    onProviderRequestStarted: input.onProviderRequestStarted ?? undefined,
     onTraceEvent: input.onTraceEvent,
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
