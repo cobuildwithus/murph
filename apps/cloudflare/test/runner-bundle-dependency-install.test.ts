@@ -211,6 +211,11 @@ describe("runner bundle pnpm install config", () => {
       packageManager?: string;
       pnpm?: {
         overrides?: Record<string, string>;
+        supportedArchitectures?: {
+          cpu?: string[];
+          libc?: string[];
+          os?: string[];
+        };
       };
     };
     const assistantRuntimeSpecifier = `file:${path.relative(
@@ -235,6 +240,11 @@ describe("runner bundle pnpm install config", () => {
       "@murphai/runtime-state": runtimeStateSpecifier,
       jose: "6.2.2",
     });
+    expect(packageJson.pnpm?.supportedArchitectures).toEqual({
+      cpu: ["current", "x64"],
+      libc: ["current", "glibc"],
+      os: ["current", "linux"],
+    });
   });
 
   it("mirrors root dependency policy into the isolated bundle install", async () => {
@@ -249,6 +259,7 @@ describe("runner bundle pnpm install config", () => {
         "allowBuilds:",
         "  '@prisma/client': true",
         "  esbuild: true",
+        "  sharp: true",
         "blockExoticSubdeps: true",
         "engineStrict: true",
         "managePackageManagerVersions: true",
@@ -281,6 +292,7 @@ describe("runner bundle pnpm install config", () => {
         "node-version=24.14.1",
         "only-built-dependencies[]=@prisma/client",
         "only-built-dependencies[]=esbuild",
+        "only-built-dependencies[]=sharp",
         "package-manager-strict-version=true",
         "save-prefix=",
         "trust-policy=no-downgrade",

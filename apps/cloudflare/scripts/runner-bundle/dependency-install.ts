@@ -20,6 +20,12 @@ interface WorkspacePackageManifest {
   version?: string;
 }
 
+const runnerBundleSupportedArchitectures = {
+  cpu: ["current", "x64"],
+  libc: ["current", "glibc"],
+  os: ["current", "linux"],
+};
+
 export async function installPackedRunnerDependencies(
   bundleDir: string,
   tarballPaths: Map<string, string>,
@@ -38,6 +44,11 @@ export async function installPackedRunnerDependencies(
     packageManager?: string;
     pnpm?: {
       overrides?: Record<string, string>;
+      supportedArchitectures?: {
+        cpu?: string[];
+        libc?: string[];
+        os?: string[];
+      };
     };
   };
   const workspaceInstallPolicy = await readWorkspacePnpmInstallPolicy(
@@ -83,6 +94,7 @@ export async function installPackedRunnerDependencies(
       ...(packageJson.pnpm?.overrides ?? {}),
       ...workspaceTarballOverrides,
     },
+    supportedArchitectures: runnerBundleSupportedArchitectures,
   };
 
   await writeFile(

@@ -21,9 +21,9 @@ import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
-  HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+  readHostedLocalLinqImagePngBytes,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
@@ -109,8 +109,11 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    expect(assistantProviderRequests).toHaveLength(1);
-    expect(assistantProviderRequests[0]?.body).toContain("U can call me Rocket Man");
+    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+      assistantProviderRequests,
+      "nickname webhook provider request",
+    );
+    expect(assistantProviderBody).toContain("U can call me Rocket Man");
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -244,8 +247,10 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    expect(assistantProviderRequests).toHaveLength(1);
-    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+      assistantProviderRequests,
+      "pdf media provider request",
+    );
     const providerBody = parseAssistantProviderRequestBody(assistantProviderBody);
     const inputFiles = collectProviderInputPartsByType(providerBody, "input_file");
     expect(inputFiles).toEqual([]);
@@ -268,11 +273,12 @@ describe("hosted local Linq webhook e2e", () => {
     ]);
   }, 300_000);
 
-  it("passes image-only iMessage media through the multimodal provider path", async () => {
+  it("normalizes a large image-only iMessage media attachment before the multimodal provider path", async () => {
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("image");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const attachmentId = `att_image_${userId}`;
+    const originalImageBytes = readHostedLocalLinqImagePngBytes();
     const expectedAttachmentMetadataPath = `/attachments/${encodeURIComponent(attachmentId)}`;
     const expectedAttachmentDownloadPath =
       `/attachment-downloads/${encodeURIComponent(attachmentId)}.png`;
@@ -300,7 +306,7 @@ describe("hosted local Linq webhook e2e", () => {
             attachmentId,
             fileName: "outbox.png",
             mimeType: "image/png",
-            size: 68,
+            size: originalImageBytes.byteLength,
             type: "media",
             url: expectedAttachmentDownloadUrl,
           },
@@ -346,23 +352,32 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    expect(assistantProviderRequests).toHaveLength(1);
-    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+      assistantProviderRequests,
+      "image media provider request",
+    );
     const providerBody = parseAssistantProviderRequestBody(assistantProviderBody);
     const inputImages = collectProviderInputPartsByType(providerBody, "input_image");
-    const expectedImageDataUrl =
-      `data:image/png;base64,${Buffer.from(HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES).toString("base64")}`;
     const imageShapeSummary = summarizeProviderImageRequestShape(
       providerBody,
       assistantProviderBody,
     );
     expect(inputImages.length, imageShapeSummary).toBeGreaterThan(0);
-    expect(
-      providerInputPartsIncludeImageUrl(inputImages, expectedImageDataUrl),
-      imageShapeSummary,
-    ).toBe(true);
+    const imagePayload = decodeSingleProviderDataImageUrl(inputImages, imageShapeSummary);
+    expect(imagePayload.mediaType, imageShapeSummary).toBe("image/webp");
+    expect(imagePayload.bytes.byteLength, imageShapeSummary).toBeLessThan(
+      originalImageBytes.byteLength,
+    );
+    expect(providerInputPartsIncludeImageUrlWithPrefix(inputImages, "data:image/png;base64,")).toBe(
+      false,
+    );
+    expect(assistantProviderBody.includes("data:image/png;base64,"), imageShapeSummary).toBe(
+      false,
+    );
     expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
-    expect(assistantProviderBody.includes("fileName: outbox.png")).toBe(true);
+    expect(assistantProviderBody.includes("fileName: outbox.webp")).toBe(true);
+    expect(assistantProviderBody.includes("mime: image/webp")).toBe(true);
+    expect(assistantProviderBody.includes("attachments/001.webp")).toBe(true);
     expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
     expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,
@@ -435,8 +450,10 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    expect(assistantProviderRequests).toHaveLength(1);
-    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+      assistantProviderRequests,
+      "audio media provider request",
+    );
     expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
     expect(assistantProviderBody.includes("fileName: Audio Message.m4a")).toBe(true);
     expect(assistantProviderBody.includes(hostedLinqVoiceNoteTranscriptText)).toBe(true);
@@ -521,11 +538,72 @@ function collectProviderInputPartsByType(
   return matches;
 }
 
-function providerInputPartsIncludeImageUrl(
+function providerInputPartsIncludeImageUrlWithPrefix(
   parts: readonly Record<string, unknown>[],
-  imageUrl: string,
+  prefix: string,
 ): boolean {
-  return parts.some((part) => part.image_url === imageUrl);
+  return parts.some((part) =>
+    typeof part.image_url === "string" && part.image_url.startsWith(prefix)
+  );
+}
+
+function decodeSingleProviderDataImageUrl(
+  parts: readonly Record<string, unknown>[],
+  shapeSummary: string,
+): { bytes: Buffer; mediaType: string } {
+  const urls = parts
+    .map((part) => part.image_url)
+    .filter((value): value is string => typeof value === "string");
+  if (urls.length !== 1) {
+    throw new Error(
+      `${shapeSummary}; expected exactly one provider data image URL, got ${urls.length}`,
+    );
+  }
+  const [url] = urls;
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/u.exec(url!);
+  if (!match) {
+    throw new Error(
+      `${shapeSummary}; provider image URL was not a supported base64 data image URL`,
+    );
+  }
+  return {
+    bytes: Buffer.from(match![2]!, "base64"),
+    mediaType: match![1]!,
+  };
+}
+
+function requireSingleAssistantProviderRequestBody(
+  requests: readonly { body: string; method: string; url: string }[],
+  context: string,
+): string {
+  if (requests.length !== 1) {
+    throw new Error(
+      `${context}: expected exactly one provider request, got ${requests.length}; ${summarizeProviderRequestsForFailure(requests)}`,
+    );
+  }
+  return requests[0]!.body;
+}
+
+function summarizeProviderRequestsForFailure(
+  requests: readonly { body: string; method: string; url: string }[],
+): string {
+  return JSON.stringify(requests.map((request) => ({
+    bodyBytes: Buffer.byteLength(request.body, "utf8"),
+    hasAttachmentContext: request.body.includes("Attachment context:"),
+    hasDataImage: request.body.includes("data:image"),
+    hasInputFile: request.body.includes("\"input_file\""),
+    hasInputImage: request.body.includes("\"input_image\""),
+    method: request.method,
+    urlPath: safeProviderRequestUrlPath(request.url),
+  })));
+}
+
+function safeProviderRequestUrlPath(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return "unparseable";
+  }
 }
 
 function summarizeProviderImageRequestShape(
@@ -535,9 +613,22 @@ function summarizeProviderImageRequestShape(
   return JSON.stringify({
     hasAttachmentContext: rawBody.includes("Attachment context:"),
     hasDataImage: rawBody.includes("data:image"),
+    hasEvidenceReadFallback: rawBody.includes("rich evidence could not be loaded"),
     hasInputImage: rawBody.includes("input_image"),
     inputItemCount: Array.isArray(body.input) ? body.input.length : null,
     inputTypes: collectJsonTypeFields(body).slice(0, 24),
+    mimeLines: Array.from(rawBody.matchAll(/mime: (image\/[A-Za-z0-9.+-]+)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
+    rawPathExtensions: Array.from(rawBody.matchAll(/attachments\/\d+\.([A-Za-z0-9]+)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
+    routingImageEligible: Array.from(rawBody.matchAll(/routingImageEligible: (true|false)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
+    routingImageReasons: Array.from(rawBody.matchAll(/routingImageReason: ([A-Za-z0-9-]+)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
   });
 }
 
