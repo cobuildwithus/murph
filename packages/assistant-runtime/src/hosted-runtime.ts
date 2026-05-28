@@ -35,6 +35,7 @@ import {
 } from "./hosted-runtime/channel-activity.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobInput,
+  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
 } from "./hosted-runtime/models.ts";
 import type {
   HostedMailboxItemImportOutcome,
@@ -251,6 +252,7 @@ export {
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
+const HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
 interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
@@ -792,6 +794,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...hostedCodexRuntime.runtimeEnv,
       ...(hostedCliBridge?.env ?? {}),
     };
+    let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
+    let suppressDirtyPendingFetchUntilCheckpoint = false;
+    const stageDeviceSyncDirtyAcks = (
+      records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined,
+    ): void => {
+      if (!records || records.length === 0) {
+        return;
+      }
+      stagedDeviceSyncDirtyAcks = mergeHostedDeviceSyncStagedDirtyAckRecords([
+        ...stagedDeviceSyncDirtyAcks,
+        ...records,
+      ]);
+      if (
+        countHostedDeviceSyncStagedDirtyAckPayloadIds(stagedDeviceSyncDirtyAcks)
+          >= HOSTED_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT
+      ) {
+        suppressDirtyPendingFetchUntilCheckpoint = true;
+      }
+    };
+    const clearStagedDeviceSyncDirtyAcks = (): void => {
+      stagedDeviceSyncDirtyAcks = [];
+      suppressDirtyPendingFetchUntilCheckpoint = false;
+    };
     const runForegroundPass = async (passInput: {
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       requestId: string;
@@ -829,6 +854,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     restored,
                     runtime: foregroundRuntime,
                     runtimeEnv,
+                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: runtimeAbortController.signal,
                   }),
                 workspace: passInput.workspace,
@@ -849,6 +876,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stage: "foreground.pass",
           status: "done",
         });
+        stageDeviceSyncDirtyAcks(passResult.assistantPhaseResult?.stagedDirtyAcks);
         return passResult;
       } catch (error) {
         emitPhaseLog({
@@ -1116,6 +1144,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         await runDurableCheckpointEffectsBestEffort();
+        clearStagedDeviceSyncDirtyAcks();
         checkpointMetadata.expectedWorkspaceVersion = checkpoint.workspace.version;
         checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
         checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
@@ -1601,6 +1630,50 @@ function shouldReplaceHostedWorkspaceInvocationWake(
     result.assistantPhaseResult
       && result.assistantPhaseResult.progressed === true
       && Object.hasOwn(result.assistantPhaseResult, "nextWakeAt"),
+  );
+}
+
+function mergeHostedDeviceSyncStagedDirtyAckRecords(
+  records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[],
+): HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] {
+  const byConnection = new Map<string, {
+    connectionId: string;
+    processedDirtyPayloadIds: Set<string>;
+    processedRevision: bigint;
+  }>();
+
+  for (const record of records) {
+    const previous = byConnection.get(record.connectionId);
+    const processedRevision = BigInt(record.processedRevision);
+    const entry = previous ?? {
+      connectionId: record.connectionId,
+      processedDirtyPayloadIds: new Set<string>(),
+      processedRevision,
+    };
+    if (processedRevision > entry.processedRevision) {
+      entry.processedRevision = processedRevision;
+    }
+    for (const payloadId of record.processedDirtyPayloadIds ?? []) {
+      entry.processedDirtyPayloadIds.add(payloadId);
+    }
+    byConnection.set(record.connectionId, entry);
+  }
+
+  return [...byConnection.values()].map((entry) => ({
+    connectionId: entry.connectionId,
+    ...(entry.processedDirtyPayloadIds.size > 0
+      ? { processedDirtyPayloadIds: [...entry.processedDirtyPayloadIds] }
+      : {}),
+    processedRevision: entry.processedRevision.toString(),
+  }));
+}
+
+function countHostedDeviceSyncStagedDirtyAckPayloadIds(
+  records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[],
+): number {
+  return records.reduce(
+    (count, record) => count + (record.processedDirtyPayloadIds?.length ?? 0),
+    0,
   );
 }
 

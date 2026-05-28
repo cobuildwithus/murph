@@ -805,6 +805,110 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     );
   });
 
+  it("uses staged dirty acks as a read overlay without deleting pending payload rows", async () => {
+    installHostedSecureBoxStringTestCodec();
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const acceptedPayloadId = "dsp_payload_staged_accepted";
+    const remainingPayloadId = "dsp_payload_staged_remaining";
+    const compactResource = {
+      count: 1,
+      jobKind: "resource",
+      payload: undefined,
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-05-26T12:10:00.000Z",
+      windowStart: "2026-05-26T12:00:00.000Z",
+    };
+    const remainingPayloadResource = {
+      count: 1,
+      jobKind: "resource",
+      payload: {
+        webhookDataJson: JSON.stringify({ sampleCount: 1, source: "garmin" }),
+      },
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-05-26T12:20:00.000Z",
+      windowStart: "2026-05-26T12:10:00.000Z",
+    };
+    const remainingResourceEncrypted = await sealHostedDeviceSyncDirtyPayloadJson({
+      connectionId: "dsc_junction_staged_overlay",
+      dirtyRevision: 4n,
+      payloadId: remainingPayloadId,
+      provider: "junction",
+      userId: "member_123",
+      value: remainingPayloadResource,
+    });
+    const prisma = {
+      $queryRaw: vi.fn(async () => [{ connection_id: "dsc_junction_staged_overlay" }]),
+      deviceSyncDirtyConnection: {
+        findMany: vi.fn(async () => [
+          {
+            connectionId: "dsc_junction_staged_overlay",
+            createdAt: dirtyAt,
+            dirtyResourcesJson: { compact: compactResource },
+            dirtyRevision: 4n,
+            eventCount: 4n,
+            firstDirtyAt: dirtyAt,
+            latestDirtyAt: dirtyAt,
+            latestEventType: "daily.data.steps.created",
+            latestResourceCategory: "timeseries",
+            latestTraceId: "trace_staged_overlay",
+            processedRevision: 3n,
+            provider: "junction",
+            resourceCategoryCountsJson: { summary: 1 },
+            sourceProviderCountsJson: { garmin: 1 },
+            updatedAt: dirtyAt,
+            userId: "member_123",
+            windowEnd: new Date("2026-05-26T12:10:00.000Z"),
+            windowStart: dirtyAt,
+          },
+        ]),
+      },
+      deviceSyncDirtyPayload: {
+        findMany: vi.fn(async () => [
+          {
+            connectionId: "dsc_junction_staged_overlay",
+            dirtyRevision: 4n,
+            id: remainingPayloadId,
+            provider: "junction",
+            resourceEncrypted: remainingResourceEncrypted,
+          },
+        ]),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+    const result = await store.listPendingDirtyConnectionsForUser({
+      limit: 10,
+      stagedDirtyAcks: [
+        {
+          connectionId: "dsc_junction_staged_overlay",
+          processedDirtyPayloadIds: [acceptedPayloadId],
+          processedRevision: "4",
+        },
+      ],
+      userId: "member_123",
+    });
+
+    expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: {
+          notIn: [acceptedPayloadId],
+        },
+      }),
+    }));
+    expect(result.items[0]).toMatchObject({
+      connectionId: "dsc_junction_staged_overlay",
+      processedRevision: 4n,
+    });
+    const dirtyResources = Object.values(result.items[0]?.dirtyResources ?? {});
+    expect(dirtyResources).toHaveLength(1);
+    expect(dirtyResources[0]?.dirtyPayloadId).toBe(remainingPayloadId);
+    expect(dirtyResources[0]?.resource).toBe("steps");
+  });
+
   it("caps durable payload hydration per pending dirty connection", async () => {
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     const firstPayloadId = "dsp_payload_cap_1";

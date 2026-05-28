@@ -10,6 +10,7 @@ import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
+import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
@@ -296,6 +297,7 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async listPendingDirtyConnectionsForUser(input: {
     limit: number;
+    stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
     userId: string;
     tx?: HostedPrismaTransactionClient;
   }) {

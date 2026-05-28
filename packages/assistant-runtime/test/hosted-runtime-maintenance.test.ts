@@ -918,6 +918,7 @@ describe("runHostedDeviceSyncPass", () => {
       postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
+      stagedDirtyAcks: [],
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
@@ -946,6 +947,7 @@ describe("runHostedDeviceSyncPass", () => {
       postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
+      stagedDirtyAcks: [],
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });

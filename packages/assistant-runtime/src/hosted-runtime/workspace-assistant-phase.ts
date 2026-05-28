@@ -59,6 +59,7 @@ import {
 import type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantWorkspaceRuntimeJobInput,
+  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
@@ -246,6 +247,8 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
+  suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
 }
 
@@ -337,6 +340,10 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxResult: continuingSystemMailboxResult,
       });
 
+    const stagedDirtyAcksForAssistant = mergeHostedDeviceSyncStagedDirtyAcks(
+      input.stagedDirtyAcks ?? [],
+      systemMailboxMaintenance.stagedDirtyAcks,
+    );
     const skipDeviceSync = shouldSkipDeviceSyncForAssistantPhase(input);
     const foregroundReplayInputIds = resolveHostedForegroundReplayInputIds(input);
     const foregroundReplayPromptInputIds =
@@ -362,11 +369,17 @@ export async function runHostedWorkspaceAssistantPhase(
       ...(input.shouldYieldBackgroundMaintenance
         ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
         : {}),
+      skipDirtyPendingFetch: input.suppressDirtyPendingFetch ?? false,
       skipDeviceSync,
+      stagedDirtyAcks: stagedDirtyAcksForAssistant,
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
     if (shouldRunDeferredLegacyDeviceSyncRecovery({ assistantMetrics, input })) {
+      const stagedDirtyAcksForLegacyDeviceSync = mergeHostedDeviceSyncStagedDirtyAcks(
+        stagedDirtyAcksForAssistant,
+        assistantMetrics.stagedDirtyAcks ?? [],
+      );
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
@@ -375,6 +388,8 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.shouldYieldBackgroundMaintenance
           ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
           : {}),
+        skipDirtyPendingFetch: input.suppressDirtyPendingFetch ?? false,
+        stagedDirtyAcks: stagedDirtyAcksForLegacyDeviceSync,
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.restored.vaultRoot,
         wake,
@@ -503,20 +518,22 @@ export async function runHostedWorkspaceAssistantPhase(
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
-            : {}),
-          progressed: false,
-          redactedStatus,
-        });
-      }
-      return mergeContinuingSystemMailboxResult({
-        checkpointReason: postDelivery.checkpointReason,
-        nextWakeAt,
-        ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
-          ? { nextWakeReason: postDelivery.nextWakeReason }
           : {}),
-        progressed: true,
+        progressed: false,
         redactedStatus,
+        stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
       });
+    }
+    return mergeContinuingSystemMailboxResult({
+      checkpointReason: postDelivery.checkpointReason,
+      nextWakeAt,
+        ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
+        ? { nextWakeReason: postDelivery.nextWakeReason }
+        : {}),
+      progressed: true,
+      redactedStatus,
+      stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
+    });
     }
 
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
@@ -581,9 +598,10 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
           ? { nextWakeReason: nextWake.reason }
-          : {}),
+        : {}),
         progressed: false,
         redactedStatus,
+        stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
       });
     }
 
@@ -660,6 +678,7 @@ export async function runHostedWorkspaceAssistantPhase(
         : {}),
       progressed: true,
       redactedStatus,
+      stagedDirtyAcks: assistantMetrics.stagedDirtyAcks ?? [],
     });
   } finally {
     typingAbortController.abort();
@@ -725,6 +744,10 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     input.systemMailboxResult.redactedStatus,
     input.assistantResult.redactedStatus,
   );
+  const stagedDirtyAcks = mergeHostedDeviceSyncStagedDirtyAcks(
+    input.systemMailboxResult.stagedDirtyAcks,
+    input.assistantResult.stagedDirtyAcks,
+  );
   const afterCheckpoint = composeHostedAssistantPhaseAfterCheckpoint({
     baseNextWake: hasNextWakeAt ? nextWake : null,
     callbacks: [
@@ -748,6 +771,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         : {}),
       progressed: true,
       ...(redactedStatus ? { redactedStatus } : {}),
+      stagedDirtyAcks,
     };
   }
 
@@ -758,6 +782,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       : {}),
     progressed: false,
     ...(redactedStatus ? { redactedStatus } : {}),
+    stagedDirtyAcks,
   };
 }
 
@@ -989,6 +1014,12 @@ type HostedTerminalLinqCleanupEvidence = Awaited<
   ReturnType<typeof listPendingAssistantAutoReplyLinqCleanupEvidence>
 >;
 
+function mergeHostedDeviceSyncStagedDirtyAcks(
+  ...groups: readonly (readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined)[]
+): HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] {
+  return groups.flatMap((group) => group ?? []);
+}
+
 async function runSystemMailboxMaintenancePhase(input: {
   executionContext: AssistantExecutionContext;
   hasFreshConversationInput: boolean;
@@ -998,6 +1029,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   continueAssistantLane: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
+  stagedDirtyAcks: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
   if (
     input.hasFreshConversationInput
@@ -1007,6 +1039,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       continueAssistantLane: false,
       initialProviderCleanupCheckpoint: null,
       result: null,
+      stagedDirtyAcks: [],
     };
   }
 
@@ -1048,6 +1081,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         ...(phaseInput.shouldYieldBackgroundMaintenance
           ? { shouldYieldDeviceSync: phaseInput.shouldYieldBackgroundMaintenance }
           : {}),
+        skipDirtyPendingFetch: phaseInput.suppressDirtyPendingFetch ?? false,
+        stagedDirtyAcks: phaseInput.stagedDirtyAcks ?? null,
         timeoutMs: phaseInput.runtime.commitTimeoutMs,
         vaultRoot: phaseInput.restored.vaultRoot,
         wake: input.wake,
@@ -1191,7 +1226,9 @@ async function runSystemMailboxMaintenancePhase(input: {
         systemMailboxRetryableFailed:
           systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
       }),
+      stagedDirtyAcks: dirtyDeviceSyncMetrics?.stagedDirtyAcks ?? [],
     },
+    stagedDirtyAcks: dirtyDeviceSyncMetrics?.stagedDirtyAcks ?? [],
   };
 }
 
@@ -2085,6 +2122,10 @@ function mergeDeferredLegacyDeviceSyncMetrics(input: {
     nextWakeAt: nextWake.at,
     ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
     postCheckpointRecord: input.deviceSyncMetrics.postCheckpointRecord ?? null,
+    stagedDirtyAcks: mergeHostedDeviceSyncStagedDirtyAcks(
+      input.assistantMetrics.stagedDirtyAcks,
+      input.deviceSyncMetrics.stagedDirtyAcks,
+    ),
   };
 }
 

@@ -14,6 +14,9 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
   type HostedExecutionSnapshotRef,
@@ -1163,6 +1166,8 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
+        "murph.send_progress_update",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_TEMPORAL: "disabled",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
