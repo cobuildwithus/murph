@@ -647,7 +647,11 @@ async function runCodexAppServerTurn(
   }
 
   const notifyContextCompactionProgress = (text: string) => {
-    if (!input.progressDelivery || contextCompactionProgressNotified) {
+    if (
+      input.modelProgressUpdatesEnabled !== true ||
+      !input.progressDelivery ||
+      contextCompactionProgressNotified
+    ) {
       return
     }
 

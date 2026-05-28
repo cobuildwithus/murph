@@ -534,12 +534,19 @@ async function handleRpc(message) {
         return;
       }
     }
-    const dynamicToolNames = method === "thread/start"
-      ? readThreadStartDynamicToolNames(params)
-      : readThreadDynamicToolNames(threadId);
+    const receivedDynamicToolNames = readThreadStartDynamicToolNames(params);
+    const restoredDynamicToolNames = method === "thread/resume"
+      ? readThreadDynamicToolNames(threadId)
+      : [];
+    const dynamicToolNames = method === "thread/start" ||
+      receivedDynamicToolNames.length > 0
+      ? receivedDynamicToolNames
+      : restoredDynamicToolNames;
     const validationError = validateExpectedDynamicTools(
       method,
-      method === "thread/start" ? "received" : "restored",
+      method === "thread/start" || receivedDynamicToolNames.length > 0
+        ? "received"
+        : "restored",
       dynamicToolNames,
     );
     if (validationError) {

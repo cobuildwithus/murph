@@ -86,6 +86,39 @@ describe('assistant turn progress', () => {
     expect(deliver).toHaveBeenCalledTimes(1)
   })
 
+  it('resolves the current delivery context when sending progress', async () => {
+    const initialInput = createMessageInput({
+      deliveryIdempotencyKey: 'initial-reply-key',
+      deliveryReplyToMessageId: 'initial-message',
+    })
+    const currentInput = createMessageInput({
+      deliveryIdempotencyKey: 'current-reply-key',
+      deliveryReplyToMessageId: 'current-message',
+    })
+    const session = createSession()
+    const delivered: DeliverProgressInput[] = []
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+      delivered.push(input)
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      getDeliveryContext: () => ({
+        messageInput: currentInput,
+        session,
+      }),
+      messageInput: initialInput,
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await progress.send('Checking the latest message now.')
+
+    expect(deliver).toHaveBeenCalledTimes(1)
+    expect(delivered[0]?.input.deliveryIdempotencyKey).toBe('current-reply-key')
+    expect(delivered[0]?.input.deliveryReplyToMessageId).toBe('current-message')
+  })
+
   it('builds progress idempotency keys distinct from final reply keys', () => {
     expect(
       buildAssistantProgressDeliveryIdempotencyKey({
@@ -104,12 +137,15 @@ describe('assistant turn progress', () => {
   })
 })
 
-function createMessageInput(): AssistantMessageInput {
+function createMessageInput(
+  overrides: Partial<AssistantMessageInput> = {},
+): AssistantMessageInput {
   return {
     deliverResponse: true,
     deliveryIdempotencyKey: 'reply-key',
     prompt: 'process this report',
     vault: '/vault',
+    ...overrides,
   }
 }
 

@@ -3,7 +3,7 @@ Goal (incl. success criteria):
 - Success: hosted Linq/iMessage queue-only turns still register exactly one Codex dynamic tool, `murph.send_progress_update`, while final responses continue to use the existing queue-only outbox path.
 
 Constraints/Assumptions:
-- Keep the existing `murph.send_progress_update` dynamic tool and `AssistantTurnProgress` current-audience delivery primitive.
+- Keep the existing `murph.send_progress_update` dynamic tool and current-audience progress delivery primitive.
 - Do not add a model-facing final-response tool or parallel final-delivery path.
 - Keep progress best-effort, deduped, capped, and metadata-only in hosted-local assertions.
 
@@ -13,7 +13,7 @@ Key decisions:
 - Register the progress dynamic tool from user-facing turn policy, not from final outbox dispatch mode or a nullable progress sink.
 
 State:
-- Active.
+- Ready to close.
 
 Done:
 - Existing code path confirmed: `buildCodexThreadStartParams` includes `dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL]` only when `turnProgress` exists.
@@ -24,12 +24,22 @@ Done:
 - Supplemental Linq hosted-local run passed with the current runner bundle: `pnpm hosted-local e2e linq-delivery --no-bundle` (7 passed, 1 skipped).
 - Focused typecheck passed: `pnpm --dir packages/assistant-runtime typecheck`.
 - Truthful full bundle run `pnpm hosted-local e2e linq-delivery` assembled successfully but failed before any assistant provider request; hosted logs showed `assistant.input_candidates.listed` with `candidateCount: 0` and `assistant provider requests: []`, so the dynamic-tool shim was not reached.
+- Refactored assistant-engine progress availability so the dynamic tool is exposed from model progress turn policy rather than queue-only final dispatch mode.
+- Added resume-param coverage so progress-enabled resumed Codex turns include `murph.send_progress_update`.
+- Kept progress delivery turn-scoped for dedupe/count but resolves current delivery context at send time for active-turn continuations.
+- Guarded progress delivery on both the advertised model capability and the delivery sink.
+- Subagent review completed with architecture/runtime/E2E/type-surface findings; in-scope high/medium findings were addressed.
+- Focused assistant-engine regression suite passed: `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-turn-progress.test.ts test/assistant-codex-runtime.test.ts test/assistant-local-service-runtime.test.ts test/model-behavior.test.ts test/assistant-codex-final-coverage.test.ts --no-coverage`.
+- Focused assistant-engine typecheck passed: `pnpm --dir packages/assistant-engine typecheck`.
+- Focused hosted-runtime shim/config test passed again: `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-codex-config.test.ts --no-coverage`.
+- Focused assistant-runtime typecheck passed: `pnpm --dir packages/assistant-runtime typecheck`.
+- Latest hosted-local Linq E2E guard run `pnpm hosted-local e2e linq-delivery --no-bundle` failed before reaching Codex; logs again showed `candidateCount: 0` and `assistant provider requests: []`, so the dynamic-tool assertion was not exercised.
 
 Now:
-- Refactor assistant-engine progress capability boundary and update regression tests.
+- Close plan and hand off.
 
 Next:
-- Run focused assistant-engine tests, hosted-local Linq E2E guard, typecheck, and scoped diff checks.
+- Re-run hosted-local Linq once the pre-provider candidate issue is fixed so the Codex shim assertion is exercised end to end.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -52,3 +62,6 @@ Working set (files/ids/commands):
 - `apps/cloudflare/src/hosted-env-policy.ts`
 - `apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+Status: completed
+Updated: 2026-05-28
+Completed: 2026-05-28
