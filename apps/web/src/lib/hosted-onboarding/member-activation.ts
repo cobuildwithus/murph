@@ -13,10 +13,12 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
+  hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
 import {
   appendHostedMailboxEnvelopeTx,
+  hasHostedMailboxItemByKind,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
@@ -66,6 +68,7 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
+  skipIfPreviouslyActivated?: boolean;
 }): Promise<HostedMemberActivationResult> {
   const timing = startHostedOnboardingTiming(
     "hosted-onboarding.member-activation.positive-source",
@@ -97,6 +100,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
+  skipIfPreviouslyActivated?: boolean;
 }): Promise<HostedMemberActivationResult> {
   const currentMember = await readActivationReadyHostedMemberTx({
     memberId: input.memberId,
@@ -122,17 +126,47 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     input.skipIfBillingAlreadyActive
     && currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
-    if (existingWake) {
-      if (currentMember.core.pendingActivationTimeZone) {
-        await clearHostedMemberPendingActivationTimeZone({
-          memberId: currentMember.core.id,
-          prisma: input.prisma,
-        });
-      }
+    await clearHostedMemberPendingActivationTimeZoneIfPresentTx({
+      member: currentMember,
+      prisma: input.prisma,
+    });
 
+    if (existingWake) {
       return {
         activated: false,
         hostedExecutionEventId: existingWake.dedupeKey,
+        memberId: currentMember.core.id,
+      };
+    }
+
+    return {
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: currentMember.core.id,
+    };
+  }
+
+  if (input.skipIfPreviouslyActivated) {
+    const previouslyActivated = Boolean(existingWake)
+      || await hasHostedMailboxItemByKind({
+        kind: "member.activated",
+        prisma: input.prisma,
+        userId: currentMember.core.id,
+      })
+      || await hasActiveHostedCryptoDomainRootsForUserTx({
+        tx: input.prisma,
+        userId: currentMember.core.id,
+      });
+
+    if (previouslyActivated) {
+      await clearHostedMemberPendingActivationTimeZoneIfPresentTx({
+        member: currentMember,
+        prisma: input.prisma,
+      });
+
+      return {
+        activated: false,
+        hostedExecutionEventId: existingWake?.dedupeKey ?? null,
         memberId: currentMember.core.id,
       };
     }
@@ -317,6 +351,20 @@ async function readHostedMemberActivationSnapshotTx(input: {
     ...snapshot,
     core,
   };
+}
+
+async function clearHostedMemberPendingActivationTimeZoneIfPresentTx(input: {
+  member: HostedMemberActivationSnapshot;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.member.core.pendingActivationTimeZone) {
+    return;
+  }
+
+  await clearHostedMemberPendingActivationTimeZone({
+    memberId: input.member.core.id,
+    prisma: input.prisma,
+  });
 }
 
 function resolveHostedMemberActivationEmailLinked(

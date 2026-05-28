@@ -166,6 +166,80 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   assert.equal(signCalls.length, 2);
 });
 
+test("detects whether all active hosted crypto domain roots exist for a user", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls: [],
+    signCalls: [],
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    hasActiveHostedCryptoDomainRootsForUserTx,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    provisionHostedCryptoDomainRootsForUserTx,
+  } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const tx = createCapturingTransaction();
+
+  await expect(hasActiveHostedCryptoDomainRootsForUserTx({
+    tx: tx.prisma,
+    userId: "member-test-1",
+  })).resolves.toBe(false);
+
+  for (const domain of ["control", "device", "ingress"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain,
+      prisma: tx.prisma,
+      reason: "test.partial-activation",
+      userId: "member-test-1",
+    });
+  }
+
+  await expect(hasActiveHostedCryptoDomainRootsForUserTx({
+    tx: tx.prisma,
+    userId: "member-test-1",
+  })).resolves.toBe(false);
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "runtime",
+    prisma: tx.prisma,
+    reason: "test.partial-activation",
+    userId: "member-test-1",
+  });
+  tx.markEnvelopeInactive({
+    domain: "device",
+    userId: "member-test-1",
+  });
+
+  await expect(hasActiveHostedCryptoDomainRootsForUserTx({
+    tx: tx.prisma,
+    userId: "member-test-1",
+  })).resolves.toBe(false);
+
+  tx.markEnvelopeActive({
+    domain: "device",
+    userId: "member-test-1",
+  });
+
+  await provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.activation",
+    tx: tx.prisma,
+    userId: "member-test-1",
+  });
+
+  await expect(hasActiveHostedCryptoDomainRootsForUserTx({
+    tx: tx.prisma,
+    userId: "member-test-1",
+  })).resolves.toBe(true);
+});
+
 test("web runtime crypto context fails closed instead of provisioning missing worker roots", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -360,12 +434,15 @@ async function createHostedWebCryptoTransactionFixture(
 }
 
 type HostedCryptoTestTransaction = {
+  markEnvelopeActive(input: { domain: HostedDomainRootKeyEnvelopeV1["domain"]; userId: string }): void;
+  markEnvelopeInactive(input: { domain: HostedDomainRootKeyEnvelopeV1["domain"]; userId: string }): void;
   persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[];
   prisma: Prisma.TransactionClient;
 };
 
 function createCapturingTransaction(): HostedCryptoTestTransaction {
   const persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[] = [];
+  const inactiveEnvelopeKeys = new Set<string>();
   const tx = {
     $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
       capturePersistedEnvelope(args, persistedEnvelopes);
@@ -374,15 +451,30 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
     $queryRaw: async <T = unknown>(
       ...args: Parameters<Prisma.TransactionClient["$queryRaw"]>
     ): Promise<T> => {
+      const strings = args[0] as TemplateStringsArray;
+      const sql = strings.join("?");
       const values = args.slice(1);
       const userId = values.find((value): value is string =>
         typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
+      if (sql.includes("COUNT(DISTINCT domain)")) {
+        const domains = new Set(
+          persistedEnvelopes
+            .filter((candidate) => candidate.userId === userId)
+            .filter((candidate) => !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)))
+            .map((candidate) => candidate.domain),
+        );
+        return [{ domainCount: domains.size }] as T;
+      }
+
       const rootKeyId = values.find((value): value is string =>
         typeof value === "string" && value.startsWith("udrk:"));
       const domain = values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
         value === "control" || value === "device" || value === "ingress" || value === "runtime");
       const envelope = persistedEnvelopes.find((candidate) =>
-        candidate.userId === userId && candidate.domain === domain && (!rootKeyId || candidate.rootKeyId === rootKeyId));
+        candidate.userId === userId
+        && candidate.domain === domain
+        && (!rootKeyId || candidate.rootKeyId === rootKeyId)
+        && !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)));
       return (envelope
         ? [{
           domain: envelope.domain,
@@ -397,7 +489,23 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
     },
   };
   // Narrow test double: domain-root-store only uses Prisma raw query helpers here.
-  return { persistedEnvelopes, prisma: tx as Prisma.TransactionClient };
+  return {
+    markEnvelopeActive(input) {
+      inactiveEnvelopeKeys.delete(createEnvelopeStatusKey(input));
+    },
+    markEnvelopeInactive(input) {
+      inactiveEnvelopeKeys.add(createEnvelopeStatusKey(input));
+    },
+    persistedEnvelopes,
+    prisma: tx as Prisma.TransactionClient,
+  };
+}
+
+function createEnvelopeStatusKey(input: {
+  domain: HostedDomainRootKeyEnvelopeV1["domain"];
+  userId: string;
+}): string {
+  return `${input.userId}:${input.domain}`;
 }
 
 function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
@@ -411,7 +519,7 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   };
 
   return {
-    persistedEnvelopes: tx.persistedEnvelopes,
+    ...tx,
     prisma: Object.assign(tx.prisma, {
       hostedMemberIdentity,
     }),
@@ -441,7 +549,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
   });
 
   return {
-    persistedEnvelopes: tx.persistedEnvelopes,
+    ...tx,
     prisma: Object.assign(tx.prisma, {
       hostedMember,
       hostedMemberIdentity,

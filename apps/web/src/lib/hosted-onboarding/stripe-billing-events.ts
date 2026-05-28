@@ -428,6 +428,7 @@ export async function applyStripeInvoicePaid(
     memberId: updatedMember.core.id,
     prisma,
     skipIfBillingAlreadyActive: hadActiveBilling,
+    skipIfPreviouslyActivated: true,
   });
 
   return {

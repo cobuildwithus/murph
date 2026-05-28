@@ -8,6 +8,7 @@ import {
   decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
+  hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxItemCheckpointById,
@@ -782,6 +783,37 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         maxUpdatedAt: FIXED_NOW.toISOString(),
       },
     ]);
+  });
+
+  it("checks whether a member has any mailbox item for a given kind", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_activation_1",
+        kind: "member.activated",
+        lane: "system",
+      })),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    await expect(hasHostedMailboxItemByKind({
+      kind: "member.activated",
+      prisma,
+      userId: "member_mailbox_1",
+    })).resolves.toBe(true);
+
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        kind: "member.activated",
+        userId: "member_mailbox_1",
+      },
+    });
   });
 
   it("fetches sidecar payload ciphertext through the separate payload helper", async () => {

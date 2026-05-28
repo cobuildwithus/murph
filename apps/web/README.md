@@ -487,7 +487,9 @@ Notes:
   `CRON_SECRET`.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
-  managed-user crypto provisioning.
+  managed-user crypto provisioning. Later successful invoices for an already
+  active member must not append a new activation welcome or trigger another
+  Resend welcome email.
 
 ## Main routes
 
