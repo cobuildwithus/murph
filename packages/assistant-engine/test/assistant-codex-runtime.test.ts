@@ -655,6 +655,39 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
+              method: 'item/completed',
+              params: {
+                completedAtMs: 340,
+                item: {
+                  id: 'mcp-1',
+                  type: 'mcpToolCall',
+                  server_name: 'web',
+                  name: 'search_query',
+                  status: 'completed',
+                  durationMs: 80,
+                  arguments: {
+                    secretPath: '/tmp/raw-mcp-argument',
+                  },
+                  result: {
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'mcp raw output must not appear',
+                      },
+                    ],
+                    structuredContent: {
+                      ok: true,
+                    },
+                    _meta: {
+                      more: 'meta',
+                    },
+                  },
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
               method: 'thread/tokenUsage/updated',
               params: {
                 turnId: 'turn-diagnostics',
@@ -703,7 +736,7 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      providerActionCount: 2,
+      providerActionCount: 3,
       sessionId: 'thread-diagnostics',
     })
 
@@ -722,22 +755,48 @@ describe('assistant codex runtime', () => {
       type: CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
       codexActionCommandCount: 1,
       codexActionDynamicToolCallCount: 1,
+      codexActionMcpToolCallCount: 1,
       codexActionInputUnitMax: 81000,
-      codexActionKinds: ['command.execution', 'dynamic.tool.call'],
+      codexActionKinds: ['command.execution', 'dynamic.tool.call', 'mcp.tool.call'],
       codexActionOutputBytesMax: 59,
-      codexActionOutputBytesTotal: 93,
-      codexActionOutputItemCount: 3,
-      codexActionProviderActionCount: 2,
-      codexActionSlowDurationMs: [123, 60],
-      codexActionSlowKinds: ['dynamic.tool.call', 'command.execution'],
-      codexActionToolCallCounts: [1, 1],
-      codexActionToolNames: ['dynamic:vault.readSummary', 'command.execution'],
-      codexActionToolOutputBytesMax: [59, 34],
-      codexActionToolOutputBytesTotal: [59, 34],
+      codexActionOutputBytesTotal: 149,
+      codexActionOutputItemCount: 6,
+      codexActionProviderActionCount: 3,
+      codexActionSlowDurationMs: [123, 80, 60],
+      codexActionSlowKinds: [
+        'dynamic.tool.call',
+        'mcp.tool.call',
+        'command.execution',
+      ],
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: 'dynamic.tool.call',
+          namespace: 'vault',
+          outputBytesMax: 59,
+          outputBytesTotal: 59,
+          tool: 'readSummary',
+        },
+        {
+          callCount: 1,
+          kind: 'mcp.tool.call',
+          outputBytesMax: 56,
+          outputBytesTotal: 56,
+          server: 'web',
+          tool: 'search_query',
+        },
+        {
+          callCount: 1,
+          kind: 'command.execution',
+          outputBytesMax: 34,
+          outputBytesTotal: 34,
+        },
+      ],
       codexActionUsageSampleCount: 1,
     })
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('mcp raw output')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
@@ -855,10 +914,14 @@ describe('assistant codex runtime', () => {
       codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
       codexActionStartedCount: 1,
-      codexActionToolCallCounts: [1],
-      codexActionToolNames: ['command.execution'],
-      codexActionToolOutputBytesMax: [26],
-      codexActionToolOutputBytesTotal: [26],
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: 'command.execution',
+          outputBytesMax: 26,
+          outputBytesTotal: 26,
+        },
+      ],
       codexActionTotalUnitMax: 168,
       codexActionUsageSampleCount: 1,
     })

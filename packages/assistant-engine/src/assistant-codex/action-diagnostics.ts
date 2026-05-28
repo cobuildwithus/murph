@@ -13,7 +13,7 @@ const SLOW_ACTION_SAMPLE_LIMIT = 8
 const OUTPUT_ITEM_SCAN_LIMIT = 64
 const TRACKED_ACTION_LIMIT = 256
 const TOOL_DIAGNOSTIC_LIMIT = 16
-const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u
+const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -40,11 +40,28 @@ type ActionOutputMetrics = {
   itemCount: number
 }
 
+type ToolDiagnosticIdentity = {
+  kind: CodexActionKind
+  namespace: string | null
+  server: string | null
+  tool: string | null
+}
+
 type ToolDiagnosticMetrics = {
   bytesMax: number
   bytesTotal: number
   callCount: number
-  name: string
+  identity: ToolDiagnosticIdentity
+}
+
+type ToolDiagnosticSummary = {
+  callCount: number
+  kind: CodexActionKind
+  namespace?: string
+  outputBytesMax: number
+  outputBytesTotal: number
+  server?: string
+  tool?: string
 }
 
 export interface CodexActionDiagnosticsReducer {
@@ -120,7 +137,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
     durationMs: number | null
     kind: CodexActionKind
     output: ActionOutputMetrics
-    toolName: string
+    toolIdentity: ToolDiagnosticIdentity
   }) => {
     if (input.durationMs !== null) {
       durationMsTotal += input.durationMs
@@ -130,7 +147,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
     outputBytesMax = Math.max(outputBytesMax, input.output.bytesTotal)
     outputItemCount += input.output.itemCount
     recordToolMetrics(toolMetrics, {
-      name: input.toolName,
+      identity: input.toolIdentity,
       outputBytes: input.output.bytesTotal,
     })
 
@@ -200,7 +217,11 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
             return maxDelta
           }
           const countDelta = right.callCount - left.callCount
-          return countDelta !== 0 ? countDelta : left.name.localeCompare(right.name)
+          return countDelta !== 0
+            ? countDelta
+            : toolDiagnosticKey(left.identity).localeCompare(
+              toolDiagnosticKey(right.identity),
+            )
         })
         .slice(0, TOOL_DIAGNOSTIC_LIMIT)
 
@@ -234,10 +255,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionSlowKinds: slowActions.map((action) => action.kind),
         codexActionStartedCount: startedCount,
         codexActionThreadIdPresent: input.codexThreadId !== null,
-        codexActionToolCallCounts: topTools.map((tool) => tool.callCount),
-        codexActionToolNames: topTools.map((tool) => tool.name),
-        codexActionToolOutputBytesMax: topTools.map((tool) => tool.bytesMax),
-        codexActionToolOutputBytesTotal: topTools.map((tool) => tool.bytesTotal),
+        codexActionToolSummaries: topTools.map(toolDiagnosticSummary),
         codexActionTotalUnitMax: totalTokensMax,
         codexActionUsageSampleCount: tokenSampleCount,
         codexActionTurnIdPresent: input.turnId !== null,
@@ -308,7 +326,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         durationMs,
         kind,
         output: measureActionOutput(item),
-        toolName: resolveToolDiagnosticName(kind, item),
+        toolIdentity: resolveToolDiagnosticIdentity(kind, item),
       })
     },
   }
@@ -317,11 +335,12 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
 function recordToolMetrics(
   metrics: Map<string, ToolDiagnosticMetrics>,
   input: {
-    name: string
+    identity: ToolDiagnosticIdentity
     outputBytes: number
   },
 ): void {
-  const existing = metrics.get(input.name)
+  const key = toolDiagnosticKey(input.identity)
+  const existing = metrics.get(key)
   if (existing) {
     existing.bytesMax = Math.max(existing.bytesMax, input.outputBytes)
     existing.bytesTotal += input.outputBytes
@@ -329,25 +348,32 @@ function recordToolMetrics(
     return
   }
 
-  metrics.set(input.name, {
+  metrics.set(key, {
     bytesMax: input.outputBytes,
     bytesTotal: input.outputBytes,
     callCount: 1,
-    name: input.name,
+    identity: input.identity,
   })
 }
 
-function resolveToolDiagnosticName(
+function resolveToolDiagnosticIdentity(
   kind: CodexActionKind,
   item: Record<string, unknown> | null,
-): string {
+): ToolDiagnosticIdentity {
   if (kind === 'dynamic.tool.call') {
     const namespace = readToolIdentifierPart(item?.namespace)
-    const tool = readToolIdentifierPart(item?.tool, item?.toolName, item?.tool_name)
-    if (namespace && tool) {
-      return `dynamic:${namespace}.${tool}`
+    const tool = readToolIdentifierPart(
+      item?.tool,
+      item?.toolName,
+      item?.tool_name,
+      item?.name,
+    )
+    return {
+      kind,
+      namespace,
+      server: null,
+      tool,
     }
-    return tool ? `dynamic:${tool}` : kind
   }
 
   if (kind === 'mcp.tool.call') {
@@ -356,14 +382,49 @@ function resolveToolDiagnosticName(
       item?.serverName,
       item?.server_name,
     )
-    const tool = readToolIdentifierPart(item?.tool, item?.toolName, item?.tool_name)
-    if (server && tool) {
-      return `mcp:${server}.${tool}`
+    const tool = readToolIdentifierPart(
+      item?.tool,
+      item?.toolName,
+      item?.tool_name,
+      item?.name,
+    )
+    return {
+      kind,
+      namespace: null,
+      server,
+      tool,
     }
-    return tool ? `mcp:${tool}` : kind
   }
 
-  return kind
+  return {
+    kind,
+    namespace: null,
+    server: null,
+    tool: null,
+  }
+}
+
+function toolDiagnosticKey(identity: ToolDiagnosticIdentity): string {
+  return JSON.stringify([
+    identity.kind,
+    identity.namespace,
+    identity.server,
+    identity.tool,
+  ])
+}
+
+function toolDiagnosticSummary(
+  metrics: ToolDiagnosticMetrics,
+): ToolDiagnosticSummary {
+  return pruneNullishRecord({
+    callCount: metrics.callCount,
+    kind: metrics.identity.kind,
+    namespace: metrics.identity.namespace,
+    outputBytesMax: metrics.bytesMax,
+    outputBytesTotal: metrics.bytesTotal,
+    server: metrics.identity.server,
+    tool: metrics.identity.tool,
+  }) as ToolDiagnosticSummary
 }
 
 function readToolIdentifierPart(...values: unknown[]): string | null {
@@ -610,15 +671,44 @@ function measureActionOutput(item: Record<string, unknown> | null): ActionOutput
     ) {
       const contentItem = resultContent[index]
       const record = asRecord(contentItem)
-      addString(record?.text)
-      addString(record?.imageUrl)
-      addString(record?.image_url)
+      if (record) {
+        const beforeCount = itemCount
+        addString(record.text)
+        addString(record.imageUrl)
+        addString(record.image_url)
+        if (itemCount === beforeCount) {
+          addJsonValue(record)
+        }
+      } else {
+        addJsonValue(contentItem)
+      }
     }
   }
+  addJsonValue(result?.structuredContent)
+  addJsonValue(result?.structured_content)
+  addJsonValue(result?._meta)
+  const error = asRecord(item.error)
+  addString(error?.message)
 
   return {
     bytesTotal,
     itemCount,
+  }
+
+  function addJsonValue(value: unknown) {
+    if (value === null || value === undefined) {
+      return
+    }
+    if (typeof value === 'string') {
+      addString(value)
+      return
+    }
+    const encoded = safeJsonStringify(value)
+    if (!encoded) {
+      return
+    }
+    itemCount += 1
+    bytesTotal += Buffer.byteLength(encoded, 'utf8')
   }
 }
 
@@ -657,7 +747,16 @@ function readTokenUsageSample(
 }
 
 function pruneNullishRecord(
-  input: Record<string, string | number | boolean | string[] | number[] | null>,
+  input: Record<
+    string,
+    | string
+    | number
+    | boolean
+    | string[]
+    | number[]
+    | ToolDiagnosticSummary[]
+    | null
+  >,
 ): Record<string, unknown> {
   const output: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(input)) {
@@ -670,6 +769,14 @@ function pruneNullishRecord(
     output[key] = value
   }
   return output
+}
+
+function safeJsonStringify(value: unknown): string | null {
+  try {
+    return JSON.stringify(value) ?? null
+  } catch {
+    return null
+  }
 }
 
 function readFirstString(...values: unknown[]): string | null {

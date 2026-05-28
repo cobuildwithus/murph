@@ -677,6 +677,30 @@ describe("executeHostedMailboxEvent", () => {
           codexActionToolNames: ["dynamic:vault.readSummary", "command.execution"],
           codexActionToolOutputBytesMax: [64, 32],
           codexActionToolOutputBytesTotal: [96, 32],
+          codexActionToolSummaries: [
+            {
+              callCount: 1,
+              kind: "dynamic.tool.call",
+              namespace: "vault",
+              outputBytesMax: 64,
+              outputBytesTotal: 96,
+              tool: "readSummary",
+            },
+            {
+              callCount: 1,
+              kind: "command.execution",
+              outputBytesMax: 32,
+              outputBytesTotal: 32,
+            },
+            {
+              callCount: 1,
+              kind: "mcp.tool.call",
+              outputBytesMax: 1,
+              outputBytesTotal: 1,
+              server: "/tmp/raw-path",
+              tool: "unsafe",
+            },
+          ],
           codexActionTotalUnitMax: 82500,
           codexActionUsageSampleCount: 1,
           codexActionTurnIdPresent: true,
@@ -707,10 +731,29 @@ describe("executeHostedMailboxEvent", () => {
         codexActionProviderActionCount: 2,
         codexActionSlowDurationMs: [123, 60],
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
-        codexActionToolCallCounts: [1, 1],
-        codexActionToolNames: ["dynamic:vault.readSummary", "command.execution"],
-        codexActionToolOutputBytesMax: [64, 32],
-        codexActionToolOutputBytesTotal: [96, 32],
+        codexActionToolSummaries: [
+          {
+            callCount: 1,
+            kind: "dynamic.tool.call",
+            namespace: "vault",
+            outputBytesMax: 64,
+            outputBytesTotal: 96,
+            tool: "readSummary",
+          },
+          {
+            callCount: 1,
+            kind: "command.execution",
+            outputBytesMax: 32,
+            outputBytesTotal: 32,
+          },
+          {
+            callCount: 1,
+            kind: "mcp.tool.call",
+            outputBytesMax: 1,
+            outputBytesTotal: 1,
+            tool: "unsafe",
+          },
+        ],
         codexActionTraceType: "action-diagnostics",
         providerTraceKind: "codex.action_diagnostics",
         requestId: "req_123",
@@ -722,6 +765,10 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-slow-path");
     expect(entry?.redacted).not.toHaveProperty("codexActionLabels");
     expect(entry?.redacted).not.toHaveProperty("codexActionSlowLabels");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolCallCounts");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolNames");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolOutputBytesMax");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolOutputBytesTotal");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw tool output");
   });
