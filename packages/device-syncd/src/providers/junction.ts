@@ -2953,10 +2953,13 @@ function readNestedJunctionHistoricalBackfillSummaryEntries(
   record: Record<string, unknown>,
 ): Record<string, unknown>[] | null {
   for (const key of ["data", "results", "items", "records"]) {
-    const entries = readJunctionRecordArray(record[key]).flatMap((entry) => {
-      const normalized = readPlainObject(entry);
-      return normalized ? [normalized] : [];
-    });
+    const directEntry = readPlainObject(record[key]);
+    const entries = directEntry
+      ? [directEntry]
+      : readJunctionRecordArray(record[key]).flatMap((entry) => {
+          const normalized = readPlainObject(entry);
+          return normalized ? [normalized] : [];
+        });
     if (entries.length > 0) {
       return entries;
     }
@@ -3506,15 +3509,11 @@ function parseJunctionWebhookDataJobRecord(value: unknown): Record<string, unkno
 }
 
 function canImportJunctionWebhookDataJobRecord(input: {
-  record: Record<string, unknown> | null;
+  record: Record<string, unknown>;
   resource: string;
   resourceCategory: "summary" | "timeseries";
   sourceProviderSlug: string | null;
 }): boolean {
-  if (!input.record) {
-    return false;
-  }
-
   const recordSourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(input.record);
   if (!recordSourceProviderSlug) {
     return false;
@@ -3674,12 +3673,17 @@ function resolveJunctionWebhookSummarySourceProviderSlug(
 function readJunctionWebhookNestedRecordEntries(
   record: Record<string, unknown>,
 ): Record<string, unknown>[] {
-  return JUNCTION_WEBHOOK_NESTED_RECORD_KEYS.flatMap((key) =>
-    readJunctionRecordArray(record[key]).flatMap((entry) => {
+  return JUNCTION_WEBHOOK_NESTED_RECORD_KEYS.flatMap((key) => {
+    const directEntry = readPlainObject(record[key]);
+    if (directEntry) {
+      return [directEntry];
+    }
+
+    return readJunctionRecordArray(record[key]).flatMap((entry) => {
       const entryRecord = readPlainObject(entry);
       return entryRecord ? [entryRecord] : [];
-    })
-  );
+    });
+  });
 }
 
 function readJunctionWebhookGroupedRecordEntries(
