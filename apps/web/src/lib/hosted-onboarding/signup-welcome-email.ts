@@ -19,26 +19,6 @@ const HOSTED_SIGNUP_WELCOME_EMAIL_RECENT_MEMBER_MAX_AGE_MS = 14 * 24 * 60 * 60 *
 
 type HostedSignupWelcomeEmailEnv = Readonly<Record<string, string | undefined>>;
 
-type HostedSignupWelcomeEmailStartAction =
-  | {
-      href: string;
-      kind: "email";
-      label: string;
-      line: string;
-    }
-  | {
-      href: string;
-      kind: "telegram";
-      label: string;
-      line: string;
-    }
-  | {
-      href: string;
-      kind: "text";
-      label: string;
-      line: string;
-    };
-
 export type HostedSignupWelcomeEmailResult =
   | {
       reason:
@@ -134,7 +114,7 @@ export async function sendHostedSignupWelcomeEmailForMember(input: {
     memberId: input.memberId,
     prisma,
   });
-  const murphStartAction = buildHostedSignupWelcomeEmailMurphStartAction({
+  const murphStartLine = buildHostedSignupWelcomeEmailMurphStartLine({
     routing,
     source: input.env ?? process.env,
   });
@@ -143,7 +123,7 @@ export async function sendHostedSignupWelcomeEmailForMember(input: {
     env: input.env,
     fetchImpl: input.fetchImpl,
     memberId: input.memberId,
-    murphStartAction,
+    murphStartLine,
     recipientEmail,
   });
 }
@@ -152,7 +132,6 @@ export async function sendHostedSignupWelcomeEmail(input: {
   env?: HostedSignupWelcomeEmailEnv;
   fetchImpl?: typeof fetch;
   memberId: string;
-  murphStartAction?: HostedSignupWelcomeEmailStartAction | null;
   murphStartLine?: string | null;
   recipientEmail: string;
 }): Promise<HostedSignupWelcomeEmailResult> {
@@ -165,19 +144,13 @@ export async function sendHostedSignupWelcomeEmail(input: {
     };
   }
 
-  const murphStartLine = input.murphStartAction?.line ?? input.murphStartLine;
   const response = await (input.fetchImpl ?? fetch)(RESEND_EMAILS_ENDPOINT, {
     body: JSON.stringify({
       from: config.from,
-      html: buildHostedSignupWelcomeEmailHtml({
-        founderName: config.founderName,
-        murphStartAction: input.murphStartAction,
-        murphStartLine,
-      }),
       subject: HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT,
       text: buildHostedSignupWelcomeEmailText({
         founderName: config.founderName,
-        murphStartLine,
+        murphStartLine: input.murphStartLine,
       }),
       to: [input.recipientEmail],
     }),
@@ -275,70 +248,17 @@ function buildHostedSignupWelcomeEmailText(input: {
   ].join("\n");
 }
 
-function buildHostedSignupWelcomeEmailHtml(input: {
-  founderName: string;
-  murphStartAction?: HostedSignupWelcomeEmailStartAction | null;
-  murphStartLine?: string | null;
-}): string {
-  const murphStartLine = normalizeNullableString(
-    input.murphStartAction?.line ?? input.murphStartLine,
-  );
-  const nextStep = murphStartLine
-    ? "Best next step: sync your data and text Murph."
-    : "Best next step: sync your data and text Murph to kick off your first experiment.";
-  const paragraphs = [
-    "Hey, welcome to Murph!",
-    `I'm ${input.founderName}, the founder. I built Murph because I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
-    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers (without having to build a spreadsheet to track it all).",
-    "That's basically what Murph does. You pick a protocol, and Murph runs the experiment and keeps you accountable over text, no busywork for you. At the end, it compares your data before and after so you can see what's actually making you healthier.",
-    nextStep,
-  ];
-  const body = [
-    ...paragraphs.map(renderHostedSignupWelcomeEmailParagraphHtml),
-    ...(murphStartLine
-      ? [
-          renderHostedSignupWelcomeEmailRawParagraphHtml(
-            buildHostedSignupWelcomeEmailStartLineHtml({
-              action: input.murphStartAction ?? null,
-              fallbackLine: murphStartLine,
-            }),
-          ),
-        ]
-      : []),
-    renderHostedSignupWelcomeEmailParagraphHtml(
-      "Hit reply if anything's confusing or broken. We're early and shipping fast, and I want to hear it.",
-    ),
-    renderHostedSignupWelcomeEmailParagraphHtml(`- ${input.founderName}`),
-  ];
-
-  return [
-    "<!doctype html>",
-    '<html lang="en">',
-    "<body style=\"margin:0;padding:32px;background:#ffffff;color:#222222;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;line-height:1.55;\">",
-    '<main style="max-width:680px;">',
-    ...body,
-    "</main>",
-    "</body>",
-    "</html>",
-  ].join("");
-}
-
-function buildHostedSignupWelcomeEmailMurphStartAction(input: {
+function buildHostedSignupWelcomeEmailMurphStartLine(input: {
   routing: HostedMemberRoutingStateSnapshot | null;
   source: HostedSignupWelcomeEmailEnv;
-}): HostedSignupWelcomeEmailStartAction {
+}): string {
   const linqRecipientPhone = normalizeNullableString(input.routing?.linqRecipientPhone)
     ?? normalizeNullableString(input.routing?.pendingLinqRecipientPhone);
 
   if (linqRecipientPhone) {
     const formattedPhone = formatHostedSignupWelcomeEmailPhoneNumber(linqRecipientPhone);
 
-    return {
-      href: buildHostedSignupWelcomeEmailSmsHref(linqRecipientPhone),
-      kind: "text",
-      label: formattedPhone,
-      line: `Shoot Murph a text at ${formattedPhone} to start your first experiment.`,
-    };
+    return `Shoot Murph a text at ${formattedPhone} to start your first experiment.`;
   }
 
   if (
@@ -348,20 +268,10 @@ function buildHostedSignupWelcomeEmailMurphStartAction(input: {
   ) {
     const username = readHostedSignupWelcomeEmailTelegramUsername(input.source);
 
-    return {
-      href: `https://t.me/${username.slice(1)}`,
-      kind: "telegram",
-      label: username,
-      line: `Shoot Murph a message on Telegram at ${username} to start your first experiment.`,
-    };
+    return `Shoot Murph a message on Telegram at ${username} to start your first experiment.`;
   }
 
-  return {
-    href: `mailto:${MURPH_CONTACT_EMAIL}`,
-    kind: "email",
-    label: MURPH_CONTACT_EMAIL,
-    line: `Shoot Murph an email at ${MURPH_CONTACT_EMAIL} to start your first experiment.`,
-  };
+  return `Shoot Murph an email at ${MURPH_CONTACT_EMAIL} to start your first experiment.`;
 }
 
 function readHostedSignupWelcomeEmailTelegramUsername(
@@ -382,64 +292,6 @@ function formatHostedSignupWelcomeEmailPhoneNumber(phoneNumber: string): string 
   }
 
   return normalized;
-}
-
-function buildHostedSignupWelcomeEmailSmsHref(phoneNumber: string): string {
-  const normalized = phoneNumber.trim();
-  const compactPhoneNumber = normalized.replace(/[^\d+]/g, "");
-
-  return `sms:${compactPhoneNumber || normalized}`;
-}
-
-function buildHostedSignupWelcomeEmailStartLineHtml(input: {
-  action: HostedSignupWelcomeEmailStartAction | null;
-  fallbackLine: string;
-}): string {
-  if (!input.action) {
-    return escapeHostedSignupWelcomeEmailHtml(input.fallbackLine);
-  }
-
-  const escapedHref = escapeHostedSignupWelcomeEmailHtml(input.action.href);
-  const escapedLabel = escapeHostedSignupWelcomeEmailHtml(input.action.label);
-  const linkedLabel = `<a href="${escapedHref}" style="color:#0b57d0;text-decoration:underline;">${escapedLabel}</a>`;
-
-  switch (input.action.kind) {
-    case "email":
-      return `Shoot Murph an email at ${linkedLabel} to start your first experiment.`;
-    case "telegram":
-      return `Shoot Murph a message on Telegram at ${linkedLabel} to start your first experiment.`;
-    case "text":
-      return `Shoot Murph a text at ${linkedLabel} to start your first experiment.`;
-  }
-}
-
-function renderHostedSignupWelcomeEmailParagraphHtml(value: string): string {
-  return renderHostedSignupWelcomeEmailRawParagraphHtml(
-    escapeHostedSignupWelcomeEmailHtml(value),
-  );
-}
-
-function renderHostedSignupWelcomeEmailRawParagraphHtml(value: string): string {
-  return `<p style="margin:0 0 24px;">${value}</p>`;
-}
-
-function escapeHostedSignupWelcomeEmailHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => {
-    switch (character) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return character;
-    }
-  });
 }
 
 function buildHostedSignupWelcomeEmailIdempotencyKey(memberId: string): string {
