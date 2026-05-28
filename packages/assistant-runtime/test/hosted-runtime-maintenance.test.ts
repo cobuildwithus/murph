@@ -1242,6 +1242,45 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("drains up to 100 device-sync jobs per pass when foreground yielding is unavailable", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 100);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      runSchedulerOnce,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_drain_cap",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T02:00:00.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 100,
+      skipped: false,
+    });
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledWith(100);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("yields before dirty control-plane fetch when foreground input is waiting", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
