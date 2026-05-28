@@ -250,6 +250,7 @@ function expectVitestSpawnCall(): void {
     "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+    "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
     "--no-coverage",
