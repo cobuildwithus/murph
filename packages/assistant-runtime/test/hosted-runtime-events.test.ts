@@ -681,7 +681,8 @@ describe("executeHostedMailboxEvent", () => {
             {
               callCount: 1,
               kind: "dynamic.tool.call",
-              namespace: "vault",
+              namespace: "raw-namespace-should-drop",
+              namespacePresent: true,
               outputBytesMax: 64,
               outputBytesTotal: 96,
               tool: "readSummary",
@@ -698,6 +699,7 @@ describe("executeHostedMailboxEvent", () => {
               outputBytesMax: 1,
               outputBytesTotal: 1,
               server: "/tmp/raw-path",
+              serverPresent: true,
               tool: "unsafe",
             },
           ],
@@ -735,7 +737,7 @@ describe("executeHostedMailboxEvent", () => {
           {
             callCount: 1,
             kind: "dynamic.tool.call",
-            namespace: "vault",
+            namespacePresent: true,
             outputBytesMax: 64,
             outputBytesTotal: 96,
             tool: "readSummary",
@@ -751,6 +753,7 @@ describe("executeHostedMailboxEvent", () => {
             kind: "mcp.tool.call",
             outputBytesMax: 1,
             outputBytesTotal: 1,
+            serverPresent: true,
             tool: "unsafe",
           },
         ],
@@ -761,6 +764,7 @@ describe("executeHostedMailboxEvent", () => {
       }),
     });
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-namespace-should-drop");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-slow-path");
     expect(entry?.redacted).not.toHaveProperty("codexActionLabels");

@@ -772,7 +772,7 @@ describe('assistant codex runtime', () => {
         {
           callCount: 1,
           kind: 'dynamic.tool.call',
-          namespace: 'vault',
+          namespacePresent: true,
           outputBytesMax: 59,
           outputBytesTotal: 59,
           tool: 'readSummary',
@@ -782,7 +782,7 @@ describe('assistant codex runtime', () => {
           kind: 'mcp.tool.call',
           outputBytesMax: 56,
           outputBytesTotal: 56,
-          server: 'web',
+          serverPresent: true,
           tool: 'search_query',
         },
         {
@@ -989,7 +989,7 @@ describe('assistant codex runtime', () => {
           kind: 'mcp.tool.call',
           outputBytesMax: 26,
           outputBytesTotal: 26,
-          server: 'web',
+          serverPresent: true,
           tool: 'search_query',
         },
       ],
