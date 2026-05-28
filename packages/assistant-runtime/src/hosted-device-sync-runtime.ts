@@ -482,7 +482,7 @@ function reportHostedDirtyDeviceSyncStateSkipped(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
-      dirtyConnectionId: input.dirtyState.connectionId,
+      dirtyConnectionFingerprint: fingerprintHostedDeviceSyncRuntimeId(input.dirtyState.connectionId),
       dirtyProvider: input.dirtyState.provider,
       eventCode: `dirty_state.${input.reason}`,
       localProvider: input.account?.provider ?? null,
@@ -582,6 +582,10 @@ function shouldApplyHostedDirtyWindowDefaults(
 function buildHostedDirtyPayloadDedupeKey(payload: Record<string, unknown>): string {
   const identity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(payload);
   return identity ? createHash("sha256").update(identity).digest("hex").slice(0, 24) : "payload";
+}
+
+function fingerprintHostedDeviceSyncRuntimeId(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
 function buildHostedDeviceSyncWakeAccountPatch(

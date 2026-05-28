@@ -67,6 +67,58 @@ describe("runHostedDeviceSyncRecoverySweep", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
   });
 
+  it("accepts legacy wake-count recovery sweep responses during deploy overlap", async () => {
+    await stubHostedWebEnvironment();
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse({
+        dueReconcileSweeper: {
+          dueConnections: 3,
+          skippedDueConnections: 0,
+          wakeAppended: 2,
+          wakeAttempted: 3,
+          wakeDuplicate: 1,
+          wakeFailed: 0,
+          wakeLimit: 25,
+          wakeNotAppended: 0,
+        },
+        sweeper: {
+          dirtyConnections: 4,
+          skippedDirtyConnections: 0,
+          staleAfterMs: 30000,
+          wakeAppended: 1,
+          wakeAttempted: 2,
+          wakeDuplicate: 1,
+          wakeFailed: 0,
+          wakeLimit: 25,
+          wakeNotAppended: 0,
+        },
+      })
+    ));
+
+    await expect(runHostedDeviceSyncRecoverySweep()).resolves.toEqual({
+      dueReconcileSweeper: {
+        dueConnections: 3,
+        recoveryAttempted: 3,
+        recoveryFailed: 0,
+        recoveryLimit: 25,
+        recoveryNotRequested: 0,
+        recoveryRequested: 3,
+        skippedDueConnections: 0,
+      },
+      sweeper: {
+        dirtyConnections: 4,
+        dirtyUsers: 4,
+        recoveryAttempted: 2,
+        recoveryFailed: 0,
+        recoveryLimit: 25,
+        recoveryNotRequested: 0,
+        recoveryRequested: 2,
+        skippedDirtyUsers: 0,
+        staleAfterMs: 30000,
+      },
+    });
+  });
+
   it("rejects invalid recovery sweep responses as non-retryable protocol errors", async () => {
     await stubHostedWebEnvironment();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
@@ -114,24 +166,23 @@ function buildRecoverySweepResponse() {
   return {
     dueReconcileSweeper: {
       dueConnections: 2,
+      recoveryAttempted: 2,
+      recoveryFailed: 0,
+      recoveryLimit: 25,
+      recoveryNotRequested: 0,
+      recoveryRequested: 2,
       skippedDueConnections: 0,
-      wakeAppended: 1,
-      wakeAttempted: 2,
-      wakeDuplicate: 1,
-      wakeFailed: 0,
-      wakeLimit: 25,
-      wakeNotAppended: 0,
     },
     sweeper: {
       dirtyConnections: 1,
-      skippedDirtyConnections: 0,
+      dirtyUsers: 1,
+      recoveryAttempted: 1,
+      recoveryFailed: 0,
+      recoveryLimit: 25,
+      recoveryNotRequested: 0,
+      recoveryRequested: 1,
+      skippedDirtyUsers: 0,
       staleAfterMs: 30000,
-      wakeAppended: 1,
-      wakeAttempted: 1,
-      wakeDuplicate: 0,
-      wakeFailed: 0,
-      wakeLimit: 25,
-      wakeNotAppended: 0,
     },
   };
 }

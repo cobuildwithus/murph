@@ -515,6 +515,9 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   traceId?: string | null;
   userId: string;
 }): Promise<HostedDeviceSyncScheduledReconcileWakeResult> {
+  // Legacy deploy-overlap path. New scheduled recovery uses
+  // requestHostedDeviceSyncScheduledReconcileRecovery so device-sync recovery
+  // stays out of foreground mailbox work.
   const prisma = getPrisma();
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma,
@@ -575,12 +578,11 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
 export async function requestHostedDeviceSyncScheduledReconcileRecovery(input: {
   connectionId: string;
   createdAt: string;
-  eventId: string;
   nextReconcileAt: string;
   provider: string;
   traceId?: string | null;
   userId: string;
-}): Promise<HostedDeviceSyncScheduledReconcileWakeResult> {
+}): Promise<HostedDeviceSyncRecoveryRequestResult> {
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
@@ -588,6 +590,11 @@ export async function requestHostedDeviceSyncScheduledReconcileRecovery(input: {
   await startHostedDeviceSyncBackgroundMaintenanceWorkflow(input.userId, {
     failureMode: "throw",
   });
+
+  // This marker means a recovery nudge was accepted for the due connection in
+  // the current bucket. If writing it fails after the user-level signal, retries
+  // may send a duplicate signal; Temporal coalescing and the sweeper limit bound
+  // that duplicate work without hiding a failed nudge.
   await store.createSignal({
     userId: input.userId,
     connectionId: input.connectionId,
@@ -642,6 +649,9 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
   store?: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<HostedDeviceSyncDirtyWakeResult> {
+  // Legacy deploy-overlap path. New dirty recovery uses
+  // requestHostedDeviceSyncDirtyRecovery so device-sync recovery stays out of
+  // foreground mailbox work.
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
@@ -677,14 +687,8 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
 }
 
 export async function requestHostedDeviceSyncDirtyRecovery(input: {
-  connectionId: string;
-  dirtyRevision: bigint;
-  eventType?: string | null;
-  occurredAt: string;
-  provider: string;
-  resourceCategory?: string | null;
   userId: string;
-}): Promise<HostedDeviceSyncDirtyWakeResult> {
+}): Promise<HostedDeviceSyncRecoveryRequestResult> {
   await startHostedDeviceSyncBackgroundMaintenanceWorkflow(input.userId, {
     failureMode: "throw",
   });
@@ -692,12 +696,14 @@ export async function requestHostedDeviceSyncDirtyRecovery(input: {
   return buildHostedDeviceSyncRecoveryRequestedResult();
 }
 
-function buildHostedDeviceSyncRecoveryRequestedResult(): HostedDeviceSyncDirtyWakeResult {
+export interface HostedDeviceSyncRecoveryRequestResult {
+  reason?: string;
+  recoveryRequested: boolean;
+}
+
+function buildHostedDeviceSyncRecoveryRequestedResult(): HostedDeviceSyncRecoveryRequestResult {
   return {
-    wakeAccepted: true,
-    wakeAppended: true,
-    wakeDuplicate: false,
-    wakeInserted: true,
+    recoveryRequested: true,
   };
 }
 

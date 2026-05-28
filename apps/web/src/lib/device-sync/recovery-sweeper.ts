@@ -33,42 +33,42 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
     runDueReconcileSweeper(),
   ]);
 
-  const dirtyWakeAppendFailed =
+  const dirtyRecoveryRequestFailed =
     dirtySweep.status === "fulfilled"
     && (
-      dirtySweep.value.wakeFailed > 0
-      || dirtySweep.value.wakeNotAppended > 0
+      dirtySweep.value.recoveryFailed > 0
+      || dirtySweep.value.recoveryNotRequested > 0
     );
-  const dueReconcileWakeAppendFailed =
+  const dueReconcileRecoveryRequestFailed =
     dueReconcileSweep.status === "fulfilled"
     && (
-      dueReconcileSweep.value.wakeFailed > 0
-      || dueReconcileSweep.value.wakeNotAppended > 0
+      dueReconcileSweep.value.recoveryFailed > 0
+      || dueReconcileSweep.value.recoveryNotRequested > 0
     );
 
   if (
     dirtySweep.status === "rejected"
-    || dirtyWakeAppendFailed
+    || dirtyRecoveryRequestFailed
     || dueReconcileSweep.status === "rejected"
-    || dueReconcileWakeAppendFailed
+    || dueReconcileRecoveryRequestFailed
   ) {
     logger.warn("Hosted device-sync recovery sweep failed.", {
+      dirtyRecoveryFailed: dirtySweep.status === "fulfilled"
+        ? dirtySweep.value.recoveryFailed
+        : null,
+      dirtyRecoveryNotRequested: dirtySweep.status === "fulfilled"
+        ? dirtySweep.value.recoveryNotRequested
+        : null,
+      dirtyRecoveryRequestFailed,
       dirtySweeperErrorName: describeErrorName(dirtySweep),
       dirtySweeperFailed: dirtySweep.status === "rejected",
-      dirtyWakeAppendFailed,
-      dirtyWakeFailed: dirtySweep.status === "fulfilled"
-        ? dirtySweep.value.wakeFailed
+      dueReconcileRecoveryFailed: dueReconcileSweep.status === "fulfilled"
+        ? dueReconcileSweep.value.recoveryFailed
         : null,
-      dirtyWakeNotAppended: dirtySweep.status === "fulfilled"
-        ? dirtySweep.value.wakeNotAppended
+      dueReconcileRecoveryNotRequested: dueReconcileSweep.status === "fulfilled"
+        ? dueReconcileSweep.value.recoveryNotRequested
         : null,
-      dueReconcileWakeAppendFailed,
-      dueReconcileWakeFailed: dueReconcileSweep.status === "fulfilled"
-        ? dueReconcileSweep.value.wakeFailed
-        : null,
-      dueReconcileWakeNotAppended: dueReconcileSweep.status === "fulfilled"
-        ? dueReconcileSweep.value.wakeNotAppended
-        : null,
+      dueReconcileRecoveryRequestFailed,
       dueReconcileSweeperErrorName: describeErrorName(dueReconcileSweep),
       dueReconcileSweeperFailed: dueReconcileSweep.status === "rejected",
     });
@@ -76,13 +76,13 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
     if (dirtySweep.status === "rejected") {
       throw dirtySweep.reason;
     }
-    if (dirtyWakeAppendFailed) {
+    if (dirtyRecoveryRequestFailed) {
       throw new Error("Hosted device-sync dirty sweeper failed to request one or more recoveries.");
     }
     if (dueReconcileSweep.status === "rejected") {
       throw dueReconcileSweep.reason;
     }
-    if (dueReconcileWakeAppendFailed) {
+    if (dueReconcileRecoveryRequestFailed) {
       throw new Error("Hosted device-sync due reconcile sweeper failed to request one or more recoveries.");
     }
   }

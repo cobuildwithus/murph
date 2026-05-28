@@ -51,6 +51,9 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(query.text).toContain("not exists");
     expect(query.text).toContain('"dirty"."connection_id" = "connection"."id"');
     expect(query.text).toContain('"dirty"."dirty_revision" > "dirty"."processed_revision"');
+    expect(query.text).toContain('from "device_sync_dirty_payload" as "payload"');
+    expect(query.text).toContain('"payload"."connection_id" = "dirty"."connection_id"');
+    expect(query.text).toContain('"payload"."user_id" = "dirty"."user_id"');
     expect(query.text).toContain('from "device_sync_signal" as "signal"');
     expect(query.text).toContain('"signal"."connection_id" = "connection"."id"');
     expect(query.text).toContain('"signal"."kind" = \'reconcile_due\'');
