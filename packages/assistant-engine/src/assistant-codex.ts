@@ -22,7 +22,7 @@ import {
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
   extractCodexTraceUpdatesFromNormalized,
-  extractCodexTurnProgressUpdateTextFromNormalized,
+  extractCodexCurrentChannelProgressTextFromNormalized,
   normalizeCodexEvent,
   normalizeStreamingText,
 } from './assistant-codex-events.js'
@@ -771,14 +771,19 @@ async function runCodexAppServerTurn(
       recordAssistantTraceUpdate(update)
     }
 
-    input.onTraceEvent?.({
-      codexThreadId,
-      rawEvent: message,
-      updates,
-    })
+    if (
+      normalizedEvent.kind !== 'status_item' ||
+      normalizedEvent.itemType !== 'context.compaction'
+    ) {
+      input.onTraceEvent?.({
+        codexThreadId,
+        rawEvent: message,
+        updates,
+      })
+    }
 
     const turnProgressText =
-      extractCodexTurnProgressUpdateTextFromNormalized(normalizedEvent)
+      extractCodexCurrentChannelProgressTextFromNormalized(normalizedEvent)
     if (turnProgressText) {
       notifyContextCompactionProgress(turnProgressText)
     }

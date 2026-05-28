@@ -17,8 +17,12 @@ import {
 
 export type CodexProgressEvent = AssistantProviderProgressEvent
 
-export const CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT =
-  'Compacting conversation history - this can take a moment.'
+export const CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS = [
+  'One sec, cleaning up context.',
+  'Cleaning up context, give me a moment.',
+  'Tidying up context, be back in a sec.',
+  'Trimming old context, give me a moment.',
+] as const
 
 export type CodexEventState = 'completed' | 'running'
 
@@ -371,17 +375,24 @@ export function extractCodexProgressEventFromNormalized(
   return null
 }
 
-export function extractCodexTurnProgressUpdateTextFromNormalized(
+export function extractCodexCurrentChannelProgressTextFromNormalized(
   normalized: CodexNormalizedEvent,
 ): string | null {
-  if (
-    normalized.kind !== 'status_item' ||
-    normalized.itemState !== 'running'
-  ) {
+  if (normalized.kind !== 'status_item') {
     return null
   }
 
-  return contextCompactionStatusText(normalized)
+  return contextCompactionStartedText(normalized)
+}
+
+export function selectCodexContextCompactionProgressText(): string {
+  const index = Math.floor(
+    Math.random() * CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS.length,
+  )
+  return (
+    CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[index] ??
+    CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[0]
+  )
 }
 
 export function extractCodexStatusEventFromStderrLine(
@@ -656,16 +667,17 @@ function statusItemTraceText(
   return null
 }
 
-function contextCompactionStatusText(
+function contextCompactionStartedText(
   event: Extract<CodexNormalizedEvent, { kind: 'status_item' }>,
 ): string | null {
-  if (event.itemType !== 'context.compaction') {
+  if (
+    event.itemType !== 'context.compaction' ||
+    event.itemState !== 'running'
+  ) {
     return null
   }
 
-  return event.itemState === 'running'
-    ? CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT
-    : 'Compacted conversation history.'
+  return selectCodexContextCompactionProgressText()
 }
 
 function toolCallText(

@@ -50,7 +50,7 @@ import {
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
-  CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
+  CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS,
   extractAssistantMessageFallback,
   extractCodexErrorMessage,
   extractCodexProgressEventFromNormalized,
@@ -2204,6 +2204,8 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir('assistant-codex-context-compact-')
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
+    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[2]
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
     const turnProgress = {
       send: vi.fn(async (_text: string) => {
         void _text
@@ -2318,9 +2320,7 @@ describe('assistant codex runtime', () => {
     })
 
     expect(turnProgress.send).toHaveBeenCalledTimes(1)
-    expect(turnProgress.send).toHaveBeenCalledWith(
-      CODEX_CONTEXT_COMPACTION_PROGRESS_TEXT,
-    )
+    expect(turnProgress.send).toHaveBeenCalledWith(selectedProgressText)
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
     ).toBe(false)
@@ -2332,6 +2332,17 @@ describe('assistant codex runtime', () => {
         ),
       ),
     ).toBe(false)
+    expect(onTraceEvent.mock.calls.map(([event]) => event?.rawEvent)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          params: expect.objectContaining({
+            item: expect.objectContaining({
+              id: 'context-compact-1',
+            }),
+          }),
+        }),
+      ]),
+    )
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
