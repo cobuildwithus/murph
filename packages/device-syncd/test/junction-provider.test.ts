@@ -3972,6 +3972,88 @@ test("Junction resource jobs import direct Garmin sleep webhook payloads without
   assert.deepEqual(snapshot.timeseries, {});
 });
 
+test("Junction resource jobs import direct Garmin sleep webhook object data without collection fetches", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep"],
+    timeseriesResources: [],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.sleep.created",
+      objectId: "sleep-object-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        data: {
+          average_hrv: 42,
+          bedtime_start: "2026-04-02T03:00:00.000Z",
+          bedtime_stop: "2026-04-02T11:00:00.000Z",
+          deep: 5400,
+          duration: 28800,
+          efficiency: 0.94,
+          hr_average: 54,
+          hr_lowest: 43,
+          id: "sleep-object-1",
+          light: 12600,
+          rem: 7200,
+          total: 25200,
+        },
+        id: "sleep-webhook-object-1",
+        sourceProviderSlug: "garmin",
+      }),
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requests, [
+    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+  ]);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  const sleepRecord = snapshot.summaries?.sleep?.[0];
+  const sleepData = sleepRecord?.data as Record<string, unknown> | undefined;
+  assert.equal(sleepRecord?.sourceProviderSlug, "garmin");
+  assert.equal(sleepData?.duration, 28800);
+  assert.equal(sleepData?.total, 25200);
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
 test("Junction resource jobs import direct Garmin sleep-cycle stage payloads without collection fetches", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
