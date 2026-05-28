@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+
 import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 
 export const CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
@@ -31,6 +33,11 @@ type TrackedAction = {
   kind: CodexActionKind
 }
 
+type ActionOutputMetrics = {
+  bytesTotal: number
+  itemCount: number
+}
+
 export interface CodexActionDiagnosticsReducer {
   buildTraceEvent(input: {
     codexThreadId: string | null
@@ -51,6 +58,8 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   let failedCount = 0
   let durationMsTotal = 0
   let durationMsMax = 0
+  let outputBytesMax = 0
+  let outputBytesTotal = 0
   let outputItemCount = 0
   let tokenSampleCount = 0
   let inputTokensMax = 0
@@ -100,13 +109,15 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   const recordCompletionMetrics = (input: {
     durationMs: number | null
     kind: CodexActionKind
-    outputItems: number
+    output: ActionOutputMetrics
   }) => {
     if (input.durationMs !== null) {
       durationMsTotal += input.durationMs
       durationMsMax = Math.max(durationMsMax, input.durationMs)
     }
-    outputItemCount += input.outputItems
+    outputBytesTotal += input.output.bytesTotal
+    outputBytesMax = Math.max(outputBytesMax, input.output.bytesTotal)
+    outputItemCount += input.output.itemCount
 
     if (trackedActions.length < TRACKED_ACTION_LIMIT) {
       trackedActions.push({
@@ -184,6 +195,8 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionInputUnitMax: inputTokensMax,
         codexActionKinds: actionKinds,
         codexActionMcpToolCallCount: actionCounts.get('mcp.tool.call') ?? 0,
+        codexActionOutputBytesMax: outputBytesMax,
+        codexActionOutputBytesTotal: outputBytesTotal,
         codexActionOutputItemCount: outputItemCount,
         codexActionOutputUnitMax: outputTokensMax,
         codexActionProviderActionCount: input.providerActionCount,
@@ -261,7 +274,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       recordCompletionMetrics({
         durationMs,
         kind,
-        outputItems: countActionOutputItems(item),
+        output: measureActionOutput(item),
       })
     },
   }
@@ -453,17 +466,22 @@ function isFailedAction(
   return exitCode !== null ? exitCode !== 0 : false
 }
 
-function countActionOutputItems(item: Record<string, unknown> | null): number {
+function measureActionOutput(item: Record<string, unknown> | null): ActionOutputMetrics {
   if (!item) {
-    return 0
+    return {
+      bytesTotal: 0,
+      itemCount: 0,
+    }
   }
 
-  let outputItems = 0
+  let bytesTotal = 0
+  let itemCount = 0
   const addString = (value: unknown) => {
     if (typeof value !== 'string' || value.length === 0) {
       return
     }
-    outputItems += 1
+    itemCount += 1
+    bytesTotal += Buffer.byteLength(value, 'utf8')
   }
 
   addString(item.aggregatedOutput)
@@ -504,7 +522,10 @@ function countActionOutputItems(item: Record<string, unknown> | null): number {
     }
   }
 
-  return outputItems
+  return {
+    bytesTotal,
+    itemCount,
+  }
 }
 
 function readTokenUsageSample(

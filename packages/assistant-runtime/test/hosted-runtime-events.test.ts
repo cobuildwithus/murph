@@ -698,6 +698,8 @@ describe("executeHostedMailboxEvent", () => {
         codexActionFinalInputUnit: 81000,
         codexActionInputUnitMax: 81000,
         codexActionKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionOutputBytesMax: 64,
+        codexActionOutputBytesTotal: 128,
         codexActionProviderActionCount: 2,
         codexActionSlowDurationMs: [123, 60],
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
@@ -711,8 +713,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-slow-path");
     expect(entry?.redacted).not.toHaveProperty("codexActionLabels");
-    expect(entry?.redacted).not.toHaveProperty("codexActionOutputBytesMax");
-    expect(entry?.redacted).not.toHaveProperty("codexActionOutputBytesTotal");
     expect(entry?.redacted).not.toHaveProperty("codexActionSlowLabels");
     expect(JSON.stringify(entry?.redacted)).not.toContain("readSummary");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt");
