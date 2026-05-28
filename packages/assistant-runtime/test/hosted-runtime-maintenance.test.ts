@@ -1300,14 +1300,12 @@ describe("runHostedDeviceSyncPass", () => {
       pendingDirtyAcks: [
         {
           connectionId: "dsc_dirty_batch_1",
-          localAccountId: "local_1",
           nextWakeAt: "2026-04-08T00:05:00.000Z",
           processedDirtyPayloadIds: ["dsp_1"],
           processedRevision: "11",
         },
         {
           connectionId: "dsc_dirty_batch_2",
-          localAccountId: "local_2",
           nextWakeAt: "2026-04-08T00:03:00.000Z",
           processedDirtyPayloadIds: ["dsp_2", "dsp_3"],
           processedRevision: "12",

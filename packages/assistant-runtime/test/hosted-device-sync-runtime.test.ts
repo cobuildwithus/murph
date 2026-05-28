@@ -1665,7 +1665,6 @@ describe("hosted device-sync runtime", () => {
       ]);
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_wake",
-        localAccountId: connected.account.id,
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_payload_steps_1"],
         processedRevision: "42",
@@ -1812,14 +1811,12 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(state.pendingDirtyAcks, [
         {
           connectionId: "hosted_conn_dirty_batch_1",
-          localAccountId: firstConnected.account.id,
           nextWakeAt: "2026-04-04T10:01:00.000Z",
           processedDirtyPayloadIds: ["dsp_payload_batch_1"],
           processedRevision: "51",
         },
         {
           connectionId: "hosted_conn_dirty_batch_2",
-          localAccountId: secondConnected.account.id,
           nextWakeAt: "2026-04-04T10:01:00.000Z",
           processedDirtyPayloadIds: ["dsp_payload_batch_2"],
           processedRevision: "52",
@@ -1920,7 +1917,6 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_payload",
-        localAccountId: connected.account.id,
         nextWakeAt: null,
         processedRevision: "43",
       }]);
@@ -2194,7 +2190,6 @@ describe("hosted device-sync runtime", () => {
       ]);
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_pending",
-        localAccountId: connected.account.id,
         nextWakeAt: "2026-04-04T10:00:01.000Z",
         processedRevision: "7",
       }]);
@@ -2371,7 +2366,6 @@ describe("hosted device-sync runtime", () => {
       ]);
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_supported",
-        localAccountId: connected.account.id,
         nextWakeAt: null,
         processedRevision: "9",
       }]);
@@ -2535,7 +2529,6 @@ describe("hosted device-sync runtime", () => {
       assert.ok(stored);
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_junction_dirty_terminal",
-        localAccountId: stored.id,
         nextWakeAt: "2026-04-04T10:15:00.000Z",
         processedRevision: "15",
       }]);
@@ -2716,7 +2709,6 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_reauth",
-        localAccountId: connected.account.id,
         nextWakeAt: "2026-04-04T10:15:00.000Z",
         processedRevision: "13",
       }]);
@@ -2805,7 +2797,6 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_disconnected",
-        localAccountId: connected.account.id,
         nextWakeAt: "2026-04-04T10:15:00.000Z",
         processedRevision: "14",
       }]);

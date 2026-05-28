@@ -46,6 +46,8 @@ import {
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION = 1;
 const HOSTED_SYSTEM_MAILBOX_STATE_LABEL = "hosted system mailbox state";
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS = 10;
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS = 500;
 
 type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -64,6 +66,7 @@ export interface HostedSystemMailboxPendingItem {
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
+  postCheckpointRecordGroupId: string | null;
   requestId: string | null;
   routeAction: HostedSystemMailboxRouteAction;
   status: "pending" | "recording" | "sending";
@@ -133,6 +136,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
+    postCheckpointRecordGroupId: null,
     requestId: input.item.payload.requestId ?? null,
     routeAction,
     status: "pending",
@@ -201,14 +205,14 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
-    const processedItem: HostedSystemMailboxPendingItem = {
-      ...prepared,
-      postCheckpointRecord: metrics.postCheckpointRecord ?? null,
-      status: metrics.postCheckpointRecord ? "recording" : "sending",
-    };
-    if (processedItem.postCheckpointRecord) {
-      await updateHostedSystemMailboxPendingItem({
-        item: processedItem,
+    const processedItems = buildHostedSystemMailboxPostCheckpointRecordingItems({
+      item: prepared,
+      record: metrics.postCheckpointRecord ?? null,
+    });
+    if (processedItems.length > 0) {
+      await replaceHostedSystemMailboxPendingItemWithItems({
+        itemId: prepared.itemId,
+        items: processedItems,
         vaultRoot: input.vaultRoot,
       });
     } else {
@@ -218,7 +222,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     return {
-      item: processedItem,
+      item: processedItems[0] ?? prepared,
       itemId: prepared.itemId,
       metrics,
       status: "processed",
@@ -279,12 +283,18 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 
   try {
-    const recordResult = await recordHostedSystemMailboxPostCheckpointRecord({
-      record: input.item.postCheckpointRecord,
+    const recordingItems = await readHostedSystemMailboxPostCheckpointRecordingItems({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+    });
+    const recordResult = await recordHostedSystemMailboxPostCheckpointRecords({
+      records: recordingItems.flatMap((item) =>
+        item.postCheckpointRecord ? [item.postCheckpointRecord] : []
+      ),
       runtime: input.runtime,
     });
-    await removeHostedSystemMailboxPendingItem({
-      itemId: input.item.itemId,
+    await removeHostedSystemMailboxPendingItems({
+      itemIds: recordingItems.map((item) => item.itemId),
       vaultRoot: input.vaultRoot,
     });
     const nextWake = selectHostedRuntimeWakeCandidate([
@@ -308,14 +318,11 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
-    await updateHostedSystemMailboxPendingItem({
-      item: {
-        ...input.item,
-        lastErrorCode: normalized.code,
-        lastErrorMessage: normalized.message,
-        nextAttemptAt: nextWakeAt,
-        status: "recording",
-      },
+    await markHostedSystemMailboxPostCheckpointRecordingItemsFailed({
+      errorCode: normalized.code,
+      errorMessage: normalized.message,
+      item: input.item,
+      nextWakeAt,
       vaultRoot: input.vaultRoot,
     });
     return {
@@ -390,9 +397,20 @@ async function removeHostedSystemMailboxPendingItem(input: {
   itemId: string;
   vaultRoot: string;
 }): Promise<void> {
+  await removeHostedSystemMailboxPendingItems({
+    itemIds: [input.itemId],
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function removeHostedSystemMailboxPendingItems(input: {
+  itemIds: readonly string[];
+  vaultRoot: string;
+}): Promise<void> {
+  const itemIds = new Set(input.itemIds);
   const state = await readHostedSystemMailboxState(input.vaultRoot);
   await writeHostedSystemMailboxState(input.vaultRoot, {
-    pending: state.pending.filter((item) => item.itemId !== input.itemId),
+    pending: state.pending.filter((item) => !itemIds.has(item.itemId)),
   });
 }
 
@@ -404,6 +422,136 @@ async function updateHostedSystemMailboxPendingItem(input: {
   await writeHostedSystemMailboxState(input.vaultRoot, {
     pending: state.pending.map((item) =>
       item.itemId === input.item.itemId ? input.item : item
+    ),
+  });
+}
+
+async function replaceHostedSystemMailboxPendingItemWithItems(input: {
+  itemId: string;
+  items: readonly HostedSystemMailboxPendingItem[];
+  vaultRoot: string;
+}): Promise<void> {
+  const replacementIds = new Set(input.items.map((item) => item.itemId));
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  let replaced = false;
+  const pending: HostedSystemMailboxPendingItem[] = [];
+
+  for (const item of state.pending) {
+    if (item.itemId === input.itemId) {
+      pending.push(...input.items);
+      replaced = true;
+      continue;
+    }
+    if (!replacementIds.has(item.itemId)) {
+      pending.push(item);
+    }
+  }
+
+  if (!replaced) {
+    pending.push(...input.items);
+  }
+
+  await writeHostedSystemMailboxState(input.vaultRoot, { pending });
+}
+
+function buildHostedSystemMailboxPostCheckpointRecordingItems(input: {
+  item: HostedSystemMailboxPendingItem;
+  record: HostedSystemMailboxPostCheckpointRecord | null;
+}): HostedSystemMailboxPendingItem[] {
+  if (!input.record) {
+    return [];
+  }
+  const records = expandHostedSystemMailboxPostCheckpointRecord(input.record);
+  const groupId = records.length > 1 ? input.item.itemId : null;
+
+  return records.map((record, index) => ({
+    ...input.item,
+    itemId: index === 0
+      ? input.item.itemId
+      : `${input.item.itemId}:post-checkpoint:${index}`,
+    mailboxDedupeKey: index === 0
+      ? input.item.mailboxDedupeKey
+      : `${input.item.mailboxDedupeKey}:post-checkpoint:${index}`,
+    postCheckpointRecord: record,
+    postCheckpointRecordGroupId: groupId,
+    status: "recording",
+  }));
+}
+
+function expandHostedSystemMailboxPostCheckpointRecord(
+  record: HostedSystemMailboxPostCheckpointRecord,
+): HostedSystemMailboxPostCheckpointRecord[] {
+  if (record.kind === "device-sync.dirty-processed") {
+    return [record];
+  }
+
+  return record.records.map((entry) => ({
+    kind: "device-sync.dirty-processed",
+    ...entry,
+  }));
+}
+
+async function readHostedSystemMailboxPostCheckpointRecordingItems(input: {
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxPendingItem[]> {
+  if (!input.item.postCheckpointRecordGroupId) {
+    return [input.item];
+  }
+
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const items = state.pending
+    .filter((item) =>
+      item.status === "recording"
+      && item.postCheckpointRecord !== null
+      && item.postCheckpointRecordGroupId === input.item.postCheckpointRecordGroupId
+    )
+    .sort((left, right) => {
+      if (left.itemId === input.item.itemId) {
+        return -1;
+      }
+      if (right.itemId === input.item.itemId) {
+        return 1;
+      }
+      return left.itemId.localeCompare(right.itemId);
+    });
+
+  return items.length > 0 ? items : [input.item];
+}
+
+async function markHostedSystemMailboxPostCheckpointRecordingItemsFailed(input: {
+  errorCode: string;
+  errorMessage: string;
+  item: HostedSystemMailboxPendingItem;
+  nextWakeAt: string;
+  vaultRoot: string;
+}): Promise<void> {
+  if (!input.item.postCheckpointRecordGroupId) {
+    await updateHostedSystemMailboxPendingItem({
+      item: {
+        ...input.item,
+        lastErrorCode: input.errorCode,
+        lastErrorMessage: input.errorMessage,
+        nextAttemptAt: input.nextWakeAt,
+        status: "recording",
+      },
+      vaultRoot: input.vaultRoot,
+    });
+    return;
+  }
+
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  await writeHostedSystemMailboxState(input.vaultRoot, {
+    pending: state.pending.map((item) =>
+      item.postCheckpointRecordGroupId === input.item.postCheckpointRecordGroupId
+        ? {
+            ...item,
+            lastErrorCode: input.errorCode,
+            lastErrorMessage: input.errorMessage,
+            nextAttemptAt: input.nextWakeAt,
+            status: "recording",
+          }
+        : item
     ),
   });
 }
@@ -508,6 +656,13 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       || record.postCheckpointRecord === undefined
       ? null
       : parseHostedSystemMailboxRecordRequest(record.postCheckpointRecord),
+    postCheckpointRecordGroupId: record.postCheckpointRecordGroupId === null
+      || record.postCheckpointRecordGroupId === undefined
+      ? null
+      : readRequiredString(
+          record.postCheckpointRecordGroupId,
+          "hosted system mailbox postCheckpointRecordGroupId",
+        ),
     requestId: record.requestId === null || record.requestId === undefined
       ? null
       : readRequiredString(record.requestId, "hosted system mailbox requestId"),
@@ -563,6 +718,11 @@ function readOptionalStringArray(value: unknown, label: string): string[] | unde
   if (!Array.isArray(value)) {
     throw new TypeError(`${label} must be an array when present.`);
   }
+  if (value.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS} entries.`,
+    );
+  }
   return value.map((entry, index) => readRequiredString(entry, `${label}[${index}]`));
 }
 
@@ -602,6 +762,11 @@ function parseHostedSystemMailboxRecordRequest(
     if (!Array.isArray(record.records) || record.records.length === 0) {
       throw new TypeError(
         "hosted system mailbox postCheckpointRecord records must be a non-empty array.",
+      );
+    }
+    if (record.records.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS) {
+      throw new TypeError(
+        "hosted system mailbox postCheckpointRecord records exceeds the dirty ack batch limit.",
       );
     }
     return {
@@ -687,6 +852,31 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   }
 }
 
+async function recordHostedSystemMailboxPostCheckpointRecords(input: {
+  records: readonly HostedSystemMailboxPostCheckpointRecord[];
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  let nextWakeAt: string | null = null;
+  let recorded = 0;
+  let stillDirty = false;
+
+  for (const record of input.records) {
+    const result = await recordHostedSystemMailboxPostCheckpointRecord({
+      record,
+      runtime: input.runtime,
+    });
+    recorded += result.recorded;
+    stillDirty = stillDirty || result.stillDirty;
+    nextWakeAt = result.nextWakeAt;
+  }
+
+  return {
+    nextWakeAt,
+    recorded,
+    stillDirty,
+  };
+}
+
 async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
   nextWakeAt?: string | null;
   records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
@@ -697,7 +887,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
     throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
   }
 
-  let nextWakeAt = input.nextWakeAt ?? null;
+  let nextWakeAt = input.records.length === 0 ? input.nextWakeAt ?? null : null;
   let recorded = 0;
   let stillDirty = false;
 
@@ -713,7 +903,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
       recorded += 1;
     }
     stillDirty = stillDirty || response.stillDirty;
-    nextWakeAt = earliestHostedSystemMailboxWakeAt(nextWakeAt, response.nextWakeAt);
+    nextWakeAt = response.nextWakeAt;
   }
 
   return {

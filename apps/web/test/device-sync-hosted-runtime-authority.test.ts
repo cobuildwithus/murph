@@ -344,26 +344,18 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   });
 
   it("returns an immediate wake when another dirty row remains after the acked row", async () => {
-    const markDirtyConnectionProcessed = vi.fn(async () =>
-      buildDirtyConnectionRecord({
-        connectionId: "conn_dirty_first",
-        dirtyRevision: 3n,
-        processedRevision: 3n,
-      })
-    );
-    const listPendingDirtyConnectionsForUser = vi.fn(async () => ({
-      hasMore: false,
-      items: [
-        buildDirtyConnectionRecord({
-          connectionId: "conn_dirty_second",
-          dirtyRevision: 4n,
-        }),
-      ],
+    const markDirtyConnectionProcessed = vi.fn(async () => ({
+      connectionId: "conn_dirty_first",
+      dirtyRevision: 3n,
+      processedRevision: 3n,
+      stillDirty: false,
+      userId: "user_123",
     }));
+    const hasPendingDirtyConnectionForUser = vi.fn(async () => true);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
+        hasPendingDirtyConnectionForUser,
         markDirtyConnectionProcessed,
-        listPendingDirtyConnectionsForUser,
       },
     });
     const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
@@ -389,10 +381,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       processedRevision: 3n,
       userId: "user_123",
     });
-    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
-      limit: 1,
-      userId: "user_123",
-    });
+    expect(hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("user_123");
     expect(response.recorded).toBe(true);
     expect(response.stillDirty).toBe(false);
     expect(response.dirtyRevision).toBe("3");

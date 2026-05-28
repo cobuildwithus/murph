@@ -15,6 +15,7 @@ import {
   sealHostedDeviceSyncDirtyPayloadJson,
 } from "./dirty-payloads";
 import type {
+  HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDirtyResource,
   HostedPrismaTransactionClient,
@@ -65,7 +66,22 @@ const DIRTY_RESOURCE_PAYLOAD_BLOCKED_KEY_PATTERN =
   /(?:authorization|authheader|bearer|clientsecret|cookie|credential|password|secret|token|apikey)/iu;
 const DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS = 12;
 const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 500;
+const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
+const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
+
+interface DirtyPayloadHydrationBudget {
+  exhausted: boolean;
+  maxEstimatedBytes: number;
+  maxResources: number;
+  usedEstimatedBytes: number;
+  usedResources: number;
+}
+
+interface DirtyConnectionHydrationResult {
+  hasMorePayloads: boolean;
+  items: HostedDeviceSyncDirtyConnectionRecord[];
+}
 
 export class PrismaHostedDirtyConnectionStore {
   readonly prisma: PrismaClient;
@@ -372,6 +388,31 @@ export class PrismaHostedDirtyConnectionStore {
     return rows.some((row) => row.pending === true);
   }
 
+  async hasPendingDirtyConnectionForUser(
+    userId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<boolean> {
+    const prisma = tx ?? this.prisma;
+    const rows = await prisma.$queryRaw<Array<{ pending: boolean }>>(Prisma.sql`
+      select exists(
+        select 1
+        from "device_sync_dirty_connection" as "dirty"
+        where "dirty"."user_id" = ${userId}
+          and (
+            "dirty"."dirty_revision" > "dirty"."processed_revision"
+            or exists(
+              select 1
+              from "device_sync_dirty_payload" as "payload"
+              where "payload"."connection_id" = "dirty"."connection_id"
+                and "payload"."user_id" = "dirty"."user_id"
+            )
+          )
+      ) as "pending"
+    `);
+
+    return rows.some((row) => row.pending === true);
+  }
+
   async listPendingDirtyConnectionsForUser(input: {
     limit: number;
     userId: string;
@@ -420,13 +461,16 @@ export class PrismaHostedDirtyConnectionStore {
       .map((id) => recordById.get(id) ?? null)
       .filter((record): record is DeviceSyncDirtyConnectionPrismaRecord => record !== null);
 
+    const hydrated = await hydrateDirtyConnectionRecords({
+      budget: createDirtyPayloadHydrationBudget(),
+      prisma,
+      records: selectedRecords,
+      userId: input.userId,
+    });
+
     return {
-      hasMore: rows.length > limit,
-      items: await hydrateDirtyConnectionRecords({
-        prisma,
-        records: selectedRecords,
-        userId: input.userId,
-      }),
+      hasMore: rows.length > limit || hydrated.hasMorePayloads,
+      items: hydrated.items,
     };
   }
 
@@ -553,7 +597,7 @@ export class PrismaHostedDirtyConnectionStore {
     processedRevision: bigint;
     userId: string;
     tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+  }): Promise<HostedDeviceSyncDirtyConnectionAckRecord | null> {
     if (input.tx) {
       return this.markDirtyConnectionProcessedOnce({
         ...input,
@@ -590,7 +634,7 @@ export class PrismaHostedDirtyConnectionStore {
     processedRevision: bigint;
     userId: string;
     tx: HostedPrismaTransactionClient;
-  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+  }): Promise<HostedDeviceSyncDirtyConnectionAckRecord | null> {
     const prisma = input.tx;
     const existing = await prisma.deviceSyncDirtyConnection.findFirst({
       where: {
@@ -664,20 +708,20 @@ export class PrismaHostedDirtyConnectionStore {
       });
     }
 
-    const record = await prisma.deviceSyncDirtyConnection.findFirst({
-      where: {
+    const stillDirty = nextProcessedRevision < existing.dirtyRevision
+      || await hasPendingDirtyPayloadForConnection({
         connectionId: input.connectionId,
+        tx: prisma,
         userId: input.userId,
-      },
-    });
+      });
 
-    return record
-      ? hydrateDirtyConnectionRecord({
-          prisma,
-          record,
-          userId: input.userId,
-        })
-      : null;
+    return {
+      connectionId: input.connectionId,
+      dirtyRevision: existing.dirtyRevision,
+      processedRevision: nextProcessedRevision,
+      stillDirty,
+      userId: input.userId,
+    };
   }
 }
 
@@ -707,6 +751,23 @@ async function waitForDirtyStateRetry(attempt: number): Promise<void> {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+async function hasPendingDirtyPayloadForConnection(input: {
+  connectionId: string;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ pending: boolean }>>(Prisma.sql`
+    select exists(
+      select 1
+      from "device_sync_dirty_payload" as "payload"
+      where "payload"."connection_id" = ${input.connectionId}
+        and "payload"."user_id" = ${input.userId}
+    ) as "pending"
+  `);
+
+  return rows.some((row) => row.pending === true);
 }
 
 async function createDirtyPayloadRows(input: {
@@ -845,27 +906,46 @@ async function hydrateDirtyConnectionRecord(input: {
   record: DeviceSyncDirtyConnectionPrismaRecord;
   userId: string;
 }): Promise<HostedDeviceSyncDirtyConnectionRecord> {
-  const [record] = await hydrateDirtyConnectionRecords({
+  const hydrated = await hydrateDirtyConnectionRecords({
     prisma: input.prisma,
     records: [input.record],
     userId: input.userId,
   });
 
-  return record ?? mapDirtyConnectionRecord(input.record);
+  return hydrated.items[0] ?? mapDirtyConnectionRecord(input.record);
 }
 
 async function hydrateDirtyConnectionRecords(input: {
+  budget?: DirtyPayloadHydrationBudget;
   prisma: HostedPrismaTransactionClient | PrismaClient;
   records: readonly DeviceSyncDirtyConnectionPrismaRecord[];
   userId: string;
-}): Promise<HostedDeviceSyncDirtyConnectionRecord[]> {
+}): Promise<DirtyConnectionHydrationResult> {
   if (input.records.length === 0) {
-    return [];
+    return {
+      hasMorePayloads: false,
+      items: [],
+    };
   }
 
+  let hasMorePayloads = false;
+  const hydratedRecords: DeviceSyncDirtyConnectionPrismaRecord[] = [];
   const payloadsByConnectionId = new Map<string, HostedDeviceSyncDirtyResource[]>();
 
   for (const dirty of input.records) {
+    if (input.budget?.exhausted) {
+      hasMorePayloads = true;
+      break;
+    }
+    const remainingPayloadSlots = resolveDirtyPayloadHydrationRemainingSlots(input.budget);
+    if (remainingPayloadSlots <= 0) {
+      hasMorePayloads = true;
+      break;
+    }
+    const payloadRowLimit = Math.min(
+      DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION,
+      remainingPayloadSlots,
+    );
     const payloadRows = await input.prisma.deviceSyncDirtyPayload.findMany({
       orderBy: [
         { createdAt: "asc" },
@@ -878,14 +958,19 @@ async function hydrateDirtyConnectionRecords(input: {
         provider: true,
         resourceEncrypted: true,
       },
-      take: DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION,
+      take: payloadRowLimit + 1,
       where: {
         connectionId: dirty.connectionId,
         userId: input.userId,
       },
     });
 
-    for (const row of payloadRows) {
+    if (payloadRows.length > payloadRowLimit) {
+      hasMorePayloads = true;
+    }
+
+    const payloads: HostedDeviceSyncDirtyResource[] = [];
+    for (const row of payloadRows.slice(0, payloadRowLimit)) {
       const resource = await readDirtyPayloadResourceJson({
         row,
         tx: input.prisma,
@@ -894,18 +979,88 @@ async function hydrateDirtyConnectionRecords(input: {
       if (!resource) {
         continue;
       }
+      if (
+        input.budget
+        && !tryReserveDirtyPayloadHydrationBudget(input.budget, resource)
+      ) {
+        hasMorePayloads = true;
+        break;
+      }
 
-      const payloads = payloadsByConnectionId.get(dirty.connectionId) ?? [];
       payloads.push(resource);
+    }
+
+    if (payloadRows.length > 0 && payloads.length === 0) {
+      hasMorePayloads = true;
+      break;
+    }
+
+    if (payloads.length > 0) {
       payloadsByConnectionId.set(dirty.connectionId, payloads);
     }
+    hydratedRecords.push(dirty);
   }
 
-  return input.records.map((record) =>
-    withDirtyPayloadResources(
-      mapDirtyConnectionRecord(record),
-      payloadsByConnectionId.get(record.connectionId) ?? [],
-    ));
+  const items = hydratedRecords
+    .map((record) =>
+      withDirtyPayloadResources(
+        mapDirtyConnectionRecord(record),
+        payloadsByConnectionId.get(record.connectionId) ?? [],
+      )
+    );
+
+  return {
+    hasMorePayloads,
+    items,
+  };
+}
+
+function createDirtyPayloadHydrationBudget(): DirtyPayloadHydrationBudget {
+  return {
+    exhausted: false,
+    maxEstimatedBytes: DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES,
+    maxResources: DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE,
+    usedEstimatedBytes: 0,
+    usedResources: 0,
+  };
+}
+
+function resolveDirtyPayloadHydrationRemainingSlots(
+  budget: DirtyPayloadHydrationBudget | undefined,
+): number {
+  if (!budget) {
+    return DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION;
+  }
+  return Math.max(0, budget.maxResources - budget.usedResources);
+}
+
+function tryReserveDirtyPayloadHydrationBudget(
+  budget: DirtyPayloadHydrationBudget,
+  resource: HostedDeviceSyncDirtyResource,
+): boolean {
+  if (budget.usedResources >= budget.maxResources) {
+    budget.exhausted = true;
+    return false;
+  }
+
+  const estimatedBytes = estimateDirtyPayloadResourceResponseBytes(resource);
+  if (
+    budget.usedResources > 0
+    && budget.usedEstimatedBytes + estimatedBytes > budget.maxEstimatedBytes
+  ) {
+    budget.exhausted = true;
+    return false;
+  }
+
+  budget.usedResources += 1;
+  budget.usedEstimatedBytes += estimatedBytes;
+  return true;
+}
+
+function estimateDirtyPayloadResourceResponseBytes(
+  resource: HostedDeviceSyncDirtyResource,
+): number {
+  return Buffer.byteLength(JSON.stringify(resource), "utf8");
 }
 
 export function mapDirtyConnectionRecord(
@@ -958,7 +1113,7 @@ function buildDirtyResourceBatch(
     const normalized = withDirtyResourceWindowPayload(normalizeDirtyResource(resource));
     mergeDirtyResourceInto(allResources, normalized);
 
-    if (normalized.payload) {
+    if (hasDirtyResourceInputPayload(resource.payload)) {
       payloadResources.push(normalized);
     } else {
       mergeDirtyResourceInto(compactResources, normalized);
@@ -970,6 +1125,13 @@ function buildDirtyResourceBatch(
     compactResources,
     payloadResources,
   };
+}
+
+function hasDirtyResourceInputPayload(value: unknown): boolean {
+  return !!value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length > 0;
 }
 
 function mergeDirtyResources(

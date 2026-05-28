@@ -52,7 +52,6 @@ export interface HostedDeviceSyncRuntimeSyncState {
 
 export interface HostedDeviceSyncRuntimeDirtyAck {
   connectionId: string;
-  localAccountId: string;
   nextWakeAt: string | null;
   processedDirtyPayloadIds?: string[];
   processedRevision: string;
@@ -427,7 +426,6 @@ function applyHostedDirtyDeviceSyncState(input: {
     });
     return {
       connectionId: input.dirtyState.connectionId,
-      localAccountId,
       nextWakeAt: input.nextWakeAt,
       ...withHostedDirtyPayloadAckIds(input.dirtyState),
       processedRevision: input.dirtyState.dirtyRevision,
@@ -459,7 +457,6 @@ function applyHostedDirtyDeviceSyncState(input: {
 
   return {
     connectionId: input.dirtyState.connectionId,
-    localAccountId,
     nextWakeAt: input.nextWakeAt,
     ...withHostedDirtyPayloadAckIds(input.dirtyState),
     processedRevision: input.dirtyState.dirtyRevision,
