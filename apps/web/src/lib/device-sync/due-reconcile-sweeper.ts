@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { appendHostedDeviceSyncScheduledReconcileWake } from "./wake-service";
+import { requestHostedDeviceSyncScheduledReconcileRecovery } from "./wake-service";
 
 const DEFAULT_WAKE_LIMIT = 25;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
@@ -21,13 +21,14 @@ export interface HostedDeviceSyncDueReconcileSweeperResult {
 }
 
 type HostedDeviceSyncDueReconcileSweeperLogger = Pick<Console, "info" | "warn">;
-type HostedDeviceSyncScheduledReconcileWakeAppend = typeof appendHostedDeviceSyncScheduledReconcileWake;
+type HostedDeviceSyncScheduledReconcileRecoveryRequest =
+  typeof requestHostedDeviceSyncScheduledReconcileRecovery;
 
 export async function runHostedDeviceSyncDueReconcileSweeper(input: {
-  appendWake?: HostedDeviceSyncScheduledReconcileWakeAppend;
   logger?: HostedDeviceSyncDueReconcileSweeperLogger;
   now?: Date;
   nudgeLimit?: number;
+  requestRecovery?: HostedDeviceSyncScheduledReconcileRecoveryRequest;
   store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDueReconcileConnectionsForSweep">;
 } = {}): Promise<HostedDeviceSyncDueReconcileSweeperResult> {
   const logger = input.logger ?? console;
@@ -41,7 +42,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
-  const appendWake = input.appendWake ?? appendHostedDeviceSyncScheduledReconcileWake;
+  const requestRecovery = input.requestRecovery ?? requestHostedDeviceSyncScheduledReconcileRecovery;
   const dueConnections = await store.listDueReconcileConnectionsForSweep({
     dueAt: now,
     limit: wakeLimit + 1,
@@ -71,7 +72,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
 
       let wake;
       try {
-        wake = await appendWake({
+        wake = await requestRecovery({
           connectionId: dueConnection.connectionId,
           createdAt: nowIso,
           eventId: buildHostedDeviceSyncDueReconcileEventId({
@@ -86,7 +87,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
       } catch (error) {
         wakeFailed += 1;
         wakeNotAppended += 1;
-        logger.warn("Hosted device-sync due reconcile sweeper device-sync wake append failed.", {
+        logger.warn("Hosted device-sync due reconcile sweeper background recovery request failed.", {
           errorName: error instanceof Error ? error.name : "unknown",
         });
         return;
@@ -104,7 +105,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
 
       wakeFailed += 1;
       wakeNotAppended += 1;
-      logger.warn("Hosted device-sync due reconcile sweeper device-sync wake was not appended.", {
+      logger.warn("Hosted device-sync due reconcile sweeper background recovery was not requested.", {
         reason: wake.reason ?? null,
       });
     },

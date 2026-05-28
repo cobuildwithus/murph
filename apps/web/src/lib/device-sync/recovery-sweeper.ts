@@ -77,13 +77,13 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
       throw dirtySweep.reason;
     }
     if (dirtyWakeAppendFailed) {
-      throw new Error("Hosted device-sync dirty sweeper failed to append one or more wakes.");
+      throw new Error("Hosted device-sync dirty sweeper failed to request one or more recoveries.");
     }
     if (dueReconcileSweep.status === "rejected") {
       throw dueReconcileSweep.reason;
     }
     if (dueReconcileWakeAppendFailed) {
-      throw new Error("Hosted device-sync due reconcile sweeper failed to append one or more wakes.");
+      throw new Error("Hosted device-sync due reconcile sweeper failed to request one or more recoveries.");
     }
   }
 

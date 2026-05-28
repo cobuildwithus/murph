@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedDeviceSyncDirtyWake: vi.fn(),
+  requestHostedDeviceSyncDirtyRecovery: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
-  appendHostedDeviceSyncDirtyWake: mocks.appendHostedDeviceSyncDirtyWake,
+  requestHostedDeviceSyncDirtyRecovery: mocks.requestHostedDeviceSyncDirtyRecovery,
 }));
 
 import {
@@ -15,10 +15,10 @@ import {
 describe("hosted device-sync dirty sweeper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValue(buildDirtyWakeResult());
+    mocks.requestHostedDeviceSyncDirtyRecovery.mockResolvedValue(buildDirtyWakeResult());
   });
 
-  it("appends device-sync wakes for stale pending dirty device-sync rows", async () => {
+  it("requests background recovery for stale pending dirty device-sync rows", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
@@ -45,7 +45,7 @@ describe("hosted device-sync dirty sweeper", () => {
       limit: 6,
       staleBefore: new Date("2026-05-05T00:00:30.000Z"),
     });
-    expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledWith({
+    expect(mocks.requestHostedDeviceSyncDirtyRecovery).toHaveBeenCalledWith({
       connectionId: "dsc_dirty_1",
       dirtyRevision: 2n,
       eventType: "sleep.updated",
@@ -54,7 +54,7 @@ describe("hosted device-sync dirty sweeper", () => {
       resourceCategory: "sleep",
       userId: "member_dirty_1",
     });
-    expect(mocks.appendHostedDeviceSyncDirtyWake.mock.calls.map(([wake]) => wake.occurredAt))
+    expect(mocks.requestHostedDeviceSyncDirtyRecovery.mock.calls.map(([wake]) => wake.occurredAt))
       .not.toContain("2026-05-05T00:01:00.000Z");
     expect(result).toEqual({
       dirtyConnections: 1,
@@ -68,7 +68,7 @@ describe("hosted device-sync dirty sweeper", () => {
       wakeNotAppended: 0,
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync dirty sweeper appending device-sync wake for dirty state.",
+      "Hosted device-sync dirty sweeper requesting background recovery for dirty state.",
       expect.objectContaining({
         connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
         dirtyRevision: "2",
@@ -103,8 +103,8 @@ describe("hosted device-sync dirty sweeper", () => {
       store,
     });
 
-    const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
-    const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
+    const firstWake = mocks.requestHostedDeviceSyncDirtyRecovery.mock.calls[0]?.[0];
+    const secondWake = mocks.requestHostedDeviceSyncDirtyRecovery.mock.calls[1]?.[0];
     expect(firstWake?.dirtyRevision).toBe(2n);
     expect(secondWake?.dirtyRevision).toBe(2n);
     expect(firstWake?.connectionId).toBe(secondWake?.connectionId);
@@ -112,7 +112,7 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(secondWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
   });
 
-  it("passes each dirty connection identity to the dirty wake primitive", async () => {
+  it("passes each dirty connection identity to the dirty recovery primitive", async () => {
     const store = buildStore([
       {
         connectionId: "dsc_dirty_1",
@@ -142,8 +142,8 @@ describe("hosted device-sync dirty sweeper", () => {
       store,
     });
 
-    const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
-    const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
+    const firstWake = mocks.requestHostedDeviceSyncDirtyRecovery.mock.calls[0]?.[0];
+    const secondWake = mocks.requestHostedDeviceSyncDirtyRecovery.mock.calls[1]?.[0];
     expect(firstWake).toMatchObject({
       connectionId: "dsc_dirty_1",
       dirtyRevision: 2n,
@@ -154,7 +154,7 @@ describe("hosted device-sync dirty sweeper", () => {
     });
   });
 
-  it("reports skipped dirty connections and wake append failures without logging raw ids", async () => {
+  it("reports skipped dirty connections and recovery request failures without logging raw ids", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
@@ -178,7 +178,7 @@ describe("hosted device-sync dirty sweeper", () => {
         userId: "member_dirty_2",
       },
     ]);
-    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValueOnce({
+    mocks.requestHostedDeviceSyncDirtyRecovery.mockResolvedValueOnce({
       reason: "append_failed",
       wakeAccepted: false,
       wakeAppended: false,
@@ -196,7 +196,7 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(result.wakeFailed).toBe(1);
     expect(result.skippedDirtyConnections).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync dirty sweeper device-sync wake was not appended.",
+      "Hosted device-sync dirty sweeper background recovery was not requested.",
       expect.objectContaining({
         connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
         reason: "append_failed",
@@ -216,7 +216,7 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_2");
   });
 
-  it("continues the sweep when one dirty wake append throws", async () => {
+  it("continues the sweep when one dirty recovery request throws", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
@@ -240,7 +240,7 @@ describe("hosted device-sync dirty sweeper", () => {
         userId: "member_dirty_2",
       },
     ]);
-    mocks.appendHostedDeviceSyncDirtyWake
+    mocks.requestHostedDeviceSyncDirtyRecovery
       .mockRejectedValueOnce(new Error("append failed"))
       .mockResolvedValueOnce(buildDirtyWakeResult());
 
@@ -250,7 +250,7 @@ describe("hosted device-sync dirty sweeper", () => {
       store,
     });
 
-    expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedDeviceSyncDirtyRecovery).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
       wakeAppended: 1,
       wakeAttempted: 2,
@@ -258,7 +258,7 @@ describe("hosted device-sync dirty sweeper", () => {
       wakeNotAppended: 1,
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync dirty sweeper device-sync wake append failed.",
+      "Hosted device-sync dirty sweeper background recovery request failed.",
       expect.objectContaining({
         connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
         errorName: "Error",
@@ -267,7 +267,7 @@ describe("hosted device-sync dirty sweeper", () => {
     );
   });
 
-  it("counts duplicate dirty wakes as accepted recovery work", async () => {
+  it("counts duplicate dirty recovery requests as accepted recovery work", async () => {
     const store = buildStore([
       {
         connectionId: "dsc_dirty_1",
@@ -280,7 +280,7 @@ describe("hosted device-sync dirty sweeper", () => {
         userId: "member_dirty_1",
       },
     ]);
-    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValueOnce(
+    mocks.requestHostedDeviceSyncDirtyRecovery.mockResolvedValueOnce(
       buildDirtyWakeResult({
         wakeAppended: false,
         wakeDuplicate: true,
