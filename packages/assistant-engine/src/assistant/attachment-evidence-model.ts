@@ -524,7 +524,7 @@ function shouldRedactNativeImageReference(input: {
   kind: AssistantInputAttachmentEvidenceItem['kind']
   routingImage: RoutingImageEligibility
 }): boolean {
-  return input.kind === 'image'
+  return input.kind === 'image' && input.routingImage.eligible
 }
 
 function redactModelEvidenceSourcePaths(
@@ -586,7 +586,8 @@ function normalizeAllowedVaultRelativePath(
     if (
       normalizedCandidate.includes('\\') ||
       normalizedCandidate.includes('?') ||
-      normalizedCandidate.includes('#')
+      normalizedCandidate.includes('#') ||
+      hasUnsafeAttachmentPathSyntax(normalizedCandidate)
     ) {
       return null
     }
@@ -597,6 +598,13 @@ function normalizeAllowedVaultRelativePath(
   } catch {
     return null
   }
+}
+
+function hasUnsafeAttachmentPathSyntax(candidatePath: string): boolean {
+  return /[\u0000-\u001F\u007F]/u.test(candidatePath) ||
+    candidatePath.split('/').some((segment) =>
+      segment === '.' || segment === '..',
+    )
 }
 
 async function readParserManifest(

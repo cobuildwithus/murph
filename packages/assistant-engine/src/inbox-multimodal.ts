@@ -26,7 +26,7 @@ import {
   type AssistantUserMessageContentPart,
 } from './assistant/content-types.js'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
-import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 const parserManifestSchema = z.object({
   schema: z.literal('murph.parser-manifest.v1'),
@@ -57,13 +57,32 @@ export async function buildInboxModelAttachmentBundle(input: {
   captureId: string
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle> {
-  const routingImage = getRoutingImageEligibility(input.attachment)
+  const storedAttachmentPath = normalizeCaptureStoredAttachmentPath(
+    input.attachment.storedPath ?? null,
+    input.captureId,
+  )
+  const allowedDerivedPrefixes = buildAllowedDerivedPrefixes(
+    input.captureId,
+    input.attachment,
+  )
+  const inlineDerivedPath = normalizeAnchoredVaultRelativePath(
+    input.attachment.derivedPath ?? null,
+    allowedDerivedPrefixes,
+  )
+  const routingImage = getRoutingImageEligibility({
+    ...input.attachment,
+    storedPath: storedAttachmentPath,
+  })
   const shouldRedactImageReference = shouldRedactNativeImageReference({
     kind: input.attachment.kind,
     routingImage,
   })
   const evidenceSources = [
-    ...buildInlineTextSources(input.attachment),
+    ...buildInlineTextSources({
+      attachment: input.attachment,
+      derivedPath: inlineDerivedPath,
+      storedPath: storedAttachmentPath,
+    }),
     ...(await buildDerivedTextSources({
       attachment: input.attachment,
       captureId: input.captureId,
@@ -74,20 +93,20 @@ export async function buildInboxModelAttachmentBundle(input: {
     ? redactModelEvidenceSourcePaths(evidenceSources)
     : evidenceSources
   const fragments = [
-    buildMetadataFragment(input.attachment, routingImage),
+    buildMetadataFragment(input.attachment, routingImage, storedAttachmentPath),
     ...projectAttachmentEvidenceForModel({
       attachment: {
         byteSize: shouldRedactImageReference
           ? null
           : input.attachment.byteSize ?? null,
-        derivedPath: input.attachment.derivedPath ?? null,
+        derivedPath: inlineDerivedPath,
         fileName: shouldRedactImageReference
           ? null
           : input.attachment.fileName ?? null,
         mime: input.attachment.mime ?? null,
         storedPath: shouldRedactImageReference
           ? null
-          : input.attachment.storedPath ?? null,
+          : storedAttachmentPath,
       },
       sources: modelEvidenceSources,
     }),
@@ -104,7 +123,7 @@ export async function buildInboxModelAttachmentBundle(input: {
     mime: input.attachment.mime ?? null,
     fileName: input.attachment.fileName ?? null,
     byteSize: input.attachment.byteSize ?? null,
-    storedPath: input.attachment.storedPath ?? null,
+    storedPath: storedAttachmentPath,
     parseState: input.attachment.parseState ?? null,
     routingImage,
     fragments,
@@ -220,6 +239,7 @@ export async function prepareInboxMultimodalUserMessageContent(input: {
 function buildMetadataFragment(
   attachment: InboxShowResult['capture']['attachments'][number],
   routingImage: RoutingImageEligibility,
+  storedAttachmentPath: string | null,
 ) {
   const shouldRedactImageReference = shouldRedactNativeImageReference({
     kind: attachment.kind,
@@ -240,7 +260,7 @@ function buildMetadataFragment(
       : `byteSize: ${attachment.byteSize ?? 'unknown'}`,
     shouldRedactImageReference
       ? null
-      : `storedPath: ${attachment.storedPath ?? 'missing'}`,
+      : `storedPath: ${storedAttachmentPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
@@ -259,7 +279,7 @@ function buildMetadataFragment(
   return {
     kind: 'attachment_metadata' as const,
     label: `attachment-${attachment.ordinal}-metadata`,
-    path: shouldRedactImageReference ? null : attachment.storedPath ?? null,
+    path: shouldRedactImageReference ? null : storedAttachmentPath,
     text,
     truncated: false,
   }
@@ -269,7 +289,7 @@ function shouldRedactNativeImageReference(input: {
   kind: InboxShowResult['capture']['attachments'][number]['kind']
   routingImage: RoutingImageEligibility
 }): boolean {
-  return input.kind === 'image'
+  return input.kind === 'image' && input.routingImage.eligible
 }
 
 function redactModelEvidenceSourcePaths(
@@ -281,9 +301,12 @@ function redactModelEvidenceSourcePaths(
   }))
 }
 
-function buildInlineTextSources(
-  attachment: InboxShowResult['capture']['attachments'][number],
-): ModelEvidenceSource[] {
+function buildInlineTextSources(input: {
+  attachment: InboxShowResult['capture']['attachments'][number]
+  derivedPath: string | null
+  storedPath: string | null
+}): ModelEvidenceSource[] {
+  const { attachment } = input
   const sources: ModelEvidenceSource[] = []
 
   const extracted = normalizeNullableString(attachment.extractedText)
@@ -291,7 +314,7 @@ function buildInlineTextSources(
     sources.push({
       kind: 'attachment_extracted_text',
       label: `attachment-${attachment.ordinal}-extracted-text`,
-      path: attachment.derivedPath ?? attachment.storedPath ?? null,
+      path: input.derivedPath ?? input.storedPath,
       text: extracted,
     })
   }
@@ -301,7 +324,7 @@ function buildInlineTextSources(
     sources.push({
       kind: 'attachment_transcript',
       label: `attachment-${attachment.ordinal}-transcript`,
-      path: attachment.derivedPath ?? attachment.storedPath ?? null,
+      path: input.derivedPath ?? input.storedPath,
       text: transcript,
     })
   }
@@ -439,10 +462,8 @@ async function readPreparedRoutingEvidence(input: {
         mediaType: attachment.routingImage.mediaType ?? null,
         bytes,
       })
-    } catch (error) {
-      errors.push(
-        `attachment ${attachment.ordinal} (image): ${errorMessage(error)}`,
-      )
+    } catch {
+      errors.push(`attachment ${attachment.ordinal} image evidence unavailable`)
     }
   }
 
@@ -495,6 +516,9 @@ function normalizeCaptureStoredAttachmentPath(
   if (!normalizedCandidate) {
     return null
   }
+  if (hasUnsafeAttachmentPathSyntax(normalizedCandidate)) {
+    return null
+  }
 
   try {
     const normalized = normalizeRelativeVaultPath(normalizedCandidate)
@@ -528,6 +552,9 @@ function normalizeAnchoredVaultRelativePath(
   if (!normalizedCandidate) {
     return null
   }
+  if (hasUnsafeAttachmentPathSyntax(normalizedCandidate)) {
+    return null
+  }
 
   try {
     const normalized = normalizeRelativeVaultPath(normalizedCandidate)
@@ -537,6 +564,16 @@ function normalizeAnchoredVaultRelativePath(
   } catch {
     return null
   }
+}
+
+function hasUnsafeAttachmentPathSyntax(candidatePath: string): boolean {
+  return candidatePath.includes('\\') ||
+    candidatePath.includes('?') ||
+    candidatePath.includes('#') ||
+    /[\u0000-\u001F\u007F]/u.test(candidatePath) ||
+    candidatePath.split('/').some((segment) =>
+      segment === '.' || segment === '..',
+    )
 }
 
 async function readParserManifest(

@@ -8,6 +8,7 @@ import {
   inboxModelAttachmentBundleSchema,
   type InboxModelAttachmentBundle,
 } from '../src/inbox-model-contracts.ts'
+import { MAX_NATIVE_ROUTING_IMAGE_BYTES } from '../src/inbox-routing-vision.ts'
 import type {
   AssistantInputAttachmentEvidenceReadFailure,
   AssistantInputAttachmentModelBundleSource,
@@ -905,6 +906,53 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Do not assume missing body content.')
     expect(result.prompt).toContain('Message text:\nReceived an email message.')
   })
+
+  it('omits malformed raw image paths in the direct prompt path', () => {
+    const rawPath =
+      'raw/inbox/capture-1/attachments/../secret/private-scan.tiff?token=secret'
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        attachmentEvidence: {
+          attachments: [
+            {
+              byteSize: 4096,
+              derived: null,
+              descriptorAttachmentId: 'att_image_1',
+              fileName: 'private-scan.tiff',
+              inlineFragments: [],
+              kind: 'image',
+              mime: 'image/tiff',
+              ordinal: 1,
+              parseState: 'unsupported',
+              raw: {
+                byteSize: 4096,
+                kind: 'vault-relative-file',
+                mediaType: 'image/tiff',
+                path: rawPath,
+                sha256: null,
+              },
+              sourceAttachmentId: 'att_image_1',
+            },
+          ],
+          optionalInboxCaptureId: 'capture-1',
+          reasonCode: null,
+          source: 'manual',
+          status: 'available',
+          updatedAt: '2026-04-08T00:00:01.000Z',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Attachment 1 (image)')
+    expect(result.prompt).not.toContain(rawPath)
+    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).not.toContain('storedPath: raw/inbox/')
+    expect(result.prompt).not.toContain('Raw attachment file is available')
+  })
 })
 
 describe('prepareAssistantAutoReplyInput', () => {
@@ -1342,6 +1390,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       createAttachmentBundle({
         kind: 'image',
         mime: 'image/jpeg',
+        storedPath: 'raw/inbox/capture-1/attachments/01__image.jpg',
         routingImage: {
           eligible: true,
           reason: 'supported-format',
@@ -1403,6 +1452,239 @@ describe('prepareAssistantAutoReplyInput', () => {
       providerKind: 'status',
       providerState: 'completed',
     })
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('storedPath: raw/inbox/capture-1/attachments/01__image.jpg')
+    expect(result.prompt).toContain('nativeImageEvidence: unavailable_text_only_fallback')
+    expect(result.userMessageContent).toBeNull()
+  })
+
+  it('exposes only failed native image refs as text fallback when stale metadata hides an oversized file', async () => {
+    const storedPath = 'raw/inbox/capture-1/attachments/01__image.jpg'
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValueOnce([
+      createAttachmentBundle({
+        byteSize: 1024,
+        fileName: 'sleep-photo.jpg',
+        kind: 'image',
+        mime: 'image/jpeg',
+        storedPath,
+        routingImage: {
+          eligible: true,
+          reason: 'supported-format',
+          mediaType: 'image/jpeg',
+          extension: '.jpg',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: null,
+            text: [
+              'ordinal: 1',
+              'kind: image',
+              'mime: image/jpeg',
+              'byteSizeBucket: <=32768',
+              'nativeImageEvidence: omitted_non_addressable',
+              'routingImageEligible: true',
+              'routingImageReason: supported-format',
+            ].join('\n'),
+            truncated: false,
+          },
+        ],
+        combinedText: [
+          '[attachment-1-metadata]',
+          'ordinal: 1',
+          'kind: image',
+          'mime: image/jpeg',
+          'byteSizeBucket: <=32768',
+          'nativeImageEvidence: omitted_non_addressable',
+          'routingImageEligible: true',
+          'routingImageReason: supported-format',
+        ].join('\n'),
+      }),
+    ])
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(true)
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockImplementationOnce(
+      async (input: {
+        onEvidenceReadFailure?: (
+          failure: AssistantInputAttachmentEvidenceReadFailure,
+        ) => void
+      }) => {
+        input.onEvidenceReadFailure?.({
+          attachmentOrdinal: 1,
+          details: 'attachment 1 image evidence exceeded native image input budget',
+          errorCode: 'image_read_failed',
+          inputId: 'event-1',
+          kind: 'image',
+        })
+        return {
+          fallbackError: null,
+          inputMode: 'text-only',
+          userMessageContent: null,
+        }
+      },
+    )
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              byteSize: 1024,
+              fileName: 'sleep-photo.jpg',
+              kind: 'image',
+              mime: 'image/jpeg',
+              storedPath,
+            }),
+          ],
+          captureOverrides: {
+            text: 'Can you inspect this photo?',
+          },
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.userMessageContent).toBeNull()
+    expect(result.prompt).toContain('Attachment 1 (image)')
+    expect(result.prompt).not.toContain('fileName: sleep-photo.jpg')
+    expect(result.prompt).toContain(`storedPath: ${storedPath}`)
+    expect(result.prompt).toContain('nativeImageEvidence: unavailable_text_only_fallback')
+    expect(result.prompt).toContain('byteSizeBucket: <=32768')
+    expect(result.prompt).toContain('Raw attachment file is available')
+  })
+
+  it('keeps successful native images redacted when a later image exceeds the total native budget', async () => {
+    const firstStoredPath = 'raw/inbox/capture-1/attachments/01__image.jpg'
+    const secondStoredPath = 'raw/inbox/capture-1/attachments/02__image.png'
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValueOnce([
+      createAttachmentBundle({
+        attachmentId: 'bundle-1',
+        byteSize: 1024,
+        fileName: 'first-photo.jpg',
+        kind: 'image',
+        mime: 'image/jpeg',
+        ordinal: 1,
+        storedPath: firstStoredPath,
+        routingImage: {
+          eligible: true,
+          reason: 'supported-format',
+          mediaType: 'image/jpeg',
+          extension: '.jpg',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: null,
+            text: 'nativeImageEvidence: omitted_non_addressable',
+            truncated: false,
+          },
+        ],
+        combinedText:
+          '[attachment-1-metadata]\nnativeImageEvidence: omitted_non_addressable',
+      }),
+      createAttachmentBundle({
+        attachmentId: 'bundle-2',
+        byteSize: 1024,
+        fileName: 'second-photo.png',
+        kind: 'image',
+        mime: 'image/png',
+        ordinal: 2,
+        storedPath: secondStoredPath,
+        routingImage: {
+          eligible: true,
+          reason: 'supported-format',
+          mediaType: 'image/png',
+          extension: '.png',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-2-metadata',
+            path: null,
+            text: 'nativeImageEvidence: omitted_non_addressable',
+            truncated: false,
+          },
+        ],
+        combinedText:
+          '[attachment-2-metadata]\nnativeImageEvidence: omitted_non_addressable',
+      }),
+    ])
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(true)
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockImplementationOnce(
+      async (input: {
+        onEvidenceReadFailure?: (
+          failure: AssistantInputAttachmentEvidenceReadFailure,
+        ) => void
+      }) => {
+        input.onEvidenceReadFailure?.({
+          attachmentOrdinal: 2,
+          details: 'attachment 2 image evidence exceeded native image input budget',
+          errorCode: 'image_read_failed',
+          inputId: 'event-1',
+          kind: 'image',
+        })
+        return {
+          fallbackError: null,
+          inputMode: 'multimodal',
+          userMessageContent: createRichUserMessageContent('old prompt'),
+        }
+      },
+    )
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              attachmentId: 'attachment-1',
+              byteSize: 1024,
+              fileName: 'first-photo.jpg',
+              kind: 'image',
+              mime: 'image/jpeg',
+              ordinal: 1,
+              storedPath: firstStoredPath,
+            }),
+            createAttachment({
+              attachmentId: 'attachment-2',
+              byteSize: 1024,
+              fileName: 'second-photo.png',
+              kind: 'image',
+              mime: 'image/png',
+              ordinal: 2,
+              storedPath: secondStoredPath,
+            }),
+          ],
+          captureOverrides: {
+            text: 'Please compare these two photos.',
+          },
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain(`storedPath: ${secondStoredPath}`)
+    expect(result.prompt).not.toContain('fileName: second-photo.png')
+    expect(result.prompt).not.toContain(`storedPath: ${firstStoredPath}`)
+    expect(result.userMessageContent?.[0]).toEqual({
+      type: 'text',
+      text: result.prompt,
+    })
+    const messageText = result.userMessageContent?.[0]?.type === 'text'
+      ? result.userMessageContent[0].text
+      : ''
+    expect(messageText).toContain(`storedPath: ${secondStoredPath}`)
+    expect(messageText).not.toContain(`storedPath: ${firstStoredPath}`)
   })
 
   it('attributes grouped attachment read failures by input id when ordinals repeat', async () => {
@@ -1621,27 +1903,51 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).not.toContain('storedPath: inbox/attachments/lunch.png')
   })
 
-  it('does not make unsupported image bundles raw-file-addressable', async () => {
+  it('keeps unsupported image bundles raw-file-addressable for text-only tool inspection', async () => {
+    const storedPath =
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.tiff'
     promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'image',
-        mime: 'image/webp',
-        fileName: 'private-photo.webp',
-        storedPath:
-          'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.webp',
+        mime: 'image/tiff',
+        fileName: 'private-photo.tiff',
+        storedPath,
         parseState: 'unsupported',
         routingImage: {
           eligible: false,
           reason: 'unsupported-format',
-          mediaType: 'image/webp',
-          extension: '.webp',
+          mediaType: 'image/tiff',
+          extension: '.tiff',
         },
-        fragments: [],
-        combinedText: 'mime: image/webp',
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'metadata',
+            path: storedPath,
+            text: [
+              'fileName: private-photo.tiff',
+              'mime: image/tiff',
+              `storedPath: ${storedPath}`,
+              'parseState: unsupported',
+              'routingImageEligible: false',
+              'routingImageReason: unsupported-format',
+            ].join('\n'),
+            truncated: false,
+          },
+        ],
+        combinedText: [
+          '[metadata]',
+          'fileName: private-photo.tiff',
+          'mime: image/tiff',
+          `storedPath: ${storedPath}`,
+          'parseState: unsupported',
+          'routingImageEligible: false',
+          'routingImageReason: unsupported-format',
+        ].join('\n'),
       }),
     ])
     promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
-      true,
+      false,
     )
     promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
@@ -1655,10 +1961,10 @@ describe('prepareAssistantAutoReplyInput', () => {
           attachments: [
             createAttachment({
               kind: 'image',
-              mime: 'image/webp',
-              fileName: 'private-photo.webp',
+              mime: 'image/tiff',
+              fileName: 'private-photo.tiff',
               storedPath:
-                'raw/inbox/capture-1/attachments/01__private-photo.webp',
+                'raw/inbox/capture-1/attachments/01__private-photo.tiff',
               parseState: 'failed',
             }),
           ],
@@ -1672,10 +1978,94 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('Attachment 1 (image)')
-    expect(result.prompt).toContain('nativeImageEvidence: omitted_non_addressable')
-    expect(result.prompt).not.toContain('Raw attachment file is available')
-    expect(result.prompt).not.toContain('raw/assistant-input/')
-    expect(result.prompt).not.toContain('private-photo.webp')
+    expect(result.prompt).toContain('Raw attachment file is available')
+    expect(result.prompt).toContain(storedPath)
+    expect(result.prompt).toContain('private-photo.tiff')
+    expect(result.prompt).not.toContain('nativeImageEvidence: omitted_non_addressable')
+  })
+
+  it('keeps too-large image bundles raw-file-addressable for text-only tool inspection', async () => {
+    const storedPath =
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.jpg'
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+      createAttachmentBundle({
+        byteSize: MAX_NATIVE_ROUTING_IMAGE_BYTES + 1,
+        kind: 'image',
+        mime: 'image/jpeg',
+        fileName: 'large-photo.jpg',
+        storedPath,
+        parseState: 'failed',
+        routingImage: {
+          eligible: false,
+          reason: 'too-large',
+          mediaType: 'image/jpeg',
+          extension: '.jpg',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'metadata',
+            path: storedPath,
+            text: [
+              'fileName: large-photo.jpg',
+              'mime: image/jpeg',
+              `storedPath: ${storedPath}`,
+              'parseState: failed',
+              'routingImageEligible: false',
+              'routingImageReason: too-large',
+            ].join('\n'),
+            truncated: false,
+          },
+        ],
+        combinedText: [
+          '[metadata]',
+          'fileName: large-photo.jpg',
+          'mime: image/jpeg',
+          `storedPath: ${storedPath}`,
+          'parseState: failed',
+          'routingImageEligible: false',
+          'routingImageReason: too-large',
+        ].join('\n'),
+      }),
+    ])
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
+      false,
+    )
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
+      fallbackError: null,
+      inputMode: 'text-only',
+      userMessageContent: null,
+    })
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              kind: 'image',
+              mime: 'image/jpeg',
+              fileName: 'large-photo.jpg',
+              byteSize: MAX_NATIVE_ROUTING_IMAGE_BYTES + 1,
+              storedPath,
+              parseState: 'failed',
+            }),
+          ],
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.userMessageContent).toBeNull()
+    expect(result.prompt).toContain('Attachment 1 (image)')
+    expect(result.prompt).toContain('Raw attachment file is available')
+    expect(result.prompt).toContain(storedPath)
+    expect(result.prompt).toContain('large-photo.jpg')
+    expect(result.prompt).toContain('routingImageReason: too-large')
+    expect(result.prompt).not.toContain('nativeImageEvidence: omitted_non_addressable')
   })
 
   it('keeps PDF-only input as stored-path metadata without routed file evidence', async () => {

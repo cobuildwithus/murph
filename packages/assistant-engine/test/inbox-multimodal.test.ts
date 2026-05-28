@@ -53,7 +53,7 @@ describe('buildInboxModelAttachmentBundle', () => {
     expect(bundle.combinedText).toContain('nativeImageEvidence: omitted_non_addressable')
   })
 
-  it('redacts unsupported image filenames and source paths from model text', async () => {
+  it('keeps unsupported image paths available for text-only tool inspection', async () => {
     const storedPath = 'raw/inbox/capture-1/attachments/private-scan.tiff'
     const bundle = await buildInboxModelAttachmentBundle({
       attachment: {
@@ -79,9 +79,10 @@ describe('buildInboxModelAttachmentBundle', () => {
     })
     expect(bundle.combinedText).toContain('Decoded label text.')
     expect(bundle.combinedText).toContain('routingImageReason: unsupported-format')
-    expect(bundle.combinedText).not.toContain('attachmentId: attachment-private-scan')
-    expect(bundle.combinedText).not.toContain('fileName: private-scan.tiff')
-    expect(bundle.combinedText).not.toContain(storedPath)
+    expect(bundle.combinedText).toContain('attachmentId: attachment-private-scan')
+    expect(bundle.combinedText).toContain('fileName: private-scan.tiff')
+    expect(bundle.combinedText).toContain(`storedPath: ${storedPath}`)
+    expect(bundle.combinedText).not.toContain('nativeImageEvidence: omitted_non_addressable')
   })
 
   it('keeps stored PDF paths as ordinary attachment metadata', async () => {
@@ -154,10 +155,10 @@ describe('buildInboxModelAttachmentBundle', () => {
       reason: 'too-large',
     })
     expect(bundle.combinedText).toContain('routingImageReason: too-large')
-    expect(bundle.combinedText).not.toContain('attachmentId: attachment-large-image')
-    expect(bundle.combinedText).not.toContain('fileName: large.jpg')
-    expect(bundle.combinedText).not.toContain(`storedPath: ${storedPath}`)
-    expect(bundle.combinedText).toContain('nativeImageEvidence: omitted_non_addressable')
+    expect(bundle.combinedText).toContain('attachmentId: attachment-large-image')
+    expect(bundle.combinedText).toContain('fileName: large.jpg')
+    expect(bundle.combinedText).toContain(`storedPath: ${storedPath}`)
+    expect(bundle.combinedText).not.toContain('nativeImageEvidence: omitted_non_addressable')
 
     const prepared = await prepareInboxMultimodalUserMessageContent({
       attachmentSources: [
@@ -175,6 +176,140 @@ describe('buildInboxModelAttachmentBundle', () => {
       inputMode: 'text-only',
       userMessageContent: null,
     })
+  })
+
+  it.each([
+    {
+      label: 'absolute',
+      storedPath: '/tmp/private-scan.tiff',
+    },
+    {
+      label: 'traversal',
+      storedPath:
+        'raw/inbox/capture-1/attachments/../secret/private-scan.tiff',
+    },
+    {
+      label: 'query',
+      storedPath: 'raw/inbox/capture-1/attachments/private-scan.tiff?token=secret',
+    },
+    {
+      label: 'hash',
+      storedPath: 'raw/inbox/capture-1/attachments/private-scan.tiff#fragment',
+    },
+    {
+      label: 'control-character',
+      storedPath: 'raw/inbox/capture-1/attachments/private\nscan.tiff',
+    },
+    {
+      label: 'wrong-capture',
+      storedPath: 'raw/inbox/capture-2/attachments/private-scan.tiff',
+    },
+  ])('omits invalid unsupported image stored paths from model text: $label', async ({
+    storedPath,
+  }) => {
+    const bundle = await buildInboxModelAttachmentBundle({
+      attachment: {
+        attachmentId: 'attachment-private-scan',
+        ordinal: 1,
+        kind: 'image',
+        mime: 'image/tiff',
+        fileName: 'scan.tiff',
+        storedPath,
+        extractedText: 'Decoded label text.',
+        transcriptText: null,
+        derivedPath: null,
+        parseState: 'succeeded',
+      } as never,
+      captureId: 'capture-1',
+      vaultRoot: '/tmp',
+    })
+
+    expect(hasInboxMultimodalAttachmentEvidenceCandidate(bundle)).toBe(false)
+    expect(bundle.storedPath).toBeNull()
+    expect(bundle.combinedText).toContain('storedPath: missing')
+    expect(bundle.combinedText).toContain('routingImageReason: stored-path-missing')
+    expect(bundle.combinedText).toContain('Decoded label text.')
+    expect(bundle.combinedText).not.toContain(storedPath)
+  })
+
+  it.each([
+    {
+      label: 'absolute',
+      storedPath: '/tmp/large-photo.jpg',
+    },
+    {
+      label: 'traversal',
+      storedPath:
+        'raw/inbox/capture-1/attachments/../secret/large-photo.jpg',
+    },
+    {
+      label: 'query',
+      storedPath: 'raw/inbox/capture-1/attachments/large-photo.jpg?token=secret',
+    },
+    {
+      label: 'hash',
+      storedPath: 'raw/inbox/capture-1/attachments/large-photo.jpg#fragment',
+    },
+    {
+      label: 'control-character',
+      storedPath: 'raw/inbox/capture-1/attachments/large\nphoto.jpg',
+    },
+    {
+      label: 'wrong-capture',
+      storedPath: 'raw/inbox/capture-2/attachments/large-photo.jpg',
+    },
+  ])('omits invalid oversized image stored paths from model text: $label', async ({
+    storedPath,
+  }) => {
+    const bundle = await buildInboxModelAttachmentBundle({
+      attachment: {
+        attachmentId: 'attachment-large-image',
+        ordinal: 1,
+        kind: 'image',
+        mime: 'image/jpeg',
+        fileName: 'large.jpg',
+        byteSize: MAX_NATIVE_ROUTING_IMAGE_BYTES + 1,
+        storedPath,
+        extractedText: null,
+        transcriptText: null,
+        derivedPath: null,
+        parseState: 'failed',
+      } as never,
+      captureId: 'capture-1',
+      vaultRoot: '/tmp',
+    })
+
+    expect(hasInboxMultimodalAttachmentEvidenceCandidate(bundle)).toBe(false)
+    expect(bundle.storedPath).toBeNull()
+    expect(bundle.combinedText).toContain('storedPath: missing')
+    expect(bundle.combinedText).toContain('routingImageReason: stored-path-missing')
+    expect(bundle.combinedText).not.toContain(storedPath)
+  })
+
+  it('omits malformed derived paths from attachment fragment metadata', async () => {
+    const derivedPath =
+      'derived/inbox/capture-1/attachments/attachment-text/plain.txt?token=secret'
+    const bundle = await buildInboxModelAttachmentBundle({
+      attachment: {
+        attachmentId: 'attachment-text',
+        ordinal: 1,
+        kind: 'document',
+        mime: 'text/plain',
+        fileName: 'note.txt',
+        byteSize: 128,
+        storedPath: null,
+        extractedText: 'Safe extracted text.',
+        transcriptText: null,
+        derivedPath,
+        parseState: 'succeeded',
+      } as never,
+      captureId: 'capture-1',
+      vaultRoot: '/tmp',
+    })
+
+    expect(bundle.combinedText).toContain('Safe extracted text.')
+    expect(bundle.combinedText).not.toContain(derivedPath)
+    expect(bundle.fragments.every((fragment) => fragment.path !== derivedPath)).toBe(true)
   })
 
   it('rechecks the native image byte budget when attachment metadata is missing', async () => {
@@ -225,6 +360,48 @@ describe('buildInboxModelAttachmentBundle', () => {
     expect(prepared.inputMode).toBe('text-only')
     expect(prepared.userMessageContent).toBeNull()
     expect(prepared.fallbackError).toContain('rich evidence could not be loaded')
+    expect(prepared.fallbackError).not.toContain(vaultRoot)
+    expect(prepared.fallbackError).not.toContain(storedPath)
+  })
+
+  it('keeps missing inbox native image fallback errors pathless', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const storedPath = 'raw/inbox/capture-1/attachments/01__missing.jpg'
+    const bundle = await buildInboxModelAttachmentBundle({
+      attachment: {
+        attachmentId: 'attachment-missing-image',
+        ordinal: 1,
+        kind: 'image',
+        mime: 'image/jpeg',
+        fileName: 'missing.jpg',
+        byteSize: null,
+        storedPath,
+        extractedText: null,
+        transcriptText: null,
+        derivedPath: null,
+        parseState: 'failed',
+      } as never,
+      captureId: 'capture-1',
+      vaultRoot,
+    })
+
+    const prepared = await prepareInboxMultimodalUserMessageContent({
+      attachmentSources: [
+        {
+          attachment: bundle,
+          captureId: 'capture-1',
+        },
+      ],
+      prompt: 'Read the attached image.',
+      vaultRoot,
+    })
+
+    expect(prepared.inputMode).toBe('text-only')
+    expect(prepared.userMessageContent).toBeNull()
+    expect(prepared.fallbackError).toContain('rich evidence could not be loaded')
+    expect(prepared.fallbackError).toContain('attachment 1 image evidence unavailable')
+    expect(prepared.fallbackError).not.toContain(vaultRoot)
+    expect(prepared.fallbackError).not.toContain(storedPath)
   })
 
 })

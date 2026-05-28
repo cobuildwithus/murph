@@ -24,6 +24,7 @@ import {
   getRoutingImageEligibility,
   isNativeRoutingImageOverBudgetBytes,
   renderNativeRoutingImageSizeBucket,
+  type RoutingImageEligibility,
 } from '../../inbox-routing-vision.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
@@ -150,46 +151,29 @@ export async function prepareAssistantAutoReplyInput(
       }),
     })),
   )
-  const textualSections = preparedInputs
-    .map((entry, index) => {
-      const attachmentSections = buildAssistantAutoReplyAttachmentSections({
-        lifecycleSection: renderAssistantInputAttachmentDescriptorPromptSection({
-          attachments: entry.attachmentEvidence.attachments,
-          descriptors: entry.attachmentDescriptors,
-          evidenceReasonCode: entry.attachmentEvidence.reasonCode,
-          evidenceStatus: entry.attachmentEvidence.status,
-          projectionReasonCode: entry.projection?.reasonCode ?? null,
-          projectionStatus: entry.projection?.status ?? null,
-        }),
-        renderedAttachmentSections: entry.attachmentBundles
-          .map((attachment) => renderPreparedAttachmentPromptSection(attachment))
-          .filter((section): section is string => section !== null),
-      })
-      return renderAssistantAutoReplyInputSection({
-        attachmentSections,
-        evidenceReasonCode: entry.attachmentEvidence.reasonCode,
-        evidenceStatus: entry.attachmentEvidence.status,
-        hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
-        inputText: normalizeNullableString(entry.text),
-        index,
-        promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
-        projectionReasonCode: entry.projection?.reasonCode ?? null,
-        projectionStatus: entry.projection?.status ?? null,
-        replyContext: entry.telegramMetadata?.replyContext ?? null,
-        totalInputs: preparedInputs.length,
-      })
-    })
-    .filter((section): section is string => section !== null)
+  const textualSections = buildPreparedAssistantAutoReplySections({
+    preparedInputs,
+  })
 
-  const hasTextualContent = textualSections.length > 0
   const nextPrompt = buildAssistantAutoReplyPromptText(inputs, textualSections)
   const attachmentSources = buildPreparedAttachmentSources(preparedInputs)
+  const failedNativeImageKeys = new Set<string>()
 
   const preparedMultimodalInput =
     await prepareAssistantInputMultimodalUserMessageContent({
       attachmentSources,
       materializeWorkspaceArtifacts: options.materializeWorkspaceArtifacts,
       onEvidenceReadFailure(failure) {
+        if (failure.kind === 'image') {
+          const failedNativeImageKey = resolveFailedNativeImageAttachmentKey({
+            attachmentOrdinal: failure.attachmentOrdinal,
+            inputId: failure.inputId ?? null,
+            preparedInputs,
+          })
+          if (failedNativeImageKey) {
+            failedNativeImageKeys.add(failedNativeImageKey)
+          }
+        }
         options.onEvent?.({
           type: 'input.reply-progress',
           inputId: failure.inputId ?? inputs[0]?.inputId,
@@ -206,8 +190,25 @@ export async function prepareAssistantAutoReplyInput(
       prompt: nextPrompt,
       vaultRoot,
     })
+  const finalTextualSections = failedNativeImageKeys.size > 0
+    ? buildPreparedAssistantAutoReplySections({
+        exposeNativeImageReferenceKeys: failedNativeImageKeys,
+        preparedInputs,
+      })
+    : textualSections
+  const finalPrompt = finalTextualSections === textualSections
+    ? nextPrompt
+    : buildAssistantAutoReplyPromptText(inputs, finalTextualSections)
+  const userMessageContent = preparedMultimodalInput.userMessageContent
+    ? finalTextualSections === textualSections
+      ? preparedMultimodalInput.userMessageContent
+      : replaceInitialUserMessageText(
+          preparedMultimodalInput.userMessageContent,
+          finalPrompt,
+        )
+    : null
 
-  if (!hasTextualContent && preparedMultimodalInput.userMessageContent === null) {
+  if (finalTextualSections.length === 0 && userMessageContent === null) {
     return {
       kind: 'skip',
       reason:
@@ -218,9 +219,110 @@ export async function prepareAssistantAutoReplyInput(
 
   return {
     kind: 'ready',
-    prompt: nextPrompt,
-    userMessageContent: preparedMultimodalInput.userMessageContent,
+    prompt: finalPrompt,
+    userMessageContent,
   }
+}
+
+function buildPreparedAssistantAutoReplySections(input: {
+  exposeNativeImageReferenceKeys?: ReadonlySet<string>
+  preparedInputs: readonly AssistantAutoReplyPromptInputWithBundles[]
+}): string[] {
+  return input.preparedInputs
+    .map((entry, index) => {
+      const attachmentSections = buildAssistantAutoReplyAttachmentSections({
+        lifecycleSection: renderAssistantInputAttachmentDescriptorPromptSection({
+          attachments: entry.attachmentEvidence.attachments,
+          descriptors: entry.attachmentDescriptors,
+          evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+          evidenceStatus: entry.attachmentEvidence.status,
+          projectionReasonCode: entry.projection?.reasonCode ?? null,
+          projectionStatus: entry.projection?.status ?? null,
+        }),
+        renderedAttachmentSections: entry.attachmentBundles
+          .map((attachment) =>
+            renderPreparedAttachmentPromptSection(attachment, {
+              exposeNativeImageReference:
+                input.exposeNativeImageReferenceKeys?.has(
+                  buildInputAttachmentKey(entry.inputId, attachment.ordinal),
+                ) ?? false,
+            }),
+          )
+          .filter((section): section is string => section !== null),
+      })
+      return renderAssistantAutoReplyInputSection({
+        attachmentSections,
+        evidenceReasonCode: entry.attachmentEvidence.reasonCode,
+        evidenceStatus: entry.attachmentEvidence.status,
+        hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
+        inputText: normalizeNullableString(entry.text),
+        index,
+        promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
+        projectionReasonCode: entry.projection?.reasonCode ?? null,
+        projectionStatus: entry.projection?.status ?? null,
+        replyContext: entry.telegramMetadata?.replyContext ?? null,
+        totalInputs: input.preparedInputs.length,
+      })
+    })
+    .filter((section): section is string => section !== null)
+}
+
+function replaceInitialUserMessageText(
+  content: readonly AssistantUserMessageContentPart[],
+  prompt: string,
+): AssistantUserMessageContentPart[] {
+  const [first, ...rest] = content
+  if (!first || first.type !== 'text') {
+    return [
+      {
+        type: 'text',
+        text: prompt,
+      },
+      ...content,
+    ]
+  }
+
+  return [
+    {
+      ...first,
+      text: prompt,
+    },
+    ...rest,
+  ]
+}
+
+function resolveFailedNativeImageAttachmentKey(input: {
+  attachmentOrdinal: number
+  inputId: string | null
+  preparedInputs: readonly AssistantAutoReplyPromptInputWithBundles[]
+}): string | null {
+  const inputId = normalizeNullableString(input.inputId)
+  if (inputId) {
+    return buildInputAttachmentKey(inputId, input.attachmentOrdinal)
+  }
+
+  const matchingInputs = input.preparedInputs.filter((entry) =>
+    entry.attachmentBundles.some(
+      (attachment) => attachment.ordinal === input.attachmentOrdinal &&
+        attachment.kind === 'image' &&
+        attachment.routingImage.eligible,
+    ),
+  )
+  if (matchingInputs.length !== 1) {
+    return null
+  }
+
+  return buildInputAttachmentKey(
+    matchingInputs[0]?.inputId ?? null,
+    input.attachmentOrdinal,
+  )
+}
+
+function buildInputAttachmentKey(
+  inputId: string | null,
+  attachmentOrdinal: number,
+): string {
+  return `${inputId ?? 'unknown'}:${attachmentOrdinal}`
 }
 
 export function readTelegramAutoReplyMetadataFromAssistantInput(input: {
@@ -353,7 +455,7 @@ function renderAttachmentEvidencePromptSection(
   const storedPathLine = shouldRedactImageReference
     ? null
     : renderAttachmentEvidencePromptStoredPath(attachment)
-  const derivedManifestPath = normalizeNullableString(
+  const derivedManifestPath = normalizePromptRawAttachmentPath(
     attachment.derived?.manifestPath ?? null,
   )
   const byteSize = attachment.byteSize ?? attachment.raw?.byteSize ?? null
@@ -426,12 +528,31 @@ function renderAttachmentEvidencePromptSection(
 function renderAttachmentEvidencePromptStoredPath(
   attachment: AssistantInputAttachmentEvidenceItem,
 ): string | null {
-  const rawPath = normalizeNullableString(attachment.raw?.path ?? null)
-  if (!hasRawAttachmentStoredPath(rawPath)) {
+  const rawPath = normalizePromptRawAttachmentPath(attachment.raw?.path ?? null)
+  if (!rawPath) {
     return null
   }
 
   return `storedPath: ${rawPath}`
+}
+
+function normalizePromptRawAttachmentPath(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  if (!normalized || !hasRawAttachmentStoredPath(normalized)) {
+    return null
+  }
+  if (
+    normalized.includes('\\') ||
+    normalized.includes('?') ||
+    normalized.includes('#') ||
+    /[\u0000-\u001F\u007F]/u.test(normalized) ||
+    normalized.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    return null
+  }
+  return normalized
 }
 
 function hasPdfAttachmentEvidencePath(
@@ -513,13 +634,22 @@ function buildAssistantAutoReplyPromptText(
 
 function renderPreparedAttachmentPromptSection(
   attachment: AssistantInputAttachmentModelBundle,
+  options: {
+    exposeNativeImageReference?: boolean
+  } = {},
 ): string | null {
   const hasTextFragments = attachment.fragments.some(
     (fragment) => fragment.kind !== 'attachment_metadata',
   )
   const richEvidenceCandidate =
     hasAssistantInputAttachmentEvidenceCandidate(attachment)
+  const exposeNativeImageReference =
+    options.exposeNativeImageReference === true &&
+    attachment.kind === 'image' &&
+    attachment.routingImage.eligible &&
+    hasRawAttachmentStoredPath(attachment.storedPath)
   const shouldRedactImageReference =
+    !exposeNativeImageReference &&
     shouldRedactAttachmentBundleImageReference(attachment)
   const hasRawStoredPath = !shouldRedactImageReference &&
     hasRawAttachmentStoredPath(attachment.storedPath)
@@ -543,7 +673,10 @@ function renderPreparedAttachmentPromptSection(
     return null
   }
 
-  const sections = attachment.combinedText.length > 0 ? [attachment.combinedText] : []
+  const combinedText = renderPreparedAttachmentCombinedText(attachment, {
+    exposeNativeImageReference,
+  })
+  const sections = combinedText.length > 0 ? [combinedText] : []
   if (status && !hasTextFragments) {
     sections.push(status)
   }
@@ -561,6 +694,56 @@ function renderPreparedAttachmentPromptSection(
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
   return `${label}\n${sections.join('\n\n')}`
+}
+
+function renderPreparedAttachmentCombinedText(
+  attachment: AssistantInputAttachmentModelBundle,
+  input: {
+    exposeNativeImageReference: boolean
+  },
+): string {
+  if (!input.exposeNativeImageReference) {
+    return attachment.combinedText
+  }
+
+  const fragments: string[] = []
+  let renderedFallbackMetadata = false
+  for (const fragment of attachment.fragments) {
+    if (fragment.kind === 'attachment_metadata' && !renderedFallbackMetadata) {
+      fragments.push(
+        `[${fragment.label}]\n${renderNativeImageFallbackMetadata(attachment)}`,
+      )
+      renderedFallbackMetadata = true
+      continue
+    }
+    fragments.push(`[${fragment.label}]\n${fragment.text}`)
+  }
+
+  if (!renderedFallbackMetadata) {
+    fragments.unshift(
+      `[attachment-${attachment.ordinal}-metadata]\n${renderNativeImageFallbackMetadata(attachment)}`,
+    )
+  }
+
+  return fragments.join('\n\n')
+}
+
+function renderNativeImageFallbackMetadata(
+  attachment: AssistantInputAttachmentModelBundle,
+): string {
+  return [
+    `ordinal: ${attachment.ordinal}`,
+    `kind: ${attachment.kind}`,
+    `mime: ${attachment.mime ?? 'unknown'}`,
+    `byteSizeBucket: ${renderNativeRoutingImageSizeBucket(attachment.byteSize ?? null)}`,
+    `storedPath: ${attachment.storedPath ?? 'missing'}`,
+    `parseState: ${attachment.parseState ?? 'unknown'}`,
+    'nativeImageEvidence: unavailable_text_only_fallback',
+    `routingImageEligible: ${String(attachment.routingImage.eligible)}`,
+    `routingImageReason: ${attachment.routingImage.reason}`,
+    `routingImageMediaType: ${attachment.routingImage.mediaType ?? 'unknown'}`,
+    `routingImageExtension: ${attachment.routingImage.extension ?? 'unknown'}`,
+  ].join('\n')
 }
 
 function buildPreparedAttachmentSources(
@@ -712,7 +895,9 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
   ordinal: number
 }): string[] {
   if (input.attachment) {
-    const rawPath = normalizeNullableString(input.attachment.raw?.path ?? null)
+    const rawPath = normalizePromptRawAttachmentPath(
+      input.attachment.raw?.path ?? null,
+    )
     if (shouldRedactAttachmentEvidenceImageReference(input.attachment)) {
       const routingImage = getRoutingImageEligibility({
         byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
@@ -878,13 +1063,26 @@ function hasAttachmentMetadataLine(
 function shouldRedactAttachmentEvidenceImageReference(
   attachment: AssistantInputAttachmentEvidenceItem,
 ): boolean {
-  return attachment.kind === 'image'
+  return attachment.kind === 'image' &&
+    getAttachmentEvidencePromptRoutingImage(attachment).eligible
 }
 
 function shouldRedactAttachmentBundleImageReference(
   attachment: AssistantInputAttachmentModelBundle,
 ): boolean {
-  return attachment.kind === 'image'
+  return attachment.kind === 'image' && attachment.routingImage.eligible
+}
+
+function getAttachmentEvidencePromptRoutingImage(
+  attachment: AssistantInputAttachmentEvidenceItem,
+): RoutingImageEligibility {
+  return getRoutingImageEligibility({
+    byteSize: attachment.byteSize ?? attachment.raw?.byteSize ?? null,
+    fileName: attachment.fileName,
+    kind: attachment.kind,
+    mime: attachment.mime ?? attachment.raw?.mediaType ?? null,
+    storedPath: normalizeNullableString(attachment.raw?.path ?? null),
+  })
 }
 
 function shouldRedactAttachmentDescriptorImageReference(input: {

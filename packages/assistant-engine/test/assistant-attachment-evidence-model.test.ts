@@ -74,6 +74,7 @@ describe('assistant input attachment evidence model materialization', () => {
       text: 'Attachment image 1.',
     })
     expect(JSON.stringify(prepared.userMessageContent)).not.toContain('01__meal.jpg')
+    expect(JSON.stringify(prepared.userMessageContent)).not.toContain(imagePath)
     expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([imagePath])
   })
 
@@ -195,7 +196,7 @@ describe('assistant input attachment evidence model materialization', () => {
     expect(bundle.combinedText).toContain('parseState: unsupported')
   })
 
-  it('redacts unsupported image filenames and source paths from model text', async () => {
+  it('keeps unsupported image paths available for text-only tool inspection', async () => {
     const vaultRoot = await createTempVaultRoot()
     const rawPath = 'raw/inbox/capture-1/attachments/private-scan.tiff'
     const bundle = await buildAssistantInputAttachmentModelBundle({
@@ -224,8 +225,9 @@ describe('assistant input attachment evidence model materialization', () => {
     })
     expect(bundle.combinedText).toContain('Decoded label text.')
     expect(bundle.combinedText).toContain('routingImageReason: unsupported-format')
-    expect(bundle.combinedText).not.toContain('private-scan.tiff')
-    expect(bundle.combinedText).not.toContain(rawPath)
+    expect(bundle.combinedText).toContain('fileName: private-scan.tiff')
+    expect(bundle.combinedText).toContain(`storedPath: ${rawPath}`)
+    expect(bundle.combinedText).not.toContain('nativeImageEvidence: omitted_non_addressable')
   })
 
   it('falls back to text-only mode when image bytes are missing', async () => {
@@ -291,9 +293,9 @@ describe('assistant input attachment evidence model materialization', () => {
       reason: 'too-large',
     })
     expect(bundle.combinedText).toContain('routingImageReason: too-large')
-    expect(bundle.combinedText).not.toContain('fileName: too-large.jpg')
-    expect(bundle.combinedText).not.toContain(`storedPath: ${imagePath}`)
-    expect(bundle.combinedText).toContain('nativeImageEvidence: omitted_non_addressable')
+    expect(bundle.combinedText).toContain('fileName: too-large.jpg')
+    expect(bundle.combinedText).toContain(`storedPath: ${imagePath}`)
+    expect(bundle.combinedText).not.toContain('nativeImageEvidence: omitted_non_addressable')
 
     const prepared = await prepareAssistantInputMultimodalUserMessageContent({
       attachmentSources: [bundle],
@@ -449,13 +451,16 @@ describe('assistant input attachment evidence model materialization', () => {
     ])
   })
 
-  it('ignores invalid raw image paths before reading filesystem bytes', async () => {
+  it.each([
+    '/tmp/not-a-vault-artifact.jpg',
+    'raw/inbox/capture-1/attachments/../secret/not-a-vault-artifact.jpg',
+  ])('ignores invalid raw image path %s before reading filesystem bytes', async (rawPath) => {
     const vaultRoot = await createTempVaultRoot()
     const bundle = await buildAssistantInputAttachmentModelBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
-        rawPath: '/tmp/not-a-vault-artifact.jpg',
+        rawPath,
       }),
       vaultRoot,
     })
@@ -482,6 +487,7 @@ describe('assistant input attachment evidence model materialization', () => {
       userMessageContent: null,
     })
     expect(failures).toEqual([])
+    expect(bundle.combinedText).not.toContain(rawPath)
   })
 
   it('reads derived parser manifest text only from the declared allowed root', async () => {
