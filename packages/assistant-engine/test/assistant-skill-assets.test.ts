@@ -10,6 +10,9 @@ import {
   resolveAssistantSkillsRoot,
   withAssistantSkillsRootEnv,
 } from '../src/assistant-skill-assets.js'
+import {
+  ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+} from '../src/assistant/first-contact-welcome.js'
 
 describe('assistant skill assets', () => {
   async function readSkillFile(skill: (typeof ASSISTANT_SKILLS)[number]) {
@@ -46,6 +49,9 @@ describe('assistant skill assets', () => {
 
   it('builds stable symbolic skill file references', () => {
     expect(MURPH_ASSISTANT_SKILLS_ROOT_REF).toBe('$MURPH_ASSISTANT_SKILLS_ROOT')
+    expect(buildAssistantSkillFileRef('conversation-onboarding')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+    )
     expect(buildAssistantSkillFileRef('experiment-onboarding')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
@@ -97,6 +103,39 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('commonsProtocolRef')
     expect(raw).toContain(
       'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
+    )
+    expect(raw).not.toContain('/tmp/')
+    expect(raw).not.toContain('.codex-hosted')
+  })
+
+  it('keeps conversation onboarding details in the skill file, not the prompt', async () => {
+    const conversationOnboardingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'conversation-onboarding',
+    )
+    expect(conversationOnboardingSkill).toBeTruthy()
+    if (!conversationOnboardingSkill) {
+      return
+    }
+
+    const raw = await readSkillFile(conversationOnboardingSkill)
+
+    expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
+    expect(raw).toContain(
+      'Use this skill only when the current prompt includes the `Conversation onboarding:` activation',
+    )
+    expect(raw).toContain('roughly 3-4 short assistant messages')
+    expect(raw).toContain(
+      'complete a wearable/app checkpoint before first experiment or logging setup',
+    )
+    expect(raw).toContain('vault-cli device account list --format json')
+    expect(raw).toContain('vault-cli device connect <provider> --format json')
+    expect(raw).toContain(
+      'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
+    )
+    expect(raw).toContain('one lightweight, bounded experiment at a time')
+    expect(raw).toContain('retrospective baseline')
+    expect(raw).toContain(
+      'vault-cli assistant onboarding complete --reason <user_answered|user_declined>',
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
