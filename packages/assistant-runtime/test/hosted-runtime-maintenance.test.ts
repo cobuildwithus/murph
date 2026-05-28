@@ -1397,6 +1397,20 @@ describe("runHostedDeviceSyncPass", () => {
         },
       ],
     });
+    assert.deepEqual(result.stagedDirtyAcks, [
+      {
+        connectionId: "dsc_dirty_batch_1",
+        nextWakeAt: "2026-04-08T00:05:00.000Z",
+        processedDirtyPayloadIds: ["dsp_1"],
+        processedRevision: "11",
+      },
+      {
+        connectionId: "dsc_dirty_batch_2",
+        nextWakeAt: "2026-04-08T00:03:00.000Z",
+        processedDirtyPayloadIds: ["dsp_2", "dsp_3"],
+        processedRevision: "12",
+      },
+    ]);
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
