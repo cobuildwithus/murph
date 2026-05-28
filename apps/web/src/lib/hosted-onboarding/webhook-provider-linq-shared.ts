@@ -46,7 +46,13 @@ export type HostedOnboardingLinqMessageContext = {
 export function isHostedLinqIMessageFirstContact(
   event: HostedLinqMessageReceivedEvent,
 ): boolean {
-  return normalizeHostedLinqService(event.data.service) === "imessage";
+  return isHostedLinqIMessageService(event.data.service);
+}
+
+export function isHostedLinqIMessageService(
+  value: string | null | undefined,
+): boolean {
+  return normalizeHostedLinqService(value) === "imessage";
 }
 
 export function resolveHostedOnboardingLinqMessageContext(

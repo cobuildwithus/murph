@@ -5,7 +5,11 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
-import { normalizeAssistantDeliveryError } from './outbox.js'
+import {
+  type AssistantOutboxDispatchPayload,
+  normalizeAssistantDeliveryError,
+  sendAssistantOutboxPayload,
+} from './outbox.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -93,32 +97,146 @@ export async function deliverAssistantReply(input: {
     }
   }
 
-  const state = createAssistantRuntimeStateService(input.input.vault)
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
-    audience,
-    channel: deliveryChannel,
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: deliveryFields.channel,
     input: input.input,
     session: input.session,
   })
-  const outcome = await state.outbox.deliverMessage({
-    turnId: input.turnId,
-    sessionId: input.session.sessionId,
-    message: input.response,
-    channel: deliveryChannel,
+
+  return await deliverAssistantCurrentAudienceMessage({
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliverySource: input.input.deliverySource ?? null,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    identityId: audience?.identityId ?? input.session.binding.identityId,
+    input: input.input,
+    message: input.response,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+    turnId: input.turnId,
+  })
+}
+
+export async function deliverAssistantProgressUpdate(input: {
+  input: AssistantMessageInput
+  ordinal: number
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  text: string
+  turnId: string
+}): Promise<void> {
+  if (!input.input.deliverResponse) {
+    return
+  }
+
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  const deliveryIdempotencyKey = buildAssistantProgressDeliveryIdempotencyKey({
+    deliveryIdempotencyKey: resolveAssistantHostedDeliveryIdempotency({
+      audience: input.sharedPlan.conversationPolicy.audience,
+      channel: deliveryFields.channel,
+      input: input.input,
+      session: input.session,
+    }).deliveryIdempotencyKey,
+    ordinal: input.ordinal,
+    turnId: input.turnId,
+  })
+
+  await sendAssistantOutboxPayload({
+    payload: {
+      ...deliveryFields,
+      deliveryIdempotencyKey,
+      message: input.text,
+      turnId: input.turnId,
+    },
+    vault: input.input.vault,
+  })
+}
+
+export function buildAssistantProgressDeliveryIdempotencyKey(input: {
+  deliveryIdempotencyKey?: string | null
+  ordinal: number
+  turnId: string
+}): string {
+  const explicitKey = normalizeNullableString(input.deliveryIdempotencyKey)
+  if (explicitKey) {
+    return `${explicitKey}:progress:${input.ordinal}`
+  }
+
+  return `assistant-progress:${input.turnId}:${input.ordinal}`
+}
+
+type AssistantCurrentAudienceDeliveryFields = Pick<
+  AssistantOutboxDispatchPayload,
+  | 'actorId'
+  | 'bindingDelivery'
+  | 'channel'
+  | 'deliverySource'
+  | 'explicitTarget'
+  | 'identityId'
+  | 'replyToMessageId'
+  | 'sessionId'
+  | 'subject'
+  | 'threadId'
+  | 'threadIsDirect'
+>
+
+function resolveAssistantCurrentAudienceDeliveryFields(input: {
+  input: AssistantMessageInput
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): AssistantCurrentAudienceDeliveryFields {
+  const audience = input.sharedPlan.conversationPolicy.audience
+  return {
     actorId: audience?.actorId ?? input.session.binding.actorId,
-    threadId: audience?.threadId ?? input.session.binding.threadId,
-    threadIsDirect: audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
     bindingDelivery: audience?.bindingDelivery ?? input.session.binding.delivery,
+    channel: audience?.channel ?? input.session.binding.channel,
+    deliverySource: input.input.deliverySource ?? null,
     explicitTarget: audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
+    identityId: audience?.identityId ?? input.session.binding.identityId,
     replyToMessageId:
       input.input.deliveryReplyToMessageId ?? audience?.replyToMessageId ?? null,
+    sessionId: input.session.sessionId,
     subject: input.input.deliverySubject ?? null,
+    threadId: audience?.threadId ?? input.session.binding.threadId,
+    threadIsDirect: audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
+  }
+}
+
+async function deliverAssistantCurrentAudienceMessage(input: {
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean | undefined
+  input: AssistantMessageInput
+  message: string
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<AssistantDeliveryOutcome> {
+  if (!input.input.deliverResponse) {
+    return {
+      kind: 'not-requested',
+      session: input.session,
+    }
+  }
+
+  const state = createAssistantRuntimeStateService(input.input.vault)
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  const outcome = await state.outbox.deliverMessage({
+    ...deliveryFields,
+    message: input.message,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    turnId: input.turnId,
     dependencies: undefined,
     dispatchMode: input.input.deliveryDispatchMode,
   })

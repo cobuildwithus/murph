@@ -228,11 +228,8 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       userId: "member_test",
     });
     machine.applySignal({
-      eventId: "runtime-prewarm:event-test",
-      kind: "runtime_prewarm_requested",
-      occurredAt: "2026-05-20T11:59:58.000Z",
+      ...runtimePrewarmSignal(),
       scopeHash: "linq-chat:legacy-scope",
-      source: "linq.imessage.typing",
     });
 
     const continued = await runUntilContinueAsNew(machine);
@@ -244,11 +241,13 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         userId: "member_test",
       },
     ]);
+    expect(continued.state?.invalidSignalCount).toBe(0);
     expect(continued.state).toMatchObject({
       lastPrewarmResult: "accepted",
       prewarmRequested: false,
       prewarmSignalCount: 1,
     });
+    expect(continued.state).not.toHaveProperty("scopeHash");
   });
 
   it("does not let pending prewarm block a later mailbox demand signal", async () => {

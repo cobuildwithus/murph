@@ -37,7 +37,9 @@ export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 5
 export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 15_000;
-export const HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS = 5_000;
+// Workflow command timeout is replay-sensitive. Keep it pinned with response
+// slack over the shared 5s prewarm HTTP/container budget unless versioned.
+export const HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS = 6_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
 export const HOSTED_USER_RUNTIME_MAX_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS = 3_600_000;
@@ -92,13 +94,10 @@ export async function hostedUserRuntimeWorkflow(
     cancellationType: ActivityCancellationType.ABANDON,
     retry: {
       initialInterval: "1 second",
-      maximumAttempts: 2,
+      maximumAttempts: 1,
       maximumInterval: "5 seconds",
     },
-    startToCloseTimeout: Math.min(
-      options.ensureRuntimeProcessingStartToCloseTimeoutMs,
-      HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
-    ),
+    startToCloseTimeout: HOSTED_USER_RUNTIME_DEFAULT_PREWARM_START_TO_CLOSE_TIMEOUT_MS,
   });
   const dedicatedQueuePrewarmActivities = proxyActivities<typeof activities>({
     cancellationType: ActivityCancellationType.ABANDON,
@@ -1086,6 +1085,8 @@ function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         "scopeHash",
         "source",
       ]);
+      // Legacy replay tolerance: older prewarm signals carried a raw chat-id hash.
+      // New producers must not send it, and the workflow deliberately ignores it.
       if (record.scopeHash !== undefined && record.scopeHash !== null) {
         requireOpaqueIdentifier(
           record.scopeHash,

@@ -195,11 +195,13 @@ Cloudflare directly, or add a `readRuntimeDemand` source. Temporal reads real
 web-owned demand first; if mailbox or other durable demand exists, normal
 ensure-processing wins. If demand is idle, Temporal may issue one short
 best-effort Cloudflare prewarm Activity on a dedicated prewarm task queue and
-clears the hint after the attempt. If a real demand signal arrives while the
-prewarm Activity is pending, the workflow abandons the prewarm wait and
-immediately re-reads demand. Mailbox processing must not wait behind a typing
-hint in workflow state, Temporal Activity worker capacity, or Cloudflare
-container lifecycle locks.
+clears the hint after the attempt. The prewarm attempt uses no Activity retry,
+keeps the Cloudflare readiness budget shorter than the workflow Activity
+timeout, and does not wait on slow container cleanup while holding the prewarm
+lifecycle lock. If a real demand signal arrives while the prewarm Activity is
+pending, the workflow abandons the prewarm wait and immediately re-reads demand.
+Mailbox processing must not wait behind a typing hint in workflow state,
+Temporal Activity worker capacity, or Cloudflare container lifecycle locks.
 
 Non-conversation control wakes follow the same durable-demand rule where they
 own durable product/control facts. Manual runs and browser-vault refreshes

@@ -10,6 +10,9 @@ import type {
   CodexAppServerTurnInput,
 } from '../assistant-codex.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
+import {
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
+} from './dynamic-tools.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 
@@ -79,6 +82,10 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
+    dynamicTools:
+      input.input.turnProgress
+        ? [MURPH_SEND_PROGRESS_UPDATE_TOOL]
+        : undefined,
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),

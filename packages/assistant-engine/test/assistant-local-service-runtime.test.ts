@@ -519,6 +519,10 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Late follow up',
   )
+  expect(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.turnProgress)
+    .toBeTruthy()
+  expect(mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.turnProgress)
+    .toBeNull()
   assert.deepEqual(
     mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
       .resumeState,
@@ -4542,6 +4546,7 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/delivery-service.js', () => ({
     deliverAssistantReply: mocks.dispatchAssistantReply,
+    deliverAssistantProgressUpdate: vi.fn(async () => undefined),
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({

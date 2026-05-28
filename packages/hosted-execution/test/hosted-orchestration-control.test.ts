@@ -415,6 +415,14 @@ describe("hosted orchestration control contracts", () => {
     })).toThrow(
       "Hosted runtime prewarm retry-later response must not include mailboxLag.",
     );
+
+    expect(() => parseHostedRuntimeSignal({
+      eventId: "runtime-prewarm:event-test",
+      kind: "runtime_prewarm_requested",
+      occurredAt: "2026-05-20T12:00:00.000Z",
+      scopeHash: "linq-chat:scope-test",
+      source: "linq.imessage.typing",
+    })).toThrow("Hosted runtime prewarm signal must not include scopeHash.");
   });
 });
 

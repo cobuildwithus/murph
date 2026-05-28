@@ -92,6 +92,22 @@ describe('assistant GPT-5 execution prompt overlay', () => {
     expect(text).toContain('Execution style:')
     expect(text).not.toContain('GPT-5 execution bias:')
   })
+
+  it('mentions progress updates only when the tool is available', () => {
+    expect(
+      buildAssistantExecutionBehaviorText({
+        profile: 'gpt5-agentic',
+      }),
+    ).not.toContain('send_progress_update')
+
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantTurnProgressAvailable: true,
+    }))
+
+    expect(prompt).toContain('send_progress_update')
+    expect(prompt).toContain('large PDFs, lab reports, research')
+    expect(prompt).toContain('Do not state interpretations, abnormalities, diagnoses')
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {

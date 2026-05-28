@@ -415,6 +415,106 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(1);
   });
 
+  it("does not wait on slow cleanup after a timed-out prewarm start", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopped" = "stopped";
+      const prewarmStarted = createDeferred<void>();
+      const destroy = vi.fn(async () => {
+        await new Promise<void>(() => undefined);
+      });
+      const startAndWaitForPorts = vi.fn(async (input: {
+        cancellationOptions: { abort: AbortSignal };
+      }) => {
+        status = "running";
+        prewarmStarted.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          input.cancellationOptions.abort.addEventListener(
+            "abort",
+            () => reject(input.cancellationOptions.abort.reason),
+            { once: true },
+          );
+        });
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        startAndWaitForPorts,
+      });
+
+      const prewarmOutcome = container.prewarmForProcessing({
+        timeoutMs: 5_000,
+        userId: "member_123",
+      }).then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
+
+      await prewarmStarted.promise;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(prewarmOutcome).resolves.toBe("rejected");
+      expect(destroy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns busy instead of queueing prewarm behind active runtime work", async () => {
+    const firstRequestStarted = createDeferred<void>();
+    const firstRequestRelease = createDeferred<void>();
+    let workspaceRequestCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      workspaceRequestCount += 1;
+      firstRequestStarted.resolve();
+      await firstRequestRelease.promise;
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_lock_holder"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await firstRequestStarted.promise;
+
+    await expect(container.prewarmForProcessing({
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).resolves.toEqual({ kind: "busy" });
+
+    firstRequestRelease.resolve();
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+    expect(workspaceRequestCount).toBe(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
   it("does not restart a warm shell when prewarm is preempted by workspace invocation", async () => {
     const healthEntered = createDeferred<void>();
     const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
