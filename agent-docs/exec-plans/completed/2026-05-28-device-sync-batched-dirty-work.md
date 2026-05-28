@@ -11,6 +11,8 @@ Speed up hosted device-sync dirty work handoff without adding a second queue, le
 - Record plural dirty acks through the existing system-mailbox post-checkpoint seam.
 - Keep each ack exact by connection id, processed revision, and explicit dirty payload row ids.
 - Raise the per-connection dirty payload hydrate page modestly only with safer direct-webhook payload handling.
+- Add a global pending-response payload budget so one request cannot hydrate an unbounded number of large direct payload rows.
+- Keep dirty ack lightweight: mutate exact rows and compute pending state with existence checks, not by decrypting remaining payload rows.
 - Add regression tests for plural checkpoint-safe dirty acks and non-truncated oversized direct webhook JSON.
 
 ## Non-Goals
@@ -24,5 +26,18 @@ Speed up hosted device-sync dirty work handoff without adding a second queue, le
 
 - Focused assistant-runtime hosted device-sync/runtime mailbox tests.
 - Focused hosted-web Prisma dirty-connection tests.
+- Focused hosted-web dirty runtime authority tests.
+- `apps/web` prepared typecheck.
 - `pnpm typecheck`.
 - Diff/privacy checks before commit.
+
+## Outcome
+
+- Runtime collects multiple exact dirty acks per bounded pending fetch.
+- System mailbox persists split singular dirty-processed recording items for rollback-compatible post-checkpoint retry, while still accepting existing batch records.
+- Dirty pending hydration is capped per connection and across a response.
+- Dirty ack no longer hydrates/decrypts remaining payload rows after delete.
+- Oversized direct webhook JSON is omitted from inline payloads without changing durable payload-row storage class.
+Status: completed
+Updated: 2026-05-28
+Completed: 2026-05-28
