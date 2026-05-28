@@ -13,10 +13,9 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v1'
+  'murph.assistant-cli-surface-bootstrap.v2'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
-const assistantCliSurfaceBootstrapFamilyIndexEntryLimit = 8
-const assistantCliSurfaceBootstrapOptionalOptionLimit = 4
+const assistantCliSurfaceBootstrapDetailedModeCommandLimit = 120
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',
@@ -25,9 +24,46 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'assistant ask',
   'assistant chat',
   'assistant deliver',
+  'assistant doctor',
+  'assistant onboarding reopen',
+  'assistant onboarding status',
   'assistant run',
+  'assistant self-target clear',
+  'assistant self-target list',
+  'assistant self-target set',
+  'assistant self-target show',
+  'assistant session list',
+  'assistant session show',
+  'assistant status',
+  'assistant stop',
   'chat',
+  'doctor',
+  'inbox attachment decode',
+  'inbox attachment inspect',
+  'inbox attachment list',
+  'inbox attachment parse',
+  'inbox attachment reparse',
+  'inbox attachment show',
+  'inbox attachment show-status',
+  'inbox attachment status',
+  'inbox backfill',
+  'inbox bootstrap',
+  'inbox doctor',
+  'inbox init',
+  'inbox model bundle',
+  'inbox parse',
+  'inbox requeue',
+  'inbox run',
+  'inbox setup',
+  'inbox source add',
+  'inbox source list',
+  'inbox source remove',
+  'inbox status',
+  'inbox stop',
+  'model',
   'run',
+  'status',
+  'stop',
 ])
 
 const cachedAssistantCliSurfaceContractPromises = new Map<
@@ -117,11 +153,10 @@ export function buildAssistantCliSurfaceContract(
   }
   const sourceDetail = input?.sourceDetail ?? 'full'
 
-  const fallbackModes: readonly AssistantCliContractRenderMode[] = [
-    'with-common-options',
-    'required-only',
-    'description-only',
-  ]
+  const fallbackModes: readonly AssistantCliContractRenderMode[] =
+    commands.length > assistantCliSurfaceBootstrapDetailedModeCommandLimit
+      ? ['description-only']
+      : ['required-only', 'description-only']
 
   for (const mode of fallbackModes) {
     const contract = renderAssistantCliSurfaceContract(commands, mode, sourceDetail)
@@ -333,7 +368,6 @@ function normalizeAssistantCliManifestCommands(
 type AssistantCliContractRenderMode =
   | 'description-only'
   | 'required-only'
-  | 'with-common-options'
 
 type AssistantCliCommandGroup = {
   commands: AssistantCliLlmsManifestCommand[]
@@ -353,9 +387,6 @@ function renderAssistantCliSurfaceContract(
       ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
       : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',
     'Use this contract first. Only fall back to `--schema --format json` or `--help` when a needed detail is missing here.',
-    '',
-    'Family Index:',
-    ...buildAssistantCliFamilyIndexLines(groupedCommands),
   ]
 
   for (const group of groupedCommands) {
@@ -367,18 +398,6 @@ function renderAssistantCliSurfaceContract(
   }
 
   return lines.join('\n')
-}
-
-function buildAssistantCliFamilyIndexLines(
-  groups: readonly AssistantCliCommandGroup[],
-): string[] {
-  return groups.map((group) => {
-    const renderedLeafCommands = group.commands
-      .map((command) => renderAssistantCliFamilyLeafCommandName(group.family, command.name))
-      .slice(0, assistantCliSurfaceBootstrapFamilyIndexEntryLimit)
-    const remainingCount = group.commands.length - renderedLeafCommands.length
-    return `- ${group.family} (${group.commands.length}): ${renderedLeafCommands.join(', ')}${remainingCount > 0 ? ` +${remainingCount} more` : ''}`
-  })
 }
 
 function groupAssistantCliManifestCommands(
@@ -404,17 +423,6 @@ function readAssistantCliCommandFamily(commandName: string): string {
   return separatorIndex === -1 ? 'root' : commandName.slice(0, separatorIndex)
 }
 
-function renderAssistantCliFamilyLeafCommandName(
-  family: string,
-  commandName: string,
-): string {
-  if (family === 'root') {
-    return commandName
-  }
-
-  return commandName === family ? family : commandName.slice(family.length + 1)
-}
-
 function renderAssistantCliContractCommandLine(
   command: AssistantCliLlmsManifestCommand,
   mode: AssistantCliContractRenderMode,
@@ -429,12 +437,6 @@ function renderAssistantCliContractCommandLine(
   const requiredOptions = readAssistantCliRequiredSchemaPropertyNames(optionsSchema)
     .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
     .map((name) => renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]))
-  const commonOptions =
-    mode === 'with-common-options'
-      ? readAssistantCliCommonOptionalOptionNames(optionsSchema).map((name) =>
-          renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]),
-        )
-      : []
 
   if (mode !== 'description-only') {
     if (requiredArgs.length > 0) {
@@ -444,10 +446,6 @@ function renderAssistantCliContractCommandLine(
     if (requiredOptions.length > 0) {
       parts.push(`required ${requiredOptions.join(', ')}`)
     }
-  }
-
-  if (mode === 'with-common-options' && commonOptions.length > 0) {
-    parts.push(`common ${commonOptions.join(', ')}`)
   }
 
   return `${parts.join('; ')}.`
@@ -460,19 +458,6 @@ function readAssistantCliRequiredSchemaPropertyNames(
   const propertyNames = Object.keys(schema?.properties ?? {})
 
   return propertyNames.filter((name) => requiredNames.has(name))
-}
-
-function readAssistantCliCommonOptionalOptionNames(
-  schema: AssistantCliLlmsManifestSchemaNode | undefined,
-): string[] {
-  const requiredNames = new Set(schema?.required ?? [])
-  const propertyEntries = Object.entries(schema?.properties ?? {})
-
-  return propertyEntries
-    .filter(([name]) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
-    .filter(([name]) => !requiredNames.has(name))
-    .slice(0, assistantCliSurfaceBootstrapOptionalOptionLimit)
-    .map(([name]) => name)
 }
 
 function renderAssistantCliOptionSignature(
