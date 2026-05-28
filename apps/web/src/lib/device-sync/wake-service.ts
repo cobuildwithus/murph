@@ -30,6 +30,7 @@ import {
   type AppendHostedMailboxItemResult,
 } from "../hosted-mailbox/store";
 import {
+  signalHostedDeviceSyncBackgroundMaintenanceRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   type HostedDeviceSyncRecoverySignalIntent,
 } from "../hosted-orchestration/signal-runtime";
@@ -38,10 +39,7 @@ import {
   type HostedDeviceSyncWakeSource,
 } from "./wake";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
-import type {
-  HostedDeviceSyncDirtyConnectionRecord,
-  HostedDeviceSyncDirtyResource,
-} from "./prisma-store";
+import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
   normalizeNullableString,
   sha256Hex,
@@ -574,6 +572,40 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   };
 }
 
+export async function requestHostedDeviceSyncScheduledReconcileRecovery(input: {
+  connectionId: string;
+  createdAt: string;
+  eventId: string;
+  nextReconcileAt: string;
+  provider: string;
+  traceId?: string | null;
+  userId: string;
+}): Promise<HostedDeviceSyncScheduledReconcileWakeResult> {
+  const store = new PrismaDeviceSyncControlPlaneStore({
+    prisma: getPrisma(),
+  });
+
+  await startHostedDeviceSyncBackgroundMaintenanceWorkflow(input.userId, {
+    failureMode: "throw",
+  });
+  await store.createSignal({
+    userId: input.userId,
+    connectionId: input.connectionId,
+    provider: input.provider,
+    kind: "reconcile_due",
+    occurredAt: input.nextReconcileAt,
+    traceId: normalizeNullableString(input.traceId),
+    eventType: null,
+    resourceCategory: null,
+    reason: null,
+    nextReconcileAt: input.nextReconcileAt,
+    revokeWarning: null,
+    createdAt: input.createdAt,
+  });
+
+  return buildHostedDeviceSyncRecoveryRequestedResult();
+}
+
 export interface HostedDeviceSyncDirtyWakeResult {
   reason?: string;
   wakeAccepted: boolean;
@@ -641,6 +673,31 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
     wakeAppended: appendResult.inserted,
     wakeDuplicate: appendResult.duplicate && !appendResult.dedupeConflict,
     wakeInserted: appendResult.inserted,
+  };
+}
+
+export async function requestHostedDeviceSyncDirtyRecovery(input: {
+  connectionId: string;
+  dirtyRevision: bigint;
+  eventType?: string | null;
+  occurredAt: string;
+  provider: string;
+  resourceCategory?: string | null;
+  userId: string;
+}): Promise<HostedDeviceSyncDirtyWakeResult> {
+  await startHostedDeviceSyncBackgroundMaintenanceWorkflow(input.userId, {
+    failureMode: "throw",
+  });
+
+  return buildHostedDeviceSyncRecoveryRequestedResult();
+}
+
+function buildHostedDeviceSyncRecoveryRequestedResult(): HostedDeviceSyncDirtyWakeResult {
+  return {
+    wakeAccepted: true,
+    wakeAppended: true,
+    wakeDuplicate: false,
+    wakeInserted: true,
   };
 }
 
@@ -735,57 +792,27 @@ async function startHostedDeviceSyncWakeWorkflow(
   }
 }
 
-async function appendHostedDeviceSyncDirtyWakeTx(input: {
-  dirty: HostedDeviceSyncDirtyConnectionRecord;
-  tx: HostedPrismaTransactionClient;
-}): Promise<AppendHostedMailboxItemResult> {
-  const wake = buildHostedDeviceSyncDirtyWakeEnvelope({
-    dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
-      connectionId: input.dirty.connectionId,
-      dirtyRevision: input.dirty.dirtyRevision,
-      provider: input.dirty.provider,
-    }),
-    eventType: input.dirty.latestEventType,
-    occurredAt: input.dirty.latestDirtyAt,
-    resourceCategory: input.dirty.latestResourceCategory,
-    userId: input.dirty.userId,
-  });
-  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-    envelope: wake,
-    tx: input.tx,
-  });
-  assertHostedDeviceSyncDirtyWakeAccepted(mailboxAppend);
-  return mailboxAppend;
-}
-
-function assertHostedDeviceSyncDirtyWakeAccepted(
-  mailboxAppend: AppendHostedMailboxItemResult,
-): void {
-  const accepted = mailboxAppend.inserted
-    || (mailboxAppend.duplicate && !mailboxAppend.dedupeConflict);
-  if (accepted) {
-    return;
+async function startHostedDeviceSyncBackgroundMaintenanceWorkflow(
+  userId: string,
+  options: {
+    failureMode?: "best_effort" | "throw";
+  } = {},
+): Promise<void> {
+  try {
+    await signalHostedDeviceSyncBackgroundMaintenanceRuntime({
+      userId,
+    });
+  } catch (error) {
+    console.warn("Hosted device-sync recovery Temporal signal failed.", {
+      code: sanitizeHostedRuntimeErrorCode(
+        isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_RECOVERY_TEMPORAL_SIGNAL_FAILED",
+      ),
+      userIdPresent: userId.trim().length > 0,
+    });
+    if (options.failureMode === "throw") {
+      throw error;
+    }
   }
-
-  throw deviceSyncError({
-    code: mailboxAppend.dedupeConflict
-      ? "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT"
-      : "HOSTED_DEVICE_SYNC_DIRTY_WAKE_APPEND_NOT_ACCEPTED",
-    httpStatus: mailboxAppend.dedupeConflict ? 500 : 503,
-    message: mailboxAppend.dedupeConflict
-      ? "Hosted device-sync dirty wake conflicted with an existing mailbox item."
-      : "Hosted device-sync dirty wake could not be queued for runner handoff.",
-    retryable: !mailboxAppend.dedupeConflict,
-  });
-}
-
-async function signalHostedDeviceSyncDirtyWakeBestEffort(input: {
-  mailboxItemId: string;
-}): Promise<void> {
-  await startHostedDeviceSyncWakeWorkflow(input.mailboxItemId, {
-    failureMode: "best_effort",
-    recoverySignalIntent: null,
-  });
 }
 
 async function persistHostedDeviceSyncWebhookAccepted(input: {
@@ -812,7 +839,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
-          dirtyWakeMailboxItemId: null,
+          backgroundNudgeRequested: false,
         };
       }
 
@@ -840,23 +867,16 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         tx,
       });
 
-      const dirtyWakeMailboxItemId = dirtyUpdate.shouldRequestWake
-        ? (await appendHostedDeviceSyncDirtyWakeTx({
-            dirty: dirtyUpdate.dirty,
-            tx,
-          })).item.id
-        : null;
-
       await completeHostedWebhookTraceTx(input, tx);
 
       return {
-        dirtyWakeMailboxItemId,
+        backgroundNudgeRequested: dirtyUpdate.shouldRequestWake,
       };
     }));
 
-  if (result.dirtyWakeMailboxItemId) {
-    await signalHostedDeviceSyncDirtyWakeBestEffort({
-      mailboxItemId: result.dirtyWakeMailboxItemId,
+  if (result.backgroundNudgeRequested) {
+    await startHostedDeviceSyncBackgroundMaintenanceWorkflow(input.userId, {
+      failureMode: "best_effort",
     });
   }
 }

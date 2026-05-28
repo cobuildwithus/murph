@@ -21,10 +21,11 @@ The live ownership split is:
   same Temporal workflow.
   Device-sync webhook freshness is different: web records per-webhook
   trace/audit facts, upserts per-connection dirty resources/revisions,
-  appends one opaque `device-sync.wake` pointer for the dirty revision, and
-  completes trace acceptance in the same transaction. The post-commit Temporal
-  signal is only a best-effort wake hint. Bounded dirty-sweeper recovery uses
-  the same dirty-revision mailbox identity when a signal is missed.
+  and completes trace acceptance in the same transaction. If the connection
+  transitioned from clean to dirty, the post-commit Temporal
+  `device_sync_recovery_requested` signal is only a best-effort wake hint.
+  Bounded dirty-sweeper recovery uses the same dirty state source of truth when
+  a signal is missed.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -200,22 +201,22 @@ immediately re-reads demand. Mailbox processing must not wait behind a typing
 hint in workflow state, Temporal Activity worker capacity, or Cloudflare
 container lifecycle locks.
 
-Non-conversation control wakes follow the same durable-demand rule. Manual
-runs, browser-vault refreshes, and device-sync recovery handoffs append
-system-mailbox control rows before Temporal is signaled. Temporal signals are
-wake hints; the demand endpoint reads the pending mailbox control row to recover
-the run source/reason, and the runtime clears the request only by importing the
-row and advancing mailbox watermarks. Historical `runtime.mailbox-lag-observed`
-control rows remain importable for deploy-skew and drain compatibility, but
-there is no active Vercel producer for them.
+Non-conversation control wakes follow the same durable-demand rule where they
+own durable product/control facts. Manual runs and browser-vault refreshes
+append system-mailbox control rows before Temporal is signaled. Device-sync
+recovery is the exception: dirty state and `DeviceConnection.nextReconcileAt`
+are the durable facts, and Temporal receives a `device_sync_recovery_requested`
+signal that causes a bounded background pass only when no fresh conversation
+input is pending. Historical `runtime.mailbox-lag-observed` control rows remain
+importable for deploy-skew and drain compatibility, but there is no active
+Vercel producer for them.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty
-resource/window map, appends one opaque `device-sync.wake` pointer for the dirty
-revision, and completes the trace in the same transaction. That mailbox pointer
-is durable demand; the post-commit Temporal signal is only a wake hint and must
-not carry provider payloads or become the device-sync queue. The assistant
+resource/window map, and completes the trace in the same transaction. Dirty
+state is durable demand; the post-commit Temporal recovery signal is only a wake
+hint and must not carry provider payloads or become the device-sync queue. The assistant
 runtime runs system-lane device sync only when no fresh conversation input is
 pending, and reschedules a short `device-sync.reconcile` wake if foreground work
 preempts that background pass.
@@ -223,13 +224,10 @@ The dirty/due recovery sweep is the bounded recovery backstop for dirty rows
 that remain pending after a missed, denied, or insufficient wake, and for active
 connections whose canonical `nextReconcileAt` is due. Temporal owns the cadence
 through a global scheduled reconciler workflow, but web owns the signed recovery
-command that selects stale dirty and due-reconcile facts, appends wake pointers,
-records due-reconcile signals, and keeps retries idempotent. Each dirty sweep
-attempt for the same still-dirty revision reuses the same opaque wake pointer
-and deterministic runtime-control recovery item, then sends an explicit
-`device_sync_recovery_requested` Temporal signal so an already-imported mailbox
-pointer does not make recovery one-shot. During migration, the Vercel
-dirty-sweeper cron was removed so Temporal remains the only scheduler. The
+command that selects stale dirty and due-reconcile facts, requests background
+recovery, records due-reconcile signals, and keeps retries idempotent. During
+migration, the Vercel dirty-sweeper cron was removed so Temporal remains the
+only scheduler. The
 runtime must support dirty-pending and dirty-ack callbacks; dirty ack means the
 dirty revision was handed off into the checkpointed local device-sync job store,
 not that upstream provider sync succeeded. Connection-established and

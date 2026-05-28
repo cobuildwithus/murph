@@ -21,7 +21,7 @@ describe("hosted device-sync recovery sweeper", () => {
     expect(dueReconcileSweeper).toHaveBeenCalledTimes(1);
   });
 
-  it("fails the command when dirty recovery cannot append effective work", async () => {
+  it("fails the command when dirty recovery cannot request effective work", async () => {
     const logger = {
       warn: vi.fn(),
     };
@@ -33,7 +33,7 @@ describe("hosted device-sync recovery sweeper", () => {
         wakeNotAppended: 1,
       })),
       runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult()),
-    })).rejects.toThrow("Hosted device-sync dirty sweeper failed to append one or more wakes.");
+    })).rejects.toThrow("Hosted device-sync dirty sweeper failed to request one or more recoveries.");
 
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync recovery sweep failed.",
@@ -44,7 +44,7 @@ describe("hosted device-sync recovery sweeper", () => {
     );
   });
 
-  it("fails the command when due-reconcile recovery cannot signal the accepted wake", async () => {
+  it("fails the command when due-reconcile recovery cannot signal accepted recovery", async () => {
     const logger = {
       warn: vi.fn(),
     };
@@ -55,7 +55,7 @@ describe("hosted device-sync recovery sweeper", () => {
       runDueReconcileSweeper: vi.fn(async () => buildDueReconcileSweepResult({
         wakeFailed: 1,
       })),
-    })).rejects.toThrow("Hosted device-sync due reconcile sweeper failed to append one or more wakes.");
+    })).rejects.toThrow("Hosted device-sync due reconcile sweeper failed to request one or more recoveries.");
 
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync recovery sweep failed.",

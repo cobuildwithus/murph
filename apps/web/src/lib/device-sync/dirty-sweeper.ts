@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import {
-  appendHostedDeviceSyncDirtyWake,
+  requestHostedDeviceSyncDirtyRecovery,
 } from "./wake-service";
 
 const DEFAULT_WAKE_LIMIT = 25;
@@ -24,13 +24,13 @@ export interface HostedDeviceSyncDirtySweeperResult {
 }
 
 type HostedDeviceSyncDirtySweeperLogger = Pick<Console, "info" | "warn">;
-type HostedDeviceSyncDirtyWakeAppend = typeof appendHostedDeviceSyncDirtyWake;
+type HostedDeviceSyncDirtyRecoveryRequest = typeof requestHostedDeviceSyncDirtyRecovery;
 
 export async function runHostedDeviceSyncDirtySweeper(input: {
-  appendDirtyWake?: HostedDeviceSyncDirtyWakeAppend;
   logger?: HostedDeviceSyncDirtySweeperLogger;
   now?: Date;
   nudgeLimit?: number;
+  requestDirtyRecovery?: HostedDeviceSyncDirtyRecoveryRequest;
   staleAfterMs?: number;
   store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDirtyConnectionsForSweep">;
 } = {}): Promise<HostedDeviceSyncDirtySweeperResult> {
@@ -41,7 +41,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
-  const appendDirtyWake = input.appendDirtyWake ?? appendHostedDeviceSyncDirtyWake;
+  const requestDirtyRecovery = input.requestDirtyRecovery ?? requestHostedDeviceSyncDirtyRecovery;
   const dirtyConnections = await store.listDirtyConnectionsForSweep({
     limit: wakeLimit + 1,
     staleBefore: new Date(now.getTime() - staleAfterMs),
@@ -68,7 +68,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
       wakeAttempted += 1;
       const connectionFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyConnection.connectionId);
       const userFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyConnection.userId);
-      logger.warn("Hosted device-sync dirty sweeper appending device-sync wake for dirty state.", {
+      logger.warn("Hosted device-sync dirty sweeper requesting background recovery for dirty state.", {
         connectionFingerprint,
         dirtyRevision: dirtyConnection.dirtyRevision.toString(),
         latestDirtyAt: dirtyConnection.latestDirtyAt,
@@ -77,7 +77,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
       });
       let wake;
       try {
-        wake = await appendDirtyWake({
+        wake = await requestDirtyRecovery({
           connectionId: dirtyConnection.connectionId,
           dirtyRevision: dirtyConnection.dirtyRevision,
           eventType: dirtyConnection.latestEventType,
@@ -89,7 +89,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
       } catch (error) {
         wakeFailed += 1;
         wakeNotAppended += 1;
-        logger.warn("Hosted device-sync dirty sweeper device-sync wake append failed.", {
+        logger.warn("Hosted device-sync dirty sweeper background recovery request failed.", {
           connectionFingerprint,
           errorName: error instanceof Error ? error.name : "unknown",
           userFingerprint,
@@ -99,7 +99,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
 
       if (wake.wakeInserted) {
         wakeAppended += 1;
-        logger.info("Hosted device-sync dirty sweeper device-sync wake appended.", {
+        logger.info("Hosted device-sync dirty sweeper background recovery requested.", {
           connectionFingerprint,
           userFingerprint,
         });
@@ -108,7 +108,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
 
       if (wake.wakeDuplicate) {
         wakeDuplicate += 1;
-        logger.info("Hosted device-sync dirty sweeper device-sync wake already existed.", {
+        logger.info("Hosted device-sync dirty sweeper background recovery was already requested.", {
           connectionFingerprint,
           userFingerprint,
         });
@@ -117,7 +117,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
 
       wakeFailed += 1;
       wakeNotAppended += 1;
-      logger.warn("Hosted device-sync dirty sweeper device-sync wake was not appended.", {
+      logger.warn("Hosted device-sync dirty sweeper background recovery was not requested.", {
         connectionFingerprint,
         reason: wake.reason ?? null,
         userFingerprint,

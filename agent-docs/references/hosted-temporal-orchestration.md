@@ -202,12 +202,13 @@ contain counts, timestamps, workflow ids, retry metadata, and schedule ids only.
 `apps/web` remains the only owner of canonical device-sync recovery facts. The
 signed sweep command reads `DeviceSyncDirtyConnection` and
 `DeviceConnection.nextReconcileAt`, skips dirty-pending due reconciles through
-web-owned selection logic, appends mailbox wake pointers through the existing
-idempotent append paths, records due-reconcile `DeviceSyncSignal` facts, and
-uses the existing post-commit Temporal signal path. Temporal retries are safe
+web-owned selection logic, requests per-user background recovery through the
+existing `device_sync_recovery_requested` signal path, records due-reconcile
+`DeviceSyncSignal` facts, and never represents dirty recovery as foreground
+mailbox work. Temporal retries are safe
 because the web command is retryable and duplicate effective work is bounded by
-dirty revisions, due-reconcile event ids/signals, mailbox dedupe, and recovery
-buckets.
+dirty revisions, due-reconcile signals, Temporal signal coalescing, and
+recovery buckets.
 
 The Vercel device-sync dirty-sweeper cron is not registered. Temporal is the
 single production owner of recovery cadence, while the signed web sweep command
