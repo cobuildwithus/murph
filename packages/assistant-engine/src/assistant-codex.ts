@@ -37,6 +37,9 @@ import {
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
 import {
+  readMurphDynamicToolRequest,
+} from './assistant-codex/dynamic-tools.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -80,6 +83,9 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import type {
+  AssistantTurnProgress,
+} from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
@@ -133,6 +139,7 @@ export interface CodexAppServerTurnInput {
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
+  turnProgress?: AssistantTurnProgress | null
   workingDirectory: string
 }
 
@@ -658,13 +665,74 @@ async function runCodexAppServerTurn(
 
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
-      denyUnsupportedCodexServerRequest({
-        message,
-        requestId,
-        writeRpcMessage: (payload) => {
-          void tryWriteRpcMessage(payload)
-        },
-      })
+      const dynamicToolRequest = readMurphDynamicToolRequest(message)
+      if (!dynamicToolRequest || !input.turnProgress) {
+        denyUnsupportedCodexServerRequest({
+          message,
+          requestId,
+          writeRpcMessage: (payload) => {
+            void tryWriteRpcMessage(payload)
+          },
+        })
+        return
+      }
+
+      if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
+        void tryWriteRpcMessage({
+          id: requestId,
+          error: {
+            code: -32000,
+            message: `Unsupported dynamic tool ${dynamicToolRequest.namespace ?? ''}.${dynamicToolRequest.tool ?? 'unknown'}`,
+          },
+        })
+        return
+      }
+
+      if (dynamicToolRequest.kind === 'invalid-progress-arguments') {
+        void tryWriteRpcMessage({
+          id: requestId,
+          result: {
+            success: false,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: 'invalid progress update arguments',
+              },
+            ],
+          },
+        })
+        return
+      }
+
+      void input.turnProgress.send(dynamicToolRequest.text)
+        .then(() => {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update accepted',
+                },
+              ],
+            },
+          })
+        })
+        .catch(() => {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update failed',
+                },
+              ],
+            },
+          })
+        })
       return
     }
 

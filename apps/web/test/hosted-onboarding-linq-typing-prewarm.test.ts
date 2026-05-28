@@ -79,7 +79,7 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma: {} as never,
-      rawBody: buildTypingWebhookBody(),
+      rawBody: buildTypingWebhookBody({ service: " imessage " }),
       signature: null,
       timestamp: null,
     });
@@ -183,6 +183,42 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     });
     expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
+  });
+
+  it("does not throttle the next typing signal after a Temporal signal failure", async () => {
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
+      core: {
+        billingStatus: "active",
+        id: "member_typing_retry",
+        suspendedAt: null,
+      },
+    });
+    mocks.signalHostedRuntimePrewarm
+      .mockRejectedValueOnce(new Error("Temporal unavailable"))
+      .mockResolvedValueOnce({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_typing_retry",
+      });
+
+    const failedResponse = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({ eventId: "evt_typing_failed" }),
+      signature: null,
+      timestamp: null,
+    });
+    const retryResponse = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({ eventId: "evt_typing_retry" }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(failedResponse.reason).toBe("typing-prewarm-temporal-signal-failed");
+    expect(retryResponse.reason).toBe("typing-prewarm-signaled");
+    expect(mocks.signalHostedRuntimePrewarm).toHaveBeenCalledTimes(2);
   });
 });
 

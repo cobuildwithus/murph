@@ -209,7 +209,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(prewarmForProcessing).toHaveBeenCalledOnce();
     expect(prewarmForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 5_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();

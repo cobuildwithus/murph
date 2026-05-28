@@ -34,6 +34,7 @@ const seamMocks = vi.hoisted(() => ({
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
   resolveAssistantUsageCredentialSource: vi.fn(),
+  sendAssistantOutboxPayload: vi.fn(),
 }));
 
 vi.mock("../src/assistant/local-service.js", () => ({
@@ -102,6 +103,7 @@ vi.mock("../src/assistant/outbox.js", async () => {
   return {
     ...actual,
     normalizeAssistantDeliveryError: seamMocks.normalizeAssistantDeliveryError,
+    sendAssistantOutboxPayload: seamMocks.sendAssistantOutboxPayload,
   };
 });
 
@@ -118,6 +120,7 @@ import * as assistantService from "../src/assistant/service.ts";
 import {
   buildAssistantTurnDeliveryFinalizationPlan,
   deliverAssistantReply,
+  deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome,
 } from "../src/assistant/delivery-service.ts";
 import {
@@ -191,6 +194,20 @@ beforeEach(() => {
   seamMocks.resolveAssistantUsageCredentialSource
     .mockReset()
     .mockReturnValue("member");
+  seamMocks.sendAssistantOutboxPayload.mockReset().mockResolvedValue({
+    delivery: {
+      channel: "telegram",
+      idempotencyKey: "progress-key",
+      messageLength: 10,
+      providerMessageId: "progress-provider-message",
+      providerThreadId: null,
+      sentAt: "2026-04-08T11:00:00.000Z",
+      target: "thread-1",
+      targetKind: "thread",
+    },
+    deliveryTransportIdempotent: false,
+    session: null,
+  });
 
   runtimeState = createRuntimeStateStub();
   seamMocks.createAssistantRuntimeStateService
@@ -753,6 +770,216 @@ describe("assistant delivery orchestration seam", () => {
     });
 
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve hosted idempotency when final delivery is disabled", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: false,
+          executionContext: {
+            hosted: {
+              memberId: "member-hosted",
+              userEnvKeys: [],
+            },
+          },
+          prompt: "hello",
+          vault: "/vault",
+        },
+        response: "reply",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-hosted-not-delivered",
+      })
+    ).resolves.toEqual({
+      kind: "not-requested",
+      session,
+    });
+
+    expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends progress directly without creating receipt-owning outbox intents", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+
+    await deliverAssistantProgressUpdate({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "reply-key",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      ordinal: 0,
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "telegram",
+            explicitTarget: "audience-target",
+            replyToMessageId: "reply-audience",
+          },
+        },
+      }),
+      text: "Still extracting the PDF.",
+      turnId: "turn-progress-direct",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+    expect(seamMocks.sendAssistantOutboxPayload).toHaveBeenCalledWith({
+      payload: expect.objectContaining({
+        deliveryIdempotencyKey: "reply-key:progress:0",
+        explicitTarget: "audience-target",
+        message: "Still extracting the PDF.",
+        replyToMessageId: "reply-audience",
+        sessionId: session.sessionId,
+        turnId: "turn-progress-direct",
+      }),
+      vault: "/vault",
+    });
+  });
+
+  it("derives hosted progress idempotency from the final delivery base key", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+
+    await deliverAssistantProgressUpdate({
+      input: {
+        deliverResponse: true,
+        executionContext: {
+          hosted: {
+            memberId: "member-hosted",
+            userEnvKeys: [],
+          },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          inboundMailboxItemIds: ["mailbox_item_123"],
+        },
+        prompt: "hello",
+        vault: "/vault",
+      },
+      ordinal: 0,
+      session,
+      sharedPlan: createSharedPlan(),
+      text: "Still checking the file.",
+      turnId: "turn-progress-derived-key",
+    });
+
+    const firstProgressKey = seamMocks.sendAssistantOutboxPayload.mock.lastCall?.[0]
+      .payload.deliveryIdempotencyKey;
+    expect(firstProgressKey).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}:progress:0$/u));
+    expect(firstProgressKey).not.toContain("turn-progress-derived-key");
+
+    await deliverAssistantProgressUpdate({
+      input: {
+        deliverResponse: true,
+        executionContext: {
+          hosted: {
+            memberId: "member-hosted",
+            userEnvKeys: [],
+          },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          inboundMailboxItemIds: ["mailbox_item_123"],
+        },
+        prompt: "hello",
+        vault: "/vault",
+      },
+      ordinal: 0,
+      session,
+      sharedPlan: createSharedPlan(),
+      text: "Still checking the file.",
+      turnId: "turn-progress-derived-key-retry",
+    });
+
+    expect(seamMocks.sendAssistantOutboxPayload.mock.lastCall?.[0])
+      .toEqual(expect.objectContaining({
+        payload: expect.objectContaining({
+          deliveryIdempotencyKey: firstProgressKey,
+        }),
+      }));
+  });
+
+  it("fails closed for hosted progress without a deterministic Linq key", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    seamMocks.sendAssistantOutboxPayload.mockClear();
+
+    await expect(
+      deliverAssistantProgressUpdate({
+        input: {
+          deliverResponse: true,
+          executionContext: {
+            hosted: {
+              memberId: "member-hosted",
+              userEnvKeys: [],
+            },
+          },
+          prompt: "hello",
+          vault: "/vault",
+        },
+        ordinal: 0,
+        session,
+        sharedPlan: createSharedPlan(),
+        text: "Still checking the file.",
+        turnId: "turn-progress-missing-key",
+      })
+    ).rejects.toThrow("Hosted outbound delivery requires a deterministic idempotency key.");
+
+    expect(seamMocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
   });
 
   it("delivers via the outbox with audience overrides and raw content", async () => {

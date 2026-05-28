@@ -29,6 +29,9 @@ import {
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
+  isHostedLinqIMessageService,
+} from "./webhook-provider-linq-shared";
+import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
@@ -63,6 +66,7 @@ export type {
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 
 const HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS = 30_000;
+// Process-local only; Temporal still coalesces duplicate prewarm hints.
 const hostedLinqTypingPrewarmLastSignalByUser = new Map<string, number>();
 
 export async function handleHostedOnboardingLinqWebhook(input: {
@@ -218,10 +222,11 @@ async function handleHostedLinqTypingPrewarm(input: {
     },
   );
 
-  if (!isHostedLinqTypingPrewarmServiceSupported(typingEvent.data.service)) {
+  if (!isHostedLinqIMessageService(typingEvent.data.service)) {
     finishHostedOnboardingTiming(timing, "ignored-unsupported-service", {
       decision: "ignored-unsupported-service",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      servicePresent: Boolean(typingEvent.data.service),
       scopeHashPresent: false,
     });
     return {
@@ -262,7 +267,7 @@ async function handleHostedLinqTypingPrewarm(input: {
     };
   }
 
-  if (!shouldSignalHostedLinqTypingPrewarm(routing.core.id)) {
+  if (!canSignalHostedLinqTypingPrewarm(routing.core.id)) {
     finishHostedOnboardingTiming(timing, "coalesced", {
       decision: "coalesced",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
@@ -304,6 +309,7 @@ async function handleHostedLinqTypingPrewarm(input: {
     userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
     scopeHashPresent: false,
   });
+  recordHostedLinqTypingPrewarmSignal(routing.core.id);
   return {
     ignored: true,
     ok: true,
@@ -311,25 +317,15 @@ async function handleHostedLinqTypingPrewarm(input: {
   };
 }
 
-function shouldSignalHostedLinqTypingPrewarm(userId: string): boolean {
+function canSignalHostedLinqTypingPrewarm(userId: string): boolean {
   const now = Date.now();
   const lastSignaledAt = hostedLinqTypingPrewarmLastSignalByUser.get(userId);
-  if (
-    lastSignaledAt !== undefined
-    && now - lastSignaledAt < HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS
-  ) {
-    return false;
-  }
-
-  hostedLinqTypingPrewarmLastSignalByUser.set(userId, now);
-  return true;
+  return lastSignaledAt === undefined
+    || now - lastSignaledAt >= HOSTED_LINQ_TYPING_PREWARM_COOLDOWN_MS;
 }
 
-function isHostedLinqTypingPrewarmServiceSupported(
-  service: string | null | undefined,
-): boolean {
-  return typeof service === "string"
-    && service.trim().toLowerCase() === "imessage";
+function recordHostedLinqTypingPrewarmSignal(userId: string): void {
+  hostedLinqTypingPrewarmLastSignalByUser.set(userId, Date.now());
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

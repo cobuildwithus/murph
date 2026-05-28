@@ -17,6 +17,7 @@ import type {
 import {
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+  HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -386,7 +387,7 @@ export class HostedUserRunner {
       const result = await container.prewarmForProcessing({
         timeoutMs: Math.min(
           this.env.runnerTimeoutMs,
-          RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+          HOSTED_RUNTIME_PREWARM_TIMEOUT_MS,
         ),
         userId: input.userId,
       });
