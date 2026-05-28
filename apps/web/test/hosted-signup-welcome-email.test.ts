@@ -77,16 +77,15 @@ describe("hosted signup welcome email", () => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toEqual({
         from: "Murph founder <founder@example.com>",
-        html: expect.stringContaining("Hey, welcome to Murph!"),
         subject: "Welcome to Murph",
         text: expect.stringContaining("I'm Murph founder, the founder."),
         to: ["member@example.com"],
       });
-      expect(payload.html).not.toContain("<h1");
-      expect(payload.html).not.toContain("Welcome to Murph</h1>");
+      expect(payload).not.toHaveProperty("html");
       expect(payload.text).toContain("- Murph founder");
       expect(payload.text).toContain("Hit reply if anything's confusing or broken.");
-      expect(payload.html).toContain("Hit reply if anything&#39;s confusing or broken.");
+      expect(payload.text).not.toContain("<");
+      expect(payload.text).not.toContain("style=");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -120,8 +119,7 @@ describe("hosted signup welcome email", () => {
       expect(payload.text).not.toContain(
         "connect your wearable",
       );
-      expect(payload.html).toContain('href="sms:+15550100099"');
-      expect(payload.html).toContain(">(+1) 555-010-0099</a>");
+      expect(payload).not.toHaveProperty("html");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -174,8 +172,7 @@ describe("hosted signup welcome email", () => {
       expect(payload.text).toContain(
         "Shoot Murph a message on Telegram at @murph_test_bot to start your first experiment.",
       );
-      expect(payload.html).toContain('href="https://t.me/murph_test_bot"');
-      expect(payload.html).toContain(">@murph_test_bot</a>");
+      expect(payload).not.toHaveProperty("html");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -222,8 +219,7 @@ describe("hosted signup welcome email", () => {
       expect(payload.text).toContain(
         "Shoot Murph an email at murph@mail.withmurph.ai to start your first experiment.",
       );
-      expect(payload.html).toContain('href="mailto:murph@mail.withmurph.ai"');
-      expect(payload.html).toContain(">murph@mail.withmurph.ai</a>");
+      expect(payload).not.toHaveProperty("html");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
