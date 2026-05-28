@@ -231,6 +231,7 @@ async function installPinnedProductionDependencies(
 ): Promise<void> {
   const installEnv = {
     COREPACK_ENABLE_AUTO_PIN: "0",
+    SHARP_IGNORE_GLOBAL_LIBVIPS: "1",
   };
 
   await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy, {

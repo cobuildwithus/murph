@@ -128,14 +128,13 @@ let hostedLocalLinqImagePngBytes: Uint8Array | null = null;
 
 export function readHostedLocalLinqImagePngBytes(): Uint8Array {
   hostedLocalLinqImagePngBytes ??= buildHostedLocalLargeImagePngBytes();
-  return hostedLocalLinqImagePngBytes;
+  return hostedLocalLinqImagePngBytes.slice();
 }
 
 export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedMessageIdsByChat = new Map<string, string[]>();
-  const imageBytes = readHostedLocalLinqImagePngBytes();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
   let nextObservedChatSequence = 0;
@@ -233,7 +232,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
         response.end(Buffer.from(pdfBytes));
       } else if (request.url.endsWith(".png")) {
         response.setHeader("content-type", "image/png");
-        response.end(Buffer.from(imageBytes));
+        response.end(Buffer.from(readHostedLocalLinqImagePngBytes()));
       } else {
         response.setHeader(
           "content-type",
