@@ -14,6 +14,9 @@ import {
   prepareAssistantDirectCliEnv,
   resolveAssistantCliAccessContext,
 } from "../src/assistant-cli-access.js";
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from "../src/assistant-skill-assets.js";
 
 describe("prepareAssistantDirectCliEnv", () => {
   it("aliases the hosted runtime marker from the bridge owner", () => {
@@ -44,6 +47,10 @@ describe("prepareAssistantDirectCliEnv", () => {
 
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".local", "bin"));
     expect(pathEntries).toContain("/usr/bin");
+    expect(env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toBeTruthy();
+    expect(env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toMatch(
+      /assistant-engine[/\\]skills$/,
+    );
     expect(
       pathEntries.some((entry) => entry.endsWith(`${path.sep}node_modules${path.sep}.bin`)),
     ).toBe(true);
@@ -108,6 +115,9 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.VAULT).toBe("/tmp/murph-vault");
     expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
     expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
+    expect(env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toMatch(
+      /assistant-engine[/\\]skills$/,
+    );
     expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]).toBe(
       "/tmp/murph-home/.codex-hosted/bin/codex",
     );

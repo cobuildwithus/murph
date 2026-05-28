@@ -7,6 +7,10 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { resolveOperatorHomeDirectory } from '@murphai/operator-config/operator-config'
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+  withAssistantSkillsRootEnv,
+} from './assistant-skill-assets.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
 export const HOSTED_RUNTIME_PROCESS_ENV_MARKER =
@@ -39,6 +43,7 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   'ALL_PROXY',
   'HTTP_PROXY',
   'HTTPS_PROXY',
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   'NO_PROXY',
   'PATH',
   'PATHEXT',
@@ -88,12 +93,13 @@ export function prepareAssistantDirectCliEnv(
   const baseEnv = hostedRuntimeProcess
     ? projectHostedCodexDirectCliEnv(env)
     : env
-  const homeDirectory = resolveOperatorHomeDirectory(baseEnv)
+  const baseEnvWithSkills = withAssistantSkillsRootEnv(baseEnv)
+  const homeDirectory = resolveOperatorHomeDirectory(baseEnvWithSkills)
   const userBinDirectory = path.join(homeDirectory, ...DEFAULT_USER_BIN_SEGMENTS)
   const hostedCodexBinEntries = hostedRuntimeProcess
-    ? resolveHostedCodexBinPathEntries(baseEnv)
+    ? resolveHostedCodexBinPathEntries(baseEnvWithSkills)
     : []
-  return withPrependedPath(baseEnv, [
+  return withPrependedPath(baseEnvWithSkills, [
     ...hostedCodexBinEntries,
     userBinDirectory,
     ...resolveAssistantCliBinPathEntries(),

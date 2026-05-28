@@ -3,6 +3,9 @@ import {
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+} from "@murphai/assistant-engine/assistant-skill-assets";
 
 export const HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "all";
 export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
@@ -16,6 +19,7 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
