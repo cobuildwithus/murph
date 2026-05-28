@@ -341,7 +341,14 @@ export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
 
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
   limit?: number | null;
+  stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
+}
+
+export interface HostedExecutionDeviceSyncStagedDirtyAck {
+  connectionId: string;
+  processedDirtyPayloadIds?: string[];
+  processedRevision: string;
 }
 
 export interface HostedExecutionDeviceSyncDirtyStateResponse {
@@ -620,7 +627,42 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
             "Hosted device-sync dirty pending request limit",
           ),
         }),
+    ...(record.stagedDirtyAcks === undefined
+      ? {}
+      : {
+          stagedDirtyAcks: requireArray(
+            record.stagedDirtyAcks,
+            "Hosted device-sync dirty pending request stagedDirtyAcks",
+          ).map((entry, index) =>
+            parseHostedExecutionDeviceSyncStagedDirtyAck(
+              entry,
+              `Hosted device-sync dirty pending request stagedDirtyAcks[${index}]`,
+            )
+          ),
+        }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+function parseHostedExecutionDeviceSyncStagedDirtyAck(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncStagedDirtyAck {
+  const record = requireObject(value, label);
+
+  return {
+    connectionId: requireString(record.connectionId, `${label}.connectionId`),
+    ...(record.processedDirtyPayloadIds === undefined
+      ? {}
+      : {
+          processedDirtyPayloadIds: requireArray(
+            record.processedDirtyPayloadIds,
+            `${label}.processedDirtyPayloadIds`,
+          ).map((entry, index) =>
+            requireString(entry, `${label}.processedDirtyPayloadIds[${index}]`)
+          ),
+        }),
+    processedRevision: requireBigIntString(record.processedRevision, `${label}.processedRevision`),
   };
 }
 

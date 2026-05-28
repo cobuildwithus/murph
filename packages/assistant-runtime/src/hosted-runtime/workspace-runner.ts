@@ -19,6 +19,7 @@ import {
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
+  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import type {
@@ -152,6 +153,7 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
 }
 
 export type HostedWorkspaceRunnerAssistantPhaseResult =

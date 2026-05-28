@@ -30,6 +30,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot as HostedDeviceSyncRuntimeWritableCredentialSnapshot,
+  HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedRuntimeEvent,
@@ -76,6 +77,8 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
+  skipDirtyPendingFetch?: boolean;
+  stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
   wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
@@ -143,12 +146,15 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       service: input.service,
     });
   }
-  state.pendingDirtyAcks = await applyHostedPendingDirtyDeviceSyncState({
-    deviceSyncPort: client,
-    hostedToLocalAccountIds: state.hostedToLocalAccountIds,
-    service: input.service,
-    wake: input.wake,
-  });
+  if (input.skipDirtyPendingFetch !== true) {
+    state.pendingDirtyAcks = await applyHostedPendingDirtyDeviceSyncState({
+      deviceSyncPort: client,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      service: input.service,
+      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
+      wake: input.wake,
+    });
+  }
 
   return state;
 }
@@ -349,10 +355,14 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
+  stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
   wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeDirtyAck[]> {
   const pending = await input.deviceSyncPort.fetchDirtyStates({
     limit: HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+    ...(input.stagedDirtyAcks && input.stagedDirtyAcks.length > 0
+      ? { stagedDirtyAcks: [...input.stagedDirtyAcks] }
+      : {}),
   });
   const acks: HostedDeviceSyncRuntimeDirtyAck[] = [];
 

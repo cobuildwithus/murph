@@ -165,6 +165,8 @@ const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "mcp.tool.call",
   "web.search",
 ]);
+const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
   "rpc.error",
@@ -286,6 +288,8 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
   "codexActionFinalTotalUnit",
   "codexActionInputUnitMax",
   "codexActionMcpToolCallCount",
+  "codexActionOutputBytesMax",
+  "codexActionOutputBytesTotal",
   "codexActionOutputItemCount",
   "codexActionOutputUnitMax",
   "codexActionProviderActionCount",
@@ -1311,6 +1315,14 @@ function readHostedAssistantCodexActionDiagnosticTrace(
       ),
     );
   }
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexActionToolSummaries",
+    readHostedAssistantProviderDiagnosticToolSummaryArray(
+      record,
+      "codexActionToolSummaries",
+    ),
+  );
   return details;
 }
 
@@ -1496,6 +1508,93 @@ function readHostedAssistantProviderDiagnosticAllowedStringArray(
     return allowedValues.has(normalized) ? [normalized] : [];
   });
   return output.length > 0 ? output : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticToolSummaryArray(
+  record: Record<string, unknown>,
+  key: string,
+): HostedExecutionStructuredLogDetails[] | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry): HostedExecutionStructuredLogDetails[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+    const entryRecord = entry as Record<string, unknown>;
+    const kind = readHostedAssistantProviderPlanAllowedString(
+      entryRecord,
+      "kind",
+      HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES,
+    );
+    const callCount = readHostedAssistantProviderDiagnosticNonnegativeNumber(
+      entryRecord,
+      "callCount",
+    );
+    const outputBytesMax = readHostedAssistantProviderDiagnosticNonnegativeNumber(
+      entryRecord,
+      "outputBytesMax",
+    );
+    const outputBytesTotal = readHostedAssistantProviderDiagnosticNonnegativeNumber(
+      entryRecord,
+      "outputBytesTotal",
+    );
+    if (
+      !kind
+      || typeof callCount !== "number"
+      || typeof outputBytesMax !== "number"
+      || typeof outputBytesTotal !== "number"
+    ) {
+      return [];
+    }
+
+    const summary: HostedExecutionStructuredLogDetails = {
+      callCount,
+      kind,
+      outputBytesMax,
+      outputBytesTotal,
+    };
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      summary,
+      "namespacePresent",
+      readHostedAssistantProviderDiagnosticBoolean(entryRecord, "namespacePresent"),
+    );
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      summary,
+      "serverPresent",
+      readHostedAssistantProviderDiagnosticBoolean(entryRecord, "serverPresent"),
+    );
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      summary,
+      "tool",
+      readHostedAssistantProviderDiagnosticToolIdentifierPart(entryRecord, "tool"),
+    );
+    return [summary];
+  });
+  return output.length > 0 ? output : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticToolIdentifierPart(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 function readHostedAssistantProviderDiagnosticKeySummaryArray(

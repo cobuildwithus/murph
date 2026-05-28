@@ -673,6 +673,36 @@ describe("executeHostedMailboxEvent", () => {
             "/tmp/raw-slow-path",
           ],
           codexActionThreadIdPresent: true,
+          codexActionToolCallCounts: [1, 1],
+          codexActionToolNames: ["dynamic:vault.readSummary", "command.execution"],
+          codexActionToolOutputBytesMax: [64, 32],
+          codexActionToolOutputBytesTotal: [96, 32],
+          codexActionToolSummaries: [
+            {
+              callCount: 1,
+              kind: "dynamic.tool.call",
+              namespace: "raw-namespace-should-drop",
+              namespacePresent: true,
+              outputBytesMax: 64,
+              outputBytesTotal: 96,
+              tool: "readSummary",
+            },
+            {
+              callCount: 1,
+              kind: "command.execution",
+              outputBytesMax: 32,
+              outputBytesTotal: 32,
+            },
+            {
+              callCount: 1,
+              kind: "mcp.tool.call",
+              outputBytesMax: 1,
+              outputBytesTotal: 1,
+              server: "/tmp/raw-path",
+              serverPresent: true,
+              tool: "unsafe",
+            },
+          ],
           codexActionTotalUnitMax: 82500,
           codexActionUsageSampleCount: 1,
           codexActionTurnIdPresent: true,
@@ -698,9 +728,35 @@ describe("executeHostedMailboxEvent", () => {
         codexActionFinalInputUnit: 81000,
         codexActionInputUnitMax: 81000,
         codexActionKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionOutputBytesMax: 64,
+        codexActionOutputBytesTotal: 128,
         codexActionProviderActionCount: 2,
         codexActionSlowDurationMs: [123, 60],
         codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionToolSummaries: [
+          {
+            callCount: 1,
+            kind: "dynamic.tool.call",
+            namespacePresent: true,
+            outputBytesMax: 64,
+            outputBytesTotal: 96,
+            tool: "readSummary",
+          },
+          {
+            callCount: 1,
+            kind: "command.execution",
+            outputBytesMax: 32,
+            outputBytesTotal: 32,
+          },
+          {
+            callCount: 1,
+            kind: "mcp.tool.call",
+            outputBytesMax: 1,
+            outputBytesTotal: 1,
+            serverPresent: true,
+            tool: "unsafe",
+          },
+        ],
         codexActionTraceType: "action-diagnostics",
         providerTraceKind: "codex.action_diagnostics",
         requestId: "req_123",
@@ -708,13 +764,15 @@ describe("executeHostedMailboxEvent", () => {
       }),
     });
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-namespace-should-drop");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-slow-path");
     expect(entry?.redacted).not.toHaveProperty("codexActionLabels");
-    expect(entry?.redacted).not.toHaveProperty("codexActionOutputBytesMax");
-    expect(entry?.redacted).not.toHaveProperty("codexActionOutputBytesTotal");
     expect(entry?.redacted).not.toHaveProperty("codexActionSlowLabels");
-    expect(JSON.stringify(entry?.redacted)).not.toContain("readSummary");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolCallCounts");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolNames");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolOutputBytesMax");
+    expect(entry?.redacted).not.toHaveProperty("codexActionToolOutputBytesTotal");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw prompt");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw tool output");
   });

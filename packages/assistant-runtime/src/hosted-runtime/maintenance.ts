@@ -153,7 +153,9 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
+  skipDirtyPendingFetch?: boolean;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const startedAt = Date.now();
@@ -188,6 +190,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
           platformEnv: input.runtime.platformEnv,
           runtimeLogPlatform: input.runtime.platform,
           shouldYield: input.shouldYieldDeviceSync ?? null,
+          skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
+          stagedDirtyAcks: input.stagedDirtyAcks ?? null,
         },
       );
   const deviceSyncElapsedMs = elapsedSince(deviceSyncStartedAt);
@@ -259,6 +263,9 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
     readinessElapsedMs,
     ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
+    ...(deviceSyncResult.stagedDirtyAcks
+      ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
+      : {}),
     totalElapsedMs: elapsedSince(startedAt),
   };
 }
@@ -847,12 +854,15 @@ export async function runHostedDeviceSyncPass(
     platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     shouldYield?: (() => boolean) | null;
+    skipDirtyPendingFetch?: boolean;
+    stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   } = {},
 ): Promise<{
   nextWakeAt: string | null;
   postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"];
   processedJobs: number;
   skipped: boolean;
+  stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
   const platformEnv = options.platformEnv ?? {};
   await writeHostedLegacyDeviceSyncPlatformEnvLog({
@@ -895,6 +905,8 @@ export async function runHostedDeviceSyncPass(
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
+        skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
+        stagedDirtyAcks: options.stagedDirtyAcks ?? null,
         wake,
       });
     }
@@ -968,12 +980,16 @@ export async function runHostedDeviceSyncPass(
     const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
       state: syncState,
     });
+    const stagedDirtyAcks = listHostedDeviceSyncDirtyProcessedRecords({
+      state: syncState,
+    });
 
     return {
       nextWakeAt: service.getNextWakeAt(),
       postCheckpointRecord,
       processedJobs,
       skipped: false,
+      ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     };
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
@@ -993,6 +1009,7 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"];
   processedJobs: number;
   skipped: boolean;
+  stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 } {
   return {
     nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
@@ -1036,6 +1053,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
   platformEnv?: Readonly<Record<string, string>>;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  skipDirtyPendingFetch?: boolean;
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   wake: HostedRuntimeEvent;
   resolvedConfig: {
     deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
@@ -1053,6 +1072,8 @@ export async function runHostedDeviceSyncWakeLane(input: {
       platformEnv: input.platformEnv ?? {},
       runtimeLogPlatform: input.runtimeLogPlatform ?? null,
       shouldYield: input.shouldYieldDeviceSync ?? null,
+      skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
+      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
     },
   );
   const nextWake = selectHostedRuntimeWakeCandidate([
@@ -1073,6 +1094,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
     ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
     parserProcessed: 0,
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
+    ...(deviceSyncResult.stagedDirtyAcks
+      ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
+      : {}),
   };
 }
 
@@ -1110,6 +1134,12 @@ function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
     ),
     records: pendingDirtyAcks.map(toHostedDeviceSyncDirtyProcessedPostCheckpointRecord),
   };
+}
+
+function listHostedDeviceSyncDirtyProcessedRecords(input: {
+  state: HostedDeviceSyncRuntimeSyncState;
+}): HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] {
+  return input.state.pendingDirtyAcks.map(toHostedDeviceSyncDirtyProcessedPostCheckpointRecord);
 }
 
 function toHostedDeviceSyncDirtyProcessedPostCheckpointRecord(

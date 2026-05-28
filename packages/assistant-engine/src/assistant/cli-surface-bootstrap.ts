@@ -13,11 +13,32 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v2'
+  'murph.assistant-cli-surface-bootstrap.v3'
+const assistantCliSurfaceBootstrapRenderPolicyVersion =
+  'murph.assistant-cli-surface-render-policy.v1'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
 const assistantCliSurfaceBootstrapDetailedModeCommandLimit = 120
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
+  'vault',
+])
+const assistantCliSurfaceBootstrapIgnoredCommandFamilies = new Set([
+  'age',
+])
+const assistantCliSurfaceBootstrapNameOnlyCommandFamilies = new Set([
+  'audit',
+  'document',
+  'export',
+  'family',
+  'genetics',
+  'inbox',
+  'intake',
+  'protocol',
+  'provider',
+  'query',
+  'recipe',
+  'samples',
+  'scheduled-log',
   'vault',
 ])
 const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
@@ -329,6 +350,8 @@ function hashAssistantCliSurfaceManifest(input: {
   sourceDetail: 'compact' | 'full'
 }): string {
   return createHash('sha256')
+    .update(assistantCliSurfaceBootstrapRenderPolicyVersion)
+    .update('\0')
     .update(input.sourceDetail)
     .update('\0')
     .update(JSON.stringify(input.manifest))
@@ -346,6 +369,9 @@ function normalizeAssistantCliManifestCommands(
     if (
       name.length === 0 ||
       seenCommandNames.has(name) ||
+      assistantCliSurfaceBootstrapIgnoredCommandFamilies.has(
+        readAssistantCliCommandFamily(name),
+      ) ||
       assistantCliSurfaceBootstrapIgnoredCommandNames.has(name)
     ) {
       continue
@@ -369,6 +395,10 @@ type AssistantCliContractRenderMode =
   | 'description-only'
   | 'required-only'
 
+type AssistantCliContractCommandLineMode =
+  | AssistantCliContractRenderMode
+  | 'name-only'
+
 type AssistantCliCommandGroup = {
   commands: AssistantCliLlmsManifestCommand[]
   family: string
@@ -387,13 +417,19 @@ function renderAssistantCliSurfaceContract(
       ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
       : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',
     'Use this contract first. Only fall back to `--schema --format json` or `--help` when a needed detail is missing here.',
+    'Bare command-name entries are low-frequency routes; inspect `vault-cli <command> --schema --format json` or `vault-cli <command> --help` before executing one.',
   ]
 
   for (const group of groupedCommands) {
     lines.push('')
     lines.push(`${group.family}:`)
     for (const command of group.commands) {
-      lines.push(renderAssistantCliContractCommandLine(command, mode))
+      lines.push(
+        renderAssistantCliContractCommandLine(
+          command,
+          readAssistantCliContractCommandLineMode(command, mode),
+        ),
+      )
     }
   }
 
@@ -425,9 +461,10 @@ function readAssistantCliCommandFamily(commandName: string): string {
 
 function renderAssistantCliContractCommandLine(
   command: AssistantCliLlmsManifestCommand,
-  mode: AssistantCliContractRenderMode,
+  mode: AssistantCliContractCommandLineMode,
 ): string {
-  const normalizedDescription = truncateAssistantCliText(command.description ?? '', 220)
+  const normalizedDescription =
+    mode === 'name-only' ? '' : truncateAssistantCliText(command.description ?? '', 220)
   const parts = [`- \`${command.name}\`${normalizedDescription ? `: ${normalizedDescription}` : ''}`]
   const argsSchema = command.schema?.args
   const optionsSchema = command.schema?.options
@@ -438,7 +475,7 @@ function renderAssistantCliContractCommandLine(
     .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
     .map((name) => renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]))
 
-  if (mode !== 'description-only') {
+  if (mode === 'required-only') {
     if (requiredArgs.length > 0) {
       parts.push(`args ${requiredArgs.join(' ')}`)
     }
@@ -449,6 +486,17 @@ function renderAssistantCliContractCommandLine(
   }
 
   return `${parts.join('; ')}.`
+}
+
+function readAssistantCliContractCommandLineMode(
+  command: AssistantCliLlmsManifestCommand,
+  mode: AssistantCliContractRenderMode,
+): AssistantCliContractCommandLineMode {
+  return assistantCliSurfaceBootstrapNameOnlyCommandFamilies.has(
+    readAssistantCliCommandFamily(command.name),
+  )
+    ? 'name-only'
+    : mode
 }
 
 function readAssistantCliRequiredSchemaPropertyNames(

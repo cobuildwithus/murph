@@ -655,6 +655,39 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
+              method: 'item/completed',
+              params: {
+                completedAtMs: 340,
+                item: {
+                  id: 'mcp-1',
+                  type: 'mcpToolCall',
+                  server_name: 'web',
+                  name: 'search_query',
+                  status: 'completed',
+                  durationMs: 80,
+                  arguments: {
+                    secretPath: '/tmp/raw-mcp-argument',
+                  },
+                  result: {
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'mcp raw output must not appear',
+                      },
+                    ],
+                    structuredContent: {
+                      ok: true,
+                    },
+                    _meta: {
+                      more: 'meta',
+                    },
+                  },
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
               method: 'thread/tokenUsage/updated',
               params: {
                 turnId: 'turn-diagnostics',
@@ -703,7 +736,7 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      providerActionCount: 2,
+      providerActionCount: 3,
       sessionId: 'thread-diagnostics',
     })
 
@@ -722,19 +755,49 @@ describe('assistant codex runtime', () => {
       type: CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
       codexActionCommandCount: 1,
       codexActionDynamicToolCallCount: 1,
+      codexActionMcpToolCallCount: 1,
       codexActionInputUnitMax: 81000,
-      codexActionKinds: ['command.execution', 'dynamic.tool.call'],
-      codexActionProviderActionCount: 2,
-      codexActionSlowDurationMs: [123, 60],
-      codexActionSlowKinds: ['dynamic.tool.call', 'command.execution'],
+      codexActionKinds: ['command.execution', 'dynamic.tool.call', 'mcp.tool.call'],
+      codexActionOutputBytesMax: 59,
+      codexActionOutputBytesTotal: 149,
+      codexActionOutputItemCount: 6,
+      codexActionProviderActionCount: 3,
+      codexActionSlowDurationMs: [123, 80, 60],
+      codexActionSlowKinds: [
+        'dynamic.tool.call',
+        'mcp.tool.call',
+        'command.execution',
+      ],
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: 'dynamic.tool.call',
+          namespacePresent: true,
+          outputBytesMax: 59,
+          outputBytesTotal: 59,
+          tool: 'readSummary',
+        },
+        {
+          callCount: 1,
+          kind: 'mcp.tool.call',
+          outputBytesMax: 56,
+          outputBytesTotal: 56,
+          serverPresent: true,
+          tool: 'search_query',
+        },
+        {
+          callCount: 1,
+          kind: 'command.execution',
+          outputBytesMax: 34,
+          outputBytesTotal: 34,
+        },
+      ],
       codexActionUsageSampleCount: 1,
     })
-    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesMax')
-    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesTotal')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('mcp raw output')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
-    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('readSummary')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
   })
@@ -846,13 +909,91 @@ describe('assistant codex runtime', () => {
       codexActionDurationMsMax: 60,
       codexActionDurationMsTotal: 60,
       codexActionInputUnitMax: 123,
+      codexActionOutputBytesMax: 26,
+      codexActionOutputBytesTotal: 26,
+      codexActionOutputItemCount: 1,
       codexActionOutputUnitMax: 45,
       codexActionStartedCount: 1,
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: 'command.execution',
+          outputBytesMax: 26,
+          outputBytesTotal: 26,
+        },
+      ],
       codexActionTotalUnitMax: 168,
       codexActionUsageSampleCount: 1,
     })
     expect(JSON.stringify(trace)).not.toContain('999999')
     expect(JSON.stringify(trace)).not.toContain('raw-action-id')
+    expect(JSON.stringify(trace)).not.toContain('raw output')
+  })
+
+  it('dedupes Codex action diagnostics without item ids when normalized identity is available', () => {
+    const reducer = createCodexActionDiagnosticsReducer()
+    const activeTurnId = 'turn-current'
+    const rawCompletedEvent = {
+      event: 'item.completed',
+      turnId: activeTurnId,
+      data: {
+        item: {
+          type: 'mcpToolCall',
+          server_name: 'web',
+          name: 'search_query',
+          status: 'completed',
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: 'raw output must not appear',
+              },
+            ],
+          },
+        },
+      },
+    }
+    const normalized: CodexNormalizedEvent = {
+      itemId: null,
+      itemState: 'completed',
+      kind: 'tool_call',
+      rawEvent: rawCompletedEvent,
+      toolName: 'search_query',
+      toolServer: 'web',
+    }
+
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: normalized,
+      rawEvent: rawCompletedEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: normalized,
+      rawEvent: rawCompletedEvent,
+    })
+
+    const trace = reducer.buildTraceEvent({
+      codexThreadId: 'thread-current',
+      providerActionCount: 0,
+      turnId: activeTurnId,
+    })
+    expect(trace).toMatchObject({
+      codexActionCompletedCount: 1,
+      codexActionMcpToolCallCount: 1,
+      codexActionOutputBytesMax: 26,
+      codexActionOutputBytesTotal: 26,
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: 'mcp.tool.call',
+          outputBytesMax: 26,
+          outputBytesTotal: 26,
+          serverPresent: true,
+          tool: 'search_query',
+        },
+      ],
+    })
     expect(JSON.stringify(trace)).not.toContain('raw output')
   })
 
@@ -3133,6 +3274,7 @@ describe('assistant codex event shaping', () => {
       itemId: 'assistant-4',
       itemState: 'completed',
       kind: 'assistant_message',
+      messagePhase: null,
       rawEvent: {
         item: {
           id: 'assistant-4',
@@ -3757,6 +3899,7 @@ describe('assistant codex event shaping', () => {
         itemId: 'assistant-11',
         itemState: 'completed',
         kind: 'assistant_message',
+        messagePhase: null,
         rawEvent: {
           type: 'item.completed',
         },

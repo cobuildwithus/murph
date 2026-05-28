@@ -2,7 +2,10 @@ import { Buffer } from "node:buffer";
 
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
-import { serializeHostedExecutionDeviceSyncDirtyPayloadIdentity } from "@murphai/device-syncd/hosted-runtime";
+import {
+  serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
+  type HostedExecutionDeviceSyncStagedDirtyAck,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   normalizeNullableString,
@@ -78,6 +81,13 @@ interface DirtyPayloadHydrationBudget {
   usedEstimatedBytes: number;
   usedResources: number;
 }
+
+interface StagedDirtyAckOverlayEntry {
+  processedDirtyPayloadIds: Set<string>;
+  processedRevision: bigint | null;
+}
+
+type StagedDirtyAckOverlay = Map<string, StagedDirtyAckOverlayEntry>;
 
 interface DirtyConnectionHydrationResult {
   hasMorePayloads: boolean;
@@ -416,6 +426,7 @@ export class PrismaHostedDirtyConnectionStore {
 
   async listPendingDirtyConnectionsForUser(input: {
     limit: number;
+    stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
     userId: string;
     tx?: HostedPrismaTransactionClient;
   }): Promise<{
@@ -424,6 +435,11 @@ export class PrismaHostedDirtyConnectionStore {
   }> {
     const prisma = input.tx ?? this.prisma;
     const limit = Math.max(1, Math.min(input.limit, 50));
+    const stagedOverlay = buildStagedDirtyAckOverlay(input.stagedDirtyAcks ?? []);
+    const candidateLimit = Math.max(
+      limit,
+      Math.min(limit + stagedOverlay.size, 250),
+    );
     const rows = await prisma.$queryRaw<Array<{ connection_id: string }>>(Prisma.sql`
       select "connection_id"
       from "device_sync_dirty_connection"
@@ -438,9 +454,9 @@ export class PrismaHostedDirtyConnectionStore {
           )
         )
       order by "first_dirty_at" asc, "connection_id" asc
-      limit ${limit + 1}
+      limit ${candidateLimit + 1}
     `);
-    const selectedIds = rows.slice(0, limit).map((row) => row.connection_id);
+    const selectedIds = rows.slice(0, candidateLimit).map((row) => row.connection_id);
     if (selectedIds.length === 0) {
       return {
         hasMore: false,
@@ -466,12 +482,16 @@ export class PrismaHostedDirtyConnectionStore {
       budget: createDirtyPayloadHydrationBudget(),
       prisma,
       records: selectedRecords,
+      stagedOverlay,
       userId: input.userId,
     });
+    const items = hydrated.items.slice(0, limit);
 
     return {
-      hasMore: rows.length > limit || hydrated.hasMorePayloads,
-      items: hydrated.items,
+      hasMore: rows.length > candidateLimit
+        || hydrated.hasMorePayloads
+        || hydrated.items.length > limit,
+      items,
     };
   }
 
@@ -944,6 +964,7 @@ async function hydrateDirtyConnectionRecords(input: {
   budget?: DirtyPayloadHydrationBudget;
   prisma: HostedPrismaTransactionClient | PrismaClient;
   records: readonly DeviceSyncDirtyConnectionPrismaRecord[];
+  stagedOverlay?: StagedDirtyAckOverlay;
   userId: string;
 }): Promise<DirtyConnectionHydrationResult> {
   if (input.records.length === 0) {
@@ -958,6 +979,12 @@ async function hydrateDirtyConnectionRecords(input: {
   const payloadsByConnectionId = new Map<string, HostedDeviceSyncDirtyResource[]>();
 
   for (const dirty of input.records) {
+    const overlayEntry = input.stagedOverlay?.get(dirty.connectionId) ?? null;
+    const effectiveProcessedRevision = resolveStagedDirtyAckProcessedRevision({
+      dirty,
+      overlayEntry,
+    });
+    const markerPending = dirty.dirtyRevision > effectiveProcessedRevision;
     if (input.budget?.exhausted) {
       hasMorePayloads = true;
       break;
@@ -971,6 +998,9 @@ async function hydrateDirtyConnectionRecords(input: {
       DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION,
       remainingPayloadSlots,
     );
+    const excludedPayloadIds = overlayEntry
+      ? [...overlayEntry.processedDirtyPayloadIds]
+      : [];
     const payloadRows = await input.prisma.deviceSyncDirtyPayload.findMany({
       orderBy: [
         { createdAt: "asc" },
@@ -986,6 +1016,13 @@ async function hydrateDirtyConnectionRecords(input: {
       take: payloadRowLimit + 1,
       where: {
         connectionId: dirty.connectionId,
+        ...(excludedPayloadIds.length > 0
+          ? {
+              id: {
+                notIn: excludedPayloadIds,
+              },
+            }
+          : {}),
         userId: input.userId,
       },
     });
@@ -1015,7 +1052,7 @@ async function hydrateDirtyConnectionRecords(input: {
       payloads.push(resource);
     }
 
-    if (payloadRows.length > 0 && payloads.length === 0) {
+    if (payloadRows.length > 0 && payloads.length === 0 && !markerPending) {
       hasMorePayloads = true;
       break;
     }
@@ -1023,7 +1060,15 @@ async function hydrateDirtyConnectionRecords(input: {
     if (payloads.length > 0) {
       payloadsByConnectionId.set(dirty.connectionId, payloads);
     }
-    hydratedRecords.push(dirty);
+    if (markerPending || payloads.length > 0) {
+      hydratedRecords.push(
+        applyStagedDirtyAckMarkerOverlay({
+          dirty,
+          effectiveProcessedRevision,
+          markerPending,
+        }),
+      );
+    }
   }
 
   const items = hydratedRecords
@@ -1037,6 +1082,76 @@ async function hydrateDirtyConnectionRecords(input: {
   return {
     hasMorePayloads,
     items,
+  };
+}
+
+function buildStagedDirtyAckOverlay(
+  stagedDirtyAcks: readonly HostedExecutionDeviceSyncStagedDirtyAck[],
+): StagedDirtyAckOverlay {
+  const overlay: StagedDirtyAckOverlay = new Map();
+
+  for (const ack of stagedDirtyAcks) {
+    const connectionId = normalizeNullableString(ack.connectionId);
+    if (!connectionId) {
+      continue;
+    }
+    const entry = overlay.get(connectionId) ?? {
+      processedDirtyPayloadIds: new Set<string>(),
+      processedRevision: null,
+    };
+    const processedRevision = BigInt(ack.processedRevision);
+    if (entry.processedRevision === null || processedRevision > entry.processedRevision) {
+      entry.processedRevision = processedRevision;
+    }
+    for (const id of ack.processedDirtyPayloadIds ?? []) {
+      const normalizedId = normalizeNullableString(id);
+      if (normalizedId) {
+        entry.processedDirtyPayloadIds.add(normalizedId);
+      }
+    }
+    overlay.set(connectionId, entry);
+  }
+
+  return overlay;
+}
+
+function resolveStagedDirtyAckProcessedRevision(input: {
+  dirty: DeviceSyncDirtyConnectionPrismaRecord;
+  overlayEntry: StagedDirtyAckOverlayEntry | null;
+}): bigint {
+  const stagedRevision = input.overlayEntry?.processedRevision ?? null;
+  if (stagedRevision === null || stagedRevision <= input.dirty.processedRevision) {
+    return input.dirty.processedRevision;
+  }
+  return stagedRevision > input.dirty.dirtyRevision
+    ? input.dirty.dirtyRevision
+    : stagedRevision;
+}
+
+function applyStagedDirtyAckMarkerOverlay(input: {
+  dirty: DeviceSyncDirtyConnectionPrismaRecord;
+  effectiveProcessedRevision: bigint;
+  markerPending: boolean;
+}): DeviceSyncDirtyConnectionPrismaRecord {
+  if (
+    input.effectiveProcessedRevision === input.dirty.processedRevision
+    && input.markerPending
+  ) {
+    return input.dirty;
+  }
+
+  return {
+    ...input.dirty,
+    processedRevision: input.effectiveProcessedRevision,
+    ...(input.markerPending
+      ? {}
+      : {
+          dirtyResourcesJson: {},
+          resourceCategoryCountsJson: {},
+          sourceProviderCountsJson: {},
+          windowEnd: null,
+          windowStart: null,
+        }),
   };
 }
 

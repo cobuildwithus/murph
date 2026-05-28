@@ -47,6 +47,9 @@ import {
   resolveAssistantRouteTurnPlan,
   type AssistantCodexTurnResolvedExecutionProfile,
 } from '../src/assistant/codex-turn/planning.js'
+import {
+  buildAssistantSkillFileRef,
+} from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import type { AssistantActiveTurnProviderHistory } from '../src/assistant/active-turn-history.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
@@ -101,6 +104,47 @@ describe('assistant protocol index planning', () => {
     expect(plan.assistantCliContract).toBe('bootstrap contract')
     expect(plan.systemPrompt).toContain('Execution style:')
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
+  })
+
+  it('injects conversation onboarding skill activation through route planning', async () => {
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({
+        onboardingGuidanceOpen: true,
+      }),
+    })
+
+    const skillRef = buildAssistantSkillFileRef('conversation-onboarding')
+
+    expect(plan.onboardingGuidanceInjected).toBe(true)
+    expect(plan.systemPrompt).toContain(skillRef)
+    expect(plan.turnContextPrompt).toContain('Conversation onboarding:')
+    expect(plan.turnContextPrompt).toContain(
+      `Before replying, read \`${skillRef}\``,
+    )
+    expect(plan.turnContextPrompt).not.toContain(
+      'roughly 3-4 short assistant messages',
+    )
+    expect(plan.turnContextPrompt).not.toContain('Natural first-run flow')
   })
 
   it('resumes Codex threads without refreshing bootstrap developer instructions', async () => {
@@ -475,7 +519,9 @@ function createSession(input?: {
   }
 }
 
-function createSharedPlan(): AssistantTurnSharedPlan {
+function createSharedPlan(
+  overrides: Partial<AssistantTurnSharedPlan> = {},
+): AssistantTurnSharedPlan {
   return {
     allowSensitiveHealthContext: false,
     cliAccess: {
@@ -504,5 +550,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/work',
+    ...overrides,
   }
 }

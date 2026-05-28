@@ -1313,10 +1313,18 @@ function createHostedWebDeviceSyncPort(input: {
     },
     async fetchDirtyStates(runtimeInput?: {
       limit?: number | null;
+      stagedDirtyAcks?: Array<{
+        connectionId: string;
+        processedDirtyPayloadIds?: string[];
+        processedRevision: string;
+      }>;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           ...(runtimeInput?.limit === undefined ? {} : { limit: runtimeInput.limit }),
+          ...(runtimeInput?.stagedDirtyAcks === undefined
+            ? {}
+            : { stagedDirtyAcks: runtimeInput.stagedDirtyAcks }),
           userId: input.boundUserId,
         },
         boundUserId: input.boundUserId,

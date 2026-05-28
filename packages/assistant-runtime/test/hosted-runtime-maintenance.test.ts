@@ -991,6 +991,54 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("passes staged dirty ack overlays into control-plane sync", async () => {
+    const close = vi.fn();
+    const service = {
+      close,
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_staged_dirty_ack_overlay",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        stagedDirtyAcks: [
+          {
+            connectionId: "dsc_123",
+            processedDirtyPayloadIds: ["dsp_1"],
+            processedRevision: "7",
+          },
+        ],
+      },
+    );
+
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDirtyPendingFetch: false,
+        stagedDirtyAcks: [
+          {
+            connectionId: "dsc_123",
+            processedDirtyPayloadIds: ["dsp_1"],
+            processedRevision: "7",
+          },
+        ],
+      }),
+    );
+  });
+
   it("hydrates Junction provider config from hosted runtime platform env", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);

@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+
 import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 
 export const CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
@@ -10,6 +12,8 @@ const ACTION_DEDUPE_LIMIT = 1024
 const SLOW_ACTION_SAMPLE_LIMIT = 8
 const OUTPUT_ITEM_SCAN_LIMIT = 64
 const TRACKED_ACTION_LIMIT = 256
+const TOOL_DIAGNOSTIC_LIMIT = 16
+const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -29,6 +33,35 @@ type TokenUsageSample = {
 type TrackedAction = {
   durationMs: number
   kind: CodexActionKind
+}
+
+type ActionOutputMetrics = {
+  bytesTotal: number
+  itemCount: number
+}
+
+type ToolDiagnosticIdentity = {
+  kind: CodexActionKind
+  namespacePresent: boolean
+  serverPresent: boolean
+  tool: string | null
+}
+
+type ToolDiagnosticMetrics = {
+  bytesMax: number
+  bytesTotal: number
+  callCount: number
+  identity: ToolDiagnosticIdentity
+}
+
+type ToolDiagnosticSummary = {
+  callCount: number
+  kind: CodexActionKind
+  namespacePresent?: boolean
+  outputBytesMax: number
+  outputBytesTotal: number
+  serverPresent?: boolean
+  tool?: string
 }
 
 export interface CodexActionDiagnosticsReducer {
@@ -51,6 +84,8 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   let failedCount = 0
   let durationMsTotal = 0
   let durationMsMax = 0
+  let outputBytesMax = 0
+  let outputBytesTotal = 0
   let outputItemCount = 0
   let tokenSampleCount = 0
   let inputTokensMax = 0
@@ -71,6 +106,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   const itemStarts = new Map<string, number>()
   const startedActionKeys = new Set<string>()
   const trackedActions: TrackedAction[] = []
+  const toolMetrics = new Map<string, ToolDiagnosticMetrics>()
 
   const recordActionSample = (kind: CodexActionKind) => {
     if (!actionKinds.includes(kind) && actionKinds.length < ACTION_SAMPLE_LIMIT) {
@@ -100,13 +136,20 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   const recordCompletionMetrics = (input: {
     durationMs: number | null
     kind: CodexActionKind
-    outputItems: number
+    output: ActionOutputMetrics
+    toolIdentity: ToolDiagnosticIdentity
   }) => {
     if (input.durationMs !== null) {
       durationMsTotal += input.durationMs
       durationMsMax = Math.max(durationMsMax, input.durationMs)
     }
-    outputItemCount += input.outputItems
+    outputBytesTotal += input.output.bytesTotal
+    outputBytesMax = Math.max(outputBytesMax, input.output.bytesTotal)
+    outputItemCount += input.output.itemCount
+    recordToolMetrics(toolMetrics, {
+      identity: input.toolIdentity,
+      outputBytes: input.output.bytesTotal,
+    })
 
     if (trackedActions.length < TRACKED_ACTION_LIMIT) {
       trackedActions.push({
@@ -163,6 +206,24 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
           return durationDelta
         })
         .slice(0, SLOW_ACTION_SAMPLE_LIMIT)
+      const topTools = [...toolMetrics.values()]
+        .sort((left, right) => {
+          const bytesDelta = right.bytesTotal - left.bytesTotal
+          if (bytesDelta !== 0) {
+            return bytesDelta
+          }
+          const maxDelta = right.bytesMax - left.bytesMax
+          if (maxDelta !== 0) {
+            return maxDelta
+          }
+          const countDelta = right.callCount - left.callCount
+          return countDelta !== 0
+            ? countDelta
+            : toolDiagnosticKey(left.identity).localeCompare(
+              toolDiagnosticKey(right.identity),
+            )
+        })
+        .slice(0, TOOL_DIAGNOSTIC_LIMIT)
 
       return pruneNullishRecord({
         schema: CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
@@ -184,6 +245,8 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionInputUnitMax: inputTokensMax,
         codexActionKinds: actionKinds,
         codexActionMcpToolCallCount: actionCounts.get('mcp.tool.call') ?? 0,
+        codexActionOutputBytesMax: outputBytesMax,
+        codexActionOutputBytesTotal: outputBytesTotal,
         codexActionOutputItemCount: outputItemCount,
         codexActionOutputUnitMax: outputTokensMax,
         codexActionProviderActionCount: input.providerActionCount,
@@ -192,6 +255,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionSlowKinds: slowActions.map((action) => action.kind),
         codexActionStartedCount: startedCount,
         codexActionThreadIdPresent: input.codexThreadId !== null,
+        codexActionToolSummaries: topTools.map(toolDiagnosticSummary),
         codexActionTotalUnitMax: totalTokensMax,
         codexActionUsageSampleCount: tokenSampleCount,
         codexActionTurnIdPresent: input.turnId !== null,
@@ -214,7 +278,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
 
       const itemId =
         readNormalizedItemId(input.normalizedEvent) ?? readRawItemId(input.rawEvent)
-      const actionKey = itemId !== null ? `${kind}:${itemId}` : null
+      const actionKey =
+        itemId !== null
+          ? `${kind}:${itemId}`
+          : fallbackActionKeyFromNormalized(input.normalizedEvent, kind)
       const item = readEventItem(input.rawEvent)
       const counted = registerAction({
         actionKey,
@@ -261,10 +328,148 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       recordCompletionMetrics({
         durationMs,
         kind,
-        outputItems: countActionOutputItems(item),
+        output: measureActionOutput(item),
+        toolIdentity: resolveToolDiagnosticIdentity(kind, item),
       })
     },
   }
+}
+
+function recordToolMetrics(
+  metrics: Map<string, ToolDiagnosticMetrics>,
+  input: {
+    identity: ToolDiagnosticIdentity
+    outputBytes: number
+  },
+): void {
+  const key = toolDiagnosticKey(input.identity)
+  const existing = metrics.get(key)
+  if (existing) {
+    existing.bytesMax = Math.max(existing.bytesMax, input.outputBytes)
+    existing.bytesTotal += input.outputBytes
+    existing.callCount += 1
+    return
+  }
+
+  metrics.set(key, {
+    bytesMax: input.outputBytes,
+    bytesTotal: input.outputBytes,
+    callCount: 1,
+    identity: input.identity,
+  })
+}
+
+function resolveToolDiagnosticIdentity(
+  kind: CodexActionKind,
+  item: Record<string, unknown> | null,
+): ToolDiagnosticIdentity {
+  if (kind === 'dynamic.tool.call') {
+    const namespace = readToolIdentifierPart(item?.namespace)
+    const tool = readToolIdentifierPart(
+      item?.tool,
+      item?.toolName,
+      item?.tool_name,
+      item?.name,
+    )
+    return {
+      kind,
+      namespacePresent: namespace !== null,
+      serverPresent: false,
+      tool,
+    }
+  }
+
+  if (kind === 'mcp.tool.call') {
+    const server = readToolIdentifierPart(
+      item?.server,
+      item?.serverName,
+      item?.server_name,
+    )
+    const tool = readToolIdentifierPart(
+      item?.tool,
+      item?.toolName,
+      item?.tool_name,
+      item?.name,
+    )
+    return {
+      kind,
+      namespacePresent: false,
+      serverPresent: server !== null,
+      tool,
+    }
+  }
+
+  return {
+    kind,
+    namespacePresent: false,
+    serverPresent: false,
+    tool: null,
+  }
+}
+
+function toolDiagnosticKey(identity: ToolDiagnosticIdentity): string {
+  return JSON.stringify([
+    identity.kind,
+    identity.namespacePresent,
+    identity.serverPresent,
+    identity.tool,
+  ])
+}
+
+function toolDiagnosticSummary(
+  metrics: ToolDiagnosticMetrics,
+): ToolDiagnosticSummary {
+  return pruneNullishRecord({
+    callCount: metrics.callCount,
+    kind: metrics.identity.kind,
+    namespacePresent: metrics.identity.namespacePresent ? true : null,
+    outputBytesMax: metrics.bytesMax,
+    outputBytesTotal: metrics.bytesTotal,
+    serverPresent: metrics.identity.serverPresent ? true : null,
+    tool: metrics.identity.tool,
+  }) as ToolDiagnosticSummary
+}
+
+function readToolIdentifierPart(...values: unknown[]): string | null {
+  const value = readNonemptyString(...values)
+  if (!value || !TOOL_IDENTIFIER_PART_PATTERN.test(value)) {
+    return null
+  }
+  return value
+}
+
+function fallbackActionKeyFromNormalized(
+  normalized: CodexNormalizedEvent,
+  kind: CodexActionKind,
+): string | null {
+  if (normalized.kind === 'status_item') {
+    if (normalizeIdentifier(normalized.itemType) !== kind) {
+      return null
+    }
+    return JSON.stringify({
+      commandLabel: normalized.commandLabel,
+      filePaths: normalized.filePaths,
+      itemType: normalized.itemType,
+      kind,
+    })
+  }
+
+  if (normalized.kind === 'tool_call' && kind === 'mcp.tool.call') {
+    return JSON.stringify({
+      kind,
+      toolName: normalized.toolName,
+      toolServer: normalized.toolServer,
+    })
+  }
+
+  if (normalized.kind === 'web_search' && kind === 'web.search') {
+    return JSON.stringify({
+      kind,
+      query: normalized.query,
+    })
+  }
+
+  return null
 }
 
 function markActionKey(set: Set<string>, key: string | null): boolean {
@@ -453,17 +658,22 @@ function isFailedAction(
   return exitCode !== null ? exitCode !== 0 : false
 }
 
-function countActionOutputItems(item: Record<string, unknown> | null): number {
+function measureActionOutput(item: Record<string, unknown> | null): ActionOutputMetrics {
   if (!item) {
-    return 0
+    return {
+      bytesTotal: 0,
+      itemCount: 0,
+    }
   }
 
-  let outputItems = 0
+  let bytesTotal = 0
+  let itemCount = 0
   const addString = (value: unknown) => {
     if (typeof value !== 'string' || value.length === 0) {
       return
     }
-    outputItems += 1
+    itemCount += 1
+    bytesTotal += Buffer.byteLength(value, 'utf8')
   }
 
   addString(item.aggregatedOutput)
@@ -498,13 +708,45 @@ function countActionOutputItems(item: Record<string, unknown> | null): number {
     ) {
       const contentItem = resultContent[index]
       const record = asRecord(contentItem)
-      addString(record?.text)
-      addString(record?.imageUrl)
-      addString(record?.image_url)
+      if (record) {
+        const beforeCount = itemCount
+        addString(record.text)
+        addString(record.imageUrl)
+        addString(record.image_url)
+        if (itemCount === beforeCount) {
+          addJsonValue(record)
+        }
+      } else {
+        addJsonValue(contentItem)
+      }
     }
   }
+  addJsonValue(result?.structuredContent)
+  addJsonValue(result?.structured_content)
+  addJsonValue(result?._meta)
+  const error = asRecord(item.error)
+  addString(error?.message)
 
-  return outputItems
+  return {
+    bytesTotal,
+    itemCount,
+  }
+
+  function addJsonValue(value: unknown) {
+    if (value === null || value === undefined) {
+      return
+    }
+    if (typeof value === 'string') {
+      addString(value)
+      return
+    }
+    const encoded = safeJsonStringify(value)
+    if (!encoded) {
+      return
+    }
+    itemCount += 1
+    bytesTotal += Buffer.byteLength(encoded, 'utf8')
+  }
 }
 
 function readTokenUsageSample(
@@ -542,7 +784,16 @@ function readTokenUsageSample(
 }
 
 function pruneNullishRecord(
-  input: Record<string, string | number | boolean | string[] | number[] | null>,
+  input: Record<
+    string,
+    | string
+    | number
+    | boolean
+    | string[]
+    | number[]
+    | ToolDiagnosticSummary[]
+    | null
+  >,
 ): Record<string, unknown> {
   const output: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(input)) {
@@ -555,6 +806,14 @@ function pruneNullishRecord(
     output[key] = value
   }
   return output
+}
+
+function safeJsonStringify(value: unknown): string | null {
+  try {
+    return JSON.stringify(value) ?? null
+  } catch {
+    return null
+  }
 }
 
 function readFirstString(...values: unknown[]): string | null {

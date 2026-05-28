@@ -27,6 +27,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
@@ -426,6 +427,91 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
       code: "ENOENT",
     });
     assert.doesNotMatch(rolloutLog, /hello hosted local/u);
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
+test("hosted Codex runtime local E2E app-server stub enforces expected dynamic tools", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseText: "shim response",
+  });
+
+  try {
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
+          "murph.send_progress_update",
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "",
+        OPENAI_API_KEY: "secret-openai-key",
+      },
+    });
+    const missingToolChild = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const rejectedMessages = await runHostedLocalCodexStubThreadStart(
+      missingToolChild,
+      {},
+    );
+    assert.match(
+      readHostedLocalCodexStubRpcErrorMessage(rejectedMessages, 2),
+      /expected \[murph\.send_progress_update\] but received \[none\]/u,
+    );
+
+    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const messages = await runHostedLocalCodexStubTurn(
+      child,
+      ["hello hosted local"],
+      {
+        dynamicTools: [
+          {
+            inputSchema: {
+              type: "object",
+            },
+            name: "send_progress_update",
+            namespace: "murph",
+          },
+        ],
+      },
+    );
+
+    assert.equal(requests.length, 1);
+    const threadId = readHostedLocalCodexStubThreadId(messages);
+    const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
+    assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
+      {
+        dynamicToolNames: ["murph.send_progress_update"],
+        event: "thread.started",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+      {
+        assistantText: "shim response",
+        event: "assistant.message",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+    ]);
   } finally {
     await closeHttpServer(server);
   }
@@ -1190,6 +1276,25 @@ test("hosted runtime launch env policy forwards the E2E Codex turn delay probe c
   );
 });
 
+test("hosted runtime launch env policy forwards the E2E Codex expected dynamic-tools control", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
+        "murph.send_progress_update",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
+    "murph.send_progress_update",
+  );
+});
+
 test("hosted Codex runtime config fails closed without the configured model credential env", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -1756,6 +1861,7 @@ async function closeHttpServer(server: Server): Promise<void> {
 async function runHostedLocalCodexStubTurn(
   child: ReturnType<typeof spawn>,
   prompts: readonly string[] = ["hello hosted local"],
+  threadStartParams: Record<string, unknown> = {},
 ): Promise<Record<string, unknown>[]> {
   const childStdin = child.stdin;
   const childStdout = child.stdout;
@@ -1849,7 +1955,11 @@ async function runHostedLocalCodexStubTurn(
   try {
     childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({ id: 2, method: "thread/start", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 2,
+      method: "thread/start",
+      params: threadStartParams,
+    })}\n`);
 
     await completed;
     return messages;
@@ -1857,6 +1967,103 @@ async function runHostedLocalCodexStubTurn(
     childStdin.end();
     child.kill();
   }
+}
+
+async function runHostedLocalCodexStubThreadStart(
+  child: ReturnType<typeof spawn>,
+  threadStartParams: Record<string, unknown>,
+): Promise<Record<string, unknown>[]> {
+  const childStdin = child.stdin;
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  assert(childStdin);
+  assert(childStdout);
+  assert(childStderr);
+
+  const messages: Record<string, unknown>[] = [];
+  let stdoutBuffer = "";
+  let stderr = "";
+
+  const completed = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for hosted local Codex stub thread/start. stderr: ${stderr}`));
+    }, 5_000);
+    let resolved = false;
+
+    const finish = (error?: Error): void => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      clearTimeout(timeout);
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    };
+
+    child.once("error", finish);
+    child.once("exit", (code, signal) => {
+      if (resolved) {
+        return;
+      }
+
+      finish(new Error(
+        `Hosted local Codex stub exited before thread/start response: ${code ?? signal}. stderr: ${stderr}`,
+      ));
+    });
+    childStderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    childStdout.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      const lines = stdoutBuffer.split(/\r?\n/u);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+        messages.push(parsed);
+        if (parsed.id === 2) {
+          finish();
+        }
+      }
+    });
+  });
+
+  try {
+    childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 2,
+      method: "thread/start",
+      params: threadStartParams,
+    })}\n`);
+
+    await completed;
+    return messages;
+  } finally {
+    childStdin.end();
+    child.kill();
+  }
+}
+
+function readHostedLocalCodexStubRpcErrorMessage(
+  messages: readonly Record<string, unknown>[],
+  id: number,
+): string {
+  const message = messages.find((candidate) => candidate.id === id);
+  const error = isRecord(message?.error) ? message.error : null;
+  if (typeof error?.message !== "string") {
+    throw new Error(`Expected hosted local Codex stub RPC error for id ${id}.`);
+  }
+  return error.message;
 }
 
 function writeHostedLocalCodexStubResume(

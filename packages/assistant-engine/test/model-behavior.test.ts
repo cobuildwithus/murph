@@ -153,10 +153,10 @@ describe('assistant local PDF evidence guidance', () => {
       'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
     )
     expect(prompt).toContain(
-      '`vault-cli device account list --format json` shows an active user-facing provider account or connected upstream source',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
     )
-    expect(prompt).toContain(
-      'use `vault-cli device connect <provider> --format json` and send the returned `connectUrl` on its own final line',
+    expect(prompt).not.toContain(
+      '`vault-cli device account list --format json` shows an active user-facing provider account or connected upstream source',
     )
     expect(prompt).not.toContain('hosted connect helper is not exposed')
     expect(prompt).not.toContain('connection links are temporarily unavailable')
@@ -497,6 +497,58 @@ describe('assistant system prompt cache stability', () => {
     )
   })
 
+  it('keeps onboarding activation out of the common Codex route prefix', () => {
+    const cacheInput = {
+      toolSchemaHash: 'assistant-tool-schema-common-codex-test',
+    }
+    const onboardingOpen = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput({
+        onboardingGuidance: true,
+      }),
+      cacheInput,
+    )
+    const onboardingClosed = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput({
+        onboardingGuidance: false,
+      }),
+      cacheInput,
+    )
+
+    expect(onboardingOpen.cacheMetadata.dynamicContextStartsAfterStaticCore).toBe(
+      onboardingClosed.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    expect(onboardingOpen.cacheMetadata.staticPromptHash).toBe(
+      onboardingClosed.cacheMetadata.staticPromptHash,
+    )
+    expect(onboardingOpen.cacheMetadata.stableRouteCapabilityPromptHash).toBe(
+      onboardingClosed.cacheMetadata.stableRouteCapabilityPromptHash,
+    )
+
+    const openStablePrefix = firstNChars(
+      onboardingOpen.prompt,
+      onboardingOpen.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    const closedStablePrefix = firstNChars(
+      onboardingClosed.prompt,
+      onboardingClosed.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    const openDynamicSuffix = onboardingOpen.prompt.slice(
+      onboardingOpen.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    const closedDynamicSuffix = onboardingClosed.prompt.slice(
+      onboardingClosed.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+
+    expect(openStablePrefix).toEqual(closedStablePrefix)
+    expect(openStablePrefix).toContain('Murph skill files:')
+    expect(openStablePrefix).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+    )
+    expect(openStablePrefix).not.toContain('Conversation onboarding:')
+    expect(openDynamicSuffix).toContain('Conversation onboarding:')
+    expect(closedDynamicSuffix).not.toContain('Conversation onboarding:')
+  })
+
   it('keeps the notification decision prefix stable across dynamic turn context', () => {
     const cacheInput = {
       toolSchemaHash: 'assistant-notification-tools-test',
@@ -597,6 +649,10 @@ describe('assistant experiment onboarding guidance', () => {
     }))
 
     expect(prompt).toContain('Murph skill files:')
+    expect(prompt).toContain('conversation-onboarding')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+    )
     expect(prompt).toContain('experiment-onboarding')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
@@ -681,7 +737,7 @@ describe('assistant notification decision guidance', () => {
 })
 
 describe('assistant conversation onboarding guidance', () => {
-  it('requires multi-message orientation, data-source handling, and an experiment-shaped next step', () => {
+  it('injects the conversation onboarding skill activation without inlining the full workflow', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       allowSensitiveHealthContext: true,
@@ -703,77 +759,48 @@ describe('assistant conversation onboarding guidance', () => {
       vaultOverview: null,
     })
 
-    expect(prompt).toContain('roughly 3-4 short assistant messages')
+    expect(prompt).toContain('Conversation onboarding:')
     expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
+    )
+    expect(prompt).toContain(
+      'This turn is eligible for first-run conversation onboarding',
+    )
+    expect(prompt).toContain(
+      'Before replying, read `$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md`',
+    )
+    expect(prompt).toContain(
+      'Use the current prompt\'s date, timezone, channel, audience/privacy, and hosted wearable connection guidance',
+    )
+    expect(prompt).toContain(
+      'Hosted wearable connection links are available for WHOOP (`whoop`)',
+    )
+    expect(prompt).not.toContain('roughly 3-4 short assistant messages')
+    expect(prompt).not.toContain(
       'Do not compress the whole orientation into one "send me things" reply',
     )
-    expect(prompt).toContain('Murph is a health context layer')
-    expect(prompt).toContain(
-      'complete a wearable/app checkpoint before first experiment or logging setup',
-    )
-    expect(prompt).toContain(
-      'A wearable is optional, but this checkpoint is not',
-    )
-    expect(prompt).toContain('Identify data sources in one short message')
-    expect(prompt).toContain(
-      'This is a required onboarding checkpoint before first experiment or logging habit',
-    )
-    expect(prompt).toContain(
-      'Before asking whether they use a wearable or app for sleep, workouts, activity, or recovery',
-    )
-    expect(prompt).toContain(
-      'run `vault-cli device account list --format json`',
-    )
-    expect(prompt).toContain(
-      'if a supported hosted wearable connection is already visible in context',
-    )
-    expect(prompt).toContain(
-      'Name the underlying provider/source rather than bridge plumbing',
-    )
-    expect(prompt).toContain(
+    expect(prompt).not.toContain('Natural first-run flow')
+    expect(prompt).not.toContain('vault-cli device account list --format json')
+    expect(prompt).not.toContain(
       'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
     )
-    expect(prompt).toContain(
-      'say Murph does not support it yet and suggest another supported source or texting notes for now',
-    )
-    expect(prompt).toContain(
-      'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
-    )
-    expect(prompt).toContain(
-      'do not ask them to send activity, steps, workouts, sleep, or recovery by message',
-    )
-    expect(prompt).toContain(
-      'activity, sleep, and recovery data can come from that source',
-    )
-    expect(prompt).toContain(
-      'Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data',
-    )
-    expect(prompt).toContain(
-      'If no connected source is visible, ask one short question about whether they use a wearable/app for sleep, workouts, activity, or recovery before moving to first-experiment guidance',
-    )
-    expect(prompt).toContain(
-      'If the user asks to connect a wearable without naming one, ask which supported provider they use',
-    )
-    expect(prompt).toContain(
-      'If no connected wearable/app source is visible and the user asks to connect a wearable without naming a provider',
-    )
-    expect(prompt).toContain(
-      'use `vault-cli device connect <provider> --format json` and send the returned `connectUrl` on its own final line',
-    )
-    expect(prompt).toContain('Do not merely say they can connect later')
     expect(prompt).not.toContain(
       'say they can start by texting notes and connect wearables later',
     )
-    expect(prompt).toContain('WHOOP')
-    expect(prompt).toContain('one lightweight, bounded experiment at a time')
-    expect(prompt).toContain('sleep, strength, energy, or simple baseline logging')
-    expect(prompt).toContain('retrospective baseline')
-    expect(prompt).toContain('stale or sparse')
+  })
+
+  it('does not inject the conversation onboarding activation after onboarding closes', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      onboardingGuidance: false,
+    }))
+
     expect(prompt).toContain(
-      'Creating an active experiment remains a separate confirmed flow',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md',
     )
-    expect(prompt).toContain('Natural first-run flow')
-    expect(prompt).toContain('vault-cli assistant onboarding complete')
+    expect(prompt).not.toContain('Conversation onboarding:')
+    expect(prompt).not.toContain(
+      'This turn is eligible for first-run conversation onboarding',
+    )
   })
 })
 

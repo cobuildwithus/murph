@@ -9,6 +9,12 @@ export const MURPH_ASSISTANT_SKILLS_ROOT_REF =
 
 export const ASSISTANT_SKILLS = [
   {
+    slug: 'conversation-onboarding',
+    name: 'conversation-onboarding',
+    triggerHint:
+      'Use when the current prompt says first-run conversation onboarding is eligible or open, including welcome flow, name/context collection, wearable/app checkpoint, first experiment or logging path selection, and onboarding completion.',
+  },
+  {
     slug: 'experiment-onboarding',
     name: 'experiment-onboarding',
     triggerHint:

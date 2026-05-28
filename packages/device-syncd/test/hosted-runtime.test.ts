@@ -8,6 +8,7 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
+  parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
@@ -15,6 +16,34 @@ import {
 } from "../src/hosted-runtime.ts";
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
+  it("parses staged dirty ack overlays on dirty-pending requests", () => {
+    expect(
+      parseHostedExecutionDeviceSyncDirtyPendingRequest(
+        {
+          limit: 10,
+          stagedDirtyAcks: [
+            {
+              connectionId: "dsc_123",
+              processedDirtyPayloadIds: ["dsp_1", "dsp_2"],
+              processedRevision: "42",
+            },
+          ],
+        },
+        "trusted-user",
+      ),
+    ).toEqual({
+      limit: 10,
+      stagedDirtyAcks: [
+        {
+          connectionId: "dsc_123",
+          processedDirtyPayloadIds: ["dsp_1", "dsp_2"],
+          processedRevision: "42",
+        },
+      ],
+      userId: "trusted-user",
+    });
+  });
+
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {
     expect(buildHostedExecutionDeviceSyncConnectLinkPath("oura/webhook")).toBe(
       "/api/internal/device-sync/connect-targets/oura%2Fwebhook/connect-link",
