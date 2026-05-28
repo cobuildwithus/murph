@@ -88,7 +88,7 @@ test('readPersistedAssistantCliSurfaceBootstrapContext returns a valid persisted
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
 })
 
-test('buildAssistantCliSurfaceContract normalizes commands and renders family, args, and common option summaries', async () => {
+test('buildAssistantCliSurfaceContract normalizes commands and renders family, args, and required option summaries', async () => {
   const {
     buildAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
