@@ -479,16 +479,9 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
     processedRevision: BigInt(parsed.processedRevision),
     userId: input.trustedUserId,
   });
-  const stillDirty = dirty
-    ? dirty.dirtyRevision > dirty.processedRevision || Object.values(dirty.dirtyResources).some((resource) =>
-      Boolean(resource.dirtyPayloadId)
-    )
-    : false;
+  const stillDirty = dirty?.stillDirty ?? false;
   const hasPendingDirty = stillDirty
-    || (await controlPlane.store.listPendingDirtyConnectionsForUser({
-      limit: 1,
-      userId: input.trustedUserId,
-    })).items.length > 0;
+    || await controlPlane.store.hasPendingDirtyConnectionForUser(input.trustedUserId);
 
   return {
     connectionId: parsed.connectionId,

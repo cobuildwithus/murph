@@ -203,6 +203,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexResumeFailureOutputStringLengths",
   "codexResumeFailureRetryable",
 ] as const;
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
 
 const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS = [
@@ -879,13 +880,36 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
 >[0]): DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
   return {
     afterDurableCheckpoint: async () => {
-      const result = await recordHostedDeviceSyncDirtyPostCheckpointRecord(input);
-      return result.nextWakeAt
-        ? {
-            nextWakeAt: result.nextWakeAt,
-            nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-          }
-        : null;
+      try {
+        const result = await recordHostedDeviceSyncDirtyPostCheckpointRecord(input);
+        return result.nextWakeAt
+          ? {
+              nextWakeAt: result.nextWakeAt,
+              nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+            }
+          : null;
+      } catch (error) {
+        const errorCode = toHostedRuntimeLogCode(deriveHostedExecutionErrorCode(error));
+        const nextWakeAt = resolveHostedDeviceSyncDirtyAckFailureWakeAt(input.record);
+        await writeHostedRuntimeLogBestEffort({
+          entry: {
+            component: "device-sync",
+            errorCode,
+            eventCode: "device-sync.job_failed",
+            level: "warn",
+            phase: "checkpoint",
+            redactedJson: {
+              errorCode,
+              nextWakeAtPresent: true,
+            },
+          },
+          platform: input.runtime.platform,
+        });
+        return {
+          nextWakeAt,
+          nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+        };
+      }
     },
     nextWakeAt: input.record.nextWakeAt ?? null,
     redactedStatus: {
@@ -894,6 +918,13 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
       hostedDeviceSyncDirtyStillPending: true,
     },
   };
+}
+
+function resolveHostedDeviceSyncDirtyAckFailureWakeAt(input: Parameters<
+  typeof recordHostedDeviceSyncDirtyPostCheckpointRecord
+>[0]["record"]): string {
+  return input.nextWakeAt
+    ?? new Date(Date.now() + HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS).toISOString();
 }
 
 function mergeHostedRuntimeRedactedStatus(

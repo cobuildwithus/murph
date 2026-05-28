@@ -41,19 +41,23 @@ import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
 import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
+import {
+  HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+} from "./hosted-device-sync-limits.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
   localToHostedAccountIds: Map<string, string>;
   observedTokenVersions: Map<string, number | null>;
-  pendingDirtyAck: {
-    connectionId: string;
-    localAccountId: string;
-    nextWakeAt: string | null;
-    processedDirtyPayloadIds?: string[];
-    processedRevision: string;
-  } | null;
+  pendingDirtyAcks: HostedDeviceSyncRuntimeDirtyAck[];
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null;
+}
+
+export interface HostedDeviceSyncRuntimeDirtyAck {
+  connectionId: string;
+  nextWakeAt: string | null;
+  processedDirtyPayloadIds?: string[];
+  processedRevision: string;
 }
 
 type HostedRuntimeDeviceSyncStore = ReturnType<typeof requireHostedRuntimeDeviceSyncStore>;
@@ -67,8 +71,6 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "provider_not_registered"
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
-
-const HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT = 10;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -141,7 +143,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       service: input.service,
     });
   }
-  state.pendingDirtyAck = await applyHostedPendingDirtyDeviceSyncState({
+  state.pendingDirtyAcks = await applyHostedPendingDirtyDeviceSyncState({
     deviceSyncPort: client,
     hostedToLocalAccountIds: state.hostedToLocalAccountIds,
     service: input.service,
@@ -217,7 +219,7 @@ function createEmptyHostedDeviceSyncRuntimeSyncState(
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
-    pendingDirtyAck: null,
+    pendingDirtyAcks: [],
     snapshot,
   };
 }
@@ -348,10 +350,11 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
   wake: HostedRuntimeEvent;
-}): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
+}): Promise<HostedDeviceSyncRuntimeDirtyAck[]> {
   const pending = await input.deviceSyncPort.fetchDirtyStates({
     limit: HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   });
+  const acks: HostedDeviceSyncRuntimeDirtyAck[] = [];
 
   for (const dirtyState of pending.items) {
     const ack = applyHostedDirtyDeviceSyncState({
@@ -363,11 +366,11 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
     });
 
     if (ack) {
-      return ack;
+      acks.push(ack);
     }
   }
 
-  return null;
+  return acks;
 }
 
 function applyHostedDirtyDeviceSyncState(input: {
@@ -376,7 +379,7 @@ function applyHostedDirtyDeviceSyncState(input: {
   nextWakeAt: string | null;
   service: DeviceSyncService;
   wake: HostedRuntimeEvent;
-}): HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"] {
+}): HostedDeviceSyncRuntimeDirtyAck | null {
   const localAccountId = input.hostedToLocalAccountIds.get(input.dirtyState.connectionId) ?? null;
   if (!localAccountId) {
     reportHostedDirtyDeviceSyncStateSkipped({
@@ -424,7 +427,6 @@ function applyHostedDirtyDeviceSyncState(input: {
     });
     return {
       connectionId: input.dirtyState.connectionId,
-      localAccountId,
       nextWakeAt: input.nextWakeAt,
       ...withHostedDirtyPayloadAckIds(input.dirtyState),
       processedRevision: input.dirtyState.dirtyRevision,
@@ -456,7 +458,6 @@ function applyHostedDirtyDeviceSyncState(input: {
 
   return {
     connectionId: input.dirtyState.connectionId,
-    localAccountId,
     nextWakeAt: input.nextWakeAt,
     ...withHostedDirtyPayloadAckIds(input.dirtyState),
     processedRevision: input.dirtyState.dirtyRevision,
@@ -465,7 +466,7 @@ function applyHostedDirtyDeviceSyncState(input: {
 
 function withHostedDirtyPayloadAckIds(
   dirtyState: HostedExecutionDeviceSyncDirtyStateResponse,
-): Pick<NonNullable<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]>, "processedDirtyPayloadIds"> | Record<string, never> {
+): Pick<HostedDeviceSyncRuntimeDirtyAck, "processedDirtyPayloadIds"> | Record<string, never> {
   const ids = dirtyState.dirtyResources
     .map((resource) => resource.dirtyPayloadId)
     .filter((id): id is string => typeof id === "string" && id.length > 0);

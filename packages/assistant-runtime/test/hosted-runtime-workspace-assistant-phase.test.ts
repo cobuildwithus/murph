@@ -248,7 +248,7 @@ beforeEach(() => {
   mocks.readLatestAssistantInputCursor.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
-    recorded: true,
+    recorded: 1,
     stillDirty: false,
   });
   mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
@@ -2305,7 +2305,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: null,
-      recorded: true,
+      recorded: 1,
       stillDirty: false,
     });
 
@@ -3115,7 +3115,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: "2026-04-27T00:13:00.000Z",
-      recorded: true,
+      recorded: 1,
       stillDirty: true,
     });
 
@@ -3369,7 +3369,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: null,
-      recorded: true,
+      recorded: 1,
       stillDirty: false,
     });
 
@@ -3403,6 +3403,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("returns a reconcile wake when deferred dirty ack recording fails", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: {
+        connectionId: "dsc_dirty_ack_failure_retry",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: "2026-04-27T00:12:00.000Z",
+        processedRevision: "46",
+      },
+      progressed: false,
+      redactedLogEntries: [],
+    });
+    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord
+      .mockRejectedValueOnce(new Error("temporary dirty ack failure"));
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Function),
+    }));
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+
+    const effect = postCheckpoint?.afterDurableCheckpoint;
+    expect(typeof effect).toBe("function");
+    if (typeof effect !== "function") {
+      throw new Error("Expected one deferred dirty ack effect.");
+    }
+    await expect(effect()).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:12:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+    });
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
+      record: {
+        connectionId: "dsc_dirty_ack_failure_retry",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: "2026-04-27T00:12:00.000Z",
+        processedRevision: "46",
+      },
+      runtime: expect.any(Object),
+    });
+  });
+
   it("preserves deferred cleanup wake after dirty ack-only foreground progress", async () => {
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       deviceSyncProcessed: 0,
@@ -3424,7 +3470,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: null,
-      recorded: true,
+      recorded: 1,
       stillDirty: false,
     });
 
