@@ -195,11 +195,15 @@ export function createHostedConversationMailboxImportItem(input: {
   >;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
-}): (item: HostedMailboxResolvedImportItem) => Promise<HostedMailboxItemImportOutcome> {
-  return (item) =>
+}): (
+  item: HostedMailboxResolvedImportItem,
+  context?: { runtimeAttemptId?: string | null },
+) => Promise<HostedMailboxItemImportOutcome> {
+  return (item, context) =>
     importHostedConversationMailboxItem({
       ...input,
       item,
+      runtimeAttemptId: context?.runtimeAttemptId ?? null,
     });
 }
 
@@ -214,6 +218,7 @@ export async function importHostedConversationMailboxItem(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  runtimeAttemptId?: string | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
@@ -294,6 +299,13 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
+    inputId: stagedInput.inputId,
+    item: input.item,
+    runtime: input.runtime,
+    runtimeAttemptId: input.runtimeAttemptId ?? null,
+    wake: decoded.wake,
+  });
 
   return {
     afterCheckpoint: async () => {
@@ -312,6 +324,39 @@ export async function importHostedConversationMailboxItem(input: {
     metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported",
   };
+}
+
+function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(input: {
+  inputId: string;
+  item: HostedMailboxResolvedImportItem;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  runtimeAttemptId?: string | null;
+  wake: HostedExecutionConversationMessageWake;
+}): void {
+  if (input.wake.message.channel !== "linq") {
+    return;
+  }
+  const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
+  if (!latencyTracePort) {
+    return;
+  }
+
+  try {
+    void latencyTracePort.record({
+      event: {
+        assistantInputId: input.inputId,
+        at: new Date().toISOString(),
+        mailboxItemId: input.item.item.id,
+        runtimeAttemptId: input.runtimeAttemptId ?? null,
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    }).catch(() => {
+      // Latency traces are diagnostic-only and must not affect runtime progress.
+    });
+  } catch {
+    // Latency traces are diagnostic-only and must not affect runtime progress.
+  }
 }
 
 async function projectHostedConversationAssistantInputBestEffort(input: {

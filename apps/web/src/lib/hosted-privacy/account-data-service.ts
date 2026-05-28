@@ -115,6 +115,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes per-lane sequence counters so deleted users cannot resume mailbox lanes.",
   },
   {
+    slug: "prisma.hosted_ingress_latency_trace",
+    label: "Hosted ingress latency traces",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes hosted ingress timing rows. Export includes aggregate counts only and omits internal correlation identifiers.",
+  },
+  {
     slug: "prisma.hosted_workspace",
     label: "Hosted workspace state",
     deletion: "live-delete",
@@ -1336,6 +1343,7 @@ async function countHostedAccountData(input: {
     hostedMailboxItem,
     hostedMailboxPayload,
     hostedMailboxLaneCounter,
+    hostedIngressLatencyTrace,
     hostedWorkspace,
     hostedUserCryptoEnvelope,
     hostedUserCryptoAudit,
@@ -1365,6 +1373,7 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMailboxItem.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxPayload.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberId } }),
+    input.prisma.hostedIngressLatencyTrace.count({ where: { userId: memberId } }),
     input.prisma.hostedWorkspace.count({ where: { userId: memberId } }),
     countHostedUserCryptoEnvelopeRows(input.prisma, memberId),
     countHostedUserCryptoAuditRows(input.prisma, memberId),
@@ -1401,6 +1410,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
     "prisma.hosted_invite": hostedInvite,
+    "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
     "prisma.hosted_linq_daily_state": hostedLinqDailyState,
     "prisma.hosted_mailbox_item": hostedMailboxItem,
     "prisma.hosted_mailbox_lane_counter": hostedMailboxLaneCounter,
@@ -1430,6 +1440,7 @@ async function deleteHostedAccountPrismaRows(input: {
   };
 
   record("prisma.hosted_mailbox_payload", await input.prisma.hostedMailboxPayload.deleteMany({ where: { userId: memberId } }));
+  record("prisma.hosted_ingress_latency_trace", await input.prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_mailbox_item", await input.prisma.hostedMailboxItem.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_mailbox_lane_counter", await input.prisma.hostedMailboxLaneCounter.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_runtime_log", await input.prisma.hostedRuntimeLog.deleteMany({ where: { userId: memberId } }));

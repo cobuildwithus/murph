@@ -31,6 +31,7 @@ import {
   parseHostedMailboxPayloadFetchResponse,
   parseHostedBrowserVaultReplicaRef,
   parseHostedBrowserVaultReplicaPublishResponse,
+  parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeLogResponse,
   parseHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceCheckpointResponse,
@@ -38,6 +39,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
@@ -664,6 +666,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             timeoutMs,
             transport: hostedWebControlTransport,
           }),
+          latencyTracePort: createHostedWebRuntimeLatencyTracePort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
           mailboxPort: createHostedWebMailboxPort({
             boundUserId: input.boundUserId,
             fetchImpl,
@@ -1154,6 +1162,7 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   mailbox_fetch: "Hosted mailbox fetch",
   mailbox_payload_decode: "Hosted mailbox payload decode",
   mailbox_payload_fetch: "Hosted mailbox payload fetch",
+  runtime_latency_trace: "Hosted runtime latency trace",
   runtime_log_write: "Hosted runtime log write",
   usage_recording: "Hosted usage recording",
   workspace_checkpoint: "Hosted workspace checkpoint",
@@ -2273,6 +2282,37 @@ function createHostedWebRuntimeLogPort(input: {
       });
 
       return parseHostedRuntimeLogResponse(payload);
+    },
+  };
+}
+
+function createHostedWebRuntimeLatencyTracePort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async record(
+      request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted runtime latency trace",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      try {
+        return parseHostedRuntimeLatencyTraceResponse(payload);
+      } catch (error) {
+        throw new Error("Hosted runtime latency trace returned invalid JSON.", {
+          cause: error,
+        });
+      }
     },
   };
 }

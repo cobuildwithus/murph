@@ -459,7 +459,9 @@ model HostedMailboxItem {
   updatedAt               DateTime              @updatedAt @map("updated_at")
   member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
   payload                 HostedMailboxPayload?
+  latencyTrace            HostedIngressLatencyTrace?
 
+  @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
@@ -479,6 +481,33 @@ model HostedMailboxPayload {
 
   @@index([userId, createdAt])
   @@map("hosted_mailbox_payload")
+}
+
+model HostedIngressLatencyTrace {
+  id                       String            @id
+  userId                   String            @map("user_id")
+  source                   String
+  mailboxItemId            String            @unique @map("mailbox_item_id")
+  mailboxLane              String            @map("mailbox_lane")
+  mailboxLaneSeq           BigInt            @map("mailbox_lane_seq")
+  assistantInputId         String?           @map("assistant_input_id")
+  runtimeAttemptId         String?           @map("runtime_attempt_id")
+  acceptedAt               DateTime          @map("accepted_at")
+  temporalSignalAcceptedAt DateTime?         @map("temporal_signal_accepted_at")
+  assistantInputStagedAt   DateTime?         @map("assistant_input_staged_at")
+  providerStartAt          DateTime?         @map("provider_start_at")
+  providerRequestOrdinal   Int?              @map("provider_request_ordinal")
+  createdAt                DateTime          @default(now()) @map("created_at")
+  updatedAt                DateTime          @updatedAt @map("updated_at")
+  mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
+
+  @@unique([userId, mailboxItemId])
+  @@index([source, acceptedAt])
+  @@index([source, providerStartAt])
+  @@index([userId, acceptedAt])
+  @@index([assistantInputId])
+  @@index([runtimeAttemptId])
+  @@map("hosted_ingress_latency_trace")
 }
 
 model HostedMailboxLaneCounter {

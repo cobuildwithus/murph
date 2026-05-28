@@ -6,6 +6,7 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
@@ -39,6 +40,7 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_fetch"
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
+  | "runtime_latency_trace"
   | "runtime_log_write"
   | "usage_recording"
   | "workspace_checkpoint"
@@ -56,6 +58,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
+  [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
