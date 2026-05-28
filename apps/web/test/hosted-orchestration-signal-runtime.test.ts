@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 
 const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
+  prewarmTaskQueue: "murph-hosted-runtime-prewarm",
   readRuntimeDemandStartToCloseTimeoutMs: 10_000,
 };
 

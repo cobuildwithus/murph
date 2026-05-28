@@ -310,7 +310,7 @@ function buildHostedEmailPromptProjection(
         attachment.fileName,
         HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
       ),
-      sizeBytes: attachment.data?.byteLength ?? null,
+      sizeBytes: null,
     }));
 
   return {

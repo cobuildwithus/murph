@@ -5,6 +5,9 @@ import {
   type HostedRuntimeTemporalEnvSource,
   type HostedRuntimeTemporalTls,
 } from "@murphai/hosted-execution/temporal-env";
+import {
+  deriveHostedUserRuntimePrewarmTaskQueue,
+} from "@murphai/hosted-execution/orchestration-control";
 
 import type {
   HostedUserRuntimeWorkflowOptions,
@@ -14,6 +17,7 @@ export interface HostedRuntimeTemporalEnvironment {
   address: string;
   apiKey?: string;
   namespace: string;
+  prewarmTaskQueue: string;
   taskQueue: string;
   tls: HostedRuntimeTemporalTls;
 }
@@ -26,6 +30,7 @@ export function readHostedRuntimeTemporalEnvironment(
   const environment = readSharedHostedRuntimeTemporalEnvironment(source, {
     defaultAddress: HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS,
   });
+  const workflowOptions = readHostedUserRuntimeWorkflowOptions(source);
   if (environment.address === null) {
     throw new TypeError("TEMPORAL_ADDRESS must be configured.");
   }
@@ -34,6 +39,8 @@ export function readHostedRuntimeTemporalEnvironment(
     address: environment.address,
     ...(environment.apiKey !== null ? { apiKey: environment.apiKey } : {}),
     namespace: environment.namespace,
+    prewarmTaskQueue: workflowOptions.prewarmTaskQueue
+      ?? deriveHostedUserRuntimePrewarmTaskQueue(environment.taskQueue),
     taskQueue: environment.taskQueue,
     tls: environment.tls,
   };

@@ -367,66 +367,52 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(0);
   });
 
-  it("releases an in-flight prewarm readiness lock at the prewarm timeout before later runtime work", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const prewarmStarted = createDeferred<void>();
-      const invocationStartupStarted = createDeferred<void>();
-      const startAndWaitForPorts = vi.fn(async (input: {
-        cancellationOptions: { abort: AbortSignal };
-      }) => {
-        if (startAndWaitForPorts.mock.calls.length === 1) {
-          prewarmStarted.resolve();
-          await new Promise<void>((_resolve, reject) => {
-            input.cancellationOptions.abort.addEventListener(
-              "abort",
-              () => reject(input.cancellationOptions.abort.reason),
-              { once: true },
-            );
+  it("preempts container prewarm when a workspace invocation arrives", async () => {
+    const firstStartEntered = createDeferred<void>();
+    const startAndWaitForPorts = vi.fn(async (input: {
+      cancellationOptions: { abort: AbortSignal };
+    }) => {
+      if (startAndWaitForPorts.mock.calls.length === 1) {
+        firstStartEntered.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          const signal = input.cancellationOptions.abort;
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
           });
-          return;
-        }
+        });
+        return;
+      }
+    });
+    const { container, containerFetch, destroy } = createContainerDouble({
+      startAndWaitForPorts,
+    });
 
-        invocationStartupStarted.resolve();
-      });
-      const { container, containerFetch } = createContainerDouble({
-        startAndWaitForPorts,
-      });
-      const prewarmOutcome = container.ensureReadyForProcessing({
-        timeoutMs: 5_000,
-        userId: "member_123",
-      }).then(
-        () => "resolved" as const,
-        () => "rejected" as const,
-      );
+    const prewarm = container.prewarmForProcessing({
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await firstStartEntered.promise;
 
-      await prewarmStarted.promise;
-      const invocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_prewarm_timeout"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_prewarm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    await expect(prewarm).resolves.toEqual({ kind: "busy" });
 
-      await vi.advanceTimersByTimeAsync(4_999);
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-
-      await vi.advanceTimersByTimeAsync(1);
-      await invocationStartupStarted.promise;
-      await expect(prewarmOutcome).resolves.toBe("rejected");
-      await expect(invocation).resolves.toEqual(createRunnerResult());
-
-      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-        String(url).endsWith("/internal/workspace-invocation")
-      );
-      expect(executeCalls).toHaveLength(1);
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
   });
 
   it("does not wait on slow cleanup after a timed-out prewarm start", async () => {
@@ -461,7 +447,7 @@ describe("RunnerContainer", () => {
         startAndWaitForPorts,
       });
 
-      const prewarmOutcome = container.ensureReadyForProcessing({
+      const prewarmOutcome = container.prewarmForProcessing({
         timeoutMs: 5_000,
         userId: "member_123",
       }).then(
@@ -479,78 +465,116 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("does not give queued prewarm a fresh lifecycle-lock timeout before runtime work", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const firstRequestStarted = createDeferred<void>();
-      const firstRequestRelease = createDeferred<void>();
-      const secondRequestStarted = createDeferred<void>();
-      let workspaceRequestCount = 0;
-      const containerFetch = vi.fn(async (url: string) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        workspaceRequestCount += 1;
-        if (workspaceRequestCount === 1) {
-          firstRequestStarted.resolve();
-          await firstRequestRelease.promise;
-        } else {
-          secondRequestStarted.resolve();
-        }
-
-        return new Response(JSON.stringify(createRunnerResult()), {
+  it("returns busy instead of queueing prewarm behind active runtime work", async () => {
+    const firstRequestStarted = createDeferred<void>();
+    const firstRequestRelease = createDeferred<void>();
+    let workspaceRequestCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
           status: 200,
         });
-      });
-      const { container } = createContainerDouble({ containerFetch });
+      }
 
-      const firstInvocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_lock_holder"),
+      workspaceRequestCount += 1;
+      firstRequestStarted.resolve();
+      await firstRequestRelease.promise;
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
         },
-        timeoutMs: 60_000,
-        userId: "member_123",
+        status: 200,
       });
-      await firstRequestStarted.promise;
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+    });
 
-      const stalePrewarm = container.ensureReadyForProcessing({
-        timeoutMs: 5_000,
-        userId: "member_123",
-      }).then(
-        () => "resolved" as const,
-        () => "rejected" as const,
-      );
-      await vi.advanceTimersByTimeAsync(5_000);
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_lock_holder"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await firstRequestStarted.promise;
 
-      const secondInvocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_stale_prewarm"),
+    await expect(container.prewarmForProcessing({
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).resolves.toEqual({ kind: "busy" });
+
+    firstRequestRelease.resolve();
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+    expect(workspaceRequestCount).toBe(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restart a warm shell when prewarm is preempted by workspace invocation", async () => {
+    const healthEntered = createDeferred<void>();
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health") && containerFetch.mock.calls.length === 1) {
+        healthEntered.resolve();
+        await new Promise<never>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      }
+
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
         },
-        timeoutMs: 60_000,
-        userId: "member_123",
+        status: 200,
       });
-      firstRequestRelease.resolve();
-      await secondRequestStarted.promise;
+    });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
 
-      await expect(stalePrewarm).resolves.toBe("rejected");
-      await expect(firstInvocation).resolves.toEqual(createRunnerResult());
-      await expect(secondInvocation).resolves.toEqual(createRunnerResult());
-      expect(workspaceRequestCount).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+    const prewarm = container.prewarmForProcessing({
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await healthEntered.promise;
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_warm_prewarm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    await expect(prewarm).resolves.toEqual({ kind: "busy" });
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
   });
 
   it("ensureProcessing rejects mismatched user identities before waking or starting work", async () => {

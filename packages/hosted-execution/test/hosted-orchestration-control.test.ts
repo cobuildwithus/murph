@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
+  HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
   HOSTED_RUNTIME_DEMAND_RUN_SOURCES,
+  deriveHostedUserRuntimePrewarmTaskQueue,
   type HostedRuntimeDemandWorkspaceProjection,
   type HostedRuntimeSignal,
 } from "../src/orchestration-control.ts";
@@ -29,8 +31,23 @@ describe("hosted orchestration control contracts", () => {
   it("freezes the Temporal workflow, task queue, signal, and query names", () => {
     expect(HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
     expect(HOSTED_USER_RUNTIME_TASK_QUEUE).toBe("murph-hosted-runtime");
+    expect(HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE).toBe(
+      "murph-hosted-runtime-prewarm",
+    );
     expect(HOSTED_USER_RUNTIME_SIGNAL_NAME).toBe("runtimeSignal");
     expect(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME).toBe("runtimeWorkflowStatus");
+  });
+
+  it("derives a separate prewarm task queue from the runtime task queue", () => {
+    expect(deriveHostedUserRuntimePrewarmTaskQueue("")).toBe(
+      HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
+    );
+    expect(deriveHostedUserRuntimePrewarmTaskQueue(" murph-hosted-runtime ")).toBe(
+      HOSTED_USER_RUNTIME_PREWARM_TASK_QUEUE,
+    );
+    expect(deriveHostedUserRuntimePrewarmTaskQueue("hosted-runtime-custom")).toBe(
+      "hosted-runtime-custom-prewarm",
+    );
   });
 
   it("parses every pointer-only runtime signal variant", () => {
@@ -127,6 +144,14 @@ describe("hosted orchestration control contracts", () => {
       mailboxItemId: "mailbox_item_test",
       source: " ".repeat(1),
     })).toThrow(/safe source string/u);
+
+    expect(() => parseHostedRuntimeSignal({
+      eventId: "runtime-prewarm:event-test",
+      kind: "runtime_prewarm_requested",
+      occurredAt: "2026-05-20T12:00:00.000Z",
+      scopeHash: "linq-chat:legacy-scope",
+      source: "linq.imessage.typing",
+    })).toThrow("Hosted runtime prewarm signal must not include scopeHash.");
   });
 
   it("parses demand requests and demand responses", () => {

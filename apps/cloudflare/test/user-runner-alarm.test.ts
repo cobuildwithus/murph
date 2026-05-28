@@ -184,12 +184,12 @@ describe("HostedUserRunner execution coordination", () => {
   it("prewarms the container shell without taking a write fence or invoking runtime work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const ensureReadyForProcessing = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    const prewarmForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["prewarmForProcessing"]>
     >(async () => ({ action: "started", kind: "ready" }));
     const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
-      ensureReadyForProcessing,
       mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      prewarmForProcessing,
       workspace: createWorkspaceState({
         nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
         nextWakeReason: "assistant",
@@ -207,8 +207,8 @@ describe("HostedUserRunner execution coordination", () => {
       kind: "runtime_prewarm_accepted",
     });
 
-    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
-    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+    expect(prewarmForProcessing).toHaveBeenCalledOnce();
+    expect(prewarmForProcessing).toHaveBeenCalledWith({
       timeoutMs: 5_000,
       userId: TEST_USER_ID,
     });
@@ -252,6 +252,50 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+  });
+
+  it("does not clear expired write fences for prewarm hints", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:02:00.000Z"));
+    const prewarmForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["prewarmForProcessing"]>
+    >(async () => ({ action: "already_warm", kind: "ready" }));
+    const { alarms, runner, sql } = createRunnerHarness({
+      prewarmForProcessing,
+    });
+    await runner.bindUser(TEST_USER_ID);
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_expired",
+      2,
+      "runtime",
+      FIXED_NOW,
+      RUNNER_TIMEOUT_AT,
+      "5",
+    );
+
+    await expect(runner.prewarmRuntimeContainerForUser({
+      prewarmAttemptId: "prewarm_attempt_expired",
+      source: "linq.imessage.typing",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      action: "already_running",
+      kind: "runtime_prewarm_accepted",
+    });
+
+    expect(prewarmForProcessing).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: "attempt_expired",
+      active_expires_at: RUNNER_TIMEOUT_AT,
+    });
+    expect(alarms).not.toContain("deleted");
   });
 
   it("passes a derived snapshot path diagnostics key without forwarding the raw log secret", async () => {
@@ -1851,6 +1895,7 @@ function createRunnerHarness(input: {
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
+  prewarmForProcessing?: HostedExecutionContainerStubLike["prewarmForProcessing"] | null;
   runtimeLogResponse?: () => Promise<Response> | Response;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
@@ -1875,9 +1920,16 @@ function createRunnerHarness(input: {
         async (ensureInput) =>
           await input.ensureReadyForProcessing?.(ensureInput) ?? { kind: "ready" },
       );
+  const prewarmForProcessing = input.prewarmForProcessing === null
+    ? null
+    : createDirectOnlyRpcMethod<NonNullable<HostedExecutionContainerStubLike["prewarmForProcessing"]>>(
+        async (prewarmInput) =>
+          await input.prewarmForProcessing?.(prewarmInput) ?? { kind: "ready" },
+      );
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: input.destroyInstance ?? (async () => {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(prewarmForProcessing ? { prewarmForProcessing } : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: async (ensureInput) => {

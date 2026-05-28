@@ -236,7 +236,7 @@ describe("hosted orchestration demand", () => {
     },
   );
 
-  it("keeps conversation mailbox backlog ahead of system control demand", async () => {
+  it("keeps conversation mailbox backlog ahead of pending device-sync system wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "1",
@@ -253,9 +253,7 @@ describe("hosted orchestration demand", () => {
         maxSeq: "1",
       },
     ]);
-    mocks.readHostedMailboxFirstPendingSystemKind.mockResolvedValue(
-      "runtime.manual-requested",
-    );
+    mocks.readHostedMailboxFirstPendingSystemKind.mockResolvedValue("device-sync.wake");
 
     const response = await demandRoute.GET(requestForDemand(), routeContext());
     const demand = parseHostedRuntimeDemand(await response.json());
@@ -264,6 +262,11 @@ describe("hosted orchestration demand", () => {
       kind: "run",
       reason: "nudge",
       source: "mailbox_backlog",
+    });
+    expect(mocks.readHostedMailboxFirstPendingSystemKind).toHaveBeenCalledWith({
+      afterSeq: "0",
+      prisma: { kind: "prisma" },
+      userId: MEMBER_ID,
     });
     expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
       memberId: MEMBER_ID,

@@ -227,7 +227,29 @@ describe("hosted runtime Temporal worker", () => {
     }));
   });
 
-  it("runs the created worker", async () => {
+  it("creates a dedicated prewarm activity worker on a separate task queue", async () => {
+    const {
+      createHostedUserRuntimePrewarmWorker,
+    } = await import("../src/worker.js");
+
+    await createHostedUserRuntimePrewarmWorker({
+      connection: { kind: "injected" } as never,
+      namespace: "hosted-local",
+      taskQueue: "hosted-runtime-local",
+    });
+
+    const workerOptions = readCreatedWorkerOptions();
+    expect(workerOptions.taskQueue).toBe("hosted-runtime-local-prewarm");
+    expect(workerOptions.workflowsPath).toBeUndefined();
+    expect(workerOptions.workflowBundle).toBeUndefined();
+    expect(workerOptions.activities).toEqual({
+      prewarmRuntimeContainer: expect.any(Function),
+    });
+    expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(1);
+    expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(1);
+  });
+
+  it("runs the primary and prewarm workers together", async () => {
     const {
       runHostedUserRuntimeWorker,
     } = await import("../src/worker.js");
@@ -235,19 +257,30 @@ describe("hosted runtime Temporal worker", () => {
     await runHostedUserRuntimeWorker({
       address: "temporal.example.test:7233",
       namespace: "hosted-local",
+      prewarmTaskQueue: "hosted-runtime-prewarm-local",
+      taskQueue: "hosted-runtime-local",
     });
 
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect((create.mock.calls[0]?.[0] as CreatedWorkerOptions).taskQueue).toBe(
+      "hosted-runtime-local",
+    );
+    expect((create.mock.calls[1]?.[0] as CreatedWorkerOptions).taskQueue).toBe(
+      "hosted-runtime-prewarm-local",
+    );
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
 
 interface CreatedWorkerOptions {
+  activities?: unknown;
   maxConcurrentActivityTaskExecutions?: unknown;
   maxConcurrentActivityTaskPolls?: unknown;
   maxConcurrentWorkflowTaskExecutions?: unknown;
   maxConcurrentWorkflowTaskPolls?: unknown;
   shutdownForceTime?: unknown;
   shutdownGraceTime?: unknown;
+  taskQueue?: unknown;
   workflowBundle?: unknown;
   workflowsPath?: unknown;
 }

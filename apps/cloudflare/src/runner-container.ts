@@ -67,6 +67,8 @@ const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
+const RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE =
+  "container prewarm preempted";
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
@@ -110,6 +112,10 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
   kind: "ready";
 }
 
+export type RunnerContainerPrewarmForProcessingResult =
+  | RunnerContainerEnsureReadyForProcessingResult
+  | { kind: "busy" };
+
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   runnerContainerName?: string;
@@ -125,6 +131,9 @@ export interface HostedExecutionContainerStubLike {
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
+  prewarmForProcessing?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmForProcessingResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
@@ -270,6 +279,8 @@ export class RunnerContainer extends Container {
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
+  private lifecycleLockPendingCount = 0;
+  private prewarmAbortController: AbortController | null = null;
   private currentLogContext: RunnerContainerLogContext | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
@@ -284,12 +295,14 @@ export class RunnerContainer extends Container {
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
     const input = parseHostedExecutionContainerInvokeInput(payload);
+    this.abortContainerPrewarm();
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(input)
     );
   }
 
   async destroyInstance(): Promise<void> {
+    this.abortContainerPrewarm();
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     await this.withLifecycleLock(async () => {
       await this.stopWarmContainer();
@@ -300,21 +313,16 @@ export class RunnerContainer extends Container {
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    const deadlineMs = Date.now() + input.timeoutMs;
+    this.abortContainerPrewarm();
     return await this.withLifecycleLock(async () => {
-      const remainingTimeoutMs = readRunnerContainerDeadlineRemainingMs(deadlineMs);
-      if (remainingTimeoutMs < 1) {
-        throw new DOMException("The operation timed out.", "TimeoutError");
-      }
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
       };
       this.currentLogContext = logContext;
       try {
         const action = await this.ensureContainerReady(
-          { ...input, timeoutMs: remainingTimeoutMs },
-          AbortSignal.timeout(remainingTimeoutMs),
-          { failureCleanup: "skip" },
+          input,
+          AbortSignal.timeout(input.timeoutMs),
         );
         return { action, kind: "ready" };
       } finally {
@@ -323,6 +331,55 @@ export class RunnerContainer extends Container {
         }
       }
     });
+  }
+
+  async prewarmForProcessing(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmForProcessingResult> {
+    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    if (this.lifecycleLockPendingCount > 0) {
+      return { kind: "busy" };
+    }
+
+    const deadlineMs = Date.now() + input.timeoutMs;
+    const prewarmAbortController = new AbortController();
+    this.prewarmAbortController = prewarmAbortController;
+    try {
+      return await this.withLifecycleLock(async () => {
+        const remainingTimeoutMs = readRunnerContainerDeadlineRemainingMs(deadlineMs);
+        if (remainingTimeoutMs < 1) {
+          return { kind: "busy" };
+        }
+        const logContext: RunnerContainerLogContext = {
+          userId: input.userId,
+        };
+        this.currentLogContext = logContext;
+        try {
+          const action = await this.ensureContainerReady(
+            { ...input, timeoutMs: remainingTimeoutMs },
+            combineRunnerContainerAbortSignals(
+              prewarmAbortController.signal,
+              AbortSignal.timeout(remainingTimeoutMs),
+            ),
+            { failureCleanup: "skip" },
+          );
+          return { action, kind: "ready" };
+        } finally {
+          if (this.currentLogContext === logContext) {
+            this.currentLogContext = null;
+          }
+        }
+      });
+    } catch (error) {
+      if (prewarmAbortController.signal.aborted) {
+        return { kind: "busy" };
+      }
+      throw error;
+    } finally {
+      if (this.prewarmAbortController === prewarmAbortController) {
+        this.prewarmAbortController = null;
+      }
+    }
   }
 
   async abortWorkspaceInvocation(input: { attemptId: string; userId: string }): Promise<void> {
@@ -919,6 +976,9 @@ export class RunnerContainer extends Container {
         });
         return "already_warm";
       } catch (error) {
+        if (isRunnerContainerPrewarmPreempted(operationAbortSignal)) {
+          throwIfRunnerContainerOperationAborted(operationAbortSignal);
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -975,6 +1035,9 @@ export class RunnerContainer extends Container {
       });
       await assertRunnerHealthy(this, readinessTimeoutMs, operationAbortSignal);
     } catch (error) {
+      if (isRunnerContainerPrewarmPreempted(operationAbortSignal)) {
+        throwIfRunnerContainerOperationAborted(operationAbortSignal);
+      }
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1156,12 +1219,27 @@ export class RunnerContainer extends Container {
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
-    const next = this.lifecycleLock.then(work, work);
+    this.lifecycleLockPendingCount += 1;
+    const run = async (): Promise<T> => {
+      try {
+        return await work();
+      } finally {
+        this.lifecycleLockPendingCount -= 1;
+      }
+    };
+    const next = this.lifecycleLock.then(run, run);
     this.lifecycleLock = next.then(
       () => undefined,
       () => undefined,
     );
     return next;
+  }
+
+  private abortContainerPrewarm(): void {
+    const controller = this.prewarmAbortController;
+    if (controller && !controller.signal.aborted) {
+      controller.abort(new Error(RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE));
+    }
   }
 }
 
@@ -1339,6 +1417,12 @@ function throwIfRunnerContainerOperationAborted(signal: AbortSignal): void {
       ? signal.reason
       : new DOMException("The operation was aborted.", "AbortError");
   }
+}
+
+function isRunnerContainerPrewarmPreempted(signal: AbortSignal): boolean {
+  return signal.aborted
+    && signal.reason instanceof Error
+    && signal.reason.message === RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE;
 }
 
 function combineRunnerContainerAbortSignals(

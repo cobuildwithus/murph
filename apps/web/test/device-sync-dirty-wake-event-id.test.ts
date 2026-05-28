@@ -33,7 +33,10 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedDeviceSyncMailboxRuntime: mocks.signalHostedDeviceSyncMailboxRuntime,
 }));
 
-import { appendHostedDeviceSyncDirtyWake } from "@/src/lib/device-sync/wake-service";
+import {
+  appendHostedDeviceSyncDirtyWake,
+  buildHostedDeviceSyncDirtyWakeDedupeKey,
+} from "@/src/lib/device-sync/wake-service";
 
 describe("appendHostedDeviceSyncDirtyWake", () => {
   beforeEach(() => {
@@ -49,23 +52,34 @@ describe("appendHostedDeviceSyncDirtyWake", () => {
   });
 
   it("uses the dedupe key as dirty wake identity across recovery sweep times", async () => {
+    const secondRevisionDedupeKey = buildHostedDeviceSyncDirtyWakeDedupeKey({
+      connectionId: "dsc_dirty_1",
+      dirtyRevision: 2n,
+      provider: "oura",
+    });
+    const thirdRevisionDedupeKey = buildHostedDeviceSyncDirtyWakeDedupeKey({
+      connectionId: "dsc_dirty_1",
+      dirtyRevision: 3n,
+      provider: "oura",
+    });
+
     await appendHostedDeviceSyncDirtyWake({
       connectionId: "dsc_dirty_1",
-      dedupeKey: "dirty-revision:2:connection:fingerprint:sweep",
+      dirtyRevision: 2n,
       occurredAt: "2026-05-05T00:01:00.000Z",
       provider: "oura",
       userId: "member_dirty_1",
     });
     await appendHostedDeviceSyncDirtyWake({
       connectionId: "dsc_dirty_1",
-      dedupeKey: "dirty-revision:2:connection:fingerprint:sweep",
-      occurredAt: "2026-05-05T00:02:00.000Z",
+      dirtyRevision: 2n,
+      occurredAt: "2026-05-05T00:01:00.000Z",
       provider: "oura",
       userId: "member_dirty_1",
     });
     await appendHostedDeviceSyncDirtyWake({
       connectionId: "dsc_dirty_1",
-      dedupeKey: "dirty-revision:3:connection:fingerprint:sweep",
+      dirtyRevision: 3n,
       occurredAt: "2026-05-05T00:03:00.000Z",
       provider: "oura",
       userId: "member_dirty_1",
@@ -75,6 +89,8 @@ describe("appendHostedDeviceSyncDirtyWake", () => {
       ([input]) => input.envelope.eventId,
     );
     expect(eventIds[0]).toBe(eventIds[1]);
+    expect(eventIds[0]).toBe(secondRevisionDedupeKey);
+    expect(eventIds[2]).toBe(thirdRevisionDedupeKey);
     expect(eventIds[2]).not.toBe(eventIds[0]);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(3);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({

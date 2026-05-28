@@ -136,14 +136,17 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
   });
 
-  it("ignores non-iMessage typing without resolving routes or signaling", async () => {
+  it("ignores non-iMessage typing services before active route lookup", async () => {
     const { handleHostedOnboardingLinqWebhook } = await import(
       "@/src/lib/hosted-onboarding/webhook-service"
     );
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma: {} as never,
-      rawBody: buildTypingWebhookBody({ service: "SMS" }),
+      rawBody: buildTypingWebhookBody({
+        eventId: "evt_typing_sms",
+        service: "SMS",
+      }),
       signature: null,
       timestamp: null,
     });
@@ -151,7 +154,32 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
     expect(response).toEqual({
       ignored: true,
       ok: true,
-      reason: "typing-prewarm-ignored-non-imessage",
+      reason: "typing-prewarm-ignored-unsupported-service",
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
+    expect(mocks.planHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
+  });
+
+  it("ignores typing prewarm when the service is missing", async () => {
+    const { handleHostedOnboardingLinqWebhook } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: buildTypingWebhookBody({
+        eventId: "evt_typing_unknown_service",
+        service: null,
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "typing-prewarm-ignored-unsupported-service",
     });
     expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimePrewarm).not.toHaveBeenCalled();
@@ -196,15 +224,18 @@ describe("handleHostedOnboardingLinqWebhook typing prewarm", () => {
 
 function buildTypingWebhookBody(input: {
   eventId?: string;
-  service?: string;
+  service?: string | null;
 } = {}): string {
+  const data: Record<string, unknown> = {
+    chat_id: "chat_typing_123",
+  };
+  if (input.service !== null) {
+    data.service = input.service ?? "iMessage";
+  }
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-05-20T12:00:00.000Z",
-    data: {
-      chat_id: "chat_typing_123",
-      service: input.service ?? "iMessage",
-    },
+    data,
     event_id: input.eventId ?? "evt_typing_123",
     event_type: "chat.typing_indicator.started",
   });

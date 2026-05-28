@@ -32,6 +32,11 @@ import {
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
+  CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
+  CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
+  createCodexActionDiagnosticsReducer,
+} from '../src/assistant-codex/action-diagnostics.ts'
+import {
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnStartParams,
@@ -55,6 +60,7 @@ import {
   isCodexConnectionLossText,
   normalizeCodexEvent,
   normalizeStatusText,
+  type CodexNormalizedEvent,
 } from '../src/assistant-codex-events.ts'
 
 const tempRoots: string[] = []
@@ -549,6 +555,403 @@ describe('assistant codex runtime', () => {
         updates: [],
       }),
     )
+  })
+
+  it('emits one metadata-only Codex action diagnostics trace after a turn', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-action-diagnostics-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-diagnostics',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-diagnostics',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                startedAtMs: 100,
+                item: {
+                  id: 'cmd-1',
+                  type: 'commandExecution',
+                  command: 'cat /tmp/raw-private-file',
+                  cwd: '/tmp/raw-private-cwd',
+                  status: 'running',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                completedAtMs: 160,
+                item: {
+                  id: 'cmd-1',
+                  type: 'commandExecution',
+                  command: 'cat /tmp/raw-private-file',
+                  cwd: '/tmp/raw-private-cwd',
+                  status: 'completed',
+                  exitCode: 0,
+                  aggregatedOutput: 'command raw output must not appear',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                completedAtMs: 300,
+                item: {
+                  id: 'dyn-1',
+                  type: 'dynamicToolCall',
+                  namespace: 'vault',
+                  tool: 'readSummary',
+                  status: 'completed',
+                  success: true,
+                  durationMs: 123,
+                  arguments: {
+                    secretPath: '/tmp/raw-argument',
+                  },
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: 'dynamic raw output must not appear',
+                    },
+                    {
+                      type: 'inputImage',
+                      imageUrl: 'data:image/png;base64,AAA',
+                    },
+                  ],
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'thread/tokenUsage/updated',
+              params: {
+                turnId: 'turn-diagnostics',
+                tokenUsage: {
+                  last: {
+                    cachedInputTokens: 1000,
+                    inputTokens: 81000,
+                    outputTokens: 1200,
+                    reasoningOutputTokens: 300,
+                    totalTokens: 82500,
+                  },
+                  total: {
+                    cachedInputTokens: 1000,
+                    inputTokens: 81000,
+                    outputTokens: 1200,
+                    reasoningOutputTokens: 300,
+                    totalTokens: 82500,
+                  },
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-diagnostics',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent,
+        prompt: 'diagnose usage',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      providerActionCount: 2,
+      sessionId: 'thread-diagnostics',
+    })
+
+    const diagnosticEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.schema === CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA
+      })
+    expect(diagnosticEvents).toHaveLength(1)
+    const diagnosticEvent = diagnosticEvents[0]
+    expect(diagnosticEvent).toBeTruthy()
+    expect(diagnosticEvent?.codexThreadId).toBeNull()
+    expect(diagnosticEvent?.rawEvent).toMatchObject({
+      schema: CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
+      type: CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
+      codexActionCommandCount: 1,
+      codexActionDynamicToolCallCount: 1,
+      codexActionInputUnitMax: 81000,
+      codexActionKinds: ['command.execution', 'dynamic.tool.call'],
+      codexActionProviderActionCount: 2,
+      codexActionSlowDurationMs: [123, 60],
+      codexActionSlowKinds: ['dynamic.tool.call', 'command.execution'],
+      codexActionUsageSampleCount: 1,
+    })
+    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesMax')
+    expect(diagnosticEvent?.rawEvent).not.toHaveProperty('codexActionOutputBytesTotal')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('/tmp/raw')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('raw output')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('readSummary')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
+    expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
+  })
+
+  it('keeps Codex action diagnostics scoped and deduped per active turn', () => {
+    const reducer = createCodexActionDiagnosticsReducer()
+    const activeTurnId = 'turn-current'
+    const staleTokenEvent = {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        turnId: 'turn-previous',
+        tokenUsage: {
+          last: {
+            inputTokens: 999999,
+            outputTokens: 999999,
+            totalTokens: 999999,
+          },
+        },
+      },
+    }
+    const currentTokenEvent = {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        turnId: activeTurnId,
+        tokenUsage: {
+          last: {
+            inputTokens: 123,
+            outputTokens: 45,
+            totalTokens: 168,
+          },
+        },
+      },
+    }
+    const rawStartedEvent = {
+      event: 'item.started',
+      startedAtMs: 10,
+      turnId: activeTurnId,
+      data: {
+        item: {
+          id: 'raw-action-id',
+          type: 'commandExecution',
+          status: 'running',
+        },
+      },
+    }
+    const rawCompletedEvent = {
+      event: 'item.completed',
+      completedAtMs: 70,
+      turnId: activeTurnId,
+      data: {
+        item: {
+          id: 'raw-action-id',
+          type: 'commandExecution',
+          status: 'completed',
+          aggregatedOutput: 'raw output must not appear',
+        },
+      },
+    }
+    const rawStartedNormalized: CodexNormalizedEvent = {
+      kind: 'unknown',
+      eventType: 'item.started',
+      rawEvent: rawStartedEvent,
+    }
+    const rawCompletedNormalized: CodexNormalizedEvent = {
+      kind: 'unknown',
+      eventType: 'item.completed',
+      rawEvent: rawCompletedEvent,
+    }
+
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: normalizeCodexEvent(staleTokenEvent),
+      rawEvent: staleTokenEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: normalizeCodexEvent(currentTokenEvent),
+      rawEvent: currentTokenEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: rawStartedNormalized,
+      rawEvent: rawStartedEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: rawStartedNormalized,
+      rawEvent: rawStartedEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: rawCompletedNormalized,
+      rawEvent: rawCompletedEvent,
+    })
+    reducer.recordEvent({
+      activeTurnId,
+      normalizedEvent: rawCompletedNormalized,
+      rawEvent: rawCompletedEvent,
+    })
+
+    const trace = reducer.buildTraceEvent({
+      codexThreadId: 'thread-current',
+      providerActionCount: 0,
+      turnId: activeTurnId,
+    })
+    expect(trace).toMatchObject({
+      codexActionCommandCount: 1,
+      codexActionCompletedCount: 1,
+      codexActionDurationMsMax: 60,
+      codexActionDurationMsTotal: 60,
+      codexActionInputUnitMax: 123,
+      codexActionOutputUnitMax: 45,
+      codexActionStartedCount: 1,
+      codexActionTotalUnitMax: 168,
+      codexActionUsageSampleCount: 1,
+    })
+    expect(JSON.stringify(trace)).not.toContain('999999')
+    expect(JSON.stringify(trace)).not.toContain('raw-action-id')
+    expect(JSON.stringify(trace)).not.toContain('raw output')
+  })
+
+  it('emits Codex action diagnostics when a turn fails', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-failed-diagnostics-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-failed-diagnostics',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-failed-diagnostics',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'cmd-failed-diagnostics',
+                  type: 'commandExecution',
+                  status: 'failed',
+                  exitCode: 1,
+                  durationMs: 42,
+                  aggregatedOutput: 'failed raw output must not appear',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-failed-diagnostics',
+                  status: 'failed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent,
+        prompt: 'diagnose failed turn',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+    })
+
+    const diagnosticEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.schema === CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA
+      })
+    expect(diagnosticEvents).toHaveLength(1)
+    expect(diagnosticEvents[0]?.codexThreadId).toBeNull()
+    expect(diagnosticEvents[0]?.rawEvent).toMatchObject({
+      schema: CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
+      type: CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
+      codexActionCommandCount: 1,
+      codexActionCompletedCount: 1,
+      codexActionDurationMsMax: 42,
+      codexActionFailedCount: 1,
+      codexActionSlowKinds: ['command.execution'],
+    })
+    expect(JSON.stringify(diagnosticEvents[0]?.rawEvent)).not.toContain('failed raw output')
+    expect(JSON.stringify(diagnosticEvents[0]?.rawEvent)).not.toContain('thread-failed-diagnostics')
+    expect(JSON.stringify(diagnosticEvents[0]?.rawEvent)).not.toContain('turn-failed-diagnostics')
   })
 
   it('ignores custom Codex executable selectors in hosted runtime processes', async () => {

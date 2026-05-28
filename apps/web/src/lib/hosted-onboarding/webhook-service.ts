@@ -218,19 +218,21 @@ async function handleHostedLinqTypingPrewarm(input: {
     {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
       eventType: typingEvent.event_type,
+      scopeHashPresent: false,
     },
   );
 
   if (!isHostedLinqIMessageService(typingEvent.data.service)) {
-    finishHostedOnboardingTiming(timing, "ignored-non-imessage", {
-      decision: "ignored-non-imessage",
+    finishHostedOnboardingTiming(timing, "ignored-unsupported-service", {
+      decision: "ignored-unsupported-service",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
       servicePresent: Boolean(typingEvent.data.service),
+      scopeHashPresent: false,
     });
     return {
       ignored: true,
       ok: true,
-      reason: "typing-prewarm-ignored-non-imessage",
+      reason: "typing-prewarm-ignored-unsupported-service",
     };
   }
 
@@ -242,6 +244,7 @@ async function handleHostedLinqTypingPrewarm(input: {
     finishHostedOnboardingTiming(timing, "ignored-no-active-route", {
       decision: "ignored-no-active-route",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
+      scopeHashPresent: false,
     });
     return {
       ignored: true,
@@ -255,6 +258,7 @@ async function handleHostedLinqTypingPrewarm(input: {
       decision: "ignored-inactive-member",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
       userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      scopeHashPresent: false,
     });
     return {
       ignored: true,
@@ -268,6 +272,7 @@ async function handleHostedLinqTypingPrewarm(input: {
       decision: "coalesced",
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
       userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      scopeHashPresent: false,
     });
     return {
       ignored: true,
@@ -289,6 +294,7 @@ async function handleHostedLinqTypingPrewarm(input: {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
       userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+      scopeHashPresent: false,
     });
     return {
       ignored: true,
@@ -301,6 +307,7 @@ async function handleHostedLinqTypingPrewarm(input: {
     decision: "signaled",
     eventIdSuffix: toHostedOnboardingLogIdSuffix(typingEvent.event_id),
     userIdSuffix: toHostedOnboardingLogIdSuffix(routing.core.id),
+    scopeHashPresent: false,
   });
   recordHostedLinqTypingPrewarmSignal(routing.core.id);
   return {

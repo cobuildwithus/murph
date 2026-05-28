@@ -21,9 +21,10 @@ The live ownership split is:
   same Temporal workflow.
   Device-sync webhook freshness is different: web records per-webhook
   trace/audit facts, upserts per-connection dirty resources/revisions,
-  completes trace acceptance in the same transaction, and sends a best-effort
-  background-maintenance signal for clean-to-dirty transitions. Bounded
-  dirty-sweeper recovery may still append opaque wake pointers.
+  appends one opaque `device-sync.wake` pointer for the dirty revision, and
+  completes trace acceptance in the same transaction. The post-commit Temporal
+  signal is only a best-effort wake hint. Bounded dirty-sweeper recovery uses
+  the same dirty-revision mailbox identity when a signal is missed.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -182,21 +183,24 @@ Temporal signals only coalesce pending work.
 
 Linq typing prewarm is the only conversation-webhook latency hint that does not
 append mailbox demand. After provider verification, web may classify
-`chat.typing_indicator.started`, resolve only an already-active hosted Linq
-route, throttle by user/source, and signal the existing per-user Temporal
-workflow with `runtime_prewarm_requested`. That signal carries only an opaque
-event id, timestamp, and source. It must not plan
+`chat.typing_indicator.started` only when the Linq service is explicitly
+`iMessage`, resolve only an already-active hosted Linq route, throttle by
+user/source, and signal the existing per-user Temporal workflow with
+`runtime_prewarm_requested`. That signal carries only an opaque event id,
+timestamp, and source; chat ids, phone numbers, and raw provider payloads must
+not enter Temporal state or logs. It must not plan
 onboarding, bind routes, append mailbox rows, send read receipts, call
 Cloudflare directly, or add a `readRuntimeDemand` source. Temporal reads real
 web-owned demand first; if mailbox or other durable demand exists, normal
 ensure-processing wins. If demand is idle, Temporal may issue one short
-best-effort Cloudflare prewarm Activity and clears the hint after the attempt.
-The prewarm attempt uses no Activity retry, keeps the Cloudflare readiness
-budget shorter than the workflow Activity timeout, and does not wait on slow
-container cleanup while holding the prewarm lifecycle lock.
-If a real demand signal arrives while the prewarm Activity is pending, the
-workflow abandons the prewarm wait and immediately re-reads demand, so mailbox
-processing never waits behind a typing hint.
+best-effort Cloudflare prewarm Activity on a dedicated prewarm task queue and
+clears the hint after the attempt. The prewarm attempt uses no Activity retry,
+keeps the Cloudflare readiness budget shorter than the workflow Activity
+timeout, and does not wait on slow container cleanup while holding the prewarm
+lifecycle lock. If a real demand signal arrives while the prewarm Activity is
+pending, the workflow abandons the prewarm wait and immediately re-reads demand.
+Mailbox processing must not wait behind a typing hint in workflow state,
+Temporal Activity worker capacity, or Cloudflare container lifecycle locks.
 
 Non-conversation control wakes follow the same durable-demand rule. Manual
 runs, browser-vault refreshes, and device-sync recovery handoffs append
@@ -210,16 +214,13 @@ there is no active Vercel producer for them.
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
 audit/signal facts, widens the per-connection dirty row and safe dirty
-resource/window map, completes the trace in the same transaction, and sends a
-best-effort `device_sync_recovery_requested` signal only when the dirty row
-transitions from clean to dirty. That signal is a wake hint; it must not carry
-provider payloads or become the device-sync queue. Temporal preserves the
-`device_sync_recovery` source through ensure-processing so the runner treats the
-invocation as background dirty work; the assistant runtime runs device sync only
-when no fresh conversation input is pending, and reschedules a short
-`device-sync.reconcile` wake if foreground work preempts that background pass.
-If an older Cloudflare deployment rejects that optional source field, Temporal
-keeps the recovery demand pending instead of consuming it as a source-less run.
+resource/window map, appends one opaque `device-sync.wake` pointer for the dirty
+revision, and completes the trace in the same transaction. That mailbox pointer
+is durable demand; the post-commit Temporal signal is only a wake hint and must
+not carry provider payloads or become the device-sync queue. The assistant
+runtime runs system-lane device sync only when no fresh conversation input is
+pending, and reschedules a short `device-sync.reconcile` wake if foreground work
+preempts that background pass.
 The dirty/due recovery sweep is the bounded recovery backstop for dirty rows
 that remain pending after a missed, denied, or insufficient wake, and for active
 connections whose canonical `nextReconcileAt` is due. Temporal owns the cadence
@@ -278,6 +279,8 @@ workspace state, import mailbox rows, invoke the assistant runtime, checkpoint,
 record usage, or enqueue cleanup as if runtime work began. If a write fence is
 already active it returns `already_running`; if the shell is already responsive
 it returns `already_warm`; otherwise it returns `started` or `retry_later`.
+Prewarm readiness must be preemptible by real workspace invocation or
+ensure-processing calls.
 Cloudflare worker config fails closed when `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`
 is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus the
 owner-watchdog recheck margin, so env overrides cannot make Temporal re-read

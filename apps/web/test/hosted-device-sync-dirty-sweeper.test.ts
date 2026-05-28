@@ -47,16 +47,15 @@ describe("hosted device-sync dirty sweeper", () => {
     });
     expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledWith({
       connectionId: "dsc_dirty_1",
-      dedupeKey: expect.stringMatching(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u),
+      dirtyRevision: 2n,
       eventType: "sleep.updated",
       occurredAt: "2026-05-05T00:00:00.000Z",
       provider: "oura",
       resourceCategory: "sleep",
-      traceId: null,
       userId: "member_dirty_1",
     });
-    expect(JSON.stringify(mocks.appendHostedDeviceSyncDirtyWake.mock.calls))
-      .not.toContain("dirty-revision:2:sweep:2026-05-05T00:01:00.000Z");
+    expect(mocks.appendHostedDeviceSyncDirtyWake.mock.calls.map(([wake]) => wake.occurredAt))
+      .not.toContain("2026-05-05T00:01:00.000Z");
     expect(result).toEqual({
       dirtyConnections: 1,
       skippedDirtyConnections: 0,
@@ -80,7 +79,7 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_1");
   });
 
-  it("uses a stable dirty wake dedupe key across sweeps for the same unresolved dirty revision", async () => {
+  it("uses a stable dirty revision across sweeps for the same unresolved dirty row", async () => {
     const row = {
       connectionId: "dsc_dirty_1",
       dirtyRevision: 2n,
@@ -106,13 +105,14 @@ describe("hosted device-sync dirty sweeper", () => {
 
     const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
     const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
-    expect(firstWake?.dedupeKey).toBe(secondWake?.dedupeKey);
-    expect(firstWake?.dedupeKey).toMatch(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u);
+    expect(firstWake?.dirtyRevision).toBe(2n);
+    expect(secondWake?.dirtyRevision).toBe(2n);
+    expect(firstWake?.connectionId).toBe(secondWake?.connectionId);
     expect(firstWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
     expect(secondWake?.occurredAt).toBe("2026-05-05T00:00:00.000Z");
   });
 
-  it("keeps dirty wake dedupe keys distinct for different connections at the same revision", async () => {
+  it("passes each dirty connection identity to the dirty wake primitive", async () => {
     const store = buildStore([
       {
         connectionId: "dsc_dirty_1",
@@ -144,9 +144,14 @@ describe("hosted device-sync dirty sweeper", () => {
 
     const firstWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[0]?.[0];
     const secondWake = mocks.appendHostedDeviceSyncDirtyWake.mock.calls[1]?.[0];
-    expect(firstWake?.dedupeKey).toMatch(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u);
-    expect(secondWake?.dedupeKey).toMatch(/^dirty-revision:2:connection:[0-9a-f]{16}:sweep$/u);
-    expect(firstWake?.dedupeKey).not.toBe(secondWake?.dedupeKey);
+    expect(firstWake).toMatchObject({
+      connectionId: "dsc_dirty_1",
+      dirtyRevision: 2n,
+    });
+    expect(secondWake).toMatchObject({
+      connectionId: "dsc_dirty_2",
+      dirtyRevision: 2n,
+    });
   });
 
   it("reports skipped dirty connections and wake append failures without logging raw ids", async () => {

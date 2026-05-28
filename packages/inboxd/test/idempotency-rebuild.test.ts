@@ -294,17 +294,17 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
   const vaultRoot = await makeTempDirectory("murph-inbox-inline-bytes-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const attachmentBytes = Buffer.from("raw-image-bytes");
+  const attachmentBytes = Buffer.from("raw-attachment-bytes");
   const inbound = createCapture({
     externalId: "msg-inline-bytes",
     occurredAt: "2026-03-13T10:20:00.000Z",
     attachments: [
       {
         externalId: "att-inline-bytes",
-        kind: "image",
-        mime: "image/jpeg",
+        kind: "document",
+        mime: "application/octet-stream",
         data: attachmentBytes,
-        fileName: "photo.jpg",
+        fileName: "payload.bin",
         byteSize: attachmentBytes.byteLength + 9,
       },
     ],
@@ -327,7 +327,7 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
   assert.equal(stored.attachments.length, 1);
   const attachment = stored.attachments[0];
   assert.ok(attachment);
-  assert.match(attachment.storedPath ?? "", /attachments\/01__photo\.jpg$/u);
+  assert.match(attachment.storedPath ?? "", /attachments\/01__payload\.bin$/u);
   assert.equal(attachment.byteSize, attachmentBytes.byteLength);
   assert.equal(attachment.sha256, createHash("sha256").update(attachmentBytes).digest("hex"));
   assert.equal(attachment.originalPath, null);
@@ -848,18 +848,18 @@ test("processCapture backfills missing parse jobs for a recovered capture that a
   const sourceRoot = await makeTempDirectory("murph-inbox-recovered-parse-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "barcode.png", "image-bytes");
+  const attachmentPath = await writeExternalFile(sourceRoot, "barcode.txt", "document bytes");
   const inbound = createCapture({
     externalId: "msg-recovered-parse",
     occurredAt: "2026-03-13T11:10:00.000Z",
     text: "Recovered parse job",
     attachments: [
       {
-        externalId: "att-recovered-image",
-        kind: "image",
-        mime: "image/png",
-        originalPath: imagePath,
-        fileName: "barcode.png",
+        externalId: "att-recovered-document",
+        kind: "document",
+        mime: "text/plain",
+        originalPath: attachmentPath,
+        fileName: "barcode.txt",
       },
     ],
   });

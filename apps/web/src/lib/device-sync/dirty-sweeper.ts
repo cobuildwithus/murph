@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { appendHostedDeviceSyncDirtyWake } from "./wake-service";
+import {
+  appendHostedDeviceSyncDirtyWake,
+} from "./wake-service";
 
 const DEFAULT_WAKE_LIMIT = 25;
 const DEFAULT_STALE_AFTER_MS = 30_000;
@@ -77,15 +79,11 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
       try {
         wake = await appendDirtyWake({
           connectionId: dirtyConnection.connectionId,
-          dedupeKey: buildHostedDeviceSyncDirtySweepDedupeKey({
-            connectionId: dirtyConnection.connectionId,
-            dirtyRevision: dirtyConnection.dirtyRevision,
-          }),
+          dirtyRevision: dirtyConnection.dirtyRevision,
           eventType: dirtyConnection.latestEventType,
           occurredAt: dirtyConnection.latestDirtyAt,
           provider: dirtyConnection.provider,
           resourceCategory: dirtyConnection.latestResourceCategory,
-          traceId: null,
           userId: dirtyConnection.userId,
         });
       } catch (error) {
@@ -146,19 +144,6 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
     wakeLimit,
     wakeNotAppended,
   };
-}
-
-function buildHostedDeviceSyncDirtySweepDedupeKey(input: {
-  connectionId: string;
-  dirtyRevision: bigint;
-}): string {
-  return [
-    "dirty-revision",
-    input.dirtyRevision.toString(),
-    "connection",
-    fingerprintHostedDeviceSyncDirtyValue(input.connectionId),
-    "sweep",
-  ].join(":");
 }
 
 function normalizeLimit(value: number | null | undefined, fallback: number, max: number): number {

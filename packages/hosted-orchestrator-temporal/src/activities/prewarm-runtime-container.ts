@@ -38,7 +38,7 @@ export async function prewarmRuntimeContainer(
 
   return observeHostedTemporalActivity({
     activity: "prewarmRuntimeContainer",
-    orchestrationAttemptId: parsedRequest.prewarmAttemptId,
+    prewarmAttemptId: parsedRequest.prewarmAttemptId,
     reason: parsedRequest.source,
     userId: parsedRequest.userId,
   }, async () =>

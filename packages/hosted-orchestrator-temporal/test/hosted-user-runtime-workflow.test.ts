@@ -215,7 +215,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
-  it("accepts legacy prewarm scope hashes without retaining them", async () => {
+  it("accepts legacy prewarm scopeHash without carrying it into prewarm requests", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(idleDemand(null));
     runtime.prewarms.push({
@@ -242,6 +242,11 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       },
     ]);
     expect(continued.state?.invalidSignalCount).toBe(0);
+    expect(continued.state).toMatchObject({
+      lastPrewarmResult: "accepted",
+      prewarmRequested: false,
+      prewarmSignalCount: 1,
+    });
     expect(continued.state).not.toHaveProperty("scopeHash");
   });
 
@@ -1211,6 +1216,7 @@ function normalizedContinuedOptions(
     continueAsNewAfterIterations: 500,
     ensureRuntimeProcessingStartToCloseTimeoutMs:
       HOSTED_USER_RUNTIME_DEFAULT_ENSURE_PROCESSING_START_TO_CLOSE_TIMEOUT_MS,
+    prewarmTaskQueue: "murph-hosted-runtime-prewarm",
     readRuntimeDemandStartToCloseTimeoutMs: 10_000,
     ...overrides,
   };
