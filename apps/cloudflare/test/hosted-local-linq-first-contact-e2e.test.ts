@@ -376,7 +376,7 @@ describe("hosted local Linq first-contact e2e", () => {
     );
     expect(firstInboundPromptText).toContain("Conversation onboarding:");
     expect(firstInboundPromptText).toContain(
-      "If the user's opener is a greeting or vague request",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md",
     );
     expect(firstInboundPromptText).toContain("Conversation so far:");
     expect(firstInboundPromptText).toContain("Assistant:");
@@ -617,6 +617,9 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
+    expect(
+      requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
+    ).toBe("murph.send_progress_update");
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
