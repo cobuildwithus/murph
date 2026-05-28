@@ -263,7 +263,9 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
     readinessElapsedMs,
     ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
-    stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks,
+    ...(deviceSyncResult.stagedDirtyAcks
+      ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
+      : {}),
     totalElapsedMs: elapsedSince(startedAt),
   };
 }
