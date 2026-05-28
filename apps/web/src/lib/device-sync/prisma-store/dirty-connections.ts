@@ -857,18 +857,30 @@ async function mapLimit<TInput, TOutput>(
 ): Promise<TOutput[]> {
   const normalizedLimit = Math.max(1, Math.floor(limit));
   const results = new Array<TOutput>(values.length);
+  let failed = false;
+  let firstError: unknown = null;
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
-    while (nextIndex < values.length) {
+    while (!failed && nextIndex < values.length) {
       const index = nextIndex;
       nextIndex += 1;
-      results[index] = await mapValue(values[index]!, index);
+      try {
+        results[index] = await mapValue(values[index]!, index);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+        }
+      }
     }
   }
 
   const workerCount = Math.min(normalizedLimit, values.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (failed) {
+    throw firstError;
+  }
   return results;
 }
 

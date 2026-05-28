@@ -140,8 +140,8 @@ function executeJunctionJobBatch(
   jobs: readonly DeviceSyncJobRecord[],
 ) {
   const executor = provider.jobExecutor;
-  assert.ok(executor?.executeJobBatch, "Junction provider should expose a batch job executor.");
-  return executor.executeJobBatch(context, jobs);
+  assert.ok(executor?.batch, "Junction provider should expose a batch job executor.");
+  return executor.batch.execute(context, jobs);
 }
 
 function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): ProviderJobContext {
@@ -3967,9 +3967,9 @@ test("Junction resource batches import compatible direct daily payloads in one s
   });
 
   const executor = provider.jobExecutor;
-  assert.ok(executor?.describeJobBatch, "Junction provider should expose a batch descriptor.");
-  const firstDescriptor = executor.describeJobBatch(firstJob);
-  const secondDescriptor = executor.describeJobBatch(secondJob);
+  assert.ok(executor?.batch, "Junction provider should expose a batch descriptor.");
+  const firstDescriptor = executor.batch.describe(firstJob);
+  const secondDescriptor = executor.batch.describe(secondJob);
   assert.ok(firstDescriptor);
   assert.equal(secondDescriptor?.key, firstDescriptor.key);
 

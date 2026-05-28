@@ -1,6 +1,6 @@
 # Device sync provider-owned execution-time batching
 
-Status: active
+Status: completed
 Created: 2026-05-28
 Updated: 2026-05-28
 
@@ -79,11 +79,27 @@ Updated: 2026-05-28
 
 ## Verification
 
-- Commands to run:
-- `pnpm typecheck`
-- `pnpm test:diff <changed paths>`
-- `pnpm test:smoke`
-- Focused package tests while iterating.
-- Expected outcomes:
-- All required checks pass, or unrelated pre-existing blockers are named with
-  focused proof for the touched paths.
+- Completed:
+- Draft PR opened before audits as requested:
+  `https://github.com/cobuildwithus/murph/pull/43`.
+- Required audit subagents completed:
+  `security-privacy-review` found no issues; `coverage-write` added a bounded
+  preseal failure regression; `simplify` and `task-finish-review` found the
+  batch retry backoff bug, now fixed.
+- `pnpm --dir packages/device-syncd typecheck` passed.
+- `pnpm --dir packages/device-syncd test -- service.test.ts junction-provider.test.ts`
+  passed.
+- `pnpm --dir apps/web typecheck` passed.
+- `pnpm --dir apps/web test -- prisma-store-dirty-payload-preseal-concurrency.test.ts`
+  passed.
+- `pnpm typecheck` passed.
+- `pnpm test:diff apps/web/src/lib/device-sync/prisma-store/dirty-connections.ts
+  apps/web/test/prisma-store-dirty-payload-preseal-concurrency.test.ts
+  packages/device-syncd/README.md packages/device-syncd/src/providers/junction.ts
+  packages/device-syncd/src/service.ts packages/device-syncd/src/store.ts
+  packages/device-syncd/src/store/jobs.ts packages/device-syncd/src/types.ts
+  packages/device-syncd/test/junction-provider.test.ts
+  packages/device-syncd/test/service.test.ts
+  packages/device-syncd/test/store-test-helpers.ts` passed.
+- `pnpm test:smoke` passed.
+Completed: 2026-05-28

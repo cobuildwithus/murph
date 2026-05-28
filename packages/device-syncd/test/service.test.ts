@@ -28,10 +28,12 @@ import {
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceStatusForTesting,
   setCredentialStateForTesting,
+  setJobAttemptsForTesting,
 } from "./store-test-helpers.ts";
 
 import type {
   DeviceConnectionHandler,
+  DeviceJobBatchExecutor,
   DeviceSyncAccount,
   DeviceSyncImporterPort,
   DeviceSyncJobRecord,
@@ -102,10 +104,10 @@ type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
   createScheduledJobs?: DeviceJobExecutor["createScheduledJobs"];
   verifyAndParseWebhook?: DeviceWebhookHandler["verifyAndParseWebhook"];
   executeJob?: DeviceJobExecutor["executeJob"];
-  describeJobBatch?: DeviceJobExecutor["describeJobBatch"];
-  executeJobBatch?: DeviceJobExecutor["executeJobBatch"];
-  maxJobBatchEstimatedBytes?: DeviceJobExecutor["maxJobBatchEstimatedBytes"];
-  maxJobBatchSize?: DeviceJobExecutor["maxJobBatchSize"];
+  describeJobBatch?: DeviceJobBatchExecutor["describe"];
+  executeJobBatch?: DeviceJobBatchExecutor["execute"];
+  maxJobBatchEstimatedBytes?: DeviceJobBatchExecutor["maxEstimatedBytes"];
+  maxJobBatchSize?: DeviceJobBatchExecutor["maxJobs"];
 };
 
 function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncProvider {
@@ -277,11 +279,17 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     ...(verifyAndParseWebhook ? { webhookHandler: { verifyAndParseWebhook } } : {}),
     jobExecutor: {
       ...(createScheduledJobs ? { createScheduledJobs } : {}),
-      ...(describeJobBatch ? { describeJobBatch } : {}),
       executeJob: executeJob ?? defaultExecuteJob,
-      ...(executeJobBatch ? { executeJobBatch } : {}),
-      ...(maxJobBatchEstimatedBytes !== undefined ? { maxJobBatchEstimatedBytes } : {}),
-      ...(maxJobBatchSize !== undefined ? { maxJobBatchSize } : {}),
+      ...(describeJobBatch && executeJobBatch
+        ? {
+            batch: {
+              describe: describeJobBatch,
+              execute: executeJobBatch,
+              ...(maxJobBatchEstimatedBytes !== undefined ? { maxEstimatedBytes: maxJobBatchEstimatedBytes } : {}),
+              ...(maxJobBatchSize !== undefined ? { maxJobs: maxJobBatchSize } : {}),
+            },
+          }
+        : {}),
     },
   };
 
@@ -1384,6 +1392,80 @@ test("device sync service lets providers execute compatible due jobs as one boun
   assert.equal(store.getJobById(incompatible.id)?.status, "queued");
   assert.equal(store.getJobById(otherAccountJob.id)?.status, "queued");
   assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-03-18T12:00:00.000Z");
+
+  close();
+});
+
+test("device sync service preserves per-job retry backoff when a provider batch fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-retry");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 2,
+        async executeJobBatch() {
+          throw deviceSyncError({
+            code: "BATCH_RETRY",
+            message: "Batch retry requested.",
+            httpStatus: 503,
+            retryable: true,
+          });
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-retry",
+    displayName: "Demo Provider Batch Retry",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-retry-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-retry", "batch-retry-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const retried = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "retried" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  setJobAttemptsForTesting(store, retried.id, 3);
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  const firstAfter = store.getJobById(first.id);
+  const retriedAfter = store.getJobById(retried.id);
+  assert.equal(firstAfter?.status, "queued");
+  assert.equal(retriedAfter?.status, "queued");
+  assert.equal(firstAfter?.attempts, 1);
+  assert.equal(retriedAfter?.attempts, 4);
+  assert.equal(firstAfter?.lastErrorCode, "BATCH_RETRY");
+  assert.equal(retriedAfter?.lastErrorCode, "BATCH_RETRY");
+  assert.equal(
+    Date.parse(retriedAfter?.availableAt ?? "") - Date.parse(firstAfter?.availableAt ?? ""),
+    (30 * 60_000) - 15_000,
+  );
 
   close();
 });

@@ -609,6 +609,13 @@ export interface ProviderJobBatchDescriptor {
   estimatedBytes?: number;
 }
 
+export interface DeviceJobBatchExecutor {
+  describe(job: DeviceSyncJobRecord): ProviderJobBatchDescriptor | null;
+  execute(context: ProviderJobContext, jobs: readonly DeviceSyncJobRecord[]): Promise<ProviderJobResult>;
+  maxEstimatedBytes?: number;
+  maxJobs?: number;
+}
+
 export interface DeviceSyncBackfillDiagnosticContext {
   account: DeviceSyncAccount;
   now: string;
@@ -668,10 +675,7 @@ export interface DeviceWebhookHandler {
 export interface DeviceJobExecutor {
   createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
-  describeJobBatch?(job: DeviceSyncJobRecord): ProviderJobBatchDescriptor | null;
-  executeJobBatch?(context: ProviderJobContext, jobs: readonly DeviceSyncJobRecord[]): Promise<ProviderJobResult>;
-  maxJobBatchSize?: number;
-  maxJobBatchEstimatedBytes?: number;
+  batch?: DeviceJobBatchExecutor;
 }
 
 export interface DeviceSyncOAuthAdapter {

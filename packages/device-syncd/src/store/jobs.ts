@@ -192,7 +192,7 @@ export function listDueDeviceSyncJobBatchCandidates(
   }
 
   const rows = database.prepare(`
-    select id
+    select *
     from device_job
     where account_id = ?
       and provider = ?
@@ -207,14 +207,10 @@ export function listDueDeviceSyncJobBatchCandidates(
     input.excludeJobId,
     input.now,
     limit,
-  ) as Array<Record<string, unknown>>;
+  ) as Array<StoredJobRow & Record<string, unknown>>;
 
   return rows.flatMap((row) => {
-    const jobId = typeof row.id === "string" ? row.id : null;
-    if (!jobId) {
-      return [];
-    }
-    const job = getDeviceSyncJobById(database, jobId);
+    const job = mapJobRow(row);
     return job ? [job] : [];
   });
 }

@@ -705,8 +705,8 @@ class DeviceSyncServiceController {
         },
         logger: this.logger,
       };
-      const result = normalizedJobs.length > 1 && jobExecutor.executeJobBatch
-        ? await jobExecutor.executeJobBatch(jobContext, normalizedJobs)
+      const result = normalizedJobs.length > 1 && jobExecutor.batch
+        ? await jobExecutor.batch.execute(jobContext, normalizedJobs)
         : await jobExecutor.executeJob(jobContext, normalizedJob);
 
       ensureJobLeasesOwned();
@@ -768,10 +768,12 @@ class DeviceSyncServiceController {
 
       const failure = normalizeExecutionError(error);
       const failureNow = currentNow();
-      const retryAt = failure.retryable ? addMilliseconds(failureNow, computeRetryDelayMs(job.attempts)) : null;
       const failed = activeJobs
-        .map((activeJob) =>
-          this.store.failJobIfOwned(
+        .map((activeJob) => {
+          const retryAt = failure.retryable
+            ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
+            : null;
+          return this.store.failJobIfOwned(
             activeJob.id,
             this.workerId,
             failureNow,
@@ -779,8 +781,8 @@ class DeviceSyncServiceController {
             failure.message,
             retryAt,
             failure.retryable,
-          )
-        )
+          );
+        })
         .some(Boolean);
 
       if (!failed) {
@@ -841,17 +843,18 @@ class DeviceSyncServiceController {
     now: string;
     provider: string;
   }): DeviceSyncJobRecord[] {
-    if (!input.jobExecutor.executeJobBatch || !input.jobExecutor.describeJobBatch) {
+    const batchExecutor = input.jobExecutor.batch;
+    if (!batchExecutor) {
       return [input.normalizedSeedJob];
     }
 
-    const seedDescriptor = input.jobExecutor.describeJobBatch(input.normalizedSeedJob);
+    const seedDescriptor = batchExecutor.describe(input.normalizedSeedJob);
     if (!isValidProviderJobBatchDescriptor(seedDescriptor)) {
       return [input.normalizedSeedJob];
     }
 
     const maxBatchSize = normalizeProviderJobBatchLimit(
-      input.jobExecutor.maxJobBatchSize,
+      batchExecutor.maxJobs,
       DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS,
     );
     if (maxBatchSize <= 1) {
@@ -859,7 +862,7 @@ class DeviceSyncServiceController {
     }
 
     const maxEstimatedBytes = normalizeProviderJobBatchLimit(
-      input.jobExecutor.maxJobBatchEstimatedBytes,
+      batchExecutor.maxEstimatedBytes,
       DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES,
     );
     const seedEstimatedBytes = normalizeProviderJobBatchEstimatedBytes(seedDescriptor);
@@ -889,7 +892,7 @@ class DeviceSyncServiceController {
         continue;
       }
 
-      const descriptor = input.jobExecutor.describeJobBatch(normalizedCandidate);
+      const descriptor = batchExecutor.describe(normalizedCandidate);
       if (!isValidProviderJobBatchDescriptor(descriptor) || descriptor.key !== seedDescriptor.key) {
         continue;
       }
