@@ -94,7 +94,7 @@ beforeEach(() => {
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
-    recorded: true,
+    recorded: 1,
     stillDirty: false,
   });
   mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);

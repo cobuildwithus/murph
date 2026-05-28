@@ -381,6 +381,7 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
   });
 
   it("moves Junction webhook payload JSON out of the compact dirty row while preserving the runtime resource", async () => {
+    installHostedSecureBoxStringTestCodec();
     let createData: Record<string, unknown> | null = null;
     let payloadCreateData: Array<Record<string, unknown>> | null = null;
     let findCount = 0;
@@ -473,6 +474,82 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
     expect(typeof resourceEncrypted).toBe("string");
     expect(resourceEncrypted).toMatch(/^hsb-test:/u);
     expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits oversized direct webhook JSON instead of truncating it", async () => {
+    installHostedSecureBoxStringTestCodec();
+    let payloadCreateData: Array<Record<string, unknown>> | null = null;
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(async () => ({
+          connectionId: "dsc_junction_oversized",
+          userId: "member_123",
+          provider: "junction",
+          dirtyRevision: 1n,
+          processedRevision: 0n,
+          firstDirtyAt: dirtyAt,
+          latestDirtyAt: dirtyAt,
+          windowStart: new Date("2026-05-26T00:00:00.000Z"),
+          windowEnd: new Date("2026-05-27T00:00:00.000Z"),
+          eventCount: 1n,
+          latestTraceId: "trace_junction_oversized",
+          latestEventType: "daily.data.steps.created",
+          latestResourceCategory: "timeseries",
+          sourceProviderCountsJson: { garmin: 1 },
+          resourceCategoryCountsJson: { timeseries: 1 },
+          dirtyResourcesJson: {},
+          createdAt: dirtyAt,
+          updatedAt: dirtyAt,
+        })),
+      },
+      deviceSyncDirtyPayload: {
+        createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
+          payloadCreateData = input.data;
+          return { count: input.data.length };
+        }),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+    const oversizedWebhookDataJson = JSON.stringify({
+      data: "x".repeat(64_001),
+      sourceProviderSlug: "garmin",
+    });
+
+    const result = await store.upsertDirtyConnection({
+      connectionId: "dsc_junction_oversized",
+      dirtyAt: "2026-05-26T12:00:00.000Z",
+      eventType: "daily.data.steps.created",
+      provider: "junction",
+      resourceCategory: "timeseries",
+      resources: [
+        {
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            ordinary: "kept",
+            webhookDataJson: oversizedWebhookDataJson,
+          },
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowEnd: "2026-05-27T00:00:00.000Z",
+          windowStart: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      traceId: "trace_junction_oversized",
+      userId: "member_123",
+    });
+
+    const dirtyResource = Object.values(result.dirty.dirtyResources)[0];
+
+    expect(dirtyResource?.payload?.ordinary).toBe("kept");
+    expect(dirtyResource?.payload).not.toHaveProperty("webhookDataJson");
+    expect(String(payloadCreateData?.[0]?.resourceEncrypted ?? ""))
+      .not.toContain(oversizedWebhookDataJson.slice(0, 256));
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
   });
 
@@ -780,14 +857,14 @@ describe("PrismaHostedDirtyConnectionStore dirty recovery sweep", () => {
 
     expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      take: 250,
+      take: 500,
       where: {
         connectionId: "dsc_junction_cap_1",
         userId: "member_123",
       },
     }));
     expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      take: 250,
+      take: 500,
       where: {
         connectionId: "dsc_junction_cap_2",
         userId: "member_123",

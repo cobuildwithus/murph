@@ -1663,13 +1663,13 @@ describe("hosted device-sync runtime", () => {
           limit: 10,
         },
       ]);
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_wake",
         localAccountId: connected.account.id,
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_payload_steps_1"],
         processedRevision: "42",
-      });
+      }]);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
       assert.deepEqual(
@@ -1695,6 +1695,138 @@ describe("hosted device-sync runtime", () => {
           status: "queued",
         },
       );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("device-sync dirty pending fetch processes multiple ackable states in one bounded pass", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const firstBegin = await service.startConnection({
+        provider: "demo",
+      });
+      const firstConnected = await service.handleOAuthCallback({
+        code: "dirty-batch-first",
+        provider: "demo",
+        state: firstBegin.state,
+      });
+      const secondBegin = await service.startConnection({
+        provider: "demo",
+      });
+      const secondConnected = await service.handleOAuthCallback({
+        code: "dirty-batch-second",
+        provider: "demo",
+        state: secondBegin.state,
+      });
+      const firstSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_batch_1",
+        externalAccountId: firstConnected.account.externalAccountId,
+      });
+      const secondSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_batch_2",
+        externalAccountId: secondConnected.account.externalAccountId,
+      });
+      const snapshot = {
+        ...firstSnapshot,
+        connections: [
+          ...firstSnapshot.connections,
+          ...secondSnapshot.connections,
+        ],
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [
+                buildDirtyState({
+                  connectionId: "hosted_conn_dirty_batch_1",
+                  dirtyRevision: "51",
+                  dirtyResources: [
+                    {
+                      count: 1,
+                      dirtyPayloadId: "dsp_payload_batch_1",
+                      jobKind: "resource",
+                      resource: "steps",
+                      resourceCategory: "timeseries",
+                      sourceProviderSlug: "garmin",
+                      windowEnd: "2026-04-04T00:00:00.000Z",
+                      windowStart: "2026-04-03T00:00:00.000Z",
+                    },
+                  ],
+                }),
+                buildDirtyState({
+                  connectionId: "hosted_conn_dirty_batch_2",
+                  dirtyRevision: "52",
+                  dirtyResources: [
+                    {
+                      count: 1,
+                      dirtyPayloadId: "dsp_payload_batch_2",
+                      jobKind: "resource",
+                      resource: "sleep",
+                      resourceCategory: "summary",
+                      sourceProviderSlug: "garmin",
+                      windowEnd: "2026-04-04T00:00:00.000Z",
+                      windowStart: "2026-04-03T00:00:00.000Z",
+                    },
+                  ],
+                }),
+              ],
+              nextWakeAt: "2026-04-04T10:01:00.000Z",
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_dirty_batch_1",
+          eventId: "evt_device_sync_dirty_batch",
+          hint: {
+            reason: "dirty",
+          },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(state.pendingDirtyAcks, [
+        {
+          connectionId: "hosted_conn_dirty_batch_1",
+          localAccountId: firstConnected.account.id,
+          nextWakeAt: "2026-04-04T10:01:00.000Z",
+          processedDirtyPayloadIds: ["dsp_payload_batch_1"],
+          processedRevision: "51",
+        },
+        {
+          connectionId: "hosted_conn_dirty_batch_2",
+          localAccountId: secondConnected.account.id,
+          nextWakeAt: "2026-04-04T10:01:00.000Z",
+          processedDirtyPayloadIds: ["dsp_payload_batch_2"],
+          processedRevision: "52",
+        },
+      ]);
+      assert.equal(readJobsForAccount(service, firstConnected.account.id).length, 1);
+      assert.equal(readJobsForAccount(service, secondConnected.account.id).length, 1);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -1786,12 +1918,12 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_payload",
         localAccountId: connected.account.id,
         nextWakeAt: null,
         processedRevision: "43",
-      });
+      }]);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
       const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null;
@@ -2060,12 +2192,12 @@ describe("hosted device-sync runtime", () => {
           limit: 10,
         },
       ]);
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_pending",
         localAccountId: connected.account.id,
         nextWakeAt: "2026-04-04T10:00:01.000Z",
         processedRevision: "7",
-      });
+      }]);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
       assert.equal(
@@ -2237,12 +2369,12 @@ describe("hosted device-sync runtime", () => {
           limit: 10,
         },
       ]);
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_supported",
         localAccountId: connected.account.id,
         nextWakeAt: null,
         processedRevision: "9",
-      });
+      }]);
       assert.equal(readJobsForAccount(service, connected.account.id).length, 1);
       assert.equal(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.length, 1);
       assert.equal(
@@ -2319,7 +2451,7 @@ describe("hosted device-sync runtime", () => {
 
       const stored = getStore(service).getAccountByExternalAccount("junction", "junction-user-123");
 
-      assert.equal(state.pendingDirtyAck, null);
+      assert.deepEqual(state.pendingDirtyAcks, []);
       assert.ok(stored);
       assert.equal(readJobsForAccount(service, stored.id).length, 0);
       assert.equal(
@@ -2401,12 +2533,12 @@ describe("hosted device-sync runtime", () => {
       );
 
       assert.ok(stored);
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_junction_dirty_terminal",
         localAccountId: stored.id,
         nextWakeAt: "2026-04-04T10:15:00.000Z",
         processedRevision: "15",
-      });
+      }]);
       assert.equal(readJobsForAccount(service, stored.id).length, 0);
       assert.equal(
         hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
@@ -2483,7 +2615,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.equal(state.pendingDirtyAck, null);
+      assert.deepEqual(state.pendingDirtyAcks, []);
       assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
       assert.equal(
         hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
@@ -2582,12 +2714,12 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_reauth",
         localAccountId: connected.account.id,
         nextWakeAt: "2026-04-04T10:15:00.000Z",
         processedRevision: "13",
-      });
+      }]);
       assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
       assert.equal(
         hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
@@ -2671,12 +2803,12 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.deepEqual(state.pendingDirtyAck, {
+      assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_disconnected",
         localAccountId: connected.account.id,
         nextWakeAt: "2026-04-04T10:15:00.000Z",
         processedRevision: "14",
-      });
+      }]);
       assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
       assert.equal(
         hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
@@ -2841,7 +2973,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.equal(dirtyPendingFetches, 1);
-      assert.equal(state.pendingDirtyAck, null);
+      assert.deepEqual(state.pendingDirtyAcks, []);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
       assert.equal(jobs[0]?.dedupeKey, "wake:legacy-resource-sync");
@@ -4357,7 +4489,7 @@ describe("hosted device-sync runtime", () => {
           hostedToLocalAccountIds: new Map(),
           localToHostedAccountIds: new Map(),
           observedTokenVersions: new Map(),
-          pendingDirtyAck: null,
+          pendingDirtyAcks: [],
           snapshot: null,
         },
       });
@@ -4372,7 +4504,7 @@ describe("hosted device-sync runtime", () => {
             hostedToLocalAccountIds: new Map(),
             localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
             observedTokenVersions: new Map(),
-            pendingDirtyAck: null,
+            pendingDirtyAcks: [],
             snapshot: buildRuntimeSnapshot({
               connectionId: "hosted_missing",
               externalAccountId: "demo-missing",
@@ -4424,7 +4556,7 @@ describe("hosted device-sync runtime", () => {
           hostedToLocalAccountIds: new Map([["hosted_missing", "local_missing"]]),
           localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
           observedTokenVersions: new Map(),
-          pendingDirtyAck: null,
+          pendingDirtyAcks: [],
           snapshot: buildRuntimeSnapshot({
             connectionId: "hosted_missing",
             externalAccountId: "demo-missing",

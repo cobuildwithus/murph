@@ -32,6 +32,7 @@ import type {
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import type {
+  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedMailboxExecutionMetrics,
   HostedSystemMailboxPostCheckpointRecord,
   NormalizedHostedAssistantRuntimeConfig,
@@ -100,7 +101,7 @@ export type HostedSystemMailboxRuntime = Pick<
 
 interface HostedSystemMailboxPostCheckpointRecordResult {
   nextWakeAt: string | null;
-  recorded: boolean;
+  recorded: number;
   stillDirty: boolean;
 }
 
@@ -302,7 +303,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       ...(nextWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
         ? { nextWakeReason: nextWake.reason }
         : {}),
-      recorded: recordResult.recorded ? 1 : 0,
+      recorded: recordResult.recorded,
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
@@ -589,11 +590,22 @@ function parseHostedSystemMailboxRecordRequest(
 
   if (record.kind === "device-sync.dirty-processed") {
     return {
-      connectionId: readRequiredString(
-        record.connectionId,
-        "hosted system mailbox postCheckpointRecord connectionId",
-      ),
       kind: "device-sync.dirty-processed",
+      ...parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+        record,
+        "hosted system mailbox postCheckpointRecord",
+      ),
+    };
+  }
+
+  if (record.kind === "device-sync.dirty-processed-batch") {
+    if (!Array.isArray(record.records) || record.records.length === 0) {
+      throw new TypeError(
+        "hosted system mailbox postCheckpointRecord records must be a non-empty array.",
+      );
+    }
+    return {
+      kind: "device-sync.dirty-processed-batch",
       ...(record.nextWakeAt === undefined
         ? {}
         : {
@@ -602,22 +614,47 @@ function parseHostedSystemMailboxRecordRequest(
               "hosted system mailbox postCheckpointRecord nextWakeAt",
             ),
           }),
-      ...(record.processedDirtyPayloadIds === undefined
-        ? {}
-        : {
-            processedDirtyPayloadIds: readOptionalStringArray(
-              record.processedDirtyPayloadIds,
-              "hosted system mailbox postCheckpointRecord processedDirtyPayloadIds",
-            ),
-          }),
-      processedRevision: readRequiredString(
-        record.processedRevision,
-        "hosted system mailbox postCheckpointRecord processedRevision",
+      records: record.records.map((entry, index) =>
+        parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+          entry,
+          `hosted system mailbox postCheckpointRecord records[${index}]`,
+        )
       ),
     };
   }
 
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
+}
+
+function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+
+  return {
+    connectionId: readRequiredString(record.connectionId, `${label} connectionId`),
+    ...(record.nextWakeAt === undefined
+      ? {}
+      : {
+          nextWakeAt: readNullableIsoTimestamp(
+            record.nextWakeAt,
+            `${label} nextWakeAt`,
+          ),
+        }),
+    ...(record.processedDirtyPayloadIds === undefined
+      ? {}
+      : {
+          processedDirtyPayloadIds: readOptionalStringArray(
+            record.processedDirtyPayloadIds,
+            `${label} processedDirtyPayloadIds`,
+          ),
+        }),
+    processedRevision: readRequiredString(record.processedRevision, `${label} processedRevision`),
+  };
 }
 
 export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {
@@ -631,24 +668,59 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  if (!input.runtime.platform.deviceSyncPort) {
+    throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
+  }
+
   switch (input.record.kind) {
     case "device-sync.dirty-processed":
-      if (!input.runtime.platform.deviceSyncPort) {
-        throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
-      }
-      const response = await input.runtime.platform.deviceSyncPort.ackDirtyStateProcessed({
-        connectionId: input.record.connectionId,
-        ...(input.record.processedDirtyPayloadIds
-          ? { processedDirtyPayloadIds: input.record.processedDirtyPayloadIds }
-          : {}),
-        processedRevision: input.record.processedRevision,
+      return await recordHostedDeviceSyncDirtyProcessedRecords({
+        records: [input.record],
+        runtime: input.runtime,
       });
-      return {
-        nextWakeAt: response.nextWakeAt,
-        recorded: response.recorded,
-        stillDirty: response.stillDirty,
-      };
+    case "device-sync.dirty-processed-batch":
+      return await recordHostedDeviceSyncDirtyProcessedRecords({
+        nextWakeAt: input.record.nextWakeAt ?? null,
+        records: input.record.records,
+        runtime: input.runtime,
+      });
   }
+}
+
+async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
+  nextWakeAt?: string | null;
+  records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  const port = input.runtime.platform.deviceSyncPort;
+  if (!port) {
+    throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
+  }
+
+  let nextWakeAt = input.nextWakeAt ?? null;
+  let recorded = 0;
+  let stillDirty = false;
+
+  for (const record of input.records) {
+    const response = await port.ackDirtyStateProcessed({
+      connectionId: record.connectionId,
+      ...(record.processedDirtyPayloadIds
+        ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }
+        : {}),
+      processedRevision: record.processedRevision,
+    });
+    if (response.recorded) {
+      recorded += 1;
+    }
+    stillDirty = stillDirty || response.stillDirty;
+    nextWakeAt = earliestHostedSystemMailboxWakeAt(nextWakeAt, response.nextWakeAt);
+  }
+
+  return {
+    nextWakeAt,
+    recorded,
+    stillDirty,
+  };
 }
 
 function readNullableIsoTimestamp(value: unknown, label: string): string | null {
@@ -663,6 +735,17 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
     throw new TypeError(`${label} must be an ISO timestamp.`);
   }
   return value;
+}
+
+function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) <= Date.parse(right) ? left : right;
 }
 
 function systemMailboxItemIsDue(

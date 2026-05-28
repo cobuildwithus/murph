@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { serializeHostedExecutionDeviceSyncDirtyPayloadIdentity } from "@murphai/device-syncd/hosted-runtime";
@@ -58,11 +60,11 @@ interface PreparedDirtyPayloadRows extends DirtyPayloadCreateResult {
 const DIRTY_COUNTER_KEY_MAX_LENGTH = 96;
 const DIRTY_RESOURCE_KEY_MAX_LENGTH = 256;
 const DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH = 512;
-const DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_LENGTH = 64_000;
+const DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_BYTES = 64_000;
 const DIRTY_RESOURCE_PAYLOAD_BLOCKED_KEY_PATTERN =
   /(?:authorization|authheader|bearer|clientsecret|cookie|credential|password|secret|token|apikey)/iu;
 const DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS = 12;
-const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 250;
+const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 500;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 
 export class PrismaHostedDirtyConnectionStore {
@@ -1173,10 +1175,11 @@ function readDirtyResourcePayload(value: unknown): HostedDeviceSyncDirtyResource
       continue;
     }
     if (typeof entry === "string") {
-      const maxLength = normalizedKey.toLowerCase() === "webhookdatajson"
-        ? DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_LENGTH
-        : DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH;
-      payload[normalizedKey] = entry.slice(0, maxLength);
+      const normalizedEntry = normalizeDirtyResourcePayloadString(normalizedKey, entry);
+      if (normalizedEntry === null) {
+        continue;
+      }
+      payload[normalizedKey] = normalizedEntry;
     } else if (typeof entry === "boolean") {
       payload[normalizedKey] = entry;
     } else if (typeof entry === "number" && Number.isFinite(entry)) {
@@ -1185,6 +1188,16 @@ function readDirtyResourcePayload(value: unknown): HostedDeviceSyncDirtyResource
   }
 
   return Object.keys(payload).length > 0 ? payload : undefined;
+}
+
+function normalizeDirtyResourcePayloadString(key: string, value: string): string | null {
+  if (key.toLowerCase() !== "webhookdatajson") {
+    return value.slice(0, DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH);
+  }
+
+  return Buffer.byteLength(value, "utf8") <= DIRTY_RESOURCE_PAYLOAD_WEBHOOK_DATA_JSON_MAX_BYTES
+    ? value
+    : null;
 }
 
 function buildDirtyResourcePayloadKey(

@@ -248,7 +248,7 @@ beforeEach(() => {
   mocks.readLatestAssistantInputCursor.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
-    recorded: true,
+    recorded: 1,
     stillDirty: false,
   });
   mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
@@ -2305,7 +2305,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: null,
-      recorded: true,
+      recorded: 1,
       stillDirty: false,
     });
 
@@ -3115,7 +3115,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: "2026-04-27T00:13:00.000Z",
-      recorded: true,
+      recorded: 1,
       stillDirty: true,
     });
 
@@ -3369,7 +3369,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: null,
-      recorded: true,
+      recorded: 1,
       stillDirty: false,
     });
 
@@ -3424,7 +3424,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
       nextWakeAt: null,
-      recorded: true,
+      recorded: 1,
       stillDirty: false,
     });
 

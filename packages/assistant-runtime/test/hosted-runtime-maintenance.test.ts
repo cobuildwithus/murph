@@ -217,6 +217,7 @@ beforeEach(() => {
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
+    pendingDirtyAcks: [],
     snapshot: {
       connections: [],
       schema: "murph.hosted-device-sync-runtime-snapshot.v1",
@@ -1281,6 +1282,79 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a bounded batch dirty ack post-checkpoint record when multiple dirty states are handed off", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => null,
+      runSchedulerOnce,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map(),
+      localToHostedAccountIds: new Map(),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [
+        {
+          connectionId: "dsc_dirty_batch_1",
+          localAccountId: "local_1",
+          nextWakeAt: "2026-04-08T00:05:00.000Z",
+          processedDirtyPayloadIds: ["dsp_1"],
+          processedRevision: "11",
+        },
+        {
+          connectionId: "dsc_dirty_batch_2",
+          localAccountId: "local_2",
+          nextWakeAt: "2026-04-08T00:03:00.000Z",
+          processedDirtyPayloadIds: ["dsp_2", "dsp_3"],
+          processedRevision: "12",
+        },
+      ],
+      snapshot: {
+        connections: [],
+        schema: "murph.hosted-device-sync-runtime-snapshot.v1",
+      },
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_dirty_batch_ack",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    assert.deepEqual(result.postCheckpointRecord, {
+      kind: "device-sync.dirty-processed-batch",
+      nextWakeAt: "2026-04-08T00:03:00.000Z",
+      records: [
+        {
+          connectionId: "dsc_dirty_batch_1",
+          nextWakeAt: "2026-04-08T00:05:00.000Z",
+          processedDirtyPayloadIds: ["dsp_1"],
+          processedRevision: "11",
+        },
+        {
+          connectionId: "dsc_dirty_batch_2",
+          nextWakeAt: "2026-04-08T00:03:00.000Z",
+          processedDirtyPayloadIds: ["dsp_2", "dsp_3"],
+          processedRevision: "12",
+        },
+      ],
+    });
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("yields before dirty control-plane fetch when foreground input is waiting", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -1343,11 +1417,11 @@ describe("runHostedDeviceSyncPass", () => {
       hostedToLocalAccountIds: new Map(),
       localToHostedAccountIds: new Map(),
       observedTokenVersions: new Map(),
-      pendingDirtyAck: {
+      pendingDirtyAcks: [{
         connectionId: "dsc_yield_after_fetch",
         nextWakeAt: null,
         processedRevision: "41",
-      },
+      }],
       snapshot: {
         connections: [],
         schema: "murph.hosted-device-sync-runtime-snapshot.v1",
@@ -1595,6 +1669,7 @@ describe("runHostedDeviceSyncPass", () => {
         ["local_account_sensitive", "hosted_connection_sensitive"],
       ]),
       observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
       snapshot: {
         connections: [
           {

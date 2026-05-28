@@ -22,6 +22,7 @@ import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
 import type {
+  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -884,7 +885,7 @@ export async function runHostedDeviceSyncPass(
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
-    pendingDirtyAck: null,
+    pendingDirtyAcks: [],
     snapshot: null,
   };
   let controlPlaneSynced = false;
@@ -1088,19 +1089,39 @@ export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
 function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
   state: HostedDeviceSyncRuntimeSyncState;
 }): HostedMaintenanceMetrics["postCheckpointRecord"] {
-  const pendingDirtyAck = input.state.pendingDirtyAck;
-  if (!pendingDirtyAck) {
+  const pendingDirtyAcks = input.state.pendingDirtyAcks;
+  if (pendingDirtyAcks.length === 0) {
     return null;
   }
 
+  if (pendingDirtyAcks.length === 1) {
+    const [pendingDirtyAck] = pendingDirtyAcks;
+    return {
+      kind: "device-sync.dirty-processed",
+      ...toHostedDeviceSyncDirtyProcessedPostCheckpointRecord(pendingDirtyAck),
+    };
+  }
+
   return {
-    connectionId: pendingDirtyAck.connectionId,
-    kind: "device-sync.dirty-processed",
-    nextWakeAt: pendingDirtyAck.nextWakeAt,
-    ...(pendingDirtyAck.processedDirtyPayloadIds
-      ? { processedDirtyPayloadIds: pendingDirtyAck.processedDirtyPayloadIds }
+    kind: "device-sync.dirty-processed-batch",
+    nextWakeAt: pendingDirtyAcks.reduce<string | null>(
+      (nextWakeAt, ack) => earliestHostedMaintenanceWakeAt(nextWakeAt, ack.nextWakeAt),
+      null,
+    ),
+    records: pendingDirtyAcks.map(toHostedDeviceSyncDirtyProcessedPostCheckpointRecord),
+  };
+}
+
+function toHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
+  ack: HostedDeviceSyncRuntimeSyncState["pendingDirtyAcks"][number],
+): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
+  return {
+    connectionId: ack.connectionId,
+    nextWakeAt: ack.nextWakeAt,
+    ...(ack.processedDirtyPayloadIds
+      ? { processedDirtyPayloadIds: ack.processedDirtyPayloadIds }
       : {}),
-    processedRevision: pendingDirtyAck.processedRevision,
+    processedRevision: ack.processedRevision,
   };
 }
 
