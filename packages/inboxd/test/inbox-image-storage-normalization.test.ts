@@ -530,14 +530,18 @@ test("processCapture fails closed for mislabeled or animated eligible images", a
       attachmentId: "att-svg-labeled-jpeg",
       mime: "image/jpeg",
       fileName: "vector.jpg",
-      bytes: new Uint8Array(Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\" />")),
+      bytes: new Uint8Array(Buffer.from(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"><rect width=\"24\" height=\"24\" fill=\"red\" /></svg>",
+      )),
     },
     {
       externalId: "msg-svg-extension-jpeg",
       attachmentId: "att-svg-extension-jpeg",
       mime: "application/octet-stream",
       fileName: "vector-by-extension.jpg",
-      bytes: new Uint8Array(Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\" />")),
+      bytes: new Uint8Array(Buffer.from(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"16\"><circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"blue\" /></svg>",
+      )),
     },
     {
       externalId: "msg-animated-webp",
@@ -606,6 +610,93 @@ test("processCapture fails closed for mislabeled or animated eligible images", a
     });
     assert.equal(captureRecord.rawRefs.some((rawRef) => rawRef.includes("/attachments/")), false);
   }
+
+  pipeline.close();
+});
+
+test("processCapture removes raw size metadata from canonical envelope and ledger records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-raw-metadata");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const persisted = await pipeline.processCapture(createCapture({
+    externalId: "msg-raw-size-metadata",
+    raw: {
+      schema: "test.raw.v1",
+      authorization: "redacted-by-key",
+      localPath: "/private/var/folders/app/raw-message.eml",
+      attachment_count: 2,
+      content_length_bytes: 333,
+      messageBytes: 556,
+      message_bytes: 555,
+      original_size_bytes: 777,
+      payload: new Uint8Array([1, 2, 3, 4, 5]),
+      payloadByteLength: 6,
+      raw_byte_size: 99_999,
+      raw_size: 98_765,
+      size: 12_345,
+      attachments: [
+        {
+          attachment_id: "photo",
+          attachment_bytes: 43_900,
+          byteSize: 44_000,
+          contentLength: 44_100,
+          file_size: 44_200,
+          mime_type: "image/jpeg",
+        },
+        {
+          attachment_id: "voice",
+          bytes: 12_000,
+          content_length: 12_100,
+          mime_type: "audio/ogg",
+        },
+      ],
+      nested: {
+        media: {
+          fileSize: 9_000,
+          label: "preview",
+        },
+      },
+    },
+  }));
+
+  const capture = runtime.getCapture(persisted.captureId);
+  assert.ok(capture);
+  const envelope = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
+  ) as {
+    input: { raw: Record<string, unknown> };
+  };
+  assert.deepEqual(envelope.input.raw, {
+    schema: "test.raw.v1",
+    authorization: "<REDACTED_SECRET>",
+    localPath: "<REDACTED_PATH>",
+    attachment_count: 2,
+    payload: "<REDACTED_BYTES>",
+    attachments: [
+      {
+        attachment_id: "photo",
+        mime_type: "image/jpeg",
+      },
+      {
+        attachment_id: "voice",
+        mime_type: "audio/ogg",
+      },
+    ],
+    nested: {
+      media: {
+        label: "preview",
+      },
+    },
+  });
+
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, 1);
+  assert.deepEqual((captureRecords[0] as { raw: Record<string, unknown> }).raw, envelope.input.raw);
 
   pipeline.close();
 });

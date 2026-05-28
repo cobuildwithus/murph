@@ -19,6 +19,12 @@ export interface NormalizedAttachmentForStorage {
 const IMAGE_NORMALIZATION_MAX_EDGE_PX = 3072;
 const IMAGE_NORMALIZATION_WEBP_QUALITY = 88;
 const IMAGE_NORMALIZATION_MAX_INPUT_PIXELS = 64 * 1_000_000;
+const ALLOWED_STATIC_RASTER_INPUT_FORMATS = new Set([
+  "heif",
+  "jpeg",
+  "png",
+  "webp",
+]);
 
 export async function normalizeAttachmentForStorage(
   input: NormalizeAttachmentForStorageInput,
@@ -40,6 +46,10 @@ export async function normalizeAttachmentForStorage(
     const metadata = await image.metadata();
 
     if (typeof metadata.pages === "number" && metadata.pages > 1) {
+      return null;
+    }
+
+    if (!isAllowedStaticRasterInputFormat(metadata.format)) {
       return null;
     }
 
@@ -66,6 +76,10 @@ export async function normalizeAttachmentForStorage(
   } catch {
     return null;
   }
+}
+
+function isAllowedStaticRasterInputFormat(format: string | undefined): boolean {
+  return typeof format === "string" && ALLOWED_STATIC_RASTER_INPUT_FORMATS.has(format);
 }
 
 function replaceExtension(fileName: string, extension: string): string {

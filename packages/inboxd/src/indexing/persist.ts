@@ -28,7 +28,6 @@ import {
   createInboxCaptureIdentityKey,
   normalizeStoredAttachments,
   normalizeRelativePath,
-  redactSensitivePaths,
   resolveVaultPath,
   sanitizeFileName,
 } from "../shared.ts";
@@ -46,6 +45,7 @@ import {
   buildInboxCaptureRecord,
 } from "./persist/canonical-records.js";
 import { normalizeAttachmentForStorage } from "./attachment-storage-normalizer.js";
+import { normalizeRawMetadataForStorage } from "./raw-metadata-storage-normalizer.js";
 export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -125,7 +125,7 @@ function buildSanitizedInboundCapture(
         byteSize: storedAttachment.byteSize ?? null,
       };
     }),
-    raw: redactSensitivePaths(input.raw) as Record<string, unknown>,
+    raw: normalizeRawMetadataForStorage(input.raw),
   };
 }
 
