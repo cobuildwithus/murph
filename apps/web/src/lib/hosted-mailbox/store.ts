@@ -560,6 +560,27 @@ export async function readHostedMailboxItemByDedupeKey(input: {
     : null;
 }
 
+export async function hasHostedMailboxItemByKind(input: {
+  kind: HostedMailboxKind | string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const kind = requireHostedMailboxKind(input.kind);
+  const record = await prisma.hostedMailboxItem.findFirst({
+    select: {
+      id: true,
+    },
+    where: {
+      kind,
+      userId,
+    },
+  });
+
+  return Boolean(record);
+}
+
 export async function readHostedMailboxItemOwnerById(input: {
   mailboxItemId: string;
   prisma?: HostedMailboxStoreClient;

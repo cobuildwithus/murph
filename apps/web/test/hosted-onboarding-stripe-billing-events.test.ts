@@ -169,6 +169,7 @@ describe("hosted onboarding stripe billing events", () => {
       memberId: "member_123",
       prisma: {},
       skipIfBillingAlreadyActive: false,
+      skipIfPreviouslyActivated: true,
     });
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenNthCalledWith(2, {
       dispatchContext: {
@@ -180,6 +181,7 @@ describe("hosted onboarding stripe billing events", () => {
       memberId: "member_123",
       prisma: {},
       skipIfBillingAlreadyActive: false,
+      skipIfPreviouslyActivated: true,
     });
   });
 
@@ -211,6 +213,109 @@ describe("hosted onboarding stripe billing events", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     }));
+  });
+
+  it("does not report activation for later paid invoices when the member is already active", async () => {
+    const activeMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+    });
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(activeMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      member: activeMember,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(activeMember);
+    mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValueOnce({
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: activeMember.core.id,
+    });
+
+    await expect(
+      applyStripeInvoicePaid(
+        makeStripeInvoice({
+          id: "in_paid_renewal",
+          subscription: "sub_123",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-25T05:13:09.000Z"),
+          occurredAt: "2026-04-25T05:13:09.000Z",
+          sourceEventId: "evt_paid_renewal",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.active,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T05:13:09.000Z"),
+        occurredAt: "2026-04-25T05:13:09.000Z",
+        sourceEventId: "invoice:in_paid_renewal",
+        sourceType: "stripe.invoice.paid",
+      },
+      memberId: "member_123",
+      prisma: {},
+      skipIfBillingAlreadyActive: true,
+      skipIfPreviouslyActivated: true,
+    });
+  });
+
+  it("does not report activation for payment recovery after prior activation", async () => {
+    const recoveringMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.past_due,
+    });
+    const updatedMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+    });
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(recoveringMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      member: recoveringMember,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(updatedMember);
+    mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValueOnce({
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: updatedMember.core.id,
+    });
+
+    await expect(
+      applyStripeInvoicePaid(
+        makeStripeInvoice({
+          id: "in_paid_recovery",
+          subscription: "sub_123",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-26T05:13:09.000Z"),
+          occurredAt: "2026-04-26T05:13:09.000Z",
+          sourceEventId: "evt_paid_recovery",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.active,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-26T05:13:09.000Z"),
+        occurredAt: "2026-04-26T05:13:09.000Z",
+        sourceEventId: "invoice:in_paid_recovery",
+        sourceType: "stripe.invoice.paid",
+      },
+      memberId: "member_123",
+      prisma: {},
+      skipIfBillingAlreadyActive: false,
+      skipIfPreviouslyActivated: true,
+    });
   });
 
   it("stores the Stripe invoice customer email as an unverified checkout email hint", async () => {

@@ -102,6 +102,26 @@ export async function provisionHostedCryptoDomainRootsForUserTx(input: {
   }
 }
 
+export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
+  tx: HostedCryptoTx;
+  userId: string;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ domainCount: number }>>`
+    SELECT COUNT(DISTINCT domain)::int AS "domainCount"
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND status = 'active'::hosted_crypto_envelope_status
+      AND domain IN (
+        'control'::hosted_crypto_domain,
+        'device'::hosted_crypto_domain,
+        'ingress'::hosted_crypto_domain,
+        'runtime'::hosted_crypto_domain
+      )
+  `;
+
+  return (rows[0]?.domainCount ?? 0) >= ALL_DOMAINS.length;
+}
+
 export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;

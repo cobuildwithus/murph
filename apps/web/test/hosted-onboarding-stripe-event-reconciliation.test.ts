@@ -267,6 +267,38 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
   });
 
+  it("does not send the Resend welcome when a later paid invoice has no new activation", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent({
+      id: "evt_invoice_paid_renewal",
+      invoiceId: "in_renewal_123",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockResolvedValueOnce({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      eventId: event.id,
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+  });
+
   it("retrieves Pulse Trial checkout subscription before opening the reconciliation transaction", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makePulseTrialCheckoutCompletedEvent();
@@ -659,7 +691,10 @@ describe("hosted Stripe event reconciliation", () => {
 
 });
 
-function makeInvoicePaidEvent(): Stripe.Event {
+function makeInvoicePaidEvent(overrides?: {
+  id?: string;
+  invoiceId?: string;
+}): Stripe.Event {
   return makeStripeEvent({
     api_version: "2025-03-31.basil",
     created: 1774708800,
@@ -669,12 +704,12 @@ function makeInvoicePaidEvent(): Stripe.Event {
         charge: "ch_123",
         currency: "usd",
         customer: "cus_123",
-        id: "in_123",
+        id: overrides?.invoiceId ?? "in_123",
         payment_intent: "pi_123",
         subscription: "sub_123",
       },
     },
-    id: "evt_invoice_paid_123",
+    id: overrides?.id ?? "evt_invoice_paid_123",
     livemode: false,
     object: "event",
     pending_webhooks: 0,

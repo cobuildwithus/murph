@@ -18,6 +18,8 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
 
 const mocks = vi.hoisted(() => ({
   clearHostedMemberPendingActivationTimeZone: vi.fn(),
+  hasHostedMailboxItemByKind: vi.fn(),
+  hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberActivationCoreState: vi.fn(),
@@ -32,11 +34,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  hasActiveHostedCryptoDomainRootsForUserTx: mocks.hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx:
     mocks.provisionHostedCryptoDomainRootsForUserTx,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  hasHostedMailboxItemByKind: mocks.hasHostedMailboxItemByKind,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
@@ -90,6 +94,8 @@ describe("hosted onboarding member activation", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.hasHostedMailboxItemByKind.mockResolvedValue(false);
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(false);
     mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
@@ -582,6 +588,138 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("skips activation side effects for later positive invoices when billing is already active", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        pendingActivationTimeZone: "America/Los_Angeles",
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "invoice:in_renewal_123",
+          sourceType: "stripe.invoice.paid",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        skipIfBillingAlreadyActive: true,
+      }),
+    ).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: "member_123",
+    });
+
+    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.anything(),
+    });
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("skips activation side effects for payment recovery after a retained mailbox activation marker", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        pendingActivationTimeZone: "America/Los_Angeles",
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(true);
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "invoice:in_recovered_mailbox_123",
+          sourceType: "stripe.invoice.paid",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        skipIfBillingAlreadyActive: false,
+        skipIfPreviouslyActivated: true,
+      }),
+    ).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: "member_123",
+    });
+
+    expect(mocks.hasHostedMailboxItemByKind).toHaveBeenCalledWith({
+      kind: "member.activated",
+      prisma: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.hasActiveHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.anything(),
+    });
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("skips activation side effects for payment recovery after a retained prior activation marker", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        pendingActivationTimeZone: "America/Los_Angeles",
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(false);
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValueOnce(true);
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "invoice:in_recovered_123",
+          sourceType: "stripe.invoice.paid",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        skipIfBillingAlreadyActive: false,
+        skipIfPreviouslyActivated: true,
+      }),
+    ).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId: null,
+      memberId: "member_123",
+    });
+
+    expect(mocks.hasHostedMailboxItemByKind).toHaveBeenCalledWith({
+      kind: "member.activated",
+      prisma: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.hasActiveHostedCryptoDomainRootsForUserTx).toHaveBeenCalledWith({
+      tx: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.anything(),
+    });
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });
