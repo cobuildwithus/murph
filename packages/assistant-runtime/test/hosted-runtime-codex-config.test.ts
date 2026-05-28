@@ -1340,6 +1340,13 @@ test("hosted Codex runtime exposes a stable package-owned assistant skill root",
     resultA.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV] ?? "",
     /assistant-engine[/\\]skills$/,
   );
+  const skillPath = path.join(
+    resultA.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV] ?? "",
+    "experiment-onboarding",
+    "SKILL.md",
+  );
+  const skill = await readFile(skillPath, "utf8");
+  assert.match(skill, /^---\nname: experiment-onboarding$/mu);
 
   const configA = await readFile(resultA.codexConfigPath, "utf8");
   const configB = await readFile(resultB.codexConfigPath, "utf8");
