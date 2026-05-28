@@ -63,7 +63,7 @@ test('readPersistedAssistantCliSurfaceBootstrapContext returns a valid persisted
     JSON.stringify({
       contract: persistedContract,
       manifestFingerprint: '1'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
       sourceDetail: 'full',
     }),
     'utf8',
@@ -165,6 +165,14 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
         name: 'assistant onboarding status',
       },
       {
+        description: 'Murph Age readiness',
+        name: 'age inputs',
+      },
+      {
+        description: 'Murph Age report',
+        name: 'age report',
+      },
+      {
         description: 'Mark onboarding complete',
         name: 'assistant onboarding complete',
       },
@@ -193,6 +201,10 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
         name: 'inbox search',
       },
       {
+        description: 'Import a document into the vault',
+        name: 'document import',
+      },
+      {
         description: 'Root status alias',
         name: 'status',
       },
@@ -214,6 +226,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.ok(contract)
   assert.match(contract, /^Murph CLI Contract:/u)
   assert.match(contract, /Use `vault-cli` directly from the current runtime process/u)
+  assert.match(contract, /Bare command-name entries are low-frequency routes/u)
   assert.doesNotMatch(contract, /Family Index:/u)
   assert.doesNotMatch(contract, /- search \(1\): docs/u)
   assert.doesNotMatch(contract, /- root \(1\): search/u)
@@ -221,13 +234,18 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.match(contract, /root:/u)
   assert.match(contract, /assistant:/u)
   assert.match(contract, /inbox:/u)
+  assert.match(contract, /document:/u)
+  assert.doesNotMatch(contract, /^age:/mu)
   assert.match(
     contract,
     /- `search docs`: Search the indexed documents for matching records\.; args <query>; required --format=json\|text\./u,
   )
   assert.match(contract, /- `search`: Root command help\./u)
   assert.match(contract, /- `assistant onboarding complete`: Mark onboarding complete\./u)
-  assert.match(contract, /- `inbox search`: User-facing inbox search\./u)
+  assert.match(contract, /- `inbox search`\./u)
+  assert.match(contract, /- `document import`\./u)
+  assert.doesNotMatch(contract, /User-facing inbox search/u)
+  assert.doesNotMatch(contract, /Import a document into the vault/u)
   assert.doesNotMatch(contract, /requestId/u)
   assert.doesNotMatch(contract, /--limit/u)
   assert.doesNotMatch(contract, /--tags/u)
@@ -240,6 +258,8 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.doesNotMatch(contract, /`assistant session list`/u)
   assert.doesNotMatch(contract, /`assistant self-target set`/u)
   assert.doesNotMatch(contract, /`assistant onboarding status`/u)
+  assert.doesNotMatch(contract, /`age inputs`/u)
+  assert.doesNotMatch(contract, /`age report`/u)
   assert.doesNotMatch(contract, /`inbox attachment list`/u)
   assert.doesNotMatch(contract, /`inbox parse`/u)
   assert.doesNotMatch(contract, /`inbox source list`/u)
@@ -310,6 +330,87 @@ test('buildAssistantCliSurfaceContract renders required string option signatures
   assert.doesNotMatch(contract, /--freeform/u)
 })
 
+test('buildAssistantCliSurfaceContract renders low-frequency families as bare command names', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const nameOnlyFamilies = [
+    'audit',
+    'document',
+    'export',
+    'family',
+    'genetics',
+    'inbox',
+    'intake',
+    'protocol',
+    'provider',
+    'query',
+    'recipe',
+    'samples',
+    'scheduled-log',
+    'vault',
+  ]
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      ...nameOnlyFamilies.map((family) => ({
+        description: `${family} detailed route`,
+        name: `${family} inspect`,
+        schema: {
+          args: {
+            properties: {
+              target: {
+                type: 'string',
+              },
+            },
+            required: ['target'],
+          },
+          options: {
+            properties: {
+              format: {
+                enum: ['json', 'text'],
+              },
+            },
+            required: ['format'],
+          },
+        },
+      })),
+      {
+        description: 'Event detail route',
+        name: 'event inspect',
+        schema: {
+          args: {
+            properties: {
+              target: {
+                type: 'string',
+              },
+            },
+            required: ['target'],
+          },
+          options: {
+            properties: {
+              format: {
+                enum: ['json', 'text'],
+              },
+            },
+            required: ['format'],
+          },
+        },
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  for (const family of nameOnlyFamilies) {
+    assert.match(contract, new RegExp(`- \`${family} inspect\`\\.`, 'u'))
+    assert.doesNotMatch(contract, new RegExp(`${family} detailed route`, 'u'))
+  }
+  assert.match(
+    contract,
+    /- `event inspect`: Event detail route; args <target>; required --format=json\|text\./u,
+  )
+})
+
 test('buildAssistantCliSurfaceContract falls back to a truncated description-only contract for oversized manifests', async () => {
   const {
     buildAssistantCliSurfaceContract,
@@ -319,7 +420,7 @@ test('buildAssistantCliSurfaceContract falls back to a truncated description-onl
   const contract = buildAssistantCliSurfaceContract({
     commands: Array.from({ length: 220 }, (_, index) => ({
       description: oversizedDescription,
-      name: `family command-${index}`,
+      name: `event command-${index}`,
       schema: {
         args: {
           properties: {
@@ -354,7 +455,7 @@ test('buildAssistantCliSurfaceContract falls back to a truncated description-onl
   assert.ok(contract.length <= 40_000)
   assert.match(
     contract,
-    /- `family command-0`: Long description Long description/u,
+    /- `event command-0`: Long description Long description/u,
   )
   assert.doesNotMatch(contract, /args <query>/u)
   assert.doesNotMatch(contract, /common --verbose/u)
@@ -385,18 +486,17 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
       },
     ],
   }
-  const manifestFingerprint = createHash('sha256')
-    .update('full')
-    .update('\0')
-    .update(JSON.stringify(manifest))
-    .digest('hex')
+  const manifestFingerprint = createAssistantCliSurfaceManifestFingerprint({
+    manifest,
+    sourceDetail: 'full',
+  })
   const persistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
   await writeFile(
     docPath,
     JSON.stringify({
       contract: persistedContract,
       manifestFingerprint,
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
       sourceDetail: 'full',
     }),
     'utf8',
@@ -441,7 +541,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites stale persisted contra
     JSON.stringify({
       contract: 'Murph CLI Contract:\nStale assistant cli contract',
       manifestFingerprint: '0'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
       sourceDetail: 'full',
     }),
     'utf8',
@@ -451,7 +551,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites stale persisted contra
     commands: [
       {
         description: 'Fresh manifest command',
-        name: 'vault show',
+        name: 'search docs',
       },
     ],
   })
@@ -476,6 +576,95 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites stale persisted contra
   }
   assert.equal(persisted.contract, contract)
   assert.notEqual(persisted.manifestFingerprint, '0'.repeat(64))
+})
+
+test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy contracts', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-render-policy-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const stateDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const docPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
+    'sessions/session-render-policy/cli-surface-bootstrap',
+  )
+  await mkdir(path.dirname(docPath), {
+    recursive: true,
+  })
+
+  const manifest = {
+    commands: [
+      {
+        description: 'Age report should stay hidden',
+        name: 'age report',
+      },
+      {
+        description: 'Inbox search should be name-only',
+        name: 'inbox search',
+      },
+      {
+        description: 'Event inspect should stay described',
+        name: 'event inspect',
+      },
+    ],
+  }
+  const legacyManifestFingerprint = createLegacyAssistantCliSurfaceManifestFingerprint({
+    manifest,
+    sourceDetail: 'full',
+  })
+  const legacyContract = [
+    'Murph CLI Contract:',
+    'age:',
+    '- `age report`: Old age report route.',
+    '',
+    'inbox:',
+    '- `inbox search`: Old described inbox route.',
+  ].join('\n')
+  await writeFile(
+    docPath,
+    JSON.stringify({
+      contract: legacyContract,
+      manifestFingerprint: legacyManifestFingerprint,
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+      sourceDetail: 'full',
+    }),
+    'utf8',
+  )
+
+  const readAssistantCliLlmsManifest = vi.fn().mockResolvedValue(manifest)
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
+  }))
+  const {
+    resolveAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = await resolveAssistantCliSurfaceBootstrapContext({
+    sessionId: 'session-render-policy',
+    vault: vaultRoot,
+  })
+
+  assert.ok(contract)
+  assert.notEqual(contract, legacyContract)
+  assert.doesNotMatch(contract, /^age:/mu)
+  assert.doesNotMatch(contract, /`age report`/u)
+  assert.match(contract, /- `inbox search`\./u)
+  assert.doesNotMatch(contract, /Inbox search should be name-only/u)
+  assert.match(contract, /- `event inspect`: Event inspect should stay described\./u)
+  assert.match(contract, /Bare command-name entries are low-frequency routes/u)
+
+  const persisted = JSON.parse(await readFile(docPath, 'utf8')) as {
+    contract: string
+    manifestFingerprint: string
+    schemaVersion: string
+  }
+  assert.equal(persisted.contract, contract)
+  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v3')
+  assert.notEqual(persisted.manifestFingerprint, legacyManifestFingerprint)
 })
 
 test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only docs and rewrites them with a generated contract', async () => {
@@ -555,7 +744,7 @@ test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only 
   }
   assert.equal(persisted.contract, generatedContract)
   assert.match(persisted.manifestFingerprint, /^[a-f0-9]{64}$/u)
-  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v2')
+  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v3')
   assert.match(persisted.generatedAt, /^\d{4}-\d{2}-\d{2}T/u)
 })
 
@@ -623,7 +812,7 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses persisted contract when 
       contract: persistedContract,
       generatedAt: '2026-01-01T00:00:00.000Z',
       manifestFingerprint: '1'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
       sourceDetail: 'full',
     }),
     'utf8',
@@ -656,7 +845,7 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses persisted contract when 
     contract: persistedContract,
     generatedAt: '2026-01-01T00:00:00.000Z',
     manifestFingerprint: '1'.repeat(64),
-    schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+    schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
     sourceDetail: 'full',
   })
 })
@@ -684,7 +873,7 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses compact persisted contra
       contract: persistedContract,
       generatedAt: '2026-01-01T00:00:00.000Z',
       manifestFingerprint: '3'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
       sourceDetail: 'compact',
     }),
     'utf8',
@@ -750,7 +939,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
       sessionId: 'missing-fingerprint',
       document: {
         contract: validPersistedContract,
-        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
         sourceDetail: 'full',
       },
     },
@@ -759,7 +948,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
       document: {
         contract: validPersistedContract,
         manifestFingerprint: validManifestFingerprint,
-        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
         sourceDetail: 'summary',
       },
     },
@@ -768,7 +957,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
       document: {
         contract: 'Persisted assistant cli contract',
         manifestFingerprint: validManifestFingerprint,
-        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
         sourceDetail: 'full',
       },
     },
@@ -891,7 +1080,7 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
     commands: [
       {
         description: `Command for ${input.cliEnv?.MURPH_TEST_SURFACE_KEY ?? 'none'}`,
-        name: 'vault show',
+        name: 'search docs',
       },
     ],
   }))
@@ -924,3 +1113,27 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
   assert.match(secondContract ?? '', /Command for two/u)
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 2)
 })
+
+function createAssistantCliSurfaceManifestFingerprint(input: {
+  manifest: unknown
+  sourceDetail: 'compact' | 'full'
+}): string {
+  return createHash('sha256')
+    .update('murph.assistant-cli-surface-render-policy.v1')
+    .update('\0')
+    .update(input.sourceDetail)
+    .update('\0')
+    .update(JSON.stringify(input.manifest))
+    .digest('hex')
+}
+
+function createLegacyAssistantCliSurfaceManifestFingerprint(input: {
+  manifest: unknown
+  sourceDetail: 'compact' | 'full'
+}): string {
+  return createHash('sha256')
+    .update(input.sourceDetail)
+    .update('\0')
+    .update(JSON.stringify(input.manifest))
+    .digest('hex')
+}
