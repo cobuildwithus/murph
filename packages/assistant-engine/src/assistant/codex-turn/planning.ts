@@ -36,6 +36,10 @@ import {
   resolveAssistantRouteResumeBinding,
 } from '../codex-resume-binding.js'
 import {
+  inspectHostedAssistantCodexResumeBudget,
+  type AssistantCodexResumeBudgetRejectReason,
+} from '../codex-resume-budget.js'
+import {
   readAssistantCodexResume,
 } from '../conversation-persistence.js'
 import type {
@@ -97,6 +101,8 @@ export interface AssistantRoutePlanningDiagnostics {
   shouldPrepareAnyBootstrapContext: boolean
   shouldPrepareBootstrapContext: boolean
   shouldPrepareFreshThreadFallback: boolean
+  nativeResumeRejectReason: AssistantCodexResumeBudgetRejectReason | null
+  nativeResumeRolloutSizeBucket: string | null
   supportedExperimentProtocolsElapsedMs: number | null
   freshThreadFallbackPromptElapsedMs: number | null
   vaultOverviewElapsedMs: number | null
@@ -390,19 +396,39 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ...input.route.providerOptions,
     }),
   )
+  const hostedExecutionContext = input.executionContext?.hosted ?? null
   const activeTurnHistory = input.activeTurnHistory ?? null
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
-  const candidateResumeCodexThreadId =
+  const resumeBudgetInspection =
+    nativeResumeEnabled &&
+    routeProviderCapabilities.supportsNativeResume &&
+    resumeBinding !== null &&
+    hostedExecutionContext !== null
+      ? await inspectHostedAssistantCodexResumeBudget({
+          codexHome:
+            input.sharedPlan.cliAccess.env.CODEX_HOME ?? process.env.CODEX_HOME,
+          resumeState: resumeBinding,
+        })
+      : null
+  const rawCandidateResumeCodexThreadId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
-      ? resolveAssistantEffectiveCodexResumeThreadId({
-          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
-            resumeState: resumeBinding,
-          }),
+      ? resolveAssistantCodexResumeThreadId({
+          resumeState: resumeBinding,
         })
       : null
+  const candidateResumeCodexThreadId =
+    hostedExecutionContext !== null
+      ? resumeBudgetInspection?.rejectReason === null
+        ? resolveAssistantEffectiveCodexResumeThreadId({
+            resumeCodexThreadId: resumeBudgetInspection.threadId,
+          })
+        : null
+      : resolveAssistantEffectiveCodexResumeThreadId({
+          resumeCodexThreadId: rawCandidateResumeCodexThreadId,
+        })
   const threadPlan = resolveAssistantCodexThreadPlan({
     candidateResumeCodexThreadId,
     onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
@@ -427,8 +453,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const shouldPrepareConversationThreadInstructions =
     shouldPrepareAnyBootstrapContext && input.profile.promptProfile === 'conversation'
+  const shouldPrepareCliBootstrapContract =
+    shouldPrepareConversationThreadInstructions && hostedExecutionContext === null
   let cliBootstrapElapsedMs: number | null = null
-  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+  const bootstrapAssistantCliContract = shouldPrepareCliBootstrapContract
     ? await measureRoutePlanningAsync(
         routePlanningSpans,
         'cliBootstrapElapsedMs',
@@ -628,6 +656,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
       shouldPrepareAnyBootstrapContext,
       shouldPrepareBootstrapContext,
       shouldPrepareFreshThreadFallback,
+      nativeResumeRejectReason:
+        resumeBudgetInspection?.rejectReason ?? null,
+      nativeResumeRolloutSizeBucket:
+        resumeBudgetInspection?.rolloutSizeBucket ?? null,
       supportedExperimentProtocolsElapsedMs:
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
       freshThreadFallbackPromptElapsedMs:

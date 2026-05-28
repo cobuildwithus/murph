@@ -158,6 +158,8 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     allowSensitiveHealthContext: false,
     cliBootstrapElapsedMs: null,
     freshThreadFallbackPromptElapsedMs: null,
+    nativeResumeRejectReason: null,
+    nativeResumeRolloutSizeBucket: null,
     primarySystemPromptElapsedMs: null,
     routePlanningElapsedMs: 0,
     routePlanningMeasuredElapsedMs: 0,

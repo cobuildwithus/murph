@@ -279,7 +279,7 @@ describe("hosted local Linq webhook e2e", () => {
     ]);
   }, 300_000);
 
-  it("normalizes a large image-only iMessage media attachment before the multimodal provider path", async () => {
+  it("keeps a large image-only iMessage attachment out of native provider history", async () => {
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("image");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
@@ -368,25 +368,31 @@ describe("hosted local Linq webhook e2e", () => {
       providerBody,
       assistantProviderBody,
     );
-    expect(inputImages.length, imageShapeSummary).toBeGreaterThan(0);
-    const imagePayload = decodeSingleProviderDataImageUrl(inputImages, imageShapeSummary);
-    expect(imagePayload.mediaType, imageShapeSummary).toBe("image/webp");
-    expect(imagePayload.bytes.byteLength, imageShapeSummary).toBeGreaterThan(12);
-    expect(hasWebpSignature(imagePayload.bytes), imageShapeSummary).toBe(true);
-    expect(hasPngSignature(imagePayload.bytes), imageShapeSummary).toBe(false);
-    expect(imagePayload.bytes.byteLength, imageShapeSummary).toBeLessThan(
-      originalImageBytes.byteLength,
-    );
+    expect(inputImages.length, imageShapeSummary).toBe(0);
     expect(providerInputPartsIncludeImageUrlWithPrefix(inputImages, "data:image/png;base64,")).toBe(
+      false,
+    );
+    expect(providerInputPartsIncludeImageUrlWithPrefix(inputImages, "data:image/webp;base64,")).toBe(
+      false,
+    );
+    expect(assistantProviderBody.includes("input_image"), imageShapeSummary).toBe(false);
+    expect(assistantProviderBody.includes("data:image/webp;base64,"), imageShapeSummary).toBe(
       false,
     );
     expect(assistantProviderBody.includes("data:image/png;base64,"), imageShapeSummary).toBe(
       false,
     );
     expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
-    expect(assistantProviderBody.includes("fileName: outbox.webp")).toBe(true);
+    expect(assistantProviderBody.includes("fileName: outbox.webp"), imageShapeSummary).toBe(false);
     expect(assistantProviderBody.includes("mime: image/webp")).toBe(true);
-    expect(assistantProviderBody.includes("attachments/001.webp")).toBe(true);
+    expect(assistantProviderBody.includes("storedPath"), imageShapeSummary).toBe(false);
+    expect(assistantProviderBody.includes("attachments/001.webp"), imageShapeSummary).toBe(false);
+    expect(assistantProviderBody.includes("nativeImageEvidence: omitted_non_addressable"), imageShapeSummary).toBe(
+      true,
+    );
+    expect(assistantProviderBody.includes("routingImageReason: too-large"), imageShapeSummary).toBe(
+      true,
+    );
     expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
     expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,
@@ -553,48 +559,6 @@ function providerInputPartsIncludeImageUrlWithPrefix(
 ): boolean {
   return parts.some((part) =>
     typeof part.image_url === "string" && part.image_url.startsWith(prefix)
-  );
-}
-
-function decodeSingleProviderDataImageUrl(
-  parts: readonly Record<string, unknown>[],
-  shapeSummary: string,
-): { bytes: Buffer; mediaType: string } {
-  const urls = parts
-    .map((part) => part.image_url)
-    .filter((value): value is string => typeof value === "string");
-  if (urls.length !== 1) {
-    throw new Error(
-      `${shapeSummary}; expected exactly one provider data image URL, got ${urls.length}`,
-    );
-  }
-  const [url] = urls;
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/u.exec(url!);
-  if (!match) {
-    throw new Error(
-      `${shapeSummary}; provider image URL was not a supported base64 data image URL`,
-    );
-  }
-  return {
-    bytes: Buffer.from(match![2]!, "base64"),
-    mediaType: match![1]!,
-  };
-}
-
-function hasWebpSignature(bytes: Uint8Array): boolean {
-  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return (
-    buffer.byteLength >= 12
-    && buffer.subarray(0, 4).toString("ascii") === "RIFF"
-    && buffer.subarray(8, 12).toString("ascii") === "WEBP"
-  );
-}
-
-function hasPngSignature(bytes: Uint8Array): boolean {
-  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  return (
-    bytes.byteLength >= pngSignature.length
-    && pngSignature.every((byte, index) => bytes[index] === byte)
   );
 }
 

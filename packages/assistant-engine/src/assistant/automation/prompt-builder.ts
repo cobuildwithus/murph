@@ -20,6 +20,11 @@ import {
   type AssistantInputAttachmentModelBundleSource,
 } from '../attachment-evidence-model.js'
 import { normalizeNullableString } from '../shared.js'
+import {
+  getRoutingImageEligibility,
+  isNativeRoutingImageOverBudgetBytes,
+  renderNativeRoutingImageSizeBucket,
+} from '../../inbox-routing-vision.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
@@ -343,17 +348,31 @@ function buildAssistantAutoReplyAttachmentSections(input: {
 function renderAttachmentEvidencePromptSection(
   attachment: AssistantInputAttachmentEvidenceItem,
 ): string | null {
-  const storedPathLine = renderAttachmentEvidencePromptStoredPath(attachment)
+  const shouldRedactImageReference =
+    shouldRedactAttachmentEvidenceImageReference(attachment)
+  const storedPathLine = shouldRedactImageReference
+    ? null
+    : renderAttachmentEvidencePromptStoredPath(attachment)
   const derivedManifestPath = normalizeNullableString(
     attachment.derived?.manifestPath ?? null,
   )
+  const byteSize = attachment.byteSize ?? attachment.raw?.byteSize ?? null
   const metadataLines = [
-    attachment.fileName ? `fileName: ${attachment.fileName}` : null,
+    shouldRedactImageReference
+      ? null
+      : attachment.fileName ? `fileName: ${attachment.fileName}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
-    typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
+    shouldRedactImageReference
+      ? `byteSizeBucket: ${renderNativeRoutingImageSizeBucket(byteSize)}`
+      : typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     storedPathLine,
-    derivedManifestPath ? `derivedManifestPath: ${derivedManifestPath}` : null,
+    shouldRedactImageReference
+      ? null
+      : derivedManifestPath ? `derivedManifestPath: ${derivedManifestPath}` : null,
     attachment.parseState ? `parseState: ${attachment.parseState}` : null,
+    shouldRedactImageReference
+      ? 'nativeImageEvidence: omitted_non_addressable'
+      : null,
   ].filter((line): line is string => line !== null)
   const chunks: string[] = []
   const omittedKinds: string[] = []
@@ -500,13 +519,17 @@ function renderPreparedAttachmentPromptSection(
   )
   const richEvidenceCandidate =
     hasAssistantInputAttachmentEvidenceCandidate(attachment)
-  const hasRawStoredPath = hasRawAttachmentStoredPath(attachment.storedPath)
+  const shouldRedactImageReference =
+    shouldRedactAttachmentBundleImageReference(attachment)
+  const hasRawStoredPath = !shouldRedactImageReference &&
+    hasRawAttachmentStoredPath(attachment.storedPath)
   const hasRawMissingMetadata = hasAttachmentMetadataLine(
     attachment,
     'storedPath: missing',
   )
   const hasDerivedEvidence = attachment.fragments.some(isDerivedAttachmentFragment)
-  const storedPdfMetadata = hasStoredPdfAttachmentPath(attachment)
+  const storedPdfMetadata = !shouldRedactImageReference &&
+    hasStoredPdfAttachmentPath(attachment)
   const status = renderAttachmentParserStatus(attachment.parseState ?? null)
   if (
     !hasTextFragments &&
@@ -527,7 +550,7 @@ function renderPreparedAttachmentPromptSection(
   if (hasRawStoredPath && !hasTextFragments) {
     sections.push(RAW_ATTACHMENT_FILE_INSTRUCTION)
   }
-  if (richEvidenceCandidate && !hasTextFragments) {
+  if (richEvidenceCandidate && !hasTextFragments && !shouldRedactImageReference) {
     sections.push(
       'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
     )
@@ -690,6 +713,27 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
 }): string[] {
   if (input.attachment) {
     const rawPath = normalizeNullableString(input.attachment.raw?.path ?? null)
+    if (shouldRedactAttachmentEvidenceImageReference(input.attachment)) {
+      const routingImage = getRoutingImageEligibility({
+        byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
+        fileName: input.attachment.fileName,
+        kind: input.attachment.kind,
+        mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
+        storedPath: rawPath,
+      })
+      return [
+        '',
+        `Attachment ${input.ordinal}`,
+        `kind: ${input.attachment.kind}`,
+        `mime: ${normalizeNullableString(input.attachment.mime) ?? 'unknown'}`,
+        `byteSizeBucket: ${renderNativeRoutingImageSizeBucket(input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null)}`,
+        'nativeImageEvidence: omitted_non_addressable',
+        `routingImageEligible: ${String(routingImage.eligible)}`,
+        `routingImageReason: ${routingImage.reason}`,
+        `parseState: ${input.attachment.parseState ?? 'unknown'}`,
+      ]
+    }
+
     return [
       '',
       `Attachment ${input.ordinal}`,
@@ -703,12 +747,34 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
   }
 
   const descriptor = input.descriptor
+  const descriptorKind = normalizeAttachmentLifecycleDescriptorKind(descriptor)
+  const descriptorMime = normalizeNullableString(descriptor?.contentType ?? null)
+  if (shouldRedactAttachmentDescriptorImageReference({
+    kind: descriptorKind,
+    mime: descriptorMime,
+  })) {
+    const imageReason = isNativeRoutingImageOverBudgetBytes(descriptor?.sizeBytes ?? null)
+      ? 'too-large'
+      : 'stored-path-missing'
+    return [
+      '',
+      `Attachment ${input.ordinal}`,
+      `kind: ${descriptorKind}`,
+      `mime: ${descriptorMime ?? 'unknown'}`,
+      `byteSizeBucket: ${renderNativeRoutingImageSizeBucket(descriptor?.sizeBytes ?? null)}`,
+      'nativeImageEvidence: omitted_non_addressable',
+      'routingImageEligible: false',
+      `routingImageReason: ${imageReason}`,
+      'parseState: unknown',
+    ]
+  }
+
   return [
     '',
     `Attachment ${input.ordinal}`,
     `fileName: ${normalizeNullableString(descriptor?.fileName ?? null) ?? 'unknown'}`,
-    `kind: ${normalizeAttachmentLifecycleDescriptorKind(descriptor)}`,
-    `mime: ${normalizeNullableString(descriptor?.contentType ?? null) ?? 'unknown'}`,
+    `kind: ${descriptorKind}`,
+    `mime: ${descriptorMime ?? 'unknown'}`,
     `byteSize: ${typeof descriptor?.sizeBytes === 'number' ? descriptor.sizeBytes : 'unknown'}`,
     'rawPath: missing',
     'parseState: unknown',
@@ -807,6 +873,25 @@ function hasAttachmentMetadataLine(
     fragment.kind === 'attachment_metadata' &&
     fragment.text.split('\n').some((fragmentLine) => fragmentLine === line),
   )
+}
+
+function shouldRedactAttachmentEvidenceImageReference(
+  attachment: AssistantInputAttachmentEvidenceItem,
+): boolean {
+  return attachment.kind === 'image'
+}
+
+function shouldRedactAttachmentBundleImageReference(
+  attachment: AssistantInputAttachmentModelBundle,
+): boolean {
+  return attachment.kind === 'image'
+}
+
+function shouldRedactAttachmentDescriptorImageReference(input: {
+  kind: string
+  mime: string | null
+}): boolean {
+  return input.kind === 'image' || input.mime?.toLowerCase().startsWith('image/') === true
 }
 
 function hasRawAttachmentStoredPath(storedPath: string | null): boolean {

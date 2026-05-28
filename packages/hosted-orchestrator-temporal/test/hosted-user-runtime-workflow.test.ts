@@ -499,6 +499,78 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(2);
   });
 
+  it("does not let duplicate pending browser-vault refresh signals reset retry backoff", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "browser_vault_refresh" }));
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+    runtime.demands.push(runDemand({ source: "browser_vault_refresh" }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(browserVaultSignal());
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(browserVaultSignal());
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits[0]).toBe(22_000);
+    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
+  it("does not let duplicate pending device-sync recovery signals reset retry backoff", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(deviceSyncRecoverySignal());
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(deviceSyncRecoverySignal());
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits[0]).toBe(22_000);
+    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
+  it("does not let duplicate pending mailbox-lag signals reset retry backoff", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "lag_recovery" }));
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+    runtime.demands.push(runDemand({ source: "lag_recovery" }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxLagSignal());
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(mailboxLagSignal());
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits[0]).toBe(22_000);
+    expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
   it("retries after retry-later processing responses when no signal arrives", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
@@ -1064,6 +1136,44 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
+  it("lets duplicate pending recovery signals wake signal-only failure waits", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "device_sync_recovery" }));
+    runtime.executions.push(() => {
+      throw nonRetryableActivityFailure("hosted_orchestrator_http_non_retryable");
+    });
+    runtime.demands.push((request) => {
+      expect(request.deviceSyncRecoveryRequested).toBe(true);
+      return runDemand({ source: "device_sync_recovery" });
+    });
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      state: {
+        ...emptyCarryForwardState(),
+        deviceSyncRecoveryRequested: true,
+      },
+      userId: "member_test",
+    });
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal({
+        kind: "device_sync_recovery_requested",
+      });
+    };
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(runtime.executionRequests).toHaveLength(2);
+    expect(continued.state).toMatchObject({
+      lastDemandSource: "device_sync_recovery",
+      lastExecutionErrorCode: null,
+      lastExecutionKind: "runtime_processing_accepted",
+    });
+  });
+
   it("keeps old retry timer behavior when the non-retryable wait patch is inactive", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.signalOnlyNonRetryableFailureWaitEnabled = false;
@@ -1259,6 +1369,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   prewarmSignalPatchEnabled = true;
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  coalescedPendingSignalPatchEnabled = true;
   runtimeRecheckSignalPatchEnabled = true;
   sameRuntimeWakeAcceptedCountPatchEnabled = true;
   signalOnlyNonRetryableFailureWaitEnabled = true;
@@ -1376,6 +1487,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return this.runtimeRecheckSignalPatchEnabled;
   }
 
+  useCoalescedPendingSignalPatch(): boolean {
+    return this.coalescedPendingSignalPatchEnabled;
+  }
+
   useRuntimePrewarmSignalPatch(): boolean {
     return this.prewarmSignalPatchEnabled;
   }
@@ -1475,6 +1590,18 @@ function manualSignal(_label = "manual_signal_test"): HostedRuntimeSignal {
 function browserVaultSignal(): HostedRuntimeSignal {
   return {
     kind: "browser_vault_refresh_requested",
+  };
+}
+
+function deviceSyncRecoverySignal(): HostedRuntimeSignal {
+  return {
+    kind: "device_sync_recovery_requested",
+  };
+}
+
+function mailboxLagSignal(): HostedRuntimeSignal {
+  return {
+    kind: "mailbox_lag_observed",
   };
 }
 

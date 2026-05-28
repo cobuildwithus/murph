@@ -8,10 +8,14 @@ export const ROUTING_VISION_SUPPORTED_MEDIA_TYPES = [
   'image/gif',
 ] as const
 
+export const MAX_NATIVE_ROUTING_IMAGE_BYTES = 32 * 1024
+export const MAX_NATIVE_ROUTING_IMAGE_TOTAL_BYTES = 64 * 1024
+
 export const routingImageEligibilityReasonValues = [
   'not-image',
   'stored-path-missing',
   'unsupported-format',
+  'too-large',
   'supported-format',
 ] as const
 
@@ -28,6 +32,7 @@ export interface RoutingImageEligibility {
 type InboxAttachment = Partial<
   InboxShowResult['capture']['attachments'][number]
 > & {
+  byteSize?: number | null
   mediaType?: string | null
 }
 
@@ -61,6 +66,15 @@ export function getRoutingImageEligibility(
     return {
       eligible: false,
       reason: 'stored-path-missing',
+      mediaType: normalizedMime,
+      extension,
+    }
+  }
+
+  if (isNativeRoutingImageOverBudgetBytes(attachment.byteSize)) {
+    return {
+      eligible: false,
+      reason: 'too-large',
       mediaType: normalizedMime,
       extension,
     }
@@ -106,6 +120,32 @@ export function shouldBypassParserWaitForRouting(
   attachment: InboxAttachment,
 ): boolean {
   return getRoutingImageEligibility(attachment).eligible
+}
+
+export function isNativeRoutingImageTooLarge(
+  routingImage: Pick<RoutingImageEligibility, 'reason'>,
+): boolean {
+  return routingImage.reason === 'too-large'
+}
+
+export function renderNativeRoutingImageSizeBucket(
+  byteSize: number | null | undefined,
+): string {
+  if (typeof byteSize !== 'number' || !Number.isFinite(byteSize)) {
+    return 'unknown'
+  }
+
+  return byteSize > MAX_NATIVE_ROUTING_IMAGE_BYTES
+    ? `>${MAX_NATIVE_ROUTING_IMAGE_BYTES}`
+    : `<=${MAX_NATIVE_ROUTING_IMAGE_BYTES}`
+}
+
+export function isNativeRoutingImageOverBudgetBytes(
+  byteSize: number | null | undefined,
+): boolean {
+  return typeof byteSize === 'number' &&
+    Number.isFinite(byteSize) &&
+    byteSize > MAX_NATIVE_ROUTING_IMAGE_BYTES
 }
 
 function hasStoredPath(value: string | null | undefined): value is string {

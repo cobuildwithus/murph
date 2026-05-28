@@ -152,6 +152,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(guidance).toContain("`murph` is the setup entrypoint");
     expect(guidance).toContain("Use the matching local CLI command directly");
     expect(guidance).toContain("prefer `--format json`");
+    expect(guidance).toContain("inspect the one needed command");
+    expect(guidance).toContain("Avoid dumping broad CLI manifests");
     expect(guidance).toContain("do not run recursive assistant or delivery commands");
     expect(guidance).toContain("`assistant deliver`");
   });

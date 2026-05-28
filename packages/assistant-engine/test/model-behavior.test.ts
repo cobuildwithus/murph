@@ -621,6 +621,22 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
+  it('keeps safety gates in compact auto-reply experiment guidance', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      turnTrigger: 'automation-auto-reply',
+    }))
+
+    expect(prompt).toContain(
+      'Do not create an active experiment from the first message alone',
+    )
+    expect(prompt).toContain(
+      'For high-caution protocols, ask the safety screen even when the vault is silent.',
+    )
+    expect(prompt).toContain(
+      'If red flags appear, suggest clinician guidance, a lower-intensity alternative, or postponing.',
+    )
+  })
+
   it('points richer experiment setup at the typed edit command', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,

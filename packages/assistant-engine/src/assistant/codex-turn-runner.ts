@@ -289,6 +289,10 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningUnaccountedElapsedMs:
           input.routePlanningDiagnostics.routePlanningUnaccountedElapsedMs,
         refreshThreadInstructions: input.refreshThreadInstructions,
+        nativeResumeRejectReason:
+          input.routePlanningDiagnostics.nativeResumeRejectReason,
+        nativeResumeRolloutSizeBucket:
+          input.routePlanningDiagnostics.nativeResumeRolloutSizeBucket,
         resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
         workingDirectoryKind:
           input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY

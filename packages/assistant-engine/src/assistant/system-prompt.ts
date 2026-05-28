@@ -187,7 +187,9 @@ function buildStableRouteCapabilityPrompt(
       assistantHostedDeviceConnectProviders:
         input.assistantHostedDeviceConnectProviders ?? [],
     }),
-    buildAssistantExperimentOnboardingGuidanceText(),
+    buildAssistantExperimentOnboardingGuidanceText({
+      compact: input.turnTrigger === "automation-auto-reply",
+    }),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
     }),
@@ -561,7 +563,13 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
   return `- Hosted wearable connection links are available for ${providerList}. Apple Health/HealthKit is not supported yet. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
-function buildAssistantExperimentOnboardingGuidanceText(): string {
+function buildAssistantExperimentOnboardingGuidanceText(input: {
+  compact: boolean;
+}): string {
+  if (input.compact) {
+    return buildAssistantCompactExperimentOnboardingGuidanceText();
+  }
+
   return `Experiment onboarding:
 
 # Goal
@@ -645,6 +653,22 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - Stop gathering info and create the run when you have enough context. Do not over-ask.
 - Do not dump the full setup checklist at once.
 - Use direct \`vault-cli ...\` commands in this privileged local route.`;
+}
+
+function buildAssistantCompactExperimentOnboardingGuidanceText(): string {
+  return `Experiment onboarding:
+- For experiment requests, resolve public protocol context through Health Commons first, then use the user's private vault context before asking setup questions.
+- Keep setup conversational and lightweight. Ask only for missing details that materially affect safety, logistics, measurement, or interpretation.
+- For wearable-backed protocols, read normalized wearable summaries first and do not ask the user to manually restate activity, sleep, recovery, HRV/RHR, or similar connected signals when they are already available.
+- For lab-backed protocols, inspect structured lab and timeline surfaces before asking about baseline or follow-up evidence.
+- Check active experiments before creating another run. If one exists, ask whether to pause, finish, defer, or run both.
+- Do not create an active experiment from the first message alone; gather enough context to set it up correctly.
+- For high-caution protocols, ask the safety screen even when the vault is silent. If red flags appear, suggest clinician guidance, a lower-intensity alternative, or postponing.
+- Create a protocol-linked run once enough context is resolved; pause for confirmation only when there is contradiction, ambiguity, or a safety-sensitive change.
+- Use Health Commons discovery commands such as \`vault-cli commons search "<query>" --format json\`, \`vault-cli commons protocol show <key-or-slug> --format json\`, and \`vault-cli commons source list --protocol <key-or-slug> --format json\`.
+- Use experiment commands such as \`vault-cli experiment list --status active --format json\`, \`vault-cli experiment start ... --dry-run --format json\`, \`vault-cli experiment start ...\`, \`vault-cli experiment edit ...\`, \`vault-cli experiment progress ... --format json\`, and \`vault-cli experiment session log ...\`.
+- If exact command details are missing, inspect the one needed command schema instead of dumping broad CLI manifests.
+- Keep public Health Commons references, private protocol adaptations, private regimens, and private experiment runs separate.`;
 }
 
 function buildHealthCommonsProtocolResolutionText(): string {
