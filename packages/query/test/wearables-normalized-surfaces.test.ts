@@ -572,6 +572,52 @@ test("activity surfaces keep explicit activity observations and convert energy-b
   assert.equal(maxHeartRate?.value, 168);
 });
 
+test("Junction expanded summaries project into wearable activity, sleep, and body surfaces", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "activity-expanded-fields",
+        date: "2026-05-20T00:00:00Z",
+        steps: 9400,
+        vo2_max: 48.5,
+        total_elevation_gain: 320,
+        elevation_change: -12,
+        percent_recorded: 0.95,
+      }],
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-expanded-fields",
+        bedtime_start: "2026-05-20T02:00:00Z",
+        bedtime_stop: "2026-05-20T10:00:00Z",
+        duration: 28800,
+        time_in_bed: 30000,
+        sleep_consistency: 91,
+        sleep_performance: 88,
+      }],
+      body: [{
+        source: { provider: "garmin", type: "scale" },
+        id: "body-expanded-fields",
+        date: "2026-05-20T08:00:00Z",
+        body_temperature: 36.7,
+      }],
+    },
+  });
+
+  const latest = summarizeWearableLatest(vault);
+
+  assert.equal(latest?.activity?.steps.selection.value, 9400);
+  assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
+  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
+  assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, -12);
+  assert.equal(latest?.activity?.percentRecorded.selection.value, 95);
+  assert.equal(latest?.sleep?.timeInBedMinutes.selection.value, 500);
+  assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
+  assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
+  assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
+});
+
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {
   const vault = makeVault([
     makeSleepSession({
@@ -704,8 +750,15 @@ test("workout session metrics stay out of wearable summary projection without an
             percentRecorded: 97,
             totalElevationGainMeters: 88,
             altitudeChangeMeters: -12,
+            elevationHighMeters: 314.5,
+            elevationLowMeters: 125.2,
             averageSpeedMps: 3.1,
             maxSpeedMps: 5.4,
+            averagePowerWatts: 215,
+            maxPowerWatts: 540,
+            normalizedPowerWatts: 235,
+            weightedAveragePowerWatts: 230,
+            kilojoules: 420,
           },
           exercises: [],
         },
@@ -717,6 +770,9 @@ test("workout session metrics stay out of wearable summary projection without an
   const activeCalories = summarizeWearableMetricLatest(vault, "active-calories", { providers: ["garmin"] });
   const maxHeartRate = summarizeWearableMetricLatest(vault, "max-heart-rate", { providers: ["garmin"] });
   const sourceHealth = summarizeWearableSourceHealth(vault, { providers: ["garmin"] });
+  const workoutDetailNote = sourceHealth[0]?.notes.find((note) =>
+    note.includes("workout detail metrics on activity sessions")
+  );
 
   assert.equal(latest?.activity?.sessionMinutes.selection.value, 42);
   assert.equal(latest?.activity?.sessionCount.selection.value, 1);
@@ -730,10 +786,11 @@ test("workout session metrics stay out of wearable summary projection without an
   assert.equal(activeCalories?.value, null);
   assert.equal(maxHeartRate?.value, null);
   assert.equal(sourceHealth[0]?.metricsContributed.includes("activeCalories"), false);
-  assert.equal(
-    sourceHealth[0]?.notes.some((note) => note.includes("workout detail metrics on activity sessions")),
-    true,
-  );
+  assert.equal(sourceHealth[0]?.metricsContributed.includes("averagePowerWatts"), false);
+  assert.ok(workoutDetailNote);
+  assert.match(workoutDetailNote, /averagePowerWatts/u);
+  assert.match(workoutDetailNote, /elevationHighMeters/u);
+  assert.match(workoutDetailNote, /kilojoules/u);
 });
 
 test("metric-trend and drift surfaces return compact structured bundles", () => {

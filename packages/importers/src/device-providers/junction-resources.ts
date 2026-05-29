@@ -79,10 +79,30 @@ export const JUNCTION_SLEEP_AWAKE_MINUTE_PATHS = Object.freeze([
 export const JUNCTION_SLEEP_AWAKE_SECOND_PATHS = Object.freeze([
   "awake",
 ] as const);
+export const JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS = Object.freeze([
+  "timeInBedMinutes",
+  "time_in_bed_minutes",
+  "inBedMinutes",
+  "in_bed_minutes",
+] as const);
+export const JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS = Object.freeze([
+  "timeInBed",
+  "time_in_bed",
+  "inBed",
+  "in_bed",
+] as const);
 export const JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS = Object.freeze([
   "sleepEfficiency",
   "sleep_efficiency",
   "efficiency",
+] as const);
+export const JUNCTION_SLEEP_CONSISTENCY_PATHS = Object.freeze([
+  "sleepConsistency",
+  "sleep_consistency",
+] as const);
+export const JUNCTION_SLEEP_PERFORMANCE_PATHS = Object.freeze([
+  "sleepPerformance",
+  "sleep_performance",
 ] as const);
 export const JUNCTION_SLEEP_HRV_PATHS = Object.freeze([
   "hrv",

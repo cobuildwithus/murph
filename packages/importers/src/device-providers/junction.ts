@@ -24,6 +24,7 @@ import {
   JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS,
   JUNCTION_SLEEP_AWAKE_MINUTE_PATHS,
   JUNCTION_SLEEP_AWAKE_SECOND_PATHS,
+  JUNCTION_SLEEP_CONSISTENCY_PATHS,
   JUNCTION_SLEEP_DEEP_MINUTE_PATHS,
   JUNCTION_SLEEP_DEEP_SECOND_PATHS,
   JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS,
@@ -35,6 +36,7 @@ import {
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
+  JUNCTION_SLEEP_PERFORMANCE_PATHS,
   JUNCTION_SLEEP_REM_MINUTE_PATHS,
   JUNCTION_SLEEP_REM_SECOND_PATHS,
   JUNCTION_SLEEP_RESPIRATORY_RATE_PATHS,
@@ -49,6 +51,8 @@ import {
   JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_TEMPERATURE_DEVIATION_PATHS,
   JUNCTION_SLEEP_TEMPERATURE_PATHS,
+  JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS,
+  JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS,
   JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
   JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
   normalizeJunctionSleepStageValue,
@@ -152,20 +156,14 @@ const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "freestyle_libre",
 ]);
 const RAW_SOURCE_IDENTIFIER_KEYS = new Set([
-  "sourceName",
-  "source_name",
-  "sourceDeviceId",
-  "source_device_id",
-  "sourceAppId",
-  "source_app_id",
-  "deviceId",
-  "device_id",
-  "appId",
-  "app_id",
+  "sourcename",
+  "sourcedeviceid",
+  "sourceappid",
+  "deviceid",
+  "appid",
 ]);
 const RAW_SOURCE_NAME_KEYS = new Set([
-  "displayName",
-  "display_name",
+  "displayname",
   "name",
 ]);
 const RAW_SOURCE_LINKAGE_KEY_PARTS = [
@@ -184,7 +182,14 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories", "calories_active"] },
   { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories", "calories_total"] },
   { metric: "distance-km", unit: "km", title: "Junction distance", paths: ["distanceKm", "distance_km"], metersPaths: ["distance"] },
+  { metric: "floors-climbed", unit: "count", title: "Junction floors climbed", paths: ["floorsClimbed", "floors_climbed", "floors", "floorsAscended", "floors_ascended"] },
   { metric: "activity-score", unit: "%", title: "Junction activity score", paths: ["activityScore", "activity_score", "score"] },
+  { metric: "estimated-vo2-max", unit: "ml/kg/min", title: "Junction estimated VO2 max", paths: ["estimatedVo2Max", "estimated_vo2_max", "vo2Max", "vo2_max", "vo2max", "cardio_fitness"] },
+  { metric: "total-elevation-gain-meters", unit: "meter", title: "Junction activity elevation gain", paths: ["totalElevationGainMeters", "total_elevation_gain_meters", "totalElevationGain", "total_elevation_gain", "elevationGainMeters", "elevation_gain_meters"] },
+  { metric: "altitude-change-meters", unit: "meter", title: "Junction activity altitude change", paths: ["altitudeChangeMeters", "altitude_change_meters", "altitudeChange", "altitude_change", "elevationChangeMeters", "elevation_change_meters", "elevationChange", "elevation_change"] },
+  { metric: "percent-recorded", unit: "%", title: "Junction activity recording coverage", paths: [], percentRatioPaths: ["percentRecorded", "percent_recorded", "recordingCoverage", "recording_coverage", "recordedRatio", "recorded_ratio", "percentRecordedRatio", "percent_recorded_ratio"] },
+  { metric: "workout-strain", unit: "score", title: "Junction workout strain", paths: ["workoutStrain", "workout_strain"] },
+  { metric: "day-strain", unit: "score", title: "Junction day strain", paths: ["dayStrain", "day_strain", "strain"] },
   { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
@@ -193,6 +198,8 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
   { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "fat"] },
+  { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
+  { metric: "temperature", unit: "celsius", title: "Junction body temperature", paths: ["temperature", "bodyTemperature", "body_temperature", "temperatureCelsius", "temperature_celsius", "skin_temperature"] },
 ];
 
 const SLEEP_METRICS: readonly MetricDescriptor[] = [
@@ -208,7 +215,10 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-rem-minutes", unit: "minutes", title: "Junction REM sleep", paths: JUNCTION_SLEEP_REM_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_REM_SECOND_PATHS },
   { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: JUNCTION_SLEEP_LIGHT_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LIGHT_SECOND_PATHS },
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
+  { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
+  { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
+  { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
   { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: JUNCTION_SLEEP_HRV_PATHS },
   { metric: "average-heart-rate", unit: "bpm", title: "Junction sleep average heart rate", paths: JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS },
   { metric: "lowest-heart-rate", unit: "bpm", title: "Junction sleep lowest heart rate", paths: JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS },
@@ -220,6 +230,8 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
 ];
 
 type WorkoutSessionMetrics = NonNullable<WorkoutSession["metrics"]>;
+type WorkoutHeartRateZone = NonNullable<WorkoutSession["heartRateZones"]>[number];
+type WorkoutRouteMetadata = NonNullable<WorkoutSession["route"]>;
 
 const WORKOUT_SESSION_METRICS: readonly {
   key: keyof WorkoutSessionMetrics;
@@ -229,7 +241,38 @@ const WORKOUT_SESSION_METRICS: readonly {
   { key: "totalCalories", paths: ["totalCalories", "total_calories"] },
   { key: "averageHeartRate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr"] },
   { key: "maxHeartRate", paths: ["maxHeartRate", "max_heart_rate", "max_hr"] },
+  { key: "totalElevationGainMeters", paths: ["totalElevationGainMeters", "total_elevation_gain_meters", "totalElevationGain", "total_elevation_gain", "elevationGainMeters", "elevation_gain_meters"] },
+  { key: "altitudeChangeMeters", paths: ["altitudeChangeMeters", "altitude_change_meters", "altitudeChange", "altitude_change", "elevationChangeMeters", "elevation_change_meters", "elevationChange", "elevation_change"] },
+  { key: "elevationHighMeters", paths: ["elevationHighMeters", "elevation_high_meters", "elevationHigh", "elevation_high", "elevHigh", "elev_high", "maxElevationMeters", "max_elevation_meters", "highestElevationMeters", "highest_elevation_meters"] },
+  { key: "elevationLowMeters", paths: ["elevationLowMeters", "elevation_low_meters", "elevationLow", "elevation_low", "elevLow", "elev_low", "minElevationMeters", "min_elevation_meters", "lowestElevationMeters", "lowest_elevation_meters"] },
+  { key: "averageSpeedMps", paths: ["averageSpeedMps", "average_speed_mps", "averageSpeed", "average_speed", "avgSpeed", "avg_speed"] },
+  { key: "maxSpeedMps", paths: ["maxSpeedMps", "max_speed_mps", "maxSpeed", "max_speed"] },
+  { key: "averagePowerWatts", paths: ["averagePowerWatts", "average_power_watts", "averagePower", "average_power", "averageWatts", "average_watts", "avgWatts", "avg_watts", "power.average_watts"] },
+  { key: "maxPowerWatts", paths: ["maxPowerWatts", "max_power_watts", "maxPower", "max_power", "maxWatts", "max_watts", "power.max_watts"] },
+  { key: "normalizedPowerWatts", paths: ["normalizedPowerWatts", "normalized_power_watts", "normalizedPower", "normalized_power", "np", "power.normalized_watts"] },
+  { key: "weightedAveragePowerWatts", paths: ["weightedAveragePowerWatts", "weighted_average_power_watts", "weightedAveragePower", "weighted_average_power", "weightedAverageWatts", "weighted_average_watts", "power.weighted_average_watts"] },
+  { key: "kilojoules", paths: ["kilojoules", "kilojoule", "kj", "power.kilojoules"] },
 ];
+const JUNCTION_WORKOUT_ID_PATHS = [
+  "providerWorkoutId",
+  "provider_workout_id",
+  "providerId",
+  "provider_id",
+  "activityId",
+  "activity_id",
+  "id",
+  "workoutId",
+  "workout_id",
+] as const;
+const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
+  "id",
+  "resourceId",
+  "resource_id",
+  "externalId",
+  "external_id",
+  "providerId",
+  "provider_id",
+] as const;
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
@@ -389,12 +432,26 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
     return normalized ? [normalized] : [];
   });
   const connectionsByKey = buildConnectionsByKey(connections);
+  const summaries = sanitizeJunctionRawResourceMap(
+    snapshot.summaries,
+    SUMMARY_RESOURCE_ALLOWLIST,
+    connectionsByKey,
+  );
+  const timeseries = sanitizeJunctionRawResourceMap(
+    snapshot.timeseries,
+    TIMESERIES_RESOURCE_ALLOWLIST,
+    connectionsByKey,
+  );
+
+  if (!summaries && !timeseries) {
+    return {};
+  }
 
   return stripUndefined({
     ...sanitized,
     connections: sanitizeJunctionRawConnections(snapshot.connections),
-    summaries: sanitizeJunctionRawResourceMap(snapshot.summaries, connectionsByKey),
-    timeseries: sanitizeJunctionRawResourceMap(snapshot.timeseries, connectionsByKey),
+    summaries,
+    timeseries,
   });
 }
 
@@ -415,13 +472,14 @@ function sanitizeJunctionRawConnections(connections: unknown[] | undefined): unk
 
 function sanitizeJunctionRawResourceMap(
   resources: Record<string, unknown> | undefined,
+  allowlist: ReadonlySet<string>,
   connectionsByKey?: ReadonlyMap<string, PlainObject>,
 ): Record<string, unknown> | undefined {
   if (!resources) {
     return undefined;
   }
 
-  const entries = Object.entries(resources)
+  const entries = allowedResourceEntries(resources, allowlist)
     .map(([resource, payload]) => [resource, buildRawResourcePayload(resource, payload, connectionsByKey)] as const)
     .filter(([, payload]) => payload !== undefined);
 
@@ -451,10 +509,10 @@ function sanitizeJunctionRawValue(value: unknown, inSourceObject: boolean): unkn
 
 function shouldDropJunctionRawSourceKey(key: string, inSourceObject: boolean): boolean {
   const normalized = normalizeJunctionRawSourceKey(key);
-  return RAW_SOURCE_IDENTIFIER_KEYS.has(key)
+  return RAW_SOURCE_IDENTIFIER_KEYS.has(normalized)
     || RAW_SOURCE_LINKAGE_KEY_PARTS.some((part) => normalized === part)
     || (inSourceObject && RAW_SOURCE_CONTAINER_LINKAGE_KEY_PARTS.some((part) => normalized === part))
-    || (inSourceObject && RAW_SOURCE_NAME_KEYS.has(key));
+    || (inSourceObject && RAW_SOURCE_NAME_KEYS.has(normalized));
 }
 
 function normalizeJunctionRawSourceKey(key: string): string {
@@ -620,16 +678,18 @@ function pushWorkoutSummary(
     resourceContext.sourceProviderSlug,
   );
   const occurredAt = startAt ?? (endAt ? undefined : timestamp.occurredAt);
+  const movingTimeMinutes = resolveWorkoutMovingTimeMinutes(entry);
   const durationMinutes =
     normalizePositiveIntegerMinutes(
-      firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes", "movingTimeMinutes", "moving_time_minutes"]),
+      firstNumberFromPaths(entry, ["durationMinutes", "duration_minutes"]),
     ) ??
     normalizePositiveIntegerMinutes(
-      secondsToMinutes(firstNumberFromPaths(entry, ["durationSeconds", "duration_seconds", "movingTime", "moving_time", "duration"])),
+      secondsToMinutes(firstNumberFromPaths(entry, ["durationSeconds", "duration_seconds", "duration"])),
     ) ??
     normalizePositiveIntegerMinutes(
       millisecondsToMinutes(firstNumberFromPaths(entry, ["durationMillis", "duration_millis"])),
     ) ??
+    movingTimeMinutes ??
     normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
 
   const workoutTimestamp = occurredAt
@@ -644,14 +704,20 @@ function pushWorkoutSummary(
   }
 
   const dayKey = extractIsoDatePrefix(occurredAt) ?? timestamp.dayKey;
-  const rawActivityType = firstStringFromPaths(entry, ["activityType", "activity_type", "sport.slug", "sport.name", "sport", "type"]);
+  const rawSport = firstStringFromPaths(entry, ["sport.slug", "sportSlug", "sport_slug", "sport.name", "sportName", "sport_name", "sport"]);
+  const sportName = trimOptionalToLength(
+    firstStringFromPaths(entry, ["sport.name", "sportName", "sport_name", "sport"]),
+    160,
+  );
+  const sport = rawSport ? trimSlugToLength(slugify(rawSport, "workout"), 80) : undefined;
+  const rawActivityType = firstStringFromPaths(entry, ["activityType", "activity_type", "type"]) ?? rawSport;
   const activityType = slugify(rawActivityType, "workout");
   const title = trimToLength(
     firstStringFromPaths(entry, ["title", "name", "sport.name", "sport", "activityType", "activity_type"]) ?? "Junction workout",
     160,
   );
   const sourceWorkoutId = trimOptionalToLength(
-    firstStringFromPaths(entry, ["providerId", "provider_id", "id", "workoutId", "workout_id"]),
+    firstStringFromPaths(entry, JUNCTION_WORKOUT_ID_PATHS),
     200,
   );
   const distanceKm =
@@ -677,10 +743,15 @@ function pushWorkoutSummary(
       workout: stripUndefined({
         sourceApp: resourceContext.sourceProviderSlug,
         sourceWorkoutId,
+        sport,
+        sportName,
         startedAt: startAt ?? occurredAt,
         endedAt: endAt,
+        movingTimeMinutes,
         sessionNote: title,
         metrics: workoutMetrics,
+        heartRateZones: buildWorkoutHeartRateZones(entry),
+        route: buildWorkoutRouteMetadata(entry),
         exercises: [],
       }),
     }),
@@ -698,6 +769,123 @@ function buildWorkoutSessionMetrics(entry: PlainObject): WorkoutSessionMetrics |
   }
 
   return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
+
+function resolveWorkoutMovingTimeMinutes(entry: PlainObject): number | undefined {
+  return normalizePositiveIntegerMinutes(
+    firstNumberFromPaths(entry, ["movingTimeMinutes", "moving_time_minutes"]),
+  ) ??
+    normalizePositiveIntegerMinutes(
+      secondsToMinutes(firstNumberFromPaths(entry, ["movingTime", "moving_time"])),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      millisecondsToMinutes(firstNumberFromPaths(entry, ["movingTimeMillis", "moving_time_millis"])),
+    );
+}
+
+function buildWorkoutHeartRateZones(entry: PlainObject): WorkoutHeartRateZone[] | undefined {
+  const source = firstValueFromPaths(entry, [
+    "heartRateZones",
+    "heart_rate_zones",
+    "hrZones",
+    "hr_zones",
+    "heart_rate.zones",
+    "zones.heart_rate",
+  ]);
+  const zones = normalizeWorkoutHeartRateZoneSource(source);
+  const boundedZones = zones.slice(0, 20);
+
+  return boundedZones.length > 0 ? boundedZones : undefined;
+}
+
+function normalizeWorkoutHeartRateZoneSource(source: unknown): WorkoutHeartRateZone[] {
+  if (Array.isArray(source)) {
+    return source.flatMap((entry, index) => {
+      const zone = asPlainObject(entry);
+      const normalized = zone ? normalizeWorkoutHeartRateZone(zone, index) : undefined;
+      return normalized ? [normalized] : [];
+    });
+  }
+
+  const record = asPlainObject(source);
+  if (!record) {
+    return [];
+  }
+
+  return Object.entries(record).flatMap(([label, value], index) => {
+    const zoneRecord = asPlainObject(value) ?? { duration: value };
+    const normalized = normalizeWorkoutHeartRateZone(zoneRecord, index, label);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function normalizeWorkoutHeartRateZone(
+  entry: PlainObject,
+  index: number,
+  fallbackLabel?: string,
+): WorkoutHeartRateZone | undefined {
+  const label = trimOptionalToLength(
+    firstStringFromPaths(entry, ["label", "name", "zoneName", "zone_name"]) ?? fallbackLabel,
+    80,
+  );
+  const minHeartRate = firstNumberFromPaths(entry, ["minHeartRate", "min_heart_rate", "minBpm", "min_bpm", "min"]);
+  const maxHeartRate = firstNumberFromPaths(entry, ["maxHeartRate", "max_heart_rate", "maxBpm", "max_bpm", "max"]);
+  const durationMinutes = firstNonNegativeMinutesFromPaths(entry, {
+    minutePaths: ["durationMinutes", "duration_minutes", "minutes", "timeMinutes", "time_minutes"],
+    secondPaths: ["durationSeconds", "duration_seconds", "seconds", "time", "duration"],
+    millisecondPaths: ["durationMillis", "duration_millis", "milliseconds"],
+  });
+
+  if (label === undefined && minHeartRate === undefined && maxHeartRate === undefined && durationMinutes === undefined) {
+    return undefined;
+  }
+
+  return stripUndefined({
+    zone: readWorkoutHeartRateZoneNumber(entry, fallbackLabel, index),
+    label,
+    minHeartRate,
+    maxHeartRate,
+    durationMinutes,
+  });
+}
+
+function readWorkoutHeartRateZoneNumber(
+  entry: PlainObject,
+  fallbackLabel: string | undefined,
+  index: number,
+): number | undefined {
+  const explicit = firstNumberFromPaths(entry, ["zone", "zoneIndex", "zone_index", "index"]);
+  if (explicit !== undefined && Number.isInteger(explicit) && explicit >= 0 && explicit <= 20) {
+    return explicit;
+  }
+
+  const zoneLabel = firstStringFromPaths(entry, ["zone", "zoneName", "zone_name", "label", "name"]) ?? fallbackLabel;
+  const labelMatch = zoneLabel ? /(\d+)/u.exec(zoneLabel) : null;
+  const parsedLabel = labelMatch ? Number(labelMatch[1]) : undefined;
+  if (parsedLabel !== undefined && Number.isInteger(parsedLabel) && parsedLabel >= 0 && parsedLabel <= 20) {
+    return parsedLabel;
+  }
+
+  return Math.min(index + 1, 20);
+}
+
+function buildWorkoutRouteMetadata(entry: PlainObject): WorkoutRouteMetadata | undefined {
+  const route = stripUndefined({
+    routeId: trimOptionalToLength(
+      firstStringFromPaths(entry, ["routeId", "route_id", "route.id", "route.providerId", "route.provider_id"]),
+      200,
+    ),
+    routeName: trimOptionalToLength(
+      firstStringFromPaths(entry, ["routeName", "route_name", "route.name"]),
+      160,
+    ),
+    mapId: trimOptionalToLength(
+      firstStringFromPaths(entry, ["mapId", "map_id", "map.id", "map.providerId", "map.provider_id"]),
+      200,
+    ),
+  });
+
+  return Object.keys(route).length > 0 ? route : undefined;
 }
 
 function pushObservationMetrics(
@@ -956,17 +1144,9 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
-  const explicitId = firstStringFromPaths(entry, [
-    "id",
-    "resourceId",
-    "resource_id",
-    "externalId",
-    "external_id",
-    "providerId",
-    "provider_id",
-    "workoutId",
-    "workout_id",
-  ]);
+  const explicitId = resourceContext.resource === "workouts"
+    ? firstStringFromPaths(entry, JUNCTION_WORKOUT_ID_PATHS)
+    : firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
 
   if (explicitId) {
     return `${resourceContext.resourceSlug}-${shortHash([
@@ -1417,6 +1597,25 @@ function firstNullableNumberFromPaths(source: PlainObject | undefined, paths: re
   return undefined;
 }
 
+function firstNonNegativeMinutesFromPaths(
+  source: PlainObject | undefined,
+  paths: {
+    minutePaths: readonly string[];
+    secondPaths?: readonly string[];
+    millisecondPaths?: readonly string[];
+  },
+): number | undefined {
+  return normalizeNonNegativeNumber(firstNumberFromPaths(source, paths.minutePaths)) ??
+    normalizeNonNegativeNumber(secondsToMinutes(firstNumberFromPaths(source, paths.secondPaths ?? []))) ??
+    normalizeNonNegativeNumber(millisecondsToMinutes(firstNumberFromPaths(source, paths.millisecondPaths ?? [])));
+}
+
+function normalizeNonNegativeNumber(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  return numeric !== undefined && numeric >= 0 ? numeric : undefined;
+}
+
 function normalizePositiveIntegerMinutes(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
@@ -1507,6 +1706,10 @@ function firstStringFromPaths(source: PlainObject | undefined, paths: readonly s
 
 function trimOptionalToLength(value: string | undefined, maxLength: number): string | undefined {
   return value ? trimToLength(value, maxLength) : undefined;
+}
+
+function trimSlugToLength(value: string, maxLength: number): string {
+  return value.slice(0, maxLength).replace(/-+$/u, "") || "workout";
 }
 
 function firstValueFromPaths(source: PlainObject | undefined, paths: readonly string[]): unknown {

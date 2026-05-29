@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
@@ -33,6 +34,13 @@ function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawI
   const receipt = artifact.content as WearableRawIngestReceipt;
   assert.equal(artifact.role, `wearable-raw-receipt:${receipt.id}`);
   return receipt;
+}
+
+function assertJsonOmits(value: unknown, forbiddenValues: readonly string[]): void {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  for (const forbidden of forbiddenValues) {
+    assert.equal(text.includes(forbidden), false, `unexpected raw value retained: ${forbidden}`);
+  }
 }
 
 test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
@@ -793,6 +801,10 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
           sourceProviderSlug: "oura",
           observedAt: "2026-04-22T12:00:00Z",
           steps: 7200,
+          appID: "activity-app-id-acronym",
+          deviceID: "activity-device-id-acronym",
+          "source-app-id": "activity-source-app-id-dashed",
+          sourceDeviceID: "activity-source-device-id-acronym",
         }],
       },
       timeseries: {
@@ -814,8 +826,12 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
                 provider: "oura",
                 type: "ring",
                 name: "Timeseries Oura Ring",
+                appID: "timeseries-app-id-acronym",
                 device_id: "timeseries-device-oura-ring-1",
+                deviceID: "timeseries-device-id-acronym",
                 app_id: "timeseries-app-oura-cloud-1",
+                "source-app-id": "timeseries-source-app-id-dashed",
+                sourceDeviceID: "timeseries-source-device-id-acronym",
                 providerDetails: "kept-non-identity-detail",
               },
               provider: {
@@ -837,6 +853,8 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   const rawReceiptText = JSON.stringify(rawReceipt);
   const rawReceiptArtifactText = JSON.stringify(rawReceiptArtifact?.content);
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+  const rawIdentifierLeakPattern =
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-device-id-acronym|timeseries-app-oura-cloud-1|timeseries-app-id-acronym|timeseries-source-app-id-dashed|timeseries-source-device-id-acronym|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|activity-app-id-acronym|activity-device-id-acronym|activity-source-app-id-dashed|activity-source-device-id-acronym|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u;
 
   assert.equal(Object.hasOwn(rawReceipt, "payload"), false);
   assert.equal(rawReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
@@ -850,16 +868,16 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
   assert.doesNotMatch(
     rawReceiptText,
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-device-id-acronym|timeseries-app-oura-cloud-1|timeseries-app-id-acronym|timeseries-source-app-id-dashed|timeseries-source-device-id-acronym|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|activity-app-id-acronym|activity-device-id-acronym|activity-source-app-id-dashed|activity-source-device-id-acronym|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
   );
   assert.equal(rawReceiptArtifact?.content, rawReceipt);
   assert.doesNotMatch(
     rawReceiptArtifactText,
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
+    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-device-id-acronym|timeseries-app-oura-cloud-1|timeseries-app-id-acronym|timeseries-source-app-id-dashed|timeseries-source-device-id-acronym|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|activity-app-id-acronym|activity-device-id-acronym|activity-source-app-id-dashed|activity-source-device-id-acronym|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
   );
   assert.doesNotMatch(
     rawArtifactText,
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u,
+    rawIdentifierLeakPattern,
   );
   assert.match(rawReceiptText, /"provider":"junction"/u);
   assert.match(rawArtifactText, /"sourceProviderSlug":"oura"/u);
@@ -1143,6 +1161,75 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "active-calories"), false);
   assert.equal(payload.events?.some((event) => event.fields?.metric === "distance"), false);
   assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction normalizer ignores unsupported timeseries and workout stream resources", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      workout_stream: [{
+        id: "workout-stream-1",
+        timestamp: "2026-04-22T18:00:00Z",
+        cadence: 86,
+      }],
+    },
+    timeseries: {
+      workout_distance: [{
+        timestamp: "2026-04-22T18:00:00Z",
+        value: 1200,
+      }],
+      workout_swimming_stroke: [{
+        timestamp: "2026-04-22T18:00:00Z",
+        value: "freestyle",
+      }],
+    },
+  });
+
+  assert.deepEqual(payload.provenance?.summaryResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.events, []);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-workout-distance"), false);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-workout-swimming-stroke"), false);
+});
+
+test("Junction import receipt does not retain unsupported-only clinical summaries", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-22T12:00:00.000Z",
+      summaries: {
+        menstrual_cycle: [{
+          id: "cycle-summary-1",
+          period_start: "2026-04-01",
+        }],
+        electrocardiogram: [{
+          id: "ecg-summary-1",
+          classification: "sinus_rhythm",
+        }],
+      },
+      timeseries: {
+        electrocardiogram_voltage: [{
+          timestamp: "2026-04-22T18:00:00Z",
+          value: 0.2,
+        }],
+      },
+    },
+  });
+
+  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+
+  assert.deepEqual(payload.provenance?.summaryResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.events, []);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
+  assert.doesNotMatch(rawArtifactText, /period_start|sinus_rhythm|electrocardiogram_voltage/u);
 });
 
 test("Junction normalizer canonicalizes documented resource aliases before allowlisting", () => {
@@ -1491,6 +1578,42 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
           total_calories: 355,
           average_hr: 145,
           max_hr: 175,
+          total_elevation_gain: 125,
+          elev_high: 314.5,
+          elev_low: 125.2,
+          average_speed: 2.7,
+          max_speed: 5.2,
+          average_watts: 215,
+          max_watts: 540,
+          normalized_power: 235,
+          weighted_average_watts: 230,
+          kilojoules: 420,
+          hr_zones: [
+            {
+              zone: 1,
+              label: "Warmup",
+              min: 100,
+              max: 120,
+              duration: 600,
+            },
+            {
+              zone: 2,
+              label: "Zone 2",
+              min_bpm: 121,
+              max_bpm: 140,
+              duration_seconds: 900,
+            },
+          ],
+          route: {
+            id: "route-forest-loop",
+            name: "Forest Loop",
+          },
+          map: {
+            id: "map-forest-loop",
+            summary_polyline: "encoded-route-polyline",
+          },
+          start_latlng: [37.1, -122.1],
+          end_latlng: [37.2, -122.2],
         },
         {
           source: {
@@ -1534,14 +1657,48 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
   assert.deepEqual(workoutSessions[0]?.fields?.workout, {
     sourceApp: "garmin",
     sourceWorkoutId: longProviderWorkoutId.slice(0, 200),
+    sport: "trail-run",
+    sportName: "Trail Run",
     startedAt: "2026-05-20T12:00:00.000Z",
     endedAt: "2026-05-20T12:30:00.000Z",
+    movingTimeMinutes: 30,
     sessionNote: "Trail Run",
     metrics: {
       activeCalories: 320,
       totalCalories: 355,
       averageHeartRate: 145,
       maxHeartRate: 175,
+      totalElevationGainMeters: 125,
+      elevationHighMeters: 314.5,
+      elevationLowMeters: 125.2,
+      averageSpeedMps: 2.7,
+      maxSpeedMps: 5.2,
+      averagePowerWatts: 215,
+      maxPowerWatts: 540,
+      normalizedPowerWatts: 235,
+      weightedAveragePowerWatts: 230,
+      kilojoules: 420,
+    },
+    heartRateZones: [
+      {
+        zone: 1,
+        label: "Warmup",
+        minHeartRate: 100,
+        maxHeartRate: 120,
+        durationMinutes: 10,
+      },
+      {
+        zone: 2,
+        label: "Zone 2",
+        minHeartRate: 121,
+        maxHeartRate: 140,
+        durationMinutes: 15,
+      },
+    ],
+    route: {
+      routeId: "route-forest-loop",
+      routeName: "Forest Loop",
+      mapId: "map-forest-loop",
     },
     exercises: [],
   });
@@ -1553,6 +1710,62 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
 
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workouts"));
+});
+
+test("Junction workout detail normalization stays within workout contract bounds", () => {
+  const longSportName = `Mountain ${"Technical ".repeat(20)}Run`;
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      workouts: [
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "workout-contract-bounds",
+          time_start: "2026-05-20T12:00:00+00:00",
+          moving_time: 1800,
+          sport: {
+            name: longSportName,
+          },
+          hr_zones: Array.from({ length: 25 }, (_, index) => ({
+            label: `Zone ${index + 1}`,
+            duration: 60,
+          })),
+        },
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "workout-sparse-zones",
+          time_start: "2026-05-21T12:00:00+00:00",
+          moving_time: 1800,
+          sport: {
+            name: "Run",
+          },
+          hr_zones: [
+            ...Array.from({ length: 24 }, () => ({})),
+            { duration: 60 },
+          ],
+        },
+      ],
+    },
+  });
+
+  assertWorkoutSessionsMatchContract(payload.events ?? []);
+
+  const workoutSessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+  const workout = workoutSessionSchema.parse(workoutSessions[0]?.fields?.workout);
+  const sparseZoneWorkout = workoutSessionSchema.parse(workoutSessions[1]?.fields?.workout);
+
+  assert.ok((workout.sport?.length ?? 0) <= 80);
+  assert.match(workout.sport ?? "", /^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+  assert.equal(workout.heartRateZones?.length, 20);
+  assert.equal(workout.heartRateZones?.at(-1)?.zone, 20);
+  assert.equal(sparseZoneWorkout.heartRateZones?.length, 1);
+  assert.equal(sparseZoneWorkout.heartRateZones?.[0]?.zone, 20);
 });
 
 test("Junction normalizer maps documented sleep summary scalar fields", () => {
@@ -1574,7 +1787,10 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
           rem: 7200,
           light: 12600,
           awake: 1800,
+          time_in_bed: 30000,
           efficiency: 0.97,
+          sleep_consistency: 91,
+          sleep_performance: 88,
           average_hrv: 42,
           hr_average: 54,
           hr_lowest: 43,
@@ -1600,7 +1816,10 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.equal(metricValue("sleep-rem-minutes"), 120);
   assert.equal(metricValue("sleep-light-minutes"), 210);
   assert.equal(metricValue("sleep-awake-minutes"), 30);
+  assert.equal(metricValue("time-in-bed-minutes"), 500);
   assert.equal(metricValue("sleep-efficiency"), 97);
+  assert.equal(metricValue("sleep-consistency"), 91);
+  assert.equal(metricValue("sleep-performance"), 88);
   assert.equal(metricValue("hrv"), 42);
   assert.equal(metricValue("average-heart-rate"), 54);
   assert.equal(metricValue("lowest-heart-rate"), 43);
@@ -1627,6 +1846,13 @@ test("Junction normalizer maps documented activity and body summary scalar field
         calories_active: 640,
         calories_total: 2400,
         distance: 7500,
+        floors_climbed: 18,
+        total_elevation_gain: 320,
+        elevation_change: -12,
+        vo2_max: 48.5,
+        percent_recorded: 0.95,
+        day_strain: 10.4,
+        workout_strain: 8.8,
         heart_rate: {
           max_bpm: 148,
           resting_bpm: 52,
@@ -1642,6 +1868,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
         date: "2026-05-20T08:00:00+00:00",
         body_mass_index: 22.3,
         fat: 30,
+        lean_body_mass_kilogram: 40.1,
+        waist_circumference_centimeter: 86.36,
+        body_temperature: 36.7,
         weight: 80,
       }],
     },
@@ -1650,16 +1879,28 @@ test("Junction normalizer maps documented activity and body summary scalar field
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const metricValue = (metric: string) =>
     observations.find((event) => event.fields?.metric === metric)?.fields?.value;
+  const rawBodyArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-body");
 
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
   assert.equal(metricValue("total-calories"), 2400);
   assert.equal(metricValue("distance-km"), 7.5);
+  assert.equal(metricValue("floors-climbed"), 18);
+  assert.equal(metricValue("estimated-vo2-max"), 48.5);
+  assert.equal(metricValue("total-elevation-gain-meters"), 320);
+  assert.equal(metricValue("altitude-change-meters"), -12);
+  assert.equal(metricValue("percent-recorded"), 95);
+  assert.equal(metricValue("day-strain"), 10.4);
+  assert.equal(metricValue("workout-strain"), 8.8);
   assert.equal(metricValue("max-heart-rate"), 148);
   assert.equal(metricValue("resting-heart-rate"), 52);
   assert.equal(metricValue("weight"), 80);
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
+  assert.equal(metricValue("waist-circumference"), 86.36);
+  assert.equal(metricValue("lean-body-mass"), undefined);
+  assert.equal(metricValue("temperature"), 36.7);
+  assert.match(JSON.stringify(rawBodyArtifact?.content), /"lean_body_mass_kilogram":40.1/u);
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
 });
 
@@ -1718,6 +1959,34 @@ test("Junction workout provider IDs drive stable summary external refs", () => {
           moving_time: 2700,
           sport: { name: "Run" },
         },
+        {
+          source: { provider: "garmin" },
+          providerWorkoutId: "provider-camel-workout-stable",
+          time_start: "2026-05-22T12:00:00+00:00",
+          moving_time: 1800,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          providerWorkoutId: "provider-camel-workout-stable",
+          time_start: "2026-05-23T12:00:00+00:00",
+          moving_time: 2700,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          activity_id: "activity-workout-stable",
+          time_start: "2026-05-24T12:00:00+00:00",
+          moving_time: 1800,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          activity_id: "activity-workout-stable",
+          time_start: "2026-05-25T12:00:00+00:00",
+          moving_time: 2700,
+          sport: { name: "Run" },
+        },
       ],
     },
   });
@@ -1725,8 +1994,18 @@ test("Junction workout provider IDs drive stable summary external refs", () => {
   assertWorkoutSessionsMatchContract(payload.events ?? []);
 
   const sessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
-  assert.equal(sessions.length, 2);
+  assert.equal(sessions.length, 6);
   assert.equal(sessions[0]?.externalRef?.resourceId, sessions[1]?.externalRef?.resourceId);
+  assert.equal(sessions[2]?.externalRef?.resourceId, sessions[3]?.externalRef?.resourceId);
+  assert.equal(sessions[4]?.externalRef?.resourceId, sessions[5]?.externalRef?.resourceId);
+  assert.equal(
+    workoutSessionSchema.parse(sessions[2]?.fields?.workout).sourceWorkoutId,
+    "provider-camel-workout-stable",
+  );
+  assert.equal(
+    workoutSessionSchema.parse(sessions[4]?.fields?.workout).sourceWorkoutId,
+    "activity-workout-stable",
+  );
 });
 
 test("Junction normalizer ignores aggregator provider and ambiguous type provenance fields", () => {

@@ -6698,6 +6698,17 @@
               "minLength": 1,
               "maxLength": 200
             },
+            "sport": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "sportName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
             "startedAt": {
               "type": "string",
               "format": "date-time"
@@ -6705,6 +6716,10 @@
             "endedAt": {
               "type": "string",
               "format": "date-time"
+            },
+            "movingTimeMinutes": {
+              "type": "number",
+              "minimum": 0
             },
             "routineId": {
               "type": "string",
@@ -6759,6 +6774,12 @@
                 "altitudeChangeMeters": {
                   "type": "number"
                 },
+                "elevationHighMeters": {
+                  "type": "number"
+                },
+                "elevationLowMeters": {
+                  "type": "number"
+                },
                 "averageSpeedMps": {
                   "type": "number",
                   "minimum": 0
@@ -6766,6 +6787,79 @@
                 "maxSpeedMps": {
                   "type": "number",
                   "minimum": 0
+                },
+                "averagePowerWatts": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "maxPowerWatts": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "normalizedPowerWatts": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "weightedAveragePowerWatts": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "kilojoules": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "heartRateZones": {
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "zone": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "minHeartRate": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "maxHeartRate": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "durationMinutes": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "route": {
+              "type": "object",
+              "properties": {
+                "routeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "routeName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "mapId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
                 }
               },
               "additionalProperties": false

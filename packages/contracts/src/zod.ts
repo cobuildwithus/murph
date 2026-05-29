@@ -506,8 +506,33 @@ export const workoutSessionMetricsSchema = z
     percentRecorded: numberSchema(0).optional(),
     totalElevationGainMeters: numberSchema(0).optional(),
     altitudeChangeMeters: numberSchema().optional(),
+    elevationHighMeters: numberSchema().optional(),
+    elevationLowMeters: numberSchema().optional(),
     averageSpeedMps: numberSchema(0).optional(),
     maxSpeedMps: numberSchema(0).optional(),
+    averagePowerWatts: numberSchema(0).optional(),
+    maxPowerWatts: numberSchema(0).optional(),
+    normalizedPowerWatts: numberSchema(0).optional(),
+    weightedAveragePowerWatts: numberSchema(0).optional(),
+    kilojoules: numberSchema(0).optional(),
+  })
+  .strict();
+
+export const workoutHeartRateZoneSchema = z
+  .object({
+    zone: integerSchema(0, 20).optional(),
+    label: boundedString(1, 80).optional(),
+    minHeartRate: numberSchema(0).optional(),
+    maxHeartRate: numberSchema(0).optional(),
+    durationMinutes: numberSchema(0).optional(),
+  })
+  .strict();
+
+export const workoutRouteMetadataSchema = z
+  .object({
+    routeId: boundedString(1, 200).optional(),
+    routeName: boundedString(1, 160).optional(),
+    mapId: boundedString(1, 200).optional(),
   })
   .strict();
 
@@ -515,12 +540,17 @@ export const workoutSessionSchema = z
   .object({
     sourceApp: patternedString(SLUG_PATTERN).optional(),
     sourceWorkoutId: boundedString(1, 200).optional(),
+    sport: patternedString(SLUG_PATTERN, 1, 80).optional(),
+    sportName: boundedString(1, 160).optional(),
     startedAt: isoDateTimeString().optional(),
     endedAt: isoDateTimeString().optional(),
+    movingTimeMinutes: numberSchema(0).optional(),
     routineId: boundedString(1, 200).optional(),
     routineName: boundedString(1, 160).optional(),
     sessionNote: boundedString(1, 4000).optional(),
     metrics: workoutSessionMetricsSchema.optional(),
+    heartRateZones: z.array(workoutHeartRateZoneSchema).max(20).optional(),
+    route: workoutRouteMetadataSchema.optional(),
     media: z.array(storedMediaSchema).max(10).optional(),
     exercises: z.array(workoutExerciseSchema).max(100),
   })
