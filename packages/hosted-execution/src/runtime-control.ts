@@ -782,9 +782,11 @@ export type HostedRuntimeLogEventCode =
 export const HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES = 50;
 
 export type HostedRuntimeRedactedScalar = boolean | null | number | string;
+export type HostedRuntimeRedactedObject = Record<string, HostedRuntimeRedactedScalar>;
 export type HostedRuntimeRedactedValue =
   | HostedRuntimeRedactedScalar
-  | HostedRuntimeRedactedScalar[];
+  | HostedRuntimeRedactedScalar[]
+  | HostedRuntimeRedactedObject[];
 export type HostedRuntimeRedactedJson = Record<string, HostedRuntimeRedactedValue>;
 
 export interface HostedRuntimeLogEntry {

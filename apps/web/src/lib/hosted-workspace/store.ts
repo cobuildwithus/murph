@@ -16,6 +16,7 @@ import type {
   HostedRuntimeLogLevel,
   HostedRuntimeLogPhase,
   HostedRuntimeRedactedJson,
+  HostedRuntimeRedactedObject,
   HostedRuntimeRedactedScalar,
   HostedRuntimeRedactedValue,
   HostedWorkspaceCheckpointReason,
@@ -99,6 +100,10 @@ const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
 ] as const;
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
+const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 8;
+const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
+  "codexActionToolSummaries",
+]);
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
@@ -895,7 +900,7 @@ function sanitizeHostedRuntimeRedactedJson(
 
   for (const [key, entry] of entries) {
     assertAllowedHostedRuntimeRedactedKey(key, `${label}.${key}`);
-    output[key] = parseHostedRuntimeRedactedValue(entry, `${label}.${key}`);
+    output[key] = parseHostedRuntimeRedactedValue(entry, `${label}.${key}`, key);
   }
 
   return Object.keys(output).length === 0 ? null : output;
@@ -904,6 +909,7 @@ function sanitizeHostedRuntimeRedactedJson(
 function parseHostedRuntimeRedactedValue(
   value: unknown,
   label: string,
+  key: string,
 ): HostedRuntimeRedactedValue {
   if (Array.isArray(value)) {
     if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
@@ -912,11 +918,44 @@ function parseHostedRuntimeRedactedValue(
       );
     }
 
+    if (value.some((entry) => entry && typeof entry === "object")) {
+      if (!HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS.has(key)) {
+        throw new TypeError(`${label} must be a shallow redacted scalar or scalar array.`);
+      }
+
+      return value.map((entry, index) =>
+        parseHostedRuntimeRedactedObject(entry, `${label}[${index}]`));
+    }
+
     return value.map((entry, index) =>
       parseHostedRuntimeRedactedScalar(entry, `${label}[${index}]`));
   }
 
   return parseHostedRuntimeRedactedScalar(value, label);
+}
+
+function parseHostedRuntimeRedactedObject(
+  value: unknown,
+  label: string,
+): HostedRuntimeRedactedObject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a redacted object.`);
+  }
+
+  const entries = Object.entries(value);
+  if (entries.length > HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS} fields.`,
+    );
+  }
+
+  const output: HostedRuntimeRedactedObject = {};
+  for (const [key, entry] of entries) {
+    assertAllowedHostedRuntimeRedactedKey(key, `${label}.${key}`);
+    output[key] = parseHostedRuntimeRedactedScalar(entry, `${label}.${key}`);
+  }
+
+  return output;
 }
 
 function parseHostedRuntimeRedactedScalar(

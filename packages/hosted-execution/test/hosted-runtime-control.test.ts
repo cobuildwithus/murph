@@ -1038,6 +1038,44 @@ describe("hosted runtime control contracts", () => {
       },
     })).toThrow(/shallow redacted scalar/u);
     expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        codexActionToolSummaries: [
+          {
+            callCount: 1,
+            kind: "dynamic.tool.call",
+            namespacePresent: true,
+            outputBytesMax: 64,
+            outputBytesTotal: 96,
+            tool: "readSummary",
+          },
+          {
+            callCount: 1,
+            kind: "command.execution",
+            outputBytesMax: 32,
+            outputBytesTotal: 32,
+          },
+        ],
+      },
+    }).redactedJson).toEqual({
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: "dynamic.tool.call",
+          namespacePresent: true,
+          outputBytesMax: 64,
+          outputBytesTotal: 96,
+          tool: "readSummary",
+        },
+        {
+          callCount: 1,
+          kind: "command.execution",
+          outputBytesMax: 32,
+          outputBytesTotal: 32,
+        },
+      ],
+    });
+    expect(parseHostedRuntimeLogEntry({
       at: "2026-04-26T00:00:03.000Z",
       component: "runner",
       eventCode: "runner.idle",

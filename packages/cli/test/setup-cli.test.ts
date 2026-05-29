@@ -3423,11 +3423,13 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
 })
 
 test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
-  const help = await runSetupAliasRaw('murph', ['--help'])
-  const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
-  const useHelp = await runSetupAliasRaw('murph', ['use', '--help'])
-  const emptyInvocation = await runSetupAliasRaw('murph', [])
-  const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
+  const [help, onboardHelp, useHelp, emptyInvocation, inboxHelp] = await Promise.all([
+    runSetupAliasRaw('murph', ['--help']),
+    runSetupAliasRaw('murph', ['onboard', '--help']),
+    runSetupAliasRaw('murph', ['use', '--help']),
+    runSetupAliasRaw('murph', []),
+    runSetupAliasRaw('murph', ['inbox', 'doctor', '--help']),
+  ])
 
   assert.match(help, /Murph local machine onboarding helpers\./u)
   assert.match(

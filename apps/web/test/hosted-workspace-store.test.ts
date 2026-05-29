@@ -1395,6 +1395,53 @@ describe("hosted runtime log store", () => {
     expect(result.redactedJson).toEqual(diagnostic);
   });
 
+  it("persists bounded Codex action tool summaries", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+    const diagnostic = {
+      codexActionToolSummaries: [
+        {
+          callCount: 1,
+          kind: "dynamic.tool.call",
+          namespacePresent: true,
+          outputBytesMax: 64,
+          outputBytesTotal: 96,
+          tool: "readSummary",
+        },
+        {
+          callCount: 1,
+          kind: "command.execution",
+          outputBytesMax: 32,
+          outputBytesTotal: 32,
+        },
+      ],
+    };
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      level: "info",
+      phase: "invoke",
+      redacted: diagnostic,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "assistant",
+        eventCode: "assistant.automation_detail",
+        phase: "invoke",
+        redactedJson: diagnostic,
+      }),
+    });
+    expect(result.redactedJson).toEqual(diagnostic);
+  });
+
   it("rejects raw OpenAI diagnostic payload fields before persistence", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({

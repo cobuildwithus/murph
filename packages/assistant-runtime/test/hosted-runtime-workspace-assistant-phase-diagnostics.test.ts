@@ -278,6 +278,107 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
       }),
     );
   });
+
+  it("preserves bounded Codex action tool diagnostics in durable detail logs", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [{
+        component: "runtime.provider",
+        level: "info",
+        message: "Hosted assistant Codex action diagnostics captured.",
+        phase: "wake.running",
+        redacted: {
+          codexActionCachedInputUnitMax: 1000,
+          codexActionCommandCount: 1,
+          codexActionCompletedCount: 2,
+          codexActionDurationMsMax: 123,
+          codexActionDurationMsTotal: 183,
+          codexActionDynamicToolCallCount: 1,
+          codexActionEventCount: 8,
+          codexActionFailedCount: 0,
+          codexActionFileChangeCount: 0,
+          codexActionFinalCachedInputUnit: 900,
+          codexActionFinalInputUnit: 81000,
+          codexActionFinalOutputUnit: 1200,
+          codexActionFinalReasoningOutputUnit: 300,
+          codexActionFinalTotalUnit: 82500,
+          codexActionInputUnitMax: 81000,
+          codexActionKinds: ["dynamic.tool.call", "command.execution"],
+          codexActionMcpToolCallCount: 0,
+          codexActionOutputBytesMax: 64,
+          codexActionOutputBytesTotal: 128,
+          codexActionOutputItemCount: 3,
+          codexActionOutputUnitMax: 1200,
+          codexActionProviderActionCount: 2,
+          codexActionReasoningOutputUnitMax: 300,
+          codexActionSlowDurationMs: [123, 60],
+          codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
+          codexActionStartedCount: 2,
+          codexActionThreadIdPresent: true,
+          codexActionToolSummaries: [
+            {
+              callCount: 1,
+              kind: "dynamic.tool.call",
+              namespacePresent: true,
+              outputBytesMax: 64,
+              outputBytesTotal: 96,
+              tool: "readSummary",
+            },
+            {
+              callCount: 1,
+              kind: "command.execution",
+              outputBytesMax: 32,
+              outputBytesTotal: 32,
+            },
+          ],
+          codexActionTotalUnitMax: 82500,
+          codexActionTraceType: "action-diagnostics",
+          codexActionTurnIdPresent: true,
+          codexActionUsageSampleCount: 1,
+          codexActionWebSearchCount: 0,
+          providerTraceKind: "codex.action_diagnostics",
+          schema: "murph.assistant-codex-action-diagnostics.v1",
+        },
+      }],
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+
+    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      redactedJson: expect.objectContaining({
+        codexActionCommandCount: 1,
+        codexActionKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionOutputBytesTotal: 128,
+        codexActionSlowKinds: ["dynamic.tool.call", "command.execution"],
+        codexActionToolSummaries: [
+          {
+            callCount: 1,
+            kind: "dynamic.tool.call",
+            namespacePresent: true,
+            outputBytesMax: 64,
+            outputBytesTotal: 96,
+            tool: "readSummary",
+          },
+          {
+            callCount: 1,
+            kind: "command.execution",
+            outputBytesMax: 32,
+            outputBytesTotal: 32,
+          },
+        ],
+        providerTraceKind: "codex.action_diagnostics",
+        schema: "murph.assistant-codex-action-diagnostics.v1",
+      }),
+    }));
+  });
 });
 
 function createPhaseInput(input: {

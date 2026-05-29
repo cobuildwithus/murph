@@ -167,6 +167,11 @@ const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
+const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_PRESERVED_KEYS = [
+  "codexActionKinds",
+  "codexActionSlowKinds",
+  "codexActionToolSummaries",
+] as const;
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
   "rpc.error",
@@ -741,6 +746,18 @@ function sanitizeHostedAssistantProviderDiagnosticDetails(
   details: HostedExecutionStructuredLogDetails,
 ): HostedExecutionStructuredLogDetails {
   const sanitized = sanitizeHostedExecutionStructuredLogDetails(details) ?? {};
+
+  for (const key of HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_PRESERVED_KEYS) {
+    if (!(key in details)) {
+      continue;
+    }
+    const sanitizedValue = sanitizeHostedExecutionStructuredLogDetails({
+      [key]: details[key],
+    })?.[key];
+    if (sanitizedValue !== undefined) {
+      sanitized[key] = sanitizedValue;
+    }
+  }
 
   for (const [key, value] of Object.entries(details)) {
     if (!isHostedAssistantProviderDiagnosticTextKey(key) || typeof value !== "string") {

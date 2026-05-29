@@ -7,6 +7,7 @@ import {
 import type {
   HostedWorkspaceCheckpointReason,
   HostedRuntimeRedactedJson,
+  HostedRuntimeRedactedObject,
   HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -128,6 +129,9 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "safeErrorPresent",
   "schema",
   "providerTraceKind",
+  "codexActionKinds",
+  "codexActionSlowKinds",
+  "codexActionToolSummaries",
   "routePlanningActiveExperimentContextElapsedMs",
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
@@ -2436,10 +2440,55 @@ function normalizeHostedRuntimeRedactedLogValue(
   }
 
   if (Array.isArray(value)) {
+    if (key === "codexActionToolSummaries") {
+      return normalizeHostedRuntimeRedactedLogObjectArray(key, value);
+    }
+
     return normalizeHostedRuntimeRedactedLogArray(key, value);
   }
 
   return normalizeHostedRuntimeRedactedLogScalar(key, value);
+}
+
+function normalizeHostedRuntimeRedactedLogObjectArray(
+  key: string,
+  value: unknown[],
+): HostedRuntimeRedactedJson[string] | undefined {
+  if (value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry) => {
+    const normalized = normalizeHostedRuntimeRedactedLogObject(key, entry);
+    return normalized === null ? [] : [normalized];
+  });
+  return output.length > 0 ? output : undefined;
+}
+
+function normalizeHostedRuntimeRedactedLogObject(
+  parentKey: string,
+  value: unknown,
+): HostedRuntimeRedactedObject | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const entries = Object.entries(value);
+  if (entries.length > 8) {
+    return null;
+  }
+
+  const output: HostedRuntimeRedactedObject = {};
+  for (const [key, entry] of entries) {
+    const normalized = normalizeHostedRuntimeRedactedLogScalar(key, entry);
+    if (normalized !== undefined) {
+      output[key] = normalized;
+    }
+  }
+
+  return Object.keys(output).length > 0 && isHostedRuntimeLogKeyAllowed(parentKey)
+    ? output
+    : null;
 }
 
 function normalizeHostedRuntimeRedactedLogArray(

@@ -33,10 +33,6 @@ const packageJson = require('../package.json') as { version?: string }
 const INCUR_ROOT_HELP_TIMEOUT_MS = 90_000
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
-const INCUR_LLMS_FULL_TIMEOUT_MS = 120_000
-const isolatedCliProcessEnv = {
-  MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-} as const
 
 function withMachineJsonOutput(args: string[]): string[] {
   const nextArgs = [...args]
@@ -230,9 +226,7 @@ async function runJsonCli<TData>(
 }
 
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
-  const help = await runRawCli(['--help'], {
-    env: isolatedCliProcessEnv,
-  })
+  const help = await runRawCli(['--help'])
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
@@ -2029,7 +2023,7 @@ test('full llms json manifest remains available for schema-rich commands', async
     String(searchQueryCommand?.description ?? ''),
     /either positionally or with `--text`/u,
   )
-}, INCUR_LLMS_FULL_TIMEOUT_MS)
+})
 
 test('bash completions remain available', async () => {
   const script = await runRawCli(['completions', 'bash'])

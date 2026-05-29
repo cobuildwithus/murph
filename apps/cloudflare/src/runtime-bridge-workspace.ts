@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   createHostedConversationMailboxImportItem,
   enqueueHostedSystemMailboxItem,
+  HostedRuntimeCheckpointInterruptedByWakeError,
   normalizeHostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeConfig,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -116,6 +117,7 @@ export interface HostedWorkspaceMailboxPayloadDecoder {
 }
 
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
+  consumePendingRuntimeWake?: () => boolean;
   decodeMailboxPayload?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
@@ -158,6 +160,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     createCheckpointSnapshot: async (checkpointInput) => {
       return await createHostedWorkspaceBridgeCheckpointSnapshot({
         platform: input.platform,
+        consumePendingRuntimeWake: input.consumePendingRuntimeWake,
         readCurrentLease,
         request: {
           attemptId: input.request.attemptId,
@@ -260,6 +263,7 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 }
 
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
+  consumePendingRuntimeWake?: () => boolean;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -318,6 +322,7 @@ interface HostedWorkspaceSnapshotTimingDetails
 }
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
+  consumePendingRuntimeWake?: () => boolean;
   legacyMaterialization: Awaited<
     ReturnType<typeof prepareLegacyWorkspaceRefsForV2SnapshotMaterialization>
   >;
@@ -507,6 +512,10 @@ async function createHostedWorkspaceV2Snapshot(
       directUploadTimings,
     );
 
+    if (input.consumePendingRuntimeWake?.() === true) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError();
+    }
+
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
       lease: await input.readCurrentLease(),
@@ -514,6 +523,10 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_web_checkpoint",
       userId: input.userId,
     });
+    if (input.consumePendingRuntimeWake?.() === true) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError();
+    }
+
     snapshotRef = {
       archive: {
         compression: encrypted.compression,
