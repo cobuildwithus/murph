@@ -20,10 +20,11 @@ Always read these before repo code/docs/test/config work:
 
 1. `agent-docs/index.md`
 2. `ARCHITECTURE.md`
-3. `agent-docs/references/repo-scope.md`
-4. `agent-docs/operations/agent-workflow-routing.md`
-5. `agent-docs/PRODUCT_SENSE.md`
-6. `agent-docs/PRODUCT_CONSTITUTION.md`
+3. `docs/contracts/00-invariants.md`
+4. `agent-docs/references/repo-scope.md`
+5. `agent-docs/operations/agent-workflow-routing.md`
+6. `agent-docs/PRODUCT_SENSE.md`
+7. `agent-docs/PRODUCT_CONSTITUTION.md`
 
 ## Task Router
 

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-27
+Last verified: 2026-05-29
 
 ## Decision
 
@@ -112,6 +112,27 @@ compatibility shims, not lifecycle policy, and must be deleted after
 Object alarm and hard timeout path.
 
 ## Current Protocol
+
+### Foreground Priority Rule
+
+Fresh user conversation input has absolute priority over background hosted
+runtime work. Device sync, provider cleanup, browser-vault refresh, system
+maintenance, and idle checkpointing are idle-only lanes; they must not make a
+user message wait for background work to finish.
+
+When a foreground wake arrives while idle maintenance is running, the
+maintenance lane must yield, abort, or reschedule. This includes
+idle-shutdown checkpointing: an in-progress idle checkpoint must not keep a
+fresh user message behind snapshot or checkpoint completion. The runtime may
+carry forward the maintenance wake, dirty state, or retry metadata needed to
+finish later, but assistant admission, assistant automation, outbox intent
+creation, and reply delivery must stay independent of device-sync and
+maintenance completion.
+
+The foreground-priority rule does not weaken correctness checks. Wrong-user
+authority, invalid auth, undecryptable mailbox payloads, stale leases, and
+workspace checkpoint compare-and-swap conflicts still fail closed rather than
+publishing partial or corrupt state.
 
 ### Deploy Compatibility Rule
 

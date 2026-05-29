@@ -20,6 +20,14 @@
 - If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical vault records or explicit derived materializations, never in assistant runtime state.
 - No agent gets arbitrary write access to vault files as part of the public contract.
 
+## Hosted Foreground Priority
+
+- User conversation messages are the highest-priority hosted runtime work.
+- Background device sync, provider cleanup, browser-vault refresh, maintenance, and idle checkpointing must never block assistant admission or reply delivery for fresh user input.
+- Idle-only work must be preemptible. If fresh user input arrives while background maintenance or idle checkpointing is running, that work must yield, abort, or reschedule instead of making the user message wait for completion.
+- Assistant reply code must not import, call, await, or coordinate with device-sync execution. Device sync may preserve a follow-up wake or recovery marker, but it must stay out of the foreground reply path.
+- Foreground preemption is not permission to publish partial or corrupt state. Wrong-user authority, stale lease, invalid auth, undecryptable mailbox payloads, and checkpoint compare-and-swap conflicts still fail closed.
+
 ## Append-Only Bias
 
 - `raw/` is immutable by default; any repair rewrite must be a named core primitive with manifest proof, metadata-only audit, and no raw payload leakage.
