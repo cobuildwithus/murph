@@ -28,13 +28,16 @@ import type {
 } from "./store/hosted-account-hydration.ts";
 import type { DeviceSyncEnqueueJobInput } from "./store/jobs.ts";
 import {
+  claimDeviceSyncJobBatchCandidatesIfSeedOwned,
   claimDueDeviceSyncJob,
   completeDeviceSyncJob,
   completeDeviceSyncJobIfOwned,
+  completeDeviceSyncJobsIfOwned,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
+  listDueDeviceSyncJobBatchCandidates,
   markPendingDeviceSyncJobsDeadForAccount,
   readNextDeviceSyncJobWakeAt,
   releaseDeviceSyncJobIfOwned,
@@ -320,12 +323,42 @@ export class SqliteDeviceSyncStore {
     return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs);
   }
 
+  listDueJobBatchCandidates(input: {
+    accountId: string;
+    excludeJobId: string;
+    limit: number;
+    now: string;
+    provider: string;
+  }): DeviceSyncJobRecord[] {
+    return listDueDeviceSyncJobBatchCandidates(this.database, input);
+  }
+
+  claimJobBatchCandidatesIfSeedOwned(input: {
+    accountId: string;
+    jobIds: readonly string[];
+    leaseMs: number;
+    now: string;
+    provider: string;
+    seedJobId: string;
+    workerId: string;
+  }): DeviceSyncJobRecord[] {
+    return claimDeviceSyncJobBatchCandidatesIfSeedOwned(this.database, input);
+  }
+
   completeJob(jobId: string, now: string): void {
     completeDeviceSyncJob(this.database, jobId, now);
   }
 
   completeJobIfOwned(jobId: string, workerId: string, now: string): boolean {
     return completeDeviceSyncJobIfOwned(this.database, jobId, workerId, now);
+  }
+
+  completeJobsIfOwned(jobIds: readonly string[], workerId: string, now: string): boolean {
+    return completeDeviceSyncJobsIfOwned(this.database, {
+      jobIds,
+      now,
+      workerId,
+    });
   }
 
   releaseJobIfOwned(jobId: string, workerId: string, now: string): boolean {

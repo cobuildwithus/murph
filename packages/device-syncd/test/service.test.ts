@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
@@ -28,10 +28,12 @@ import {
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceStatusForTesting,
   setCredentialStateForTesting,
+  setJobAttemptsForTesting,
 } from "./store-test-helpers.ts";
 
 import type {
   DeviceConnectionHandler,
+  DeviceJobBatchExecutor,
   DeviceSyncAccount,
   DeviceSyncImporterPort,
   DeviceSyncJobRecord,
@@ -102,6 +104,10 @@ type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
   createScheduledJobs?: DeviceJobExecutor["createScheduledJobs"];
   verifyAndParseWebhook?: DeviceWebhookHandler["verifyAndParseWebhook"];
   executeJob?: DeviceJobExecutor["executeJob"];
+  describeJobBatch?: DeviceJobBatchExecutor["describe"];
+  executeJobBatch?: DeviceJobBatchExecutor["execute"];
+  maxJobBatchEstimatedBytes?: DeviceJobBatchExecutor["maxEstimatedBytes"];
+  maxJobBatchSize?: DeviceJobBatchExecutor["maxJobs"];
 };
 
 function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncProvider {
@@ -191,6 +197,18 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
   const executeJob = Object.hasOwn(overrides, "executeJob")
     ? overrides.executeJob
     : defaultExecuteJob;
+  const describeJobBatch = Object.hasOwn(overrides, "describeJobBatch")
+    ? overrides.describeJobBatch
+    : undefined;
+  const executeJobBatch = Object.hasOwn(overrides, "executeJobBatch")
+    ? overrides.executeJobBatch
+    : undefined;
+  const maxJobBatchEstimatedBytes = Object.hasOwn(overrides, "maxJobBatchEstimatedBytes")
+    ? overrides.maxJobBatchEstimatedBytes
+    : undefined;
+  const maxJobBatchSize = Object.hasOwn(overrides, "maxJobBatchSize")
+    ? overrides.maxJobBatchSize
+    : undefined;
   const {
     buildConnectUrl: _buildConnectUrl,
     exchangeAuthorizationCode: _exchangeAuthorizationCode,
@@ -199,6 +217,10 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     createScheduledJobs: _createScheduledJobs,
     verifyAndParseWebhook: _verifyAndParseWebhook,
     executeJob: _executeJob,
+    describeJobBatch: _describeJobBatch,
+    executeJobBatch: _executeJobBatch,
+    maxJobBatchEstimatedBytes: _maxJobBatchEstimatedBytes,
+    maxJobBatchSize: _maxJobBatchSize,
     ...providerOverrides
   } = overrides;
   const baseProvider: DeviceSyncProvider = {
@@ -258,6 +280,16 @@ function createFakeProvider(overrides: FakeProviderOverrides = {}): DeviceSyncPr
     jobExecutor: {
       ...(createScheduledJobs ? { createScheduledJobs } : {}),
       executeJob: executeJob ?? defaultExecuteJob,
+      ...(describeJobBatch && executeJobBatch
+        ? {
+            batch: {
+              describe: describeJobBatch,
+              execute: executeJobBatch,
+              ...(maxJobBatchEstimatedBytes !== undefined ? { maxEstimatedBytes: maxJobBatchEstimatedBytes } : {}),
+              ...(maxJobBatchSize !== undefined ? { maxJobs: maxJobBatchSize } : {}),
+            },
+          }
+        : {}),
     },
   };
 
@@ -1231,6 +1263,629 @@ test("device sync service preserves scheduler-owned reconcile cursor when job re
   const processedClear = await service.runWorkerOnce();
   assert.equal(processedClear?.kind, "manual-clear");
   assert.equal(store.getAccountById(connected.account.id)?.nextReconcileAt, null);
+
+  close();
+});
+
+test("device sync service lets providers execute compatible due jobs as one bounded batch", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch");
+  const batchCalls: string[][] = [];
+  const singleCalls: string[] = [];
+  const imports: unknown[] = [];
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input.snapshot);
+      return { ok: true };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer,
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          const group = typeof job.payload.group === "string" ? job.payload.group : null;
+          const estimatedBytes = typeof job.payload.estimatedBytes === "number" ? job.payload.estimatedBytes : 5;
+          return job.kind === "resource" && group
+            ? { key: `resource:${group}`, estimatedBytes }
+            : null;
+        },
+        maxJobBatchEstimatedBytes: 16,
+        maxJobBatchSize: 3,
+        async executeJob(context, job) {
+          singleCalls.push(String(job.payload.label));
+          await context.importSnapshot({ single: job.payload.label });
+          return {};
+        },
+        async executeJobBatch(context, jobs) {
+          batchCalls.push(jobs.map((job) => String(job.payload.label)));
+          await context.importSnapshot({
+            batch: jobs.map((job) => job.payload.label),
+          });
+          return {
+            nextReconcileAt: "2026-03-18T12:00:00.000Z",
+          };
+        },
+      }),
+    ],
+  });
+
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch",
+    displayName: "Demo Provider Batch",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch", "batch-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const otherAccount = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-other",
+    displayName: "Demo Provider Batch Other",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-other-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-other", "batch-other-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const third = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "third" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+  const cappedByBytes = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "capped-by-bytes" },
+    availableAt: "2026-03-17T10:00:03.000Z",
+  });
+  const laterCompatibleAfterByteBarrier = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { estimatedBytes: 1, group: "activity", label: "later-compatible-after-byte-barrier" },
+    availableAt: "2026-03-17T10:00:04.000Z",
+  });
+  const incompatible = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "sleep", label: "incompatible" },
+    availableAt: "2026-03-17T10:00:05.000Z",
+  });
+  const otherAccountJob = store.enqueueJob({
+    accountId: otherAccount.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "other-account" },
+    availableAt: "2026-03-17T10:00:06.000Z",
+  });
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.deepEqual(batchCalls, [["first", "second", "third"]]);
+  assert.deepEqual(singleCalls, []);
+  assert.deepEqual(imports, [{ batch: ["first", "second", "third"] }]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(second.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "succeeded");
+  assert.equal(store.getJobById(cappedByBytes.id)?.status, "queued");
+  assert.equal(store.getJobById(laterCompatibleAfterByteBarrier.id)?.status, "queued");
+  assert.equal(store.getJobById(incompatible.id)?.status, "queued");
+  assert.equal(store.getJobById(otherAccountJob.id)?.status, "queued");
+  assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-03-18T12:00:00.000Z");
+
+  close();
+});
+
+test("device sync service counts provider batch rows against drainWorker limits", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-drain");
+  const batchCalls: string[][] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 3,
+        async executeJobBatch(_context, jobs) {
+          batchCalls.push(jobs.map((job) => String(job.payload.label)));
+          return {};
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-drain",
+    displayName: "Demo Provider Batch Drain",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-drain-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-drain", "batch-drain-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const third = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "third" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+  const fourth = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "fourth" },
+    availableAt: "2026-03-17T10:00:03.000Z",
+  });
+
+  const processedRows = await service.drainWorker(2);
+
+  assert.equal(processedRows, 2);
+  assert.deepEqual(batchCalls, [["first", "second"]]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(second.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "queued");
+  assert.equal(store.getJobById(fourth.id)?.status, "queued");
+
+  close();
+});
+
+test("device sync service reclaims expired running batch candidates in due order", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-expired-running");
+  const batchCalls: string[][] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 3,
+        async executeJobBatch(_context, jobs) {
+          batchCalls.push(jobs.map((job) => String(job.payload.label)));
+          return {};
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-expired-running",
+    displayName: "Demo Provider Batch Expired Running",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-expired-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-expired-running", "batch-expired-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const second = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "second" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const third = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "third" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+  const staleNow = "2026-03-17T10:01:00.000Z";
+  const staleSeed = store.claimDueJob("stale-worker", staleNow, 60_000);
+
+  assert.equal(staleSeed?.id, first.id);
+  assert.deepEqual(
+    store.claimJobBatchCandidatesIfSeedOwned({
+      accountId: account.id,
+      jobIds: [second.id],
+      leaseMs: 60_000,
+      now: staleNow,
+      provider: "demo",
+      seedJobId: first.id,
+      workerId: "stale-worker",
+    }).map((job) => job.id),
+    [second.id],
+  );
+
+  const expiredLeaseAt = "2026-03-17T10:00:30.000Z";
+  expireJobLeaseForTesting(store, first.id, expiredLeaseAt);
+  expireJobLeaseForTesting(store, second.id, expiredLeaseAt);
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.deepEqual(batchCalls, [["first", "second", "third"]]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(second.id)?.status, "succeeded");
+  assert.equal(store.getJobById(third.id)?.status, "succeeded");
+  assert.equal(store.getJobById(first.id)?.attempts, 2);
+  assert.equal(store.getJobById(second.id)?.attempts, 2);
+  assert.equal(store.getJobById(third.id)?.attempts, 1);
+
+  close();
+});
+
+test("device sync service preserves per-job retry backoff when a provider batch fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-retry");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 2,
+        async executeJobBatch() {
+          throw deviceSyncError({
+            code: "BATCH_RETRY",
+            message: "Batch retry requested.",
+            httpStatus: 503,
+            retryable: true,
+          });
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-retry",
+    displayName: "Demo Provider Batch Retry",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-retry-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-retry", "batch-retry-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const retried = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "retried" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  setJobAttemptsForTesting(store, retried.id, 3);
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  const firstAfter = store.getJobById(first.id);
+  const retriedAfter = store.getJobById(retried.id);
+  assert.equal(firstAfter?.status, "queued");
+  assert.equal(retriedAfter?.status, "queued");
+  assert.equal(firstAfter?.attempts, 1);
+  assert.equal(retriedAfter?.attempts, 4);
+  assert.equal(firstAfter?.lastErrorCode, "BATCH_RETRY");
+  assert.equal(retriedAfter?.lastErrorCode, "BATCH_RETRY");
+  assert.equal(
+    Date.parse(retriedAfter?.availableAt ?? "") - Date.parse(firstAfter?.availableAt ?? ""),
+    (30 * 60_000) - 15_000,
+  );
+
+  close();
+});
+
+test("device sync service falls back to single-job execution when seed batch description throws", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-seed-describe-error");
+  const debugLog = vi.fn();
+  const singleCalls: string[] = [];
+  let batchCalls = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        debug: debugLog,
+      },
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch() {
+          throw new Error("descriptor exploded");
+        },
+        async executeJob(_context, job) {
+          singleCalls.push(String(job.payload.label));
+          return {};
+        },
+        async executeJobBatch() {
+          batchCalls += 1;
+          return {};
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-seed-describe-error",
+    displayName: "Demo Provider Batch Seed Describe Error",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-seed-describe-error-access",
+      accessTokenEncrypted: encryptStoredAccessToken(
+        "demo",
+        "demo-provider-batch-seed-describe-error",
+        "batch-seed-describe-error-access",
+      ),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.deepEqual(singleCalls, ["first"]);
+  assert.equal(batchCalls, 0);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  expect(debugLog).toHaveBeenCalledWith(
+    "Device sync provider batch descriptor failed; using single-job fallback.",
+    expect.objectContaining({
+      jobId: first.id,
+      provider: "demo",
+      role: "seed",
+    }),
+  );
+
+  close();
+});
+
+test("device sync service treats batch candidate description failures as order barriers", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-candidate-describe-error");
+  const debugLog = vi.fn();
+  const batchCalls: string[][] = [];
+  const singleCalls: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        debug: debugLog,
+      },
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          if (job.payload.label === "bad-candidate") {
+            throw new Error("candidate descriptor exploded");
+          }
+
+          return job.kind === "resource" && job.payload.group === "activity"
+            ? { key: "resource:activity", estimatedBytes: 1 }
+            : null;
+        },
+        maxJobBatchSize: 3,
+        async executeJob(_context, job) {
+          singleCalls.push(String(job.payload.label));
+          return {};
+        },
+        async executeJobBatch(_context, jobs) {
+          batchCalls.push(jobs.map((job) => String(job.payload.label)));
+          return {};
+        },
+      }),
+    ],
+  });
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-candidate-describe-error",
+    displayName: "Demo Provider Batch Candidate Describe Error",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-candidate-describe-error-access",
+      accessTokenEncrypted: encryptStoredAccessToken(
+        "demo",
+        "demo-provider-batch-candidate-describe-error",
+        "batch-candidate-describe-error-access",
+      ),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const badCandidate = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "bad-candidate" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const third = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "third" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.deepEqual(singleCalls, ["first"]);
+  assert.deepEqual(batchCalls, []);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(badCandidate.id)?.status, "queued");
+  assert.equal(store.getJobById(third.id)?.status, "queued");
+  expect(debugLog).toHaveBeenCalledWith(
+    "Device sync provider batch descriptor failed; using single-job fallback.",
+    expect.objectContaining({
+      jobId: badCandidate.id,
+      provider: "demo",
+      role: "candidate",
+    }),
+  );
+
+  close();
+});
+
+test("device sync service falls back to single-job execution when no compatible batch exists", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-batch-fallback");
+  let batchCalls = 0;
+  const singleCalls: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        describeJobBatch(job) {
+          return job.kind === "resource" && typeof job.payload.group === "string"
+            ? { key: `resource:${job.payload.group}`, estimatedBytes: 1 }
+            : null;
+        },
+        async executeJob(context, job) {
+          singleCalls.push(String(job.payload.label));
+          return {};
+        },
+        async executeJobBatch() {
+          batchCalls += 1;
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const account = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-provider-batch-fallback",
+    displayName: "Demo Provider Batch Fallback",
+    scopes: ["read:data"],
+    tokens: {
+      accessToken: "batch-fallback-access",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-provider-batch-fallback", "batch-fallback-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const first = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "first" },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  const incompatible = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "sleep", label: "incompatible" },
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  const laterCompatible = store.enqueueJob({
+    accountId: account.id,
+    provider: "demo",
+    kind: "resource",
+    payload: { group: "activity", label: "later-compatible" },
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+
+  const processed = await service.runWorkerOnce();
+
+  assert.equal(processed?.id, first.id);
+  assert.equal(batchCalls, 0);
+  assert.deepEqual(singleCalls, ["first"]);
+  assert.equal(store.getJobById(first.id)?.status, "succeeded");
+  assert.equal(store.getJobById(incompatible.id)?.status, "queued");
+  assert.equal(store.getJobById(laterCompatible.id)?.status, "queued");
 
   close();
 });

@@ -860,7 +860,7 @@ export async function runHostedDeviceSyncPass(
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
         service,
-        syncState,
+        stagedDirtyAcks: options.stagedDirtyAcks ?? null,
         wake,
       });
     }
@@ -999,6 +999,7 @@ function isHostedDeviceSyncAbortError(error: unknown, signal: AbortSignal | null
 function buildHostedDeviceSyncYieldedPassResult(input: {
   processedJobs: number;
   service: DeviceSyncService;
+  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   syncState?: HostedDeviceSyncRuntimeSyncState | null;
   wake: HostedRuntimeEvent;
 }): {
@@ -1011,7 +1012,7 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   const syncState = input.syncState ?? null;
   const stagedDirtyAcks = syncState
     ? listHostedDeviceSyncDirtyProcessedRecords({ state: syncState })
-    : [];
+    : input.stagedDirtyAcks ?? [];
   return {
     nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
     postCheckpointRecord: syncState
@@ -1019,7 +1020,9 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
       : null,
     processedJobs: input.processedJobs,
     skipped: true,
-    ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
+    ...(stagedDirtyAcks.length > 0
+      ? { stagedDirtyAcks: [...stagedDirtyAcks] }
+      : {}),
   };
 }
 

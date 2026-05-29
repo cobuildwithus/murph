@@ -71,6 +71,7 @@ const DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS = 12;
 const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 500;
 const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
 const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
+const DIRTY_PAYLOAD_PRESEAL_CONCURRENCY = 16;
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 
 interface DirtyPayloadHydrationBudget {
@@ -828,7 +829,7 @@ async function prepareDirtyPayloadRows(input: {
   traceId?: string | null;
   userId: string;
 }): Promise<PreparedDirtyPayloadRows> {
-  const prepared = await Promise.all(input.resources.map(async (resource, index) => {
+  const prepared = await mapLimit(input.resources, DIRTY_PAYLOAD_PRESEAL_CONCURRENCY, async (resource, index) => {
     const payloadId = createDirtyPayloadId({
       connectionId: input.connectionId,
       dirtyRevision: input.dirtyRevision,
@@ -860,13 +861,47 @@ async function prepareDirtyPayloadRows(input: {
         userId: input.userId,
       },
     };
-  }));
+  });
 
   return {
     dirtyRevision: input.dirtyRevision,
     resources: prepared.map((entry) => entry.resource),
     rows: prepared.map((entry) => entry.row),
   };
+}
+
+async function mapLimit<TInput, TOutput>(
+  values: readonly TInput[],
+  limit: number,
+  mapValue: (value: TInput, index: number) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  const normalizedLimit = Math.max(1, Math.floor(limit));
+  const results = new Array<TOutput>(values.length);
+  let failed = false;
+  let firstError: unknown = null;
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (!failed && nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = await mapValue(values[index]!, index);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+        }
+      }
+    }
+  }
+
+  const workerCount = Math.min(normalizedLimit, values.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (failed) {
+    throw firstError;
+  }
+  return results;
 }
 
 function resolveDirtyPayloadRevision(input: {

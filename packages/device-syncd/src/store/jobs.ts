@@ -176,6 +176,168 @@ export function claimDueDeviceSyncJob(
   });
 }
 
+export function listDueDeviceSyncJobBatchCandidates(
+  database: DatabaseSync,
+  input: {
+    accountId: string;
+    excludeJobId: string;
+    limit: number;
+    now: string;
+    provider: string;
+  },
+): DeviceSyncJobRecord[] {
+  const limit = Math.max(0, Math.floor(input.limit));
+  if (limit <= 0) {
+    return [];
+  }
+
+  const rows = database.prepare(`
+    select *
+    from device_job
+    where account_id = ?
+      and provider = ?
+      and id != ?
+      and (
+        (
+          status = 'queued'
+          and available_at <= ?
+        ) or (
+          status = 'running'
+          and lease_expires_at is not null
+          and lease_expires_at <= ?
+          and attempts < max_attempts
+        )
+      )
+    order by priority desc, available_at asc, created_at asc, id asc
+    limit ?
+  `).all(
+    input.accountId,
+    input.provider,
+    input.excludeJobId,
+    input.now,
+    input.now,
+    limit,
+  ) as Array<StoredJobRow & Record<string, unknown>>;
+
+  return rows.flatMap((row) => {
+    const job = mapJobRow(row);
+    return job ? [job] : [];
+  });
+}
+
+export function claimDeviceSyncJobBatchCandidatesIfSeedOwned(
+  database: DatabaseSync,
+  input: {
+    accountId: string;
+    jobIds: readonly string[];
+    leaseMs: number;
+    now: string;
+    provider: string;
+    seedJobId: string;
+    workerId: string;
+  },
+): DeviceSyncJobRecord[] {
+  const jobIds = [...new Set(input.jobIds)].filter((jobId) => jobId !== input.seedJobId);
+  if (jobIds.length === 0) {
+    return [];
+  }
+
+  return withImmediateTransaction(database, () => {
+    const seed = database.prepare(`
+      select id
+      from device_job
+      where id = ?
+        and account_id = ?
+        and provider = ?
+        and status = 'running'
+        and lease_owner = ?
+        and lease_expires_at is not null
+        and lease_expires_at > ?
+      limit 1
+    `).get(
+      input.seedJobId,
+      input.accountId,
+      input.provider,
+      input.workerId,
+      input.now,
+    ) as { id: string } | undefined;
+
+    if (!seed) {
+      return [];
+    }
+
+    const placeholders = jobIds.map(() => "?").join(", ");
+    const eligible = database.prepare(`
+      select count(*) as count
+      from device_job
+      where id in (${placeholders})
+        and account_id = ?
+        and provider = ?
+        and (
+          (
+            status = 'queued'
+            and available_at <= ?
+          ) or (
+            status = 'running'
+            and lease_expires_at is not null
+            and lease_expires_at <= ?
+            and attempts < max_attempts
+          )
+        )
+    `).get(
+      ...jobIds,
+      input.accountId,
+      input.provider,
+      input.now,
+      input.now,
+    ) as { count: number } | undefined;
+
+    if ((eligible?.count ?? 0) !== jobIds.length) {
+      return [];
+    }
+
+    const leaseExpiresAt = new Date(Date.parse(input.now) + input.leaseMs).toISOString();
+    database.prepare(`
+      update device_job
+      set status = 'running',
+          lease_owner = ?,
+          lease_expires_at = ?,
+          attempts = attempts + 1,
+          started_at = coalesce(started_at, ?),
+          updated_at = ?
+      where id in (${placeholders})
+        and account_id = ?
+        and provider = ?
+        and (
+          (
+            status = 'queued'
+            and available_at <= ?
+          ) or (
+            status = 'running'
+            and lease_expires_at is not null
+            and lease_expires_at <= ?
+            and attempts < max_attempts
+          )
+        )
+    `).run(
+      input.workerId,
+      leaseExpiresAt,
+      input.now,
+      input.now,
+      ...jobIds,
+      input.accountId,
+      input.provider,
+      input.now,
+      input.now,
+    );
+
+    return jobIds.flatMap((jobId) => {
+      const claimed = getDeviceSyncJobById(database, jobId);
+      return claimed ? [claimed] : [];
+    });
+  });
+}
+
 export function completeDeviceSyncJob(database: DatabaseSync, jobId: string, now: string): void {
   database.prepare(`
     update device_job
@@ -209,6 +371,63 @@ export function completeDeviceSyncJobIfOwned(
   `).run(now, now, jobId, workerId, now) as { changes: number };
 
   return (result.changes ?? 0) > 0;
+}
+
+export function completeDeviceSyncJobsIfOwned(
+  database: DatabaseSync,
+  input: {
+    jobIds: readonly string[];
+    now: string;
+    workerId: string;
+  },
+): boolean {
+  const jobIds = [...new Set(input.jobIds)];
+  if (jobIds.length === 0) {
+    return false;
+  }
+
+  return withImmediateTransaction(database, () => {
+    const placeholders = jobIds.map(() => "?").join(", ");
+    const eligible = database.prepare(`
+      select count(*) as count
+      from device_job
+      where id in (${placeholders})
+        and status = 'running'
+        and lease_owner = ?
+        and lease_expires_at is not null
+        and lease_expires_at > ?
+    `).get(
+      ...jobIds,
+      input.workerId,
+      input.now,
+    ) as { count: number } | undefined;
+
+    if ((eligible?.count ?? 0) !== jobIds.length) {
+      return false;
+    }
+
+    database.prepare(`
+      update device_job
+      set status = 'succeeded',
+          lease_owner = null,
+          lease_expires_at = null,
+          finished_at = ?,
+          updated_at = ?
+      where id in (${placeholders})
+        and status = 'running'
+        and lease_owner = ?
+        and lease_expires_at is not null
+        and lease_expires_at > ?
+    `).run(
+      input.now,
+      input.now,
+      ...jobIds,
+      input.workerId,
+      input.now,
+    );
+
+    return true;
+  });
 }
 
 export function releaseDeviceSyncJobIfOwned(

@@ -187,6 +187,20 @@ export function expireJobLeaseForTesting(
   });
 }
 
+export function setJobAttemptsForTesting(
+  store: SqliteDeviceSyncStore,
+  jobId: string,
+  attempts: number,
+): void {
+  withStoreDatabase(store, (database) => {
+    database.prepare(`
+      update device_job
+      set attempts = ?
+      where id = ?
+    `).run(attempts, jobId);
+  });
+}
+
 export function setConnectionUpdatedAtForTesting(
   store: SqliteDeviceSyncStore,
   accountId: string,

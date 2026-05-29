@@ -134,6 +134,16 @@ function executeJunctionJob(
   return executor.executeJob(context, job);
 }
 
+function executeJunctionJobBatch(
+  provider: ReturnType<typeof createJunctionProvider>,
+  context: ProviderJobContext,
+  jobs: readonly DeviceSyncJobRecord[],
+) {
+  const executor = provider.jobExecutor;
+  assert.ok(executor?.batch, "Junction provider should expose a batch job executor.");
+  return executor.batch.execute(context, jobs);
+}
+
 function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): ProviderJobContext {
   const account = overrides.account ?? createAccount();
 
@@ -3884,6 +3894,107 @@ test("Junction resource jobs import direct daily data webhook payloads without c
   assert.equal(snapshot.summaries?.activity?.[0]?.steps, 4321);
   assert.equal(snapshot.summaries?.activity?.[0]?.memo, "from [redacted] payload");
   assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "garmin");
+  assert.deepEqual(snapshot.timeseries, {});
+  assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+});
+
+test("Junction resource batches import compatible direct daily payloads in one snapshot", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+  const firstJob = createJob("resource", {
+    eventType: "daily.data.activity.created",
+    objectId: "activity-1",
+    occurredAt: "2026-04-02T00:00:00.000Z",
+    resource: "activity",
+    resourceCategory: "summary",
+    sourceProviderSlug: "garmin",
+    webhookDataJson: JSON.stringify({
+      date: "2026-04-02",
+      id: "activity-1",
+      memo: "first from junction-user-1 payload",
+      sourceProviderSlug: "garmin",
+      steps: 111,
+    }),
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-05T00:00:00.000Z",
+  });
+  const secondJob = createJob("resource", {
+    eventType: "daily.data.activity.created",
+    objectId: "activity-2",
+    occurredAt: "2026-04-02T00:00:00.000Z",
+    resource: "activity",
+    resourceCategory: "summary",
+    sourceProviderSlug: "garmin",
+    webhookDataJson: JSON.stringify({
+      date: "2026-04-02",
+      id: "activity-2",
+      memo: "second from junction-user-1 payload",
+      sourceProviderSlug: "garmin",
+      steps: 222,
+    }),
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-05T00:00:00.000Z",
+  });
+
+  const executor = provider.jobExecutor;
+  assert.ok(executor?.batch, "Junction provider should expose a batch descriptor.");
+  const firstDescriptor = executor.batch.describe(firstJob);
+  const secondDescriptor = executor.batch.describe(secondJob);
+  assert.ok(firstDescriptor);
+  assert.equal(secondDescriptor?.key, firstDescriptor.key);
+
+  await executeJunctionJobBatch(provider, context, [firstJob, secondJob]);
+
+  assert.deepEqual(requests, [
+    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+  ]);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+    windowEnd?: string;
+    windowStart?: string;
+  };
+  assert.equal(snapshot.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(snapshot.windowEnd, "2026-04-05T00:00:00.000Z");
+  const activity = snapshot.summaries?.activity ?? [];
+  assert.equal(activity.length, 2);
+  assert.deepEqual(activity.map((record) => record.steps), [111, 222]);
+  assert.deepEqual(
+    activity.map((record) => record.memo),
+    ["first from [redacted] payload", "second from [redacted] payload"],
+  );
+  assert.deepEqual(activity.map((record) => record.sourceProviderSlug), ["garmin", "garmin"]);
   assert.deepEqual(snapshot.timeseries, {});
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
 });

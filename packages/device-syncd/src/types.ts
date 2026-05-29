@@ -46,6 +46,8 @@ export interface DeviceSyncServiceConfig {
   sessionTtlMs?: number;
   workerLeaseMs?: number;
   workerPollMs?: number;
+  // Number of durable job rows per drain tick. A provider batch may complete
+  // multiple compatible rows in one worker pass, and each row counts here.
   workerBatchSize?: number;
   schedulerPollMs?: number;
   log?: DeviceSyncLogger;
@@ -604,6 +606,18 @@ export interface ProviderJobResult {
   nextReconcileAt?: string | null;
 }
 
+export interface ProviderJobBatchDescriptor {
+  key: string;
+  estimatedBytes?: number;
+}
+
+export interface DeviceJobBatchExecutor {
+  describe(job: DeviceSyncJobRecord): ProviderJobBatchDescriptor | null;
+  execute(context: ProviderJobContext, jobs: readonly DeviceSyncJobRecord[]): Promise<ProviderJobResult>;
+  maxEstimatedBytes?: number;
+  maxJobs?: number;
+}
+
 export interface DeviceSyncBackfillDiagnosticContext {
   account: DeviceSyncAccount;
   now: string;
@@ -663,6 +677,7 @@ export interface DeviceWebhookHandler {
 export interface DeviceJobExecutor {
   createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
+  batch?: DeviceJobBatchExecutor;
 }
 
 export interface DeviceSyncOAuthAdapter {
