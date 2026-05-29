@@ -19,8 +19,12 @@ import {
   writeJsonResponse,
 } from "./hosted-local-e2e-support.js";
 import type { HostedLocalFullStackScenario } from "./hosted-local-full-stack-scenario.js";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../../src/runner-injected-credential.ts";
 
 export interface ObservedLinqRequest {
+  authorizationStatus: "expected" | "hosted-sentinel" | "missing" | "present" | "unexpected";
   body: string;
   host: string | null;
   method: string;
@@ -131,7 +135,9 @@ export function readHostedLocalLinqImagePngBytes(): Uint8Array {
   return hostedLocalLinqImagePngBytes.slice();
 }
 
-export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
+export async function startHostedLocalLinqStub(input: {
+  expectedAuthorizationToken?: string | null;
+} = {}): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedMessageIdsByChat = new Map<string, string[]>();
@@ -146,6 +152,10 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   server = createServer(async (request, response) => {
     const body = await readRequestBody(request);
     observedRequests.push({
+      authorizationStatus: classifyObservedLinqAuthorization(
+        request.headers.authorization,
+        input.expectedAuthorizationToken,
+      ),
       body,
       host: request.headers.host?.trim() || null,
       method: request.method ?? "GET",
@@ -599,6 +609,27 @@ function parseObservedLinqJson(body: string): Record<string, unknown> | null {
   }
 }
 
+function classifyObservedLinqAuthorization(
+  authorization: string | string[] | undefined,
+  expectedToken: string | null | undefined,
+): ObservedLinqRequest["authorizationStatus"] {
+  const value = Array.isArray(authorization)
+    ? authorization.at(0)?.trim() ?? ""
+    : authorization?.trim() ?? "";
+  if (!value) {
+    return "missing";
+  }
+
+  const expected = expectedToken?.trim() ?? "";
+  if (expected && value === `Bearer ${expected}`) {
+    return "expected";
+  }
+  if (value === `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`) {
+    return "hosted-sentinel";
+  }
+  return expected ? "unexpected" : "present";
+}
+
 function isObservedLinqCreateChatPayload(payload: Record<string, unknown> | null): boolean {
   return Boolean(
     payload
@@ -792,12 +823,14 @@ function pngCrc32(buffers: readonly Uint8Array[]): number {
 function summarizeObservedLinqRequests(
   requests: readonly ObservedLinqRequest[],
 ): Array<{
+  authorizationStatus: ObservedLinqRequest["authorizationStatus"];
   bodyBytes: number;
   bodySha256Prefix: string;
   method: string;
   path: string;
 }> {
   return requests.map((request) => ({
+    authorizationStatus: request.authorizationStatus,
     bodyBytes: Buffer.byteLength(request.body, "utf8"),
     bodySha256Prefix: createHash("sha256").update(request.body).digest("hex").slice(0, 12),
     method: request.method,

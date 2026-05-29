@@ -181,4 +181,5 @@ export type {
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,
   AssistantHostedExecutionContext,
+  AssistantHostedProgressDeliveryDependencies,
 } from './execution-context.js'

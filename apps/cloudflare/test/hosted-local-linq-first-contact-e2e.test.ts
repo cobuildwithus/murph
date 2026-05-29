@@ -60,13 +60,17 @@ const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
+const progressToolUserId = `member_local_linq_progress_tool_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
 const checkpointReplayUserId = `member_local_linq_checkpoint_replay_${Date.now()}`;
 const typingLoopUserId = `member_local_linq_typing_loop_${Date.now()}`;
+const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const checkpointReplayReplyText = "Yes - I can help with that.";
+const progressToolUpdateText = "Checking the current iMessage thread now.";
+const progressToolFinalReplyText = "I checked that and can keep helping from here.";
 const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
@@ -84,6 +88,24 @@ const itCheckpointReplayRepro =
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 const cleanupPaths: string[] = [];
+
+function buildHostedAssistantProgressDirectiveResponse(input: {
+  progressText: string;
+  text: string;
+}): string {
+  return JSON.stringify({
+    __murphE2eToolCalls: [
+      {
+        arguments: {
+          text: input.progressText,
+        },
+        namespace: "murph",
+        tool: "send_progress_update",
+      },
+    ],
+    text: input.text,
+  });
+}
 
 afterAll(async () => {
   await scenario?.stop();
@@ -283,6 +305,93 @@ describe("hosted local Linq first-contact e2e", () => {
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
+  }, 300_000);
+
+  it("delivers a model-authored progress update through the hosted Linq bridge", async () => {
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(progressToolUserId),
+      memberId: progressToolUserId,
+      memberPhone: buildLinqRecipientPhoneNumber(progressToolUserId),
+    });
+    await requireScenario().runWake(
+      buildActivationWake(progressToolUserId),
+      progressToolUserId,
+    );
+    await requireScenario().waitForHostedCompletion(progressToolUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId:
+          `assistant.notification.requested:local:${progressToolUserId}:evt_linq_progress_tool`,
+        userId: progressToolUserId,
+      }),
+      progressToolUserId,
+    );
+    await requireScenario().waitForHostedCompletion(progressToolUserId);
+    await requireLinqStub().waitForSend({
+      expectedPath: requireLinqStub().createChatPath,
+      matchRequest: requireLinqStub().createCreateChatRequestMatcher(progressToolUserId),
+      scenario: requireScenario(),
+      userId: progressToolUserId,
+    });
+
+    const materializedChatId = requireLinqStub().requireObservedChatId(progressToolUserId);
+    const expectedDirectReplyChatPath =
+      `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeReply =
+      requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantProgressDirectiveResponse({
+        progressText: progressToolUpdateText,
+        text: progressToolFinalReplyText,
+      }),
+    ]);
+
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      progressToolUserId,
+      materializedChatId,
+      {
+        eventId: `evt_progress_tool_${progressToolUserId}`,
+        messageId: `msg_progress_tool_${progressToolUserId}`,
+        text: "Can you check this thread?",
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(progressToolUserId);
+    const completionPromise = requireScenario()
+      .waitForHostedCompletion(progressToolUserId);
+    const matchingSends = await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: outboundCountBeforeReply + 2,
+      expectedPath: expectedDirectReplyChatPath,
+      scenario: requireScenario(),
+      userId: progressToolUserId,
+    });
+    const newSendTexts = matchingSends
+      .slice(outboundCountBeforeReply)
+      .map((request) => requireLinqStub().readObservedMessageText(request));
+    expect(
+      matchingSends
+        .slice(outboundCountBeforeReply)
+        .map((request) => request.authorizationStatus),
+    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    expect(new Set(newSendTexts)).toEqual(new Set([
+      progressToolUpdateText,
+      progressToolFinalReplyText,
+    ]));
+
+    const finalStatus = await completionPromise;
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
   }, 300_000);
 
   itOutsideFastDeployGate(
@@ -1159,7 +1268,9 @@ function createBrowserVaultReplicaRef(
 async function startLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
 ): Promise<void> {
-  linqStub = await startHostedLocalLinqStub();
+  linqStub = await startHostedLocalLinqStub({
+    expectedAuthorizationToken: linqApiToken,
+  });
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
@@ -1167,7 +1278,7 @@ async function startLinqScenario(
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqFirstContactLocalInboundAllowlist(),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
-      LINQ_API_TOKEN: "linq-local-test-token",
+      LINQ_API_TOKEN: linqApiToken,
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
         "murph.send_progress_update",
@@ -1215,6 +1326,7 @@ function buildLinqFirstContactLocalInboundAllowlist(): string {
     directReplyUserId,
     duplicateWelcomeUserId,
     fastReplyUserId,
+    progressToolUserId,
     postAssistantReplyUserId,
     checkpointReplayUserId,
     typingLoopUserId,

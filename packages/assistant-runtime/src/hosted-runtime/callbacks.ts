@@ -22,6 +22,7 @@ import {
   resetAssistantOutboxPreparedDispatchById,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
+  type AssistantHostedProgressDeliveryDependencies,
 } from "@murphai/assistant-engine";
 import type {
   AssistantOutboxIntent,
@@ -273,6 +274,27 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   }
 }
 
+export function createHostedAssistantProgressDeliveryDependencies(input: {
+  forwardedEnv?: Readonly<Record<string, string>>;
+  providerFetch?: typeof fetch | null;
+  signal?: AbortSignal | null;
+  userEnv?: Readonly<Record<string, string>>;
+}): AssistantHostedProgressDeliveryDependencies {
+  const linqEnv = buildHostedLinqChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    userEnv: input.userEnv ?? {},
+  }) as NodeJS.ProcessEnv;
+
+  return {
+    ...(input.signal ? { signal: input.signal } : {}),
+    sendLinq: createHostedAssistantLinqSendDependency({
+      linqEnv,
+      providerFetch: input.providerFetch ?? null,
+      signal: input.signal ?? null,
+    }),
+  };
+}
+
 export async function drainHostedPreparedAssistantDeliveries(input: {
   allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
@@ -415,41 +437,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
-        sendLinq: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
-          const directRecipientPhoneNumber =
-            normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
-            ?? readHostedWakeDirectLinqRecipientForDelivery({
-              replyToMessageId: request.replyToMessageId ?? null,
-              target: request.target,
-              targetKind: request.targetKind ?? null,
-              wake: input.wake,
-            });
-          const fromPhoneNumber =
-            normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
-            ?? readHostedWakeLinqSenderForDelivery({
-              replyToMessageId: request.replyToMessageId ?? null,
-              target: request.target,
-              targetKind: request.targetKind ?? null,
-              wake: input.wake,
-            });
-          providerDispatchEntered = true;
-          const result = await sendHostedProviderLinqMessage({
-            directRecipientPhoneNumber,
-            fromPhoneNumber,
-            idempotencyKey: request.idempotencyKey ?? null,
-            message: request.message,
-            replyToMessageId: request.replyToMessageId ?? null,
-            target: request.target,
-            targetKind: request.targetKind ?? null,
-          }, {
-            env: input.linqEnv,
-            fetchImplementation: input.providerFetch ?? undefined,
-            signal: input.signal ?? undefined,
-          });
-          await assertHostedDeliveryLiveNow(input);
-          return result;
-        },
+        sendLinq: createHostedAssistantLinqSendDependency({
+          assertLiveness: input.assertLiveness,
+          linqEnv: input.linqEnv,
+          onProviderDispatchEntered: () => {
+            providerDispatchEntered = true;
+          },
+          providerFetch: input.providerFetch,
+          signal: input.signal,
+          wake: input.wake,
+        }),
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           providerDispatchEntered = true;
@@ -528,6 +525,55 @@ function shouldResetHostedPreparedForegroundDeliveryOnAbort(input: {
     && input.mirrorState.intent?.status === "sending"
     && input.mirrorState.sendingStartedAt !== null
     && !input.providerDispatchEntered;
+}
+
+function createHostedAssistantLinqSendDependency(input: {
+  assertLiveness?: () => Promise<void>;
+  linqEnv: NodeJS.ProcessEnv;
+  onProviderDispatchEntered?: () => void;
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+  wake?: HostedRuntimeEvent | null;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
+  return async (request) => {
+    await assertHostedDeliveryLiveNow(input);
+    const directRecipientPhoneNumber =
+      normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
+      ?? (input.wake
+        ? readHostedWakeDirectLinqRecipientForDelivery({
+            replyToMessageId: request.replyToMessageId ?? null,
+            target: request.target,
+            targetKind: request.targetKind ?? null,
+            wake: input.wake,
+          })
+        : null);
+    const fromPhoneNumber =
+      normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
+      ?? (input.wake
+        ? readHostedWakeLinqSenderForDelivery({
+            replyToMessageId: request.replyToMessageId ?? null,
+            target: request.target,
+            targetKind: request.targetKind ?? null,
+            wake: input.wake,
+          })
+        : null);
+    input.onProviderDispatchEntered?.();
+    const result = await sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: request.idempotencyKey ?? null,
+      message: request.message,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
+    }, {
+      env: input.linqEnv,
+      fetchImplementation: input.providerFetch ?? undefined,
+      signal: input.signal ?? undefined,
+    });
+    await assertHostedDeliveryLiveNow(input);
+    return result;
+  };
 }
 
 function readHostedWakeDirectLinqRecipientForDelivery(input: {

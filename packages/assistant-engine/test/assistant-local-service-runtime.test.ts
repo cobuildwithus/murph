@@ -3333,6 +3333,54 @@ test('sendAssistantMessageLocal preserves boundary admission for hosted queue-on
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
+test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only auto-reply',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  await progressDelivery.send('Checking the iMessage thread.')
+
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
+    'Checking the iMessage thread.',
+  )
+})
+
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
   const terminalError = new Error('provider failed hard')
   const failedProviderSession = createAssistantSession({
@@ -4140,6 +4188,13 @@ async function loadLocalServiceModule(input?: {
         turnId: 'turn-1',
       }),
     ),
+    deliverAssistantProgressUpdate: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/delivery-service.js').deliverAssistantProgressUpdate
+        >[0],
+      ) => undefined,
+    ),
     dispatchAssistantReply: vi.fn(async () => deliveryOutcome),
     executeCodexTurnWithRecovery: vi.fn(
       async (
@@ -4417,7 +4472,7 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/delivery-service.js', () => ({
     deliverAssistantReply: mocks.dispatchAssistantReply,
-    deliverAssistantProgressUpdate: vi.fn(async () => undefined),
+    deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({

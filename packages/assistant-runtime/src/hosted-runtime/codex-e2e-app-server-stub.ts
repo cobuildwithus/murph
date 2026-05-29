@@ -59,7 +59,9 @@ const turnDelayMs = ${JSON.stringify(turnDelayMs)};
 const processThreadPrefix = String(process.pid % 1000000).padStart(6, "0");
 let threadCounter = 0;
 let turnCounter = 0;
+let serverRequestCounter = 1000000;
 let activeTurn = null;
+const pendingServerRequests = new Map();
 const threadAssistantHistory = new Map();
 const threadDynamicToolNames = new Map();
 
@@ -431,6 +433,100 @@ function extractResponseText(payload) {
   throw new Error("assistant provider stub response did not contain output text");
 }
 
+function extractE2EToolDirective(responseText) {
+  try {
+    const parsed = JSON.parse(responseText);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Array.isArray(parsed.__murphE2eToolCalls) &&
+      typeof parsed.text === "string" &&
+      parsed.text.trim()
+    ) {
+      const toolCalls = parsed.__murphE2eToolCalls
+        .map(normalizeE2EToolCall)
+        .filter(Boolean);
+      return {
+        toolCalls,
+        text: parsed.text.trim(),
+      };
+    }
+  } catch {
+    // Non-JSON responses are normal assistant text.
+  }
+
+  return {
+    toolCalls: [],
+    text: responseText,
+  };
+}
+
+function normalizeE2EToolCall(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  if (
+    typeof value.namespace !== "string" ||
+    !value.namespace.trim() ||
+    typeof value.tool !== "string" ||
+    !value.tool.trim()
+  ) {
+    return null;
+  }
+  const args = value.arguments && typeof value.arguments === "object" && !Array.isArray(value.arguments)
+    ? value.arguments
+    : {};
+  return {
+    arguments: args,
+    namespace: value.namespace.trim(),
+    tool: value.tool.trim(),
+  };
+}
+
+function callDynamicTool(toolCall) {
+  return new Promise((resolve, reject) => {
+    const id = ++serverRequestCounter;
+    const timeout = setTimeout(() => {
+      pendingServerRequests.delete(id);
+      reject(new Error("dynamic tool call timed out"));
+    }, 30000);
+    pendingServerRequests.set(id, {
+      reject,
+      resolve,
+      timeout,
+    });
+    writeRpc({
+      id,
+      method: "item/tool/call",
+      params: {
+        arguments: toolCall.arguments,
+        namespace: toolCall.namespace,
+        tool: toolCall.tool,
+      },
+    });
+  }).then((message) => {
+    if (message && message.error) {
+      const errorMessage =
+        message.error && typeof message.error.message === "string"
+          ? message.error.message
+          : "dynamic tool call failed";
+      throw new Error(errorMessage);
+    }
+    const result = message ? message.result : null;
+    if (!result || result.success !== true) {
+      const contentItems = result && Array.isArray(result.contentItems)
+        ? result.contentItems
+        : [];
+      const detail = contentItems
+        .flatMap((item) => item && typeof item.text === "string" ? [item.text] : [])
+        .join(" ")
+        .trim();
+      throw new Error(detail || "dynamic tool call was not accepted");
+    }
+  });
+}
+
 async function fetchAssistantResponse(providerInput) {
   const response = await fetch(new URL("responses", assistantProviderBaseUrl.replace(/\\/+$/u, "") + "/"), {
     body: JSON.stringify({
@@ -459,7 +555,14 @@ async function completeTurn(turn) {
 
   try {
     const providerInput = buildTurnProviderInput(turn);
-    const text = await fetchAssistantResponse(providerInput);
+    const rawText = await fetchAssistantResponse(providerInput);
+    const {
+      toolCalls,
+      text,
+    } = extractE2EToolDirective(rawText);
+    for (const toolCall of toolCalls) {
+      await callDynamicTool(toolCall);
+    }
     appendThreadAssistantMessage(turn.threadId, text);
     writeRpc({
       type: "item.completed",
@@ -509,6 +612,17 @@ async function handleRpc(message) {
   const id = typeof message.id === "number" ? message.id : null;
   const method = typeof message.method === "string" ? message.method : null;
   const params = message.params && typeof message.params === "object" ? message.params : {};
+
+  if (id !== null && method === null && pendingServerRequests.has(id)) {
+    const pending = pendingServerRequests.get(id);
+    pendingServerRequests.delete(id);
+    clearTimeout(pending.timeout);
+    pending.resolve(message);
+    return;
+  }
+  if (id !== null && method === null) {
+    return;
+  }
 
   if (method === "initialize" && id !== null) {
     writeRpc({

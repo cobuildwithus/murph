@@ -36,6 +36,7 @@ import {
 } from './hosted-context-diagnostics.js'
 import {
   deliverAssistantReply as dispatchAssistantReply,
+  deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
 } from './delivery-service.js'
 import {
@@ -114,6 +115,14 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 const MAX_ACTIVE_TURN_INPUT_CONTINUATIONS = 3
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
+
+function resolveAssistantProgressDeliveryChannel(input: {
+  input: AssistantMessageInput
+  session: AssistantSession
+}): string | null {
+  return normalizeNullableString(input.input.channel)
+    ?? normalizeNullableString(input.session.binding.channel)
+}
 
 async function appendUserTranscriptEntryForTurn(input: {
   createdAt?: string | null
@@ -350,6 +359,35 @@ export async function sendAssistantMessageLocal(
           shouldEnableAssistantModelProgressUpdates(input)
         const progressDelivery = modelProgressUpdatesEnabled
           ? createAssistantProgressDelivery({
+              deliver: async (progressInput) => {
+                const hosted = executionContext?.hosted
+                if (hosted) {
+                  const deliveryChannel = resolveAssistantProgressDeliveryChannel(
+                    progressInput,
+                  )
+                  if (deliveryChannel !== 'linq') {
+                    throw new VaultCliError(
+                      'ASSISTANT_PROGRESS_CHANNEL_UNSUPPORTED',
+                      'Hosted model progress updates are currently supported for iMessage delivery only.',
+                    )
+                  }
+                  if (!hosted.progressDeliveryDependencies?.sendLinq) {
+                    throw new VaultCliError(
+                      'ASSISTANT_PROGRESS_DELIVERY_UNAVAILABLE',
+                      'Hosted iMessage progress delivery dependencies were not available.',
+                    )
+                  }
+                  await deliverAssistantProgressUpdate({
+                    ...progressInput,
+                    dependencies: hosted.progressDeliveryDependencies,
+                  })
+                  return
+                }
+
+                await deliverAssistantProgressUpdate({
+                  ...progressInput,
+                })
+              },
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,

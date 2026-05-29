@@ -866,6 +866,59 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
+  it("passes hosted channel delivery dependencies to progress sends", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "linq",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    const dependencies = {
+      sendLinq: vi.fn(async () => ({
+        providerMessageId: "linq-progress-message",
+        providerThreadId: "binding-thread",
+        target: "binding-thread",
+        targetKind: "thread" as const,
+      })),
+    };
+
+    await deliverAssistantProgressUpdate({
+      dependencies,
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "reply-key",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      ordinal: 0,
+      session,
+      sharedPlan: createSharedPlan(),
+      text: "Still checking the iMessage thread.",
+      turnId: "turn-progress-hosted-dependencies",
+    });
+
+    expect(seamMocks.sendAssistantOutboxPayload).toHaveBeenCalledWith({
+      dependencies,
+      payload: expect.objectContaining({
+        channel: "linq",
+        deliveryIdempotencyKey: "reply-key:progress:0",
+        message: "Still checking the iMessage thread.",
+        sessionId: session.sessionId,
+        threadId: "binding-thread",
+        turnId: "turn-progress-hosted-dependencies",
+      }),
+      vault: "/vault",
+    });
+  });
+
   it("derives hosted progress idempotency from the final delivery base key", async () => {
     const session = createAssistantSession({
       binding: {

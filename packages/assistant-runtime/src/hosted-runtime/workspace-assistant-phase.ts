@@ -28,6 +28,7 @@ import {
 
 import {
   collectHostedAssistantDeliverySideEffects,
+  createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   resolveHostedAssistantOutboxNextWakeAt,
@@ -264,7 +265,11 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
-  const typingAbortController = new AbortController();
+  const channelAbortController = new AbortController();
+  const releaseChannelAbortRelay = relayHostedAssistantPhaseAbortSignal(
+    input.signal ?? null,
+    channelAbortController,
+  );
   const wake = buildHostedExecutionRuntimeTimerWake({
     eventId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
     occurredAt: new Date().toISOString(),
@@ -287,20 +292,26 @@ export async function runHostedWorkspaceAssistantPhase(
   }
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
-        hosted: {
-          channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-            forwardedEnv: input.runtime.forwardedEnv,
-            platformEnv: input.runtime.platformEnv,
-            providerFetch: input.runtime.platform.providerFetch ?? null,
-            signal: typingAbortController.signal,
-            userEnv: input.runtime.userEnv,
-          }),
-          deviceConnectProviders,
-          ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
-          ...(input.materializeWorkspaceArtifacts
-            ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
-            : {}),
-          memberId: input.request.userId,
+      hosted: {
+        progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
+          forwardedEnv: input.runtime.forwardedEnv,
+          providerFetch: input.runtime.platform.providerFetch ?? null,
+          signal: channelAbortController.signal,
+          userEnv: input.runtime.userEnv,
+        }),
+        channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+          forwardedEnv: input.runtime.forwardedEnv,
+          platformEnv: input.runtime.platformEnv,
+          providerFetch: input.runtime.platform.providerFetch ?? null,
+          signal: channelAbortController.signal,
+          userEnv: input.runtime.userEnv,
+        }),
+        deviceConnectProviders,
+        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
+        ...(input.materializeWorkspaceArtifacts
+          ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
+          : {}),
+        memberId: input.request.userId,
         ...(input.runtime.platform.usageRecordPort
           ? {
               usageRecorder: {
@@ -629,7 +640,8 @@ export async function runHostedWorkspaceAssistantPhase(
       redactedStatus,
     });
   } finally {
-    typingAbortController.abort();
+    releaseChannelAbortRelay();
+    channelAbortController.abort();
   }
 }
 
@@ -1995,6 +2007,30 @@ async function deferHostedProviderCleanupAfterDelivery(input: {
   });
   return {
     nextWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+  };
+}
+
+function relayHostedAssistantPhaseAbortSignal(
+  source: AbortSignal | null,
+  controller: AbortController,
+): () => void {
+  if (!source) {
+    return () => undefined;
+  }
+
+  const onAbort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(source.reason);
+    }
+  };
+  if (source.aborted) {
+    onAbort();
+    return () => undefined;
+  }
+
+  source.addEventListener("abort", onAbort, { once: true });
+  return () => {
+    source.removeEventListener("abort", onAbort);
   };
 }
 

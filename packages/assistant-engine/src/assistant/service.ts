@@ -24,6 +24,7 @@ export type {
   AssistantExecutionContext,
   AssistantMessageInput,
   AssistantHostedExecutionContext,
+  AssistantHostedProgressDeliveryDependencies,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
 export type {

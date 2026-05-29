@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   collectHostedAssistantDeliverySideEffects: vi.fn(),
+  createHostedAssistantProgressDeliveryDependencies: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
@@ -31,6 +32,8 @@ vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
+  createHostedAssistantProgressDeliveryDependencies:
+    mocks.createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries:
     mocks.drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch:
@@ -76,6 +79,7 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
+  mocks.createHostedAssistantProgressDeliveryDependencies.mockReturnValue({});
   mocks.createHostedAssistantChannelTypingDependencies.mockReturnValue({});
   mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([]);
   mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValue({

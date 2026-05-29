@@ -8,6 +8,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   markLinqChatRead: vi.fn(),
+  sendHostedProviderLinqMessage: vi.fn(),
   startLinqTypingIndicator: vi.fn(),
   startTelegramTypingIndicator: vi.fn(),
 }));
@@ -27,6 +28,13 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
   markLinqChatRead: mocks.markLinqChatRead,
 }));
 
+vi.mock("../src/hosted-provider-effects.ts", () => ({
+  sendHostedProviderLinqMessage: mocks.sendHostedProviderLinqMessage,
+}));
+
+import {
+  createHostedAssistantProgressDeliveryDependencies,
+} from "../src/hosted-runtime/callbacks.ts";
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
@@ -37,6 +45,12 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.markLinqChatRead.mockResolvedValue(undefined);
+  mocks.sendHostedProviderLinqMessage.mockResolvedValue({
+    providerMessageId: "linq-message",
+    providerThreadId: "linq-thread",
+    target: "linq-thread",
+    targetKind: "thread",
+  });
   mocks.startLinqTypingIndicator.mockResolvedValue(undefined);
   mocks.startTelegramTypingIndicator.mockResolvedValue(undefined);
 });
@@ -204,4 +218,52 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
   assert.equal(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
   assert.equal(mocks.markLinqChatRead.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
+});
+
+test("hosted progress delivery dependencies use the hosted Linq provider effect", async () => {
+  const providerFetch = vi.fn() as unknown as typeof fetch;
+  const signal = new AbortController().signal;
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    forwardedEnv: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    providerFetch,
+    signal,
+    userEnv: {
+      LINQ_API_TOKEN: "user-linq-token",
+    },
+  });
+
+  await delivery.sendLinq?.({
+    directRecipientPhoneNumber: "+15550000001",
+    fromPhoneNumber: "+15550000002",
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: "linq-reply",
+    target: "linq-thread",
+    targetKind: "thread",
+  });
+
+  assert.equal(delivery.signal, signal);
+  assert.equal("sendTelegram" in delivery, false);
+  assert.equal("sendWhatsApp" in delivery, false);
+  assert.equal("sendEmail" in delivery, false);
+  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
+    directRecipientPhoneNumber: "+15550000001",
+    fromPhoneNumber: "+15550000002",
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: "linq-reply",
+    target: "linq-thread",
+    targetKind: "thread",
+  });
+  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[1], {
+    env: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "user-linq-token",
+    },
+    fetchImplementation: providerFetch,
+    signal,
+  });
 });

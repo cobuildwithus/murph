@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   compareAssistantInputCursors: vi.fn(),
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes: vi.fn(),
+  createHostedAssistantProgressDeliveryDependencies: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
@@ -64,6 +65,8 @@ vi.mock("@murphai/assistant-engine/assistant-store", () => ({
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
+  createHostedAssistantProgressDeliveryDependencies:
+    mocks.createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries:
     mocks.drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch:
@@ -205,6 +208,7 @@ beforeEach(() => {
     return env;
   });
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
+  mocks.createHostedAssistantProgressDeliveryDependencies.mockReturnValue({});
   mocks.createHostedAssistantChannelTypingDependencies.mockReturnValue({});
   mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes.mockImplementation(
     (outcomes: readonly HostedAssistantDeliveryOutcome[]) => [
@@ -2609,6 +2613,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.createHostedAssistantChannelTypingDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerFetch: null,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
       expect.objectContaining({
         providerFetch: null,
         signal: expect.any(AbortSignal),

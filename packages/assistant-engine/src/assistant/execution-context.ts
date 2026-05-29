@@ -10,6 +10,11 @@ export type AssistantChannelTypingDependencies = Pick<
   'startLinqTyping' | 'startTelegramTyping'
 >
 
+export type AssistantHostedProgressDeliveryDependencies = Pick<
+  AssistantChannelDependencies,
+  'sendLinq' | 'signal'
+>
+
 export interface AssistantHostedDeviceConnectLink {
   authorizationUrl: string
   connectUrl: string
@@ -50,6 +55,7 @@ export interface AssistantHostedExecutionContext {
   ): Promise<AssistantHostedDeviceConnectLink>
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
+  progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -66,6 +72,9 @@ export function normalizeAssistantExecutionContext(
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
     hosted?.channelTypingDependencies,
+  )
+  const progressDeliveryDependencies = normalizeAssistantHostedProgressDeliveryDependencies(
+    hosted?.progressDeliveryDependencies,
   )
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
@@ -106,6 +115,11 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
+      ...(progressDeliveryDependencies
+        ? {
+            progressDeliveryDependencies,
+          }
+        : {}),
       userEnvKeys:
         hosted?.userEnvKeys
           .map((key) => normalizeNullableString(key))
@@ -144,6 +158,24 @@ function normalizeAssistantChannelTypingDependencies(
   return dependencies.startLinqTyping || dependencies.startTelegramTyping
     ? dependencies
     : undefined
+}
+
+function normalizeAssistantHostedProgressDeliveryDependencies(
+  input: AssistantHostedExecutionContext['progressDeliveryDependencies'] | undefined,
+): AssistantHostedProgressDeliveryDependencies | undefined {
+  if (!input) {
+    return undefined
+  }
+
+  const dependencies: AssistantHostedProgressDeliveryDependencies = {}
+  if (typeof input.sendLinq === 'function') {
+    dependencies.sendLinq = input.sendLinq
+  }
+  if (input.signal && dependencies.sendLinq) {
+    dependencies.signal = input.signal
+  }
+
+  return dependencies.sendLinq ? dependencies : undefined
 }
 
 export function normalizeAssistantHostedDeviceConnectProviderKey(

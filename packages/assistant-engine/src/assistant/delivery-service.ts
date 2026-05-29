@@ -10,6 +10,7 @@ import {
   normalizeAssistantDeliveryError,
   sendAssistantOutboxPayload,
 } from './outbox.js'
+import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -121,6 +122,7 @@ export async function deliverAssistantReply(input: {
 }
 
 export async function deliverAssistantProgressUpdate(input: {
+  dependencies?: AssistantChannelDependencies
   input: AssistantMessageInput
   ordinal: number
   session: AssistantSession
@@ -151,6 +153,7 @@ export async function deliverAssistantProgressUpdate(input: {
   })
 
   await sendAssistantOutboxPayload({
+    ...(input.dependencies ? { dependencies: input.dependencies } : {}),
     payload: {
       ...deliveryFields,
       deliveryIdempotencyKey,
