@@ -35,6 +35,15 @@ interface WalkVaultFilesOptions {
   extension?: string | null;
 }
 
+interface WalkVaultFilesInterruptibleOptions extends WalkVaultFilesOptions {
+  shouldContinue?: () => boolean;
+}
+
+interface WalkVaultFilesResult {
+  interrupted: boolean;
+  relativePaths: string[];
+}
+
 async function readUtf8FileMatches(absolutePath: string, expectedContent: string): Promise<boolean> {
   const existingContent = await fs.readFile(absolutePath, "utf8");
   return existingContent === expectedContent;
@@ -217,22 +226,46 @@ export async function walkVaultFiles(
   relativeDirectory: string,
   options: WalkVaultFilesOptions = {},
 ): Promise<string[]> {
+  return (await walkVaultFilesInterruptible(vaultRoot, relativeDirectory, {
+    extension: options.extension,
+  })).relativePaths;
+}
+
+export async function walkVaultFilesInterruptible(
+  vaultRoot: string,
+  relativeDirectory: string,
+  options: WalkVaultFilesInterruptibleOptions = {},
+): Promise<WalkVaultFilesResult> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const resolved = resolveVaultPath(vaultRoot, relativeDirectory);
   const extension = options.extension ?? null;
   const matches: string[] = [];
+  let interrupted = false;
 
   if (!(await pathExists(resolved.absolutePath))) {
-    return matches;
+    return {
+      interrupted: false,
+      relativePaths: matches,
+    };
   }
 
   await assertPathWithinVaultOnDisk(absoluteRoot, resolved.absolutePath);
 
   async function walk(currentAbsolutePath: string): Promise<void> {
+    if (options.shouldContinue?.() === false) {
+      interrupted = true;
+      return;
+    }
+
     const entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
 
     for (const entry of entries) {
+      if (interrupted || options.shouldContinue?.() === false) {
+        interrupted = true;
+        return;
+      }
+
       const nextAbsolutePath = path.join(currentAbsolutePath, entry.name);
 
       if (entry.isDirectory()) {
@@ -254,5 +287,8 @@ export async function walkVaultFiles(
   }
 
   await walk(resolved.absolutePath);
-  return matches;
+  return {
+    interrupted,
+    relativePaths: matches,
+  };
 }

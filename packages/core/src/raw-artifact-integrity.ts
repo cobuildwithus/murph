@@ -10,10 +10,58 @@ export interface RawArtifactIntegrity {
   sha256: string;
 }
 
+type InterruptibleRawArtifactIntegrity =
+  | { kind: "interrupted" }
+  | { kind: "missing" }
+  | { kind: "ok"; integrity: RawArtifactIntegrity };
+
 export async function statAndHashVaultFile(
   vaultRoot: string,
   relativePath: string,
 ): Promise<RawArtifactIntegrity | null> {
+  const target = await statVaultFileForHash(vaultRoot, relativePath);
+  if (!target) {
+    return null;
+  }
+
+  return {
+    byteSize: target.byteSize,
+    sha256: await sha256File(target.absolutePath),
+  };
+}
+
+export async function statAndHashVaultFileInterruptible(
+  vaultRoot: string,
+  relativePath: string,
+  options: { shouldContinue?: () => boolean } = {},
+): Promise<InterruptibleRawArtifactIntegrity> {
+  if (options.shouldContinue?.() === false) {
+    return { kind: "interrupted" };
+  }
+
+  const target = await statVaultFileForHash(vaultRoot, relativePath);
+  if (!target) {
+    return { kind: "missing" };
+  }
+
+  const sha256 = await sha256FileInterruptible(target.absolutePath, options.shouldContinue);
+  if (sha256 === null) {
+    return { kind: "interrupted" };
+  }
+
+  return {
+    kind: "ok",
+    integrity: {
+      byteSize: target.byteSize,
+      sha256,
+    },
+  };
+}
+
+async function statVaultFileForHash(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<{ absolutePath: string; byteSize: number } | null> {
   const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath);
   let stats: Awaited<ReturnType<typeof fs.lstat>>;
   try {
@@ -39,8 +87,8 @@ export async function statAndHashVaultFile(
     );
   }
   return {
+    absolutePath: resolved.absolutePath,
     byteSize: stats.size,
-    sha256: await sha256File(resolved.absolutePath),
   };
 }
 
@@ -76,4 +124,24 @@ async function sha256File(absolutePath: string): Promise<string> {
     stream.on("end", resolve);
   });
   return hash.digest("hex");
+}
+
+async function sha256FileInterruptible(
+  absolutePath: string,
+  shouldContinue: (() => boolean) | undefined,
+): Promise<string | null> {
+  if (shouldContinue?.() === false) {
+    return null;
+  }
+
+  const hash = createHash("sha256");
+  const stream = createReadStream(absolutePath);
+  for await (const chunk of stream) {
+    if (shouldContinue?.() === false) {
+      return null;
+    }
+    hash.update(chunk);
+  }
+
+  return shouldContinue?.() === false ? null : hash.digest("hex");
 }

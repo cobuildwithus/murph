@@ -282,7 +282,7 @@ test("pruneWearableDenseRawTimeseries runs only old dense raw retention", async 
   );
 });
 
-test("dense raw pruning treats maxBytes as a hard candidate budget", async () => {
+test("dense raw pruning allows one oversized candidate to avoid no-progress loops", async () => {
   const vaultRoot = await createRawArtifactFixture({
     denseRole: "junction-timeseries-distance",
     denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
@@ -297,15 +297,36 @@ test("dense raw pruning treats maxBytes as a hard candidate budget", async () =>
     vaultRoot,
   });
 
-  assert.equal(result.mutated, false);
-  assert.equal(result.hasMore, true);
-  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
-  assert.equal(result.denseRawBytesBefore, 0);
-  assert.equal(result.denseRawBytesFreed, 0);
-  assert.match(
+  assert.equal(result.mutated, true);
+  assert.equal(result.hasMore, false);
+  assert.equal(result.tombstonedDenseRawArtifactCount, 1);
+  assert.ok(result.denseRawBytesBefore > 1);
+  assert.ok(result.denseRawBytesFreed > 0);
+  const rawTombstone = JSON.parse(
     await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
-    /sampleValues/u,
-  );
+  ) as Record<string, unknown>;
+  assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
+});
+
+test("dense raw pruning reports more work after one oversized progress candidate", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
+  });
+  await addSecondDenseRawArtifact(vaultRoot);
+
+  const result = await runWearableStorageMigrationPass({
+    maxBytes: 1,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    repairClasses: ["dense_raw_timeseries"],
+    vaultRoot,
+  });
+
+  assert.equal(result.mutated, true);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.tombstonedDenseRawArtifactCount, 1);
 });
 
 test("dense raw pruning never stages manifest changes for deadline-rejected candidates", async () => {
@@ -318,7 +339,7 @@ test("dense raw pruning never stages manifest changes for deadline-rejected cand
   let nowCallCount = 0;
   const dateNow = vi.spyOn(Date, "now").mockImplementation(() => {
     nowCallCount += 1;
-    return nowCallCount >= 6 ? 2 : 0;
+    return nowCallCount >= 65 ? 2 : 0;
   });
 
   try {
@@ -353,7 +374,41 @@ test("dense raw pruning never stages manifest changes for deadline-rejected cand
   );
 });
 
-test("dense raw classifier prefers retention metadata before role fallback", async () => {
+test("dense raw pruning skips manifest scans when the deadline is already exhausted", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
+  });
+  const readFile = vi.spyOn(fs, "readFile");
+
+  try {
+    const result = await runWearableStorageMigrationPass({
+      deadlineMs: 0,
+      maxFiles: 5,
+      now: REPAIR_NOW,
+      pruneDenseRaw: true,
+      repairClasses: ["dense_raw_timeseries"],
+      vaultRoot,
+    });
+
+    assert.equal(result.mutated, false);
+    assert.equal(result.hasMore, false);
+    assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+    assert.equal(
+      readFile.mock.calls.some(([file]) => String(file).endsWith("manifest.json")),
+      false,
+    );
+  } finally {
+    readFile.mockRestore();
+  }
+
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    /sampleValues/u,
+  );
+});
+
+test("dense raw classifier uses retention metadata before role fallback", async () => {
   const metadataDenseVaultRoot = await createRawArtifactFixture({
     denseRole: "provider-debug-payload",
     rawArtifactMetadata: {
@@ -396,7 +451,18 @@ test("dense raw classifier prefers retention metadata before role fallback", asy
     now: REPAIR_NOW,
     vaultRoot: incompleteMetadataVaultRoot,
   });
-  assert.equal(incompleteMetadataDetection.denseProviderRawTimeseriesCount, 1);
+  assert.equal(incompleteMetadataDetection.denseProviderRawTimeseriesCount, 0);
+
+  const malformedMetadataVaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    rawArtifactMetadata: null,
+  });
+  const malformedMetadataDetection = await detectWearableStorageMigrationCandidates({
+    includeRecentDenseRaw: true,
+    now: REPAIR_NOW,
+    vaultRoot: malformedMetadataVaultRoot,
+  });
+  assert.equal(malformedMetadataDetection.denseProviderRawTimeseriesCount, 0);
 });
 
 test("dense raw timeseries detection covers non-Junction dense provider roles", async () => {
@@ -784,7 +850,7 @@ test("raw tombstoning updates every agreeing manifest for a shared path", async 
   );
 });
 
-test("raw tombstoning does not exceed maxBytes for one oversized candidate", async () => {
+test("raw tombstoning allows one oversized candidate to avoid no-progress loops", async () => {
   const vaultRoot = await createRawArtifactFixture();
 
   const result = await runWearableStorageMigrationPass({
@@ -794,10 +860,14 @@ test("raw tombstoning does not exceed maxBytes for one oversized candidate", asy
     vaultRoot,
   });
 
-  assert.equal(result.mutated, false);
-  assert.equal(result.hasMore, true);
-  assert.equal(result.tombstonedCanonicalArtifactCount, 0);
-  assert.equal(result.bytesBefore, 0);
+  assert.equal(result.mutated, true);
+  assert.equal(result.hasMore, false);
+  assert.equal(result.tombstonedCanonicalArtifactCount, 1);
+  assert.ok(result.bytesBefore > 1);
+  const rawTombstone = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "03-canonical-wearable-records.json"), "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(rawTombstone.schemaVersion, "wearable.legacy_canonical_records_pruned.v1");
 });
 
 test("dense raw timeseries tombstoning treats escaped ledger raw references as blockers", async () => {
@@ -875,6 +945,37 @@ test("dense raw timeseries tombstoning treats malformed ledger shards as blocker
     `{"rawRef":\n`,
     "utf8",
   );
+
+  const result = await runWearableStorageMigrationPass({
+    vaultRoot,
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  assert.ok(result.skippedCount > 0);
+  const rawText = await fs.readFile(path.join(vaultRoot, rawPath), "utf8");
+  assert.match(rawText, /sampleValues/u);
+});
+
+test("dense raw timeseries tombstoning treats symlinked ledger shards as blockers", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  await runWearableStorageMigrationPass({
+    vaultRoot,
+    maxFiles: 1,
+    now: REPAIR_NOW,
+  });
+  const rawPath = `${RAW_DIRECTORY}/01-provider-timeseries-heart-rate.json`;
+  const eventShardPath = "ledger/events/2026/2026-05.jsonl";
+  const externalLedgerPath = path.join(
+    await makeTempDirectory("murph-wearable-storage-external-ledger"),
+    "external.jsonl",
+  );
+  await fs.writeFile(externalLedgerPath, `{"rawRef":"elsewhere"}\n`, "utf8");
+  await fs.mkdir(path.dirname(path.join(vaultRoot, eventShardPath)), { recursive: true });
+  await fs.symlink(externalLedgerPath, path.join(vaultRoot, eventShardPath));
 
   const result = await runWearableStorageMigrationPass({
     vaultRoot,

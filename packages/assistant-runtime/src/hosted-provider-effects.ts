@@ -7,7 +7,6 @@ import {
 import {
   isLinqChatNotFoundSendMessageError,
   markLinqChatRead,
-  probeLinqApi,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
   type LinqFetch,
@@ -110,6 +109,7 @@ export async function sendHostedProviderLinqMessage(
     if (recovered) {
       return recovered;
     }
+    throw createHostedProviderLinqRecoverySenderRequiredError();
   }
 
   try {
@@ -259,70 +259,43 @@ async function materializeHostedProviderLinqDirectThread(input: {
     return null;
   }
 
-  const senders = await resolveHostedProviderLinqRecoverySenders(input);
-
-  for (const sender of senders) {
-    try {
-      const delivered = await sendHostedProviderLinqMessageDirect({
-        fromPhoneNumber: sender,
-        idempotencyKey: input.request.idempotencyKey ?? null,
-        message: input.request.message,
-        replyToMessageId: input.request.replyToMessageId ?? null,
-        target: recipient,
-        targetKind: "participant",
-      }, input.dependencies);
-      const target =
-        normalizeHostedProviderText(delivered.target) ??
-        normalizeHostedProviderText(delivered.providerThreadId);
-      if (!target) {
-        throw createHostedProviderDeliveryConfirmationPendingError(
-          "Recovered iMessage direct delivery did not return a chat id.",
-        );
-      }
-      return {
-        ...delivered,
-        providerThreadId: normalizeHostedProviderText(delivered.providerThreadId) ?? target,
-        target,
-      };
-    } catch (error) {
-      if (isHostedProviderDeliveryConfirmationPendingError(error)) {
-        throw error;
-      }
-      if (shouldContinueLinqDirectThreadRecoveryAfterError(error)) {
-        continue;
-      }
-      if (isPotentiallyAcceptedLinqDirectThreadRecoveryError(error)) {
-        throw createHostedProviderDeliveryConfirmationPendingError(
-          "Recovered iMessage direct delivery could not be confirmed safely.",
-        );
-      }
-      throw error;
-    }
-  }
-
-  return null;
-}
-
-async function resolveHostedProviderLinqRecoverySenders(input: {
-  dependencies: HostedProviderEffectDependencies;
-  request: HostedRuntimeLinqSendRequest;
-}): Promise<string[]> {
   const sender = normalizeDirectLinqRecipient(input.request.fromPhoneNumber);
-  if (sender) {
-    return [sender];
+  if (!sender) {
+    return null;
   }
 
   try {
-    const probed = await probeLinqApi({
-      env: input.dependencies.env,
-      fetchImplementation: adaptHostedProviderFetchForLinq(
-        input.dependencies.fetchImplementation,
-      ),
-      signal: input.dependencies.signal,
-    });
-    return normalizeLinqSenderPhoneNumbers(probed.phoneNumbers);
-  } catch {
-    return [];
+    const delivered = await sendHostedProviderLinqMessageDirect({
+      fromPhoneNumber: sender,
+      idempotencyKey: input.request.idempotencyKey ?? null,
+      message: input.request.message,
+      replyToMessageId: input.request.replyToMessageId ?? null,
+      target: recipient,
+      targetKind: "participant",
+    }, input.dependencies);
+    const target =
+      normalizeHostedProviderText(delivered.target) ??
+      normalizeHostedProviderText(delivered.providerThreadId);
+    if (!target) {
+      throw createHostedProviderDeliveryConfirmationPendingError(
+        "Recovered iMessage direct delivery did not return a chat id.",
+      );
+    }
+    return {
+      ...delivered,
+      providerThreadId: normalizeHostedProviderText(delivered.providerThreadId) ?? target,
+      target,
+    };
+  } catch (error) {
+    if (isHostedProviderDeliveryConfirmationPendingError(error)) {
+      throw error;
+    }
+    if (isPotentiallyAcceptedLinqDirectThreadRecoveryError(error)) {
+      throw createHostedProviderDeliveryConfirmationPendingError(
+        "Recovered iMessage direct delivery could not be confirmed safely.",
+      );
+    }
+    throw error;
   }
 }
 
@@ -354,24 +327,6 @@ function looksLikeMissingLinqChatError(error: unknown): error is VaultCliError {
   return isLinqChatNotFoundSendMessageError(error);
 }
 
-function shouldContinueLinqDirectThreadRecoveryAfterError(error: unknown): boolean {
-  if (
-    !(error instanceof VaultCliError)
-    || error.code !== "LINQ_API_REQUEST_FAILED"
-    || error.context?.failureStage !== "http"
-    || error.context?.retryable === true
-  ) {
-    return false;
-  }
-
-  const status = error.context?.status;
-  return typeof status === "number" &&
-    status >= 400 &&
-    status < 500 &&
-    status !== 408 &&
-    status !== 429;
-}
-
 function isPotentiallyAcceptedLinqDirectThreadRecoveryError(
   error: unknown,
 ): boolean {
@@ -392,15 +347,19 @@ function normalizeDirectLinqRecipient(value: string | null | undefined): string 
   return recipient.startsWith("+") ? recipient : null;
 }
 
-function normalizeLinqSenderPhoneNumbers(phoneNumbers: readonly unknown[]): string[] {
-  return phoneNumbers
-    .map((phoneNumber) => typeof phoneNumber === "string" ? phoneNumber.trim() : "")
-    .filter((phoneNumber) => phoneNumber.startsWith("+"));
-}
-
 function normalizeHostedProviderText(value: string | null | undefined): string | null {
   const text = value?.trim() ?? "";
   return text.length > 0 ? text : null;
+}
+
+function createHostedProviderLinqRecoverySenderRequiredError(): VaultCliError {
+  return new VaultCliError(
+    "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED",
+    "Hosted Linq direct-thread materialization requires an explicit sender route.",
+    {
+      retryable: false,
+    },
+  );
 }
 
 function createHostedProviderDeliveryConfirmationPendingError(detail: string): {

@@ -154,7 +154,7 @@ describe("hosted provider effects", () => {
     ]);
   });
 
-  it("recovers stale Linq thread sends inside the provider effect", async () => {
+  it("recovers stale Linq thread sends inside the provider effect with an explicit sender", async () => {
     const fetchMock = vi.fn(async (
       input: RequestInfo | URL,
       _init?: RequestInit,
@@ -169,18 +169,6 @@ describe("hosted provider effects", () => {
             "content-type": "application/json; charset=utf-8",
           },
           status: 404,
-        });
-      }
-      if (url.endsWith("/phone_numbers")) {
-        return new Response(JSON.stringify({
-          phone_numbers: [
-            { phone_number: "+15550000" },
-          ],
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
         });
       }
       if (url.endsWith("/chats")) {
@@ -207,6 +195,7 @@ describe("hosted provider effects", () => {
 
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -220,22 +209,18 @@ describe("hosted provider effects", () => {
       target: "recovered-chat",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     assert.equal(
       String(fetchMock.mock.calls[0]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats/stale-chat/messages",
     );
     assert.equal(
       String(fetchMock.mock.calls[1]?.[0]),
-      "https://api.linqapp.com/api/partner/v3/phone_numbers",
-    );
-    assert.equal(
-      String(fetchMock.mock.calls[2]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
     );
   });
 
-  it("uses the hosted provider fetch dependency while probing Linq recovery senders", async () => {
+  it("uses the hosted provider fetch dependency for explicit-sender Linq recovery", async () => {
     const rawGlobalFetch = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ) => {
@@ -257,18 +242,6 @@ describe("hosted provider effects", () => {
             "content-type": "application/json; charset=utf-8",
           },
           status: 404,
-        });
-      }
-      if (url.endsWith("/phone_numbers")) {
-        return new Response(JSON.stringify({
-          phone_numbers: [
-            { phone_number: "+15550000" },
-          ],
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
         });
       }
       if (url.endsWith("/chats")) {
@@ -294,6 +267,7 @@ describe("hosted provider effects", () => {
 
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -309,22 +283,18 @@ describe("hosted provider effects", () => {
     });
 
     expect(rawGlobalFetch).not.toHaveBeenCalled();
-    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
     assert.equal(
       String(fetchImplementation.mock.calls[0]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats/stale-chat/messages",
     );
     assert.equal(
       String(fetchImplementation.mock.calls[1]?.[0]),
-      "https://api.linqapp.com/api/partner/v3/phone_numbers",
-    );
-    assert.equal(
-      String(fetchImplementation.mock.calls[2]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
     );
   });
 
-  it("does not try another Linq recovery sender after an ambiguous create-chat response", async () => {
+  it("does not retry Linq recovery after an ambiguous create-chat response", async () => {
     const fetchImplementation = vi.fn(async (
       input: RequestInfo | URL,
       _init?: RequestInit,
@@ -339,19 +309,6 @@ describe("hosted provider effects", () => {
             "content-type": "application/json; charset=utf-8",
           },
           status: 404,
-        });
-      }
-      if (url.endsWith("/phone_numbers")) {
-        return new Response(JSON.stringify({
-          phone_numbers: [
-            { phone_number: "+15550000" },
-            { phone_number: "+15550002" },
-          ],
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
         });
       }
       if (url.endsWith("/chats")) {
@@ -372,6 +329,7 @@ describe("hosted provider effects", () => {
 
     await expect(sendHostedProviderLinqMessage({
       directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
@@ -388,6 +346,33 @@ describe("hosted provider effects", () => {
       String(input).endsWith("/chats")
     );
     expect(createChatCalls).toHaveLength(1);
+  });
+
+  it("does not materialize or send redacted Linq direct targets without an explicit sender", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(null, {
+      status: 204,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      message: "hello",
+      target: "h1_111111111111111111111111",
+      targetKind: "explicit",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED",
+      context: expect.objectContaining({
+        retryable: false,
+      }),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not recover unclassified Linq thread send 404 responses", async () => {

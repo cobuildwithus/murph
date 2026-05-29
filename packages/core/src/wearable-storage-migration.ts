@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
@@ -11,8 +11,7 @@ import {
 
 import { emitAuditRecord } from "./audit.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
-import { walkVaultFiles } from "./fs.ts";
-import { readJsonlRecords } from "./jsonl.ts";
+import { walkVaultFiles, walkVaultFilesInterruptible } from "./fs.ts";
 import {
   isRawManifestFileName,
   parseRawImportManifest,
@@ -27,9 +26,11 @@ import {
   resolveVaultPath,
   resolveVaultPathOnDisk,
 } from "./path-safety.ts";
-import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
+import {
+  statAndHashVaultFile,
+  statAndHashVaultFileInterruptible,
+} from "./raw-artifact-integrity.ts";
 import { assertValidVault } from "./vault.ts";
-import { VaultError } from "./errors.ts";
 import {
   compactLegacyWearableReceiptEnvelopes,
   detectLegacyWearableReceiptCompaction,
@@ -101,12 +102,14 @@ interface RawManifestSnapshot {
 }
 
 interface RawManifestReadResult {
+  interrupted: boolean;
   invalidDirectories: Set<string>;
   snapshots: RawManifestSnapshot[];
 }
 
 type LedgerRawReferenceScan =
   | { kind: "ok"; rawPaths: ReadonlySet<string> }
+  | { kind: "interrupted" }
   | { kind: "unsafe" };
 
 interface RawArtifactReference {
@@ -125,6 +128,11 @@ interface RawArtifactRetentionMetadata {
   resourceCategory: "timeseries";
   retentionClass: "debug_temporary" | "provider_evidence";
 }
+
+type RawArtifactProvenanceMetadataLookup =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | { kind: "present"; metadata: RawArtifactRetentionMetadata };
 
 interface PreparedRawTombstone {
   artifactClass: "dense_provider_timeseries" | "derived_canonical_records";
@@ -386,13 +394,15 @@ export async function runWearableStorageMigrationPass({
     hasMore ||= denseRawResult.hasMore;
   }
 
+  const hasUnattemptedEnabledRepair =
+    (shouldCompactReceipts && !attemptedReceiptCompaction)
+    || (shouldTombstoneCanonicalArtifacts && !attemptedCanonicalTombstones)
+    || (shouldTombstoneDenseRaw && !attemptedDenseRawTombstones);
+
   if (
     !hasMore
-    && (
-      !attemptedReceiptCompaction
-      || !attemptedCanonicalTombstones
-      || (shouldTombstoneDenseRaw && !attemptedDenseRawTombstones)
-    )
+    && hasUnattemptedEnabledRepair
+    && !deadlineExceeded(startedAtMs, deadlineMs)
   ) {
     const detection = await detectWearableStorageMigrationCandidates({
       includeRecentDenseRaw,
@@ -514,9 +524,34 @@ async function tombstoneRawArtifactClassLocked(input: {
   startedAtMs: number;
   vaultRoot: string;
 }): Promise<RawTombstoneRunResult> {
-  const manifestReadResult = await readRawManifestReadResult(input.vaultRoot);
+  const shouldContinue = () => !deadlineExceeded(input.startedAtMs, input.deadlineMs);
+  const manifestReadResult = await readRawManifestReadResult(input.vaultRoot, {
+    shouldContinue,
+  });
+  if (manifestReadResult.interrupted) {
+    return {
+      bytesAfter: 0,
+      bytesBefore: 0,
+      hasMore: true,
+      skippedCount: 0,
+      tombstonedCount: 0,
+      touchedPaths: [],
+    };
+  }
   const manifestSnapshots = manifestReadResult.snapshots;
-  const ledgerRawReferences = await collectLedgerRawReferences(input.vaultRoot);
+  const ledgerRawReferences = await collectLedgerRawReferences(input.vaultRoot, {
+    shouldContinue,
+  });
+  if (ledgerRawReferences.kind === "interrupted") {
+    return {
+      bytesAfter: 0,
+      bytesBefore: 0,
+      hasMore: true,
+      skippedCount: 0,
+      tombstonedCount: 0,
+      touchedPaths: [],
+    };
+  }
   const groups = collectRawArtifactReferenceGroups(manifestSnapshots, input.predicate)
     .filter((references) => isRawTombstoneReferenceGroupInScope({
       artifactClass: input.artifactClass,
@@ -542,7 +577,9 @@ async function tombstoneRawArtifactClassLocked(input: {
       break;
     }
     const largestBytes = largestReferenceByteSize(references);
-    if (bytesBefore + largestBytes > input.maxBytes) {
+    const overBatchByteBudget = bytesBefore + largestBytes > input.maxBytes;
+    const canMakeSingleOversizedProgress = prepared.length === 0 && bytesBefore === 0;
+    if (overBatchByteBudget && !canMakeSingleOversizedProgress) {
       hasMore = true;
       continue;
     }
@@ -557,8 +594,13 @@ async function tombstoneRawArtifactClassLocked(input: {
       reason: input.reason,
       references,
       schemaVersion: input.schemaVersion,
+      shouldContinue,
       vaultRoot: input.vaultRoot,
     });
+    if (tombstone === "interrupted") {
+      hasMore = true;
+      break;
+    }
     if (!tombstone) {
       skippedCount += 1;
       continue;
@@ -660,8 +702,9 @@ async function prepareRawArtifactTombstone(input: {
   reason: string;
   references: readonly RawArtifactReference[];
   schemaVersion: string;
+  shouldContinue?: () => boolean;
   vaultRoot: string;
-}): Promise<PreparedRawTombstone | null> {
+}): Promise<"interrupted" | PreparedRawTombstone | null> {
   const [firstReference] = input.references;
   if (!firstReference || !rawArtifactReferencesAgree(input.references)) {
     return null;
@@ -680,23 +723,33 @@ async function prepareRawArtifactTombstone(input: {
   ) {
     return null;
   }
-  if (!await manifestsHaveRequiredEvidenceFiles({
+  const hasRequiredEvidence = await manifestsHaveRequiredEvidenceFiles({
     artifactClass: input.artifactClass,
     references: input.references,
+    shouldContinue: input.shouldContinue,
     vaultRoot: input.vaultRoot,
-  })) {
+  });
+  if (hasRequiredEvidence === "interrupted") {
+    return "interrupted";
+  }
+  if (!hasRequiredEvidence) {
     return null;
   }
-  const actual = await statAndHashVaultFile(input.vaultRoot, targetArtifact.relativePath);
+  const actualResult = await statAndHashVaultFileInterruptible(input.vaultRoot, targetArtifact.relativePath, {
+    shouldContinue: input.shouldContinue,
+  });
+  if (actualResult.kind === "interrupted") {
+    return "interrupted";
+  }
   if (
-    !actual
-    || actual.byteSize !== targetArtifact.byteSize
-    || actual.sha256 !== targetArtifact.sha256
+    actualResult.kind === "missing"
+    || actualResult.integrity.byteSize !== targetArtifact.byteSize
+    || actualResult.integrity.sha256 !== targetArtifact.sha256
   ) {
     return null;
   }
   if (
-    input.ledgerRawReferences.kind === "unsafe"
+    input.ledgerRawReferences.kind !== "ok"
     || input.ledgerRawReferences.rawPaths.has(targetArtifact.relativePath)
   ) {
     return null;
@@ -812,21 +865,40 @@ function updateRawTombstoneManifestProvenance(input: {
 
 async function readRawManifestSnapshots(
   vaultRoot: string,
-  options: { maxManifestBytes?: number } = {},
+  options: { maxManifestBytes?: number; shouldContinue?: () => boolean } = {},
 ): Promise<RawManifestSnapshot[]> {
   return (await readRawManifestReadResult(vaultRoot, options)).snapshots;
 }
 
 async function readRawManifestReadResult(
   vaultRoot: string,
-  options: { maxManifestBytes?: number } = {},
+  options: { maxManifestBytes?: number; shouldContinue?: () => boolean } = {},
 ): Promise<RawManifestReadResult> {
-  const manifestPaths = (await walkVaultFiles(vaultRoot, "raw", { extension: ".json" }))
+  const manifestWalk = await walkVaultFilesInterruptible(vaultRoot, "raw", {
+    extension: ".json",
+    shouldContinue: options.shouldContinue,
+  });
+  const manifestPaths = manifestWalk.relativePaths
     .filter((relativePath) => isRawManifestFileName(path.posix.basename(relativePath)));
   const snapshots: RawManifestSnapshot[] = [];
   const invalidDirectories = new Set<string>();
 
+  if (manifestWalk.interrupted) {
+    return {
+      interrupted: true,
+      invalidDirectories,
+      snapshots,
+    };
+  }
+
   for (const relativePath of manifestPaths) {
+    if (options.shouldContinue?.() === false) {
+      return {
+        interrupted: true,
+        invalidDirectories,
+        snapshots,
+      };
+    }
     try {
       const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath);
       const stats = await fs.lstat(resolved.absolutePath);
@@ -840,6 +912,13 @@ async function readRawManifestReadResult(
       ) {
         continue;
       }
+      if (options.shouldContinue?.() === false) {
+        return {
+          interrupted: true,
+          invalidDirectories,
+          snapshots,
+        };
+      }
       snapshots.push({
         manifest: parseRawImportManifest(JSON.parse(await fs.readFile(resolved.absolutePath, "utf8"))),
         relativePath,
@@ -851,6 +930,7 @@ async function readRawManifestReadResult(
   }
 
   return {
+    interrupted: false,
     invalidDirectories,
     snapshots,
   };
@@ -908,29 +988,85 @@ async function collectDenseSampleShardCandidates(
 
 async function collectLedgerRawReferences(
   vaultRoot: string,
+  options: { shouldContinue?: () => boolean } = {},
 ): Promise<LedgerRawReferenceScan> {
   const rawPaths = new Set<string>();
   for (const directory of ["ledger/events", "ledger/samples", "ledger/metric-samples"]) {
-    const files = await walkVaultFiles(vaultRoot, directory, { extension: ".jsonl" });
+    if (options.shouldContinue?.() === false) {
+      return { kind: "interrupted" };
+    }
+    const walkResult = await walkVaultFilesInterruptible(vaultRoot, directory, {
+      extension: ".jsonl",
+      shouldContinue: options.shouldContinue,
+    });
+    if (walkResult.interrupted) {
+      return { kind: "interrupted" };
+    }
+    const files = walkResult.relativePaths;
     for (const file of files) {
-      let records: Awaited<ReturnType<typeof readJsonlRecords>>;
-      try {
-        records = await readJsonlRecords({
-          vaultRoot,
-          relativePath: file,
-        });
-      } catch (error) {
-        if (error instanceof VaultError && error.code === "VAULT_INVALID_JSONL") {
-          return { kind: "unsafe" };
-        }
-        throw error;
+      if (options.shouldContinue?.() === false) {
+        return { kind: "interrupted" };
       }
-      for (const record of records) {
-        collectRawPathStrings(record, rawPaths);
+      const outcome = await collectLedgerRawReferencesFromFile({
+        file,
+        rawPaths,
+        shouldContinue: options.shouldContinue,
+        vaultRoot,
+      });
+      if (outcome !== "ok") {
+        return { kind: outcome };
       }
     }
   }
   return { kind: "ok", rawPaths };
+}
+
+async function collectLedgerRawReferencesFromFile(input: {
+  file: string;
+  rawPaths: Set<string>;
+  shouldContinue?: () => boolean;
+  vaultRoot: string;
+}): Promise<"interrupted" | "ok" | "unsafe"> {
+  let resolved: Awaited<ReturnType<typeof resolveVaultPathOnDisk>>;
+  try {
+    resolved = await resolveVaultPathOnDisk(input.vaultRoot, input.file);
+  } catch {
+    return "unsafe";
+  }
+  let buffered = "";
+
+  for await (const chunk of createReadStream(resolved.absolutePath, { encoding: "utf8" })) {
+    if (input.shouldContinue?.() === false) {
+      return "interrupted";
+    }
+    buffered += chunk;
+    let newlineIndex = buffered.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = buffered.slice(0, newlineIndex);
+      buffered = buffered.slice(newlineIndex + 1);
+      if (line.trim().length > 0 && !collectRawPathStringsFromJsonLine(line, input.rawPaths)) {
+        return "unsafe";
+      }
+      if (input.shouldContinue?.() === false) {
+        return "interrupted";
+      }
+      newlineIndex = buffered.indexOf("\n");
+    }
+  }
+
+  if (buffered.trim().length > 0 && !collectRawPathStringsFromJsonLine(buffered, input.rawPaths)) {
+    return "unsafe";
+  }
+  return input.shouldContinue?.() === false ? "interrupted" : "ok";
+}
+
+function collectRawPathStringsFromJsonLine(line: string, rawPaths: Set<string>): boolean {
+  try {
+    collectRawPathStrings(JSON.parse(line), rawPaths);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function collectRawPathStrings(value: unknown, rawPaths: Set<string>): void {
@@ -994,8 +1130,9 @@ function rawArtifactReferencesAgree(references: readonly RawArtifactReference[])
 async function manifestsHaveRequiredEvidenceFiles(input: {
   artifactClass: PreparedRawTombstone["artifactClass"];
   references: readonly RawArtifactReference[];
+  shouldContinue?: () => boolean;
   vaultRoot: string;
-}): Promise<boolean> {
+}): Promise<"interrupted" | boolean> {
   for (const reference of input.references) {
     const providerEvidenceArtifacts: RawImportManifestArtifact[] = [];
     const receiptArtifacts: RawImportManifestArtifact[] = [];
@@ -1024,13 +1161,24 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
       return false;
     }
     for (const artifact of providerEvidenceArtifacts) {
-      if (!await rawArtifactIsUsableEvidenceFile(input.vaultRoot, artifact)) {
+      const usable = await rawArtifactIsUsableEvidenceFile(input.vaultRoot, artifact, {
+        shouldContinue: input.shouldContinue,
+      });
+      if (usable === "interrupted") {
+        return "interrupted";
+      }
+      if (!usable) {
         return false;
       }
     }
     const coveredRoles = new Set<string>();
     for (const artifact of receiptArtifacts) {
-      const receiptRoles = await readReceiptCoveredRoles(input.vaultRoot, artifact);
+      const receiptRoles = await readReceiptCoveredRoles(input.vaultRoot, artifact, {
+        shouldContinue: input.shouldContinue,
+      });
+      if (receiptRoles === "interrupted") {
+        return "interrupted";
+      }
       if (!receiptRoles) {
         return false;
       }
@@ -1057,14 +1205,25 @@ async function manifestsHaveRequiredEvidenceFiles(input: {
 async function readReceiptCoveredRoles(
   vaultRoot: string,
   artifact: RawImportManifestArtifact,
-): Promise<Set<string> | null> {
-  if (!await rawArtifactIsUsableEvidenceFile(vaultRoot, artifact)) {
+  options: { shouldContinue?: () => boolean } = {},
+): Promise<"interrupted" | Set<string> | null> {
+  const usable = await rawArtifactIsUsableEvidenceFile(vaultRoot, artifact, options);
+  if (usable === "interrupted") {
+    return "interrupted";
+  }
+  if (!usable) {
     return null;
+  }
+  if (options.shouldContinue?.() === false) {
+    return "interrupted";
   }
   try {
     const raw = JSON.parse(
       await fs.readFile(resolveVaultPath(vaultRoot, artifact.relativePath).absolutePath, "utf8"),
     );
+    if (options.shouldContinue?.() === false) {
+      return "interrupted";
+    }
     if (!isPlainRecord(raw)) {
       return null;
     }
@@ -1111,19 +1270,31 @@ function readStringArray(value: unknown): string[] | null {
 async function rawArtifactFileMatchesManifest(
   vaultRoot: string,
   artifact: RawImportManifestArtifact,
-): Promise<boolean> {
-  const actual = await statAndHashVaultFile(vaultRoot, artifact.relativePath);
-  return actual !== null
-    && actual.byteSize === artifact.byteSize
-    && actual.sha256 === artifact.sha256;
+  options: { shouldContinue?: () => boolean } = {},
+): Promise<"interrupted" | boolean> {
+  const actual = await statAndHashVaultFileInterruptible(vaultRoot, artifact.relativePath, options);
+  if (actual.kind === "interrupted") {
+    return "interrupted";
+  }
+  return actual.kind === "ok"
+    && actual.integrity.byteSize === artifact.byteSize
+    && actual.integrity.sha256 === artifact.sha256;
 }
 
 async function rawArtifactIsUsableEvidenceFile(
   vaultRoot: string,
   artifact: RawImportManifestArtifact,
-): Promise<boolean> {
-  if (!await rawArtifactFileMatchesManifest(vaultRoot, artifact)) {
+  options: { shouldContinue?: () => boolean } = {},
+): Promise<"interrupted" | boolean> {
+  const matches = await rawArtifactFileMatchesManifest(vaultRoot, artifact, options);
+  if (matches === "interrupted") {
+    return "interrupted";
+  }
+  if (!matches) {
     return false;
+  }
+  if (options.shouldContinue?.() === false) {
+    return "interrupted";
   }
   return !await rawArtifactContentIsWearableStorageTombstone(vaultRoot, artifact);
 }
@@ -1158,14 +1329,16 @@ function isDenseRawTimeseriesArtifact(
   artifact: RawImportManifestArtifact,
   manifest?: RawImportManifest,
 ): boolean {
-  const metadata = manifest
-    ? readRawArtifactProvenanceMetadata(artifact, manifest)
-    : null;
-  const retentionMetadata = parseRawArtifactRetentionMetadata(metadata);
-  if (retentionMetadata) {
-    return retentionMetadata.artifactClass === "dense_provider_timeseries"
-      && retentionMetadata.resourceCategory === "timeseries"
-      && retentionMetadata.retentionClass === "debug_temporary";
+  const retentionMetadata = manifest
+    ? readRawArtifactRetentionMetadataState(artifact, manifest)
+    : { kind: "absent" } satisfies RawArtifactProvenanceMetadataLookup;
+  if (retentionMetadata.kind === "invalid") {
+    return false;
+  }
+  if (retentionMetadata.kind === "present") {
+    return retentionMetadata.metadata.artifactClass === "dense_provider_timeseries"
+      && retentionMetadata.metadata.resourceCategory === "timeseries"
+      && retentionMetadata.metadata.retentionClass === "debug_temporary";
   }
 
   const role = artifact.role.toLowerCase();
@@ -1175,13 +1348,17 @@ function isDenseRawTimeseriesArtifact(
     && DENSE_RAW_ROLE_TERMS.some((term) => role.includes(term));
 }
 
-function readRawArtifactProvenanceMetadata(
+function readRawArtifactRetentionMetadataState(
   artifact: RawImportManifestArtifact,
   manifest: RawImportManifest,
-): Record<string, unknown> | null {
+): RawArtifactProvenanceMetadataLookup {
+  if (!Object.prototype.hasOwnProperty.call(manifest.provenance, "rawArtifacts")) {
+    return { kind: "absent" };
+  }
+
   const rawArtifacts = readRecordArray(manifest.provenance.rawArtifacts);
   if (!rawArtifacts) {
-    return null;
+    return { kind: "invalid" };
   }
 
   for (const entry of rawArtifacts) {
@@ -1192,10 +1369,17 @@ function readRawArtifactProvenanceMetadata(
     ) {
       continue;
     }
-    return isPlainRecord(entry.metadata) ? entry.metadata : null;
+    if (!Object.prototype.hasOwnProperty.call(entry, "metadata")) {
+      return { kind: "absent" };
+    }
+    if (!isPlainRecord(entry.metadata)) {
+      return { kind: "invalid" };
+    }
+    const metadata = parseRawArtifactRetentionMetadata(entry.metadata);
+    return metadata ? { kind: "present", metadata } : { kind: "invalid" };
   }
 
-  return null;
+  return { kind: "absent" };
 }
 
 function readRecordArray(value: unknown): Record<string, unknown>[] | null {
