@@ -954,6 +954,37 @@ describe("hosted runtime control contracts", () => {
       routePlanningBootstrapContextPrepared: false,
       routePlanningSensitiveHealthContextAllowed: true,
     });
+    expect(parseHostedRuntimeLogRequest({
+      entries: [{
+        ...entry,
+        component: "device-sync",
+        eventCode: "device-sync.dense_raw_retention",
+        phase: "invoke",
+        redactedJson: {
+          denseRawAfterBytes: 500,
+          denseRawBeforeBytes: 9000,
+          denseRawCandidateCount: 3,
+          denseRawEligibleBytes: 12345,
+          denseRawEligibleCount: 2,
+          denseRawFreedBytes: 8500,
+          hasMore: false,
+          processedJobs: 2,
+          skippedCount: 1,
+          tombstonedDenseRawArtifactCount: 2,
+        },
+      }],
+    }).entries[0]?.redactedJson).toEqual({
+      denseRawAfterBytes: 500,
+      denseRawBeforeBytes: 9000,
+      denseRawCandidateCount: 3,
+      denseRawEligibleBytes: 12345,
+      denseRawEligibleCount: 2,
+      denseRawFreedBytes: 8500,
+      hasMore: false,
+      processedJobs: 2,
+      skippedCount: 1,
+      tombstonedDenseRawArtifactCount: 2,
+    });
     expect(parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

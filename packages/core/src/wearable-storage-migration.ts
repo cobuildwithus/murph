@@ -60,6 +60,11 @@ export interface WearableStorageMigrationResult {
   touchedPaths: string[];
 }
 
+export type WearableStorageMigrationRepairClass =
+  | "dense_raw_timeseries"
+  | "legacy_canonical_artifacts"
+  | "legacy_receipts";
+
 export interface DetectWearableStorageMigrationCandidatesInput {
   vaultRoot: string;
   includeRecentDenseRaw?: boolean;
@@ -74,6 +79,7 @@ export interface RunWearableStorageMigrationPassInput {
   deadlineMs?: number;
   now?: Date;
   pruneDenseRaw?: boolean;
+  repairClasses?: readonly WearableStorageMigrationRepairClass[];
   includeRecentDenseRaw?: boolean;
   validateAfter?: boolean;
 }
@@ -167,7 +173,16 @@ const DENSE_RAW_ROLE_TERMS = Object.freeze([
   "steps",
   "temperature",
 ]);
-const DENSE_RAW_EXACT_ROLES = new Set(DENSE_RAW_ROLE_TERMS);
+const DENSE_RAW_TIMESERIES_ONLY_TERMS = new Set([
+  "active-calories",
+  "active_calories",
+  "calories-active",
+  "calories_active",
+  "distance",
+]);
+const DENSE_RAW_EXACT_ROLES = new Set(
+  DENSE_RAW_ROLE_TERMS.filter((term) => !DENSE_RAW_TIMESERIES_ONLY_TERMS.has(term)),
+);
 
 export async function detectWearableStorageMigrationCandidates({
   includeRecentDenseRaw = false,
@@ -222,9 +237,20 @@ export async function runWearableStorageMigrationPass({
   deadlineMs,
   now = new Date(),
   pruneDenseRaw = false,
+  repairClasses,
   includeRecentDenseRaw = false,
   validateAfter = true,
 }: RunWearableStorageMigrationPassInput): Promise<WearableStorageMigrationResult> {
+  const enabledRepairClasses = resolveWearableStorageMigrationRepairClasses({
+    pruneDenseRaw,
+    repairClasses,
+  });
+  const shouldCompactReceipts = enabledRepairClasses.has("legacy_receipts");
+  const shouldTombstoneCanonicalArtifacts = enabledRepairClasses.has(
+    "legacy_canonical_artifacts",
+  );
+  const shouldTombstoneDenseRaw = pruneDenseRaw
+    && enabledRepairClasses.has("dense_raw_timeseries");
   const startedAtMs = Date.now();
   let remainingFiles = Math.max(0, Math.trunc(maxFiles));
   let remainingBytes = Math.max(0, Math.trunc(maxBytes));
@@ -242,7 +268,12 @@ export async function runWearableStorageMigrationPass({
   let attemptedCanonicalTombstones = false;
   let attemptedDenseRawTombstones = false;
 
-  if (remainingFiles > 0 && remainingBytes > 0 && !deadlineExceeded(startedAtMs, deadlineMs)) {
+  if (
+    shouldCompactReceipts
+    && remainingFiles > 0
+    && remainingBytes > 0
+    && !deadlineExceeded(startedAtMs, deadlineMs)
+  ) {
     attemptedReceiptCompaction = true;
     const receiptResult = await compactLegacyWearableReceiptEnvelopes({
       deadlineMs: remainingDeadlineMs(startedAtMs, deadlineMs),
@@ -267,7 +298,12 @@ export async function runWearableStorageMigrationPass({
     hasMore ||= receiptResult.hasMore;
   }
 
-  if (remainingFiles > 0 && remainingBytes > 0 && !deadlineExceeded(startedAtMs, deadlineMs)) {
+  if (
+    shouldTombstoneCanonicalArtifacts
+    && remainingFiles > 0
+    && remainingBytes > 0
+    && !deadlineExceeded(startedAtMs, deadlineMs)
+  ) {
     attemptedCanonicalTombstones = true;
     const canonicalResult = await tombstoneRawArtifactClass({
       artifactClass: "derived_canonical_records",
@@ -294,7 +330,7 @@ export async function runWearableStorageMigrationPass({
   }
 
   if (
-    pruneDenseRaw
+    shouldTombstoneDenseRaw
     && remainingFiles > 0
     && remainingBytes > 0
     && !deadlineExceeded(startedAtMs, deadlineMs)
@@ -332,7 +368,7 @@ export async function runWearableStorageMigrationPass({
     && (
       !attemptedReceiptCompaction
       || !attemptedCanonicalTombstones
-      || (pruneDenseRaw && !attemptedDenseRawTombstones)
+      || (shouldTombstoneDenseRaw && !attemptedDenseRawTombstones)
     )
   ) {
     const detection = await detectWearableStorageMigrationCandidates({
@@ -340,14 +376,22 @@ export async function runWearableStorageMigrationPass({
       now,
       vaultRoot,
     });
-    if (!attemptedReceiptCompaction && detection.legacyReceiptPayloadCount > 0) {
-      hasMore = true;
-    }
-    if (!attemptedCanonicalTombstones && detection.legacyCanonicalArtifactCount > 0) {
+    if (
+      shouldCompactReceipts
+      && !attemptedReceiptCompaction
+      && detection.legacyReceiptPayloadCount > 0
+    ) {
       hasMore = true;
     }
     if (
-      pruneDenseRaw
+      shouldTombstoneCanonicalArtifacts
+      && !attemptedCanonicalTombstones
+      && detection.legacyCanonicalArtifactCount > 0
+    ) {
+      hasMore = true;
+    }
+    if (
+      shouldTombstoneDenseRaw
       && !attemptedDenseRawTombstones
       && detection.retentionEligibleDenseProviderRawTimeseriesCount > 0
     ) {
@@ -430,6 +474,12 @@ async function tombstoneRawArtifactClassLocked(input: {
   const manifestSnapshots = manifestReadResult.snapshots;
   const ledgerRawReferences = await collectLedgerRawReferences(input.vaultRoot);
   const groups = collectRawArtifactReferenceGroups(manifestSnapshots, input.predicate)
+    .filter((references) => isRawTombstoneReferenceGroupInScope({
+      artifactClass: input.artifactClass,
+      denseRetentionPolicy: input.denseRetentionPolicy,
+      now: input.now,
+      references,
+    }))
     .sort((left, right) => largestReferenceByteSize(right) - largestReferenceByteSize(left));
   const prepared: PreparedRawTombstone[] = [];
   const touchedManifestPaths = new Set<string>();
@@ -448,7 +498,7 @@ async function tombstoneRawArtifactClassLocked(input: {
       break;
     }
     const largestBytes = largestReferenceByteSize(references);
-    if (prepared.length > 0 && bytesBefore + largestBytes > input.maxBytes) {
+    if (bytesBefore + largestBytes > input.maxBytes) {
       hasMore = true;
       continue;
     }
@@ -1095,6 +1145,37 @@ function isDenseRawReferenceGroupOlderThanRetentionWindow(
     && references.every((reference) =>
       isArtifactOlderThanDenseRetentionWindow(reference.manifest.importedAt, now)
     );
+}
+
+function isRawTombstoneReferenceGroupInScope(input: {
+  artifactClass: PreparedRawTombstone["artifactClass"];
+  denseRetentionPolicy?: {
+    includeRecent: boolean;
+  };
+  now: Date;
+  references: readonly RawArtifactReference[];
+}): boolean {
+  return input.artifactClass !== "dense_provider_timeseries"
+    || input.denseRetentionPolicy?.includeRecent === true
+    || isDenseRawReferenceGroupOlderThanRetentionWindow(input.references, input.now);
+}
+
+function resolveWearableStorageMigrationRepairClasses(input: {
+  pruneDenseRaw: boolean;
+  repairClasses?: readonly WearableStorageMigrationRepairClass[];
+}): ReadonlySet<WearableStorageMigrationRepairClass> {
+  if (input.repairClasses) {
+    return new Set(input.repairClasses);
+  }
+
+  const repairClasses = new Set<WearableStorageMigrationRepairClass>([
+    "legacy_canonical_artifacts",
+    "legacy_receipts",
+  ]);
+  if (input.pruneDenseRaw) {
+    repairClasses.add("dense_raw_timeseries");
+  }
+  return repairClasses;
 }
 
 function deadlineExceeded(startedAtMs: number, deadlineMs: number | undefined): boolean {

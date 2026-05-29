@@ -746,7 +746,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.snapshot_started",
   "workspace.codex_continuity_repaired",
   "workspace.codex_home_snapshot_failed",
-  "assistant.codex_doctor_snapshot",
   "assistant.device_connect",
   "assistant.automation_detail",
   "assistant.pass_finished",

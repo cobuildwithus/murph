@@ -220,7 +220,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
           denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
           denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
           retentionEligibleDenseProviderRawTimeseriesBytes:
-            detection.retentionEligibleDenseProviderRawTimeseriesBytes,
+            detection.retentionEligibleDenseProviderRawTimeseriesBytes ?? 0,
           retentionEligibleDenseProviderRawTimeseriesCount:
             detection.retentionEligibleDenseProviderRawTimeseriesCount,
           mutated: false,
@@ -256,7 +256,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
         denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
         denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
         retentionEligibleDenseProviderRawTimeseriesBytes:
-          detection.retentionEligibleDenseProviderRawTimeseriesBytes,
+          detection.retentionEligibleDenseProviderRawTimeseriesBytes ?? 0,
         retentionEligibleDenseProviderRawTimeseriesCount:
           detection.retentionEligibleDenseProviderRawTimeseriesCount,
         mutated: result.mutated,
@@ -265,9 +265,9 @@ function createIntegratedCoreServices(): CoreWriteServices {
         bytesAfter: result.bytesAfter,
         bytesFreed: result.bytesFreed,
         compactedReceiptCount: result.compactedReceiptCount,
-        denseRawBytesAfter: result.denseRawBytesAfter,
-        denseRawBytesBefore: result.denseRawBytesBefore,
-        denseRawBytesFreed: result.denseRawBytesFreed,
+        denseRawBytesAfter: result.denseRawBytesAfter ?? 0,
+        denseRawBytesBefore: result.denseRawBytesBefore ?? 0,
+        denseRawBytesFreed: result.denseRawBytesFreed ?? 0,
         tombstonedCanonicalArtifactCount: result.tombstonedCanonicalArtifactCount,
         tombstonedDenseRawArtifactCount: result.tombstonedDenseRawArtifactCount,
         skippedCount: result.skippedCount,

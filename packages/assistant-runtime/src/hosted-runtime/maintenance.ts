@@ -830,6 +830,7 @@ export async function runHostedDeviceSyncPass(
     options.shouldYield ?? null,
     options.signal ?? null,
   );
+  const startedAtMs = Date.now();
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     platformEnv,
@@ -925,21 +926,6 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
-    await runHostedDeviceSyncDenseRawRetention({
-      platform: options.runtimeLogPlatform ?? null,
-      processedJobs,
-      vaultRoot,
-    });
-
-    if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        service,
-        syncState,
-        wake,
-      });
-    }
-
     if (secret && controlPlaneSynced) {
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -960,6 +946,23 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
+    const denseRawRetention = await runHostedDeviceSyncDenseRawRetention({
+      deadlineMs: remainingHostedDeviceSyncDeadlineMs(startedAtMs, timeoutMs),
+      platform: options.runtimeLogPlatform ?? null,
+      processedJobs,
+      shouldYield,
+      vaultRoot,
+    });
+
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        service,
+        syncState,
+        wake,
+      });
+    }
+
     const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
       state: syncState,
     });
@@ -968,7 +971,10 @@ export async function runHostedDeviceSyncPass(
     });
 
     return {
-      nextWakeAt: service.getNextWakeAt(),
+      nextWakeAt: earliestHostedMaintenanceWakeAt(
+        service.getNextWakeAt(),
+        denseRawRetention.hasMore ? resolveHostedDeviceSyncYieldRetryAt() : null,
+      ),
       postCheckpointRecord,
       processedJobs,
       skipped: false,
@@ -1051,6 +1057,16 @@ function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {
   return new Date(now.getTime() + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
 }
 
+function remainingHostedDeviceSyncDeadlineMs(
+  startedAtMs: number,
+  timeoutMs: number | null,
+): number | undefined {
+  if (timeoutMs === null) {
+    return undefined;
+  }
+  return Math.max(0, timeoutMs - (Date.now() - startedAtMs));
+}
+
 async function drainHostedDeviceSyncWorker(input: {
   service: DeviceSyncService;
   shouldYield?: (() => boolean) | null;
@@ -1077,32 +1093,58 @@ async function drainHostedDeviceSyncWorker(input: {
 }
 
 async function runHostedDeviceSyncDenseRawRetention(input: {
+  deadlineMs?: number;
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   processedJobs: number;
+  shouldYield: (() => boolean) | null;
   vaultRoot: string;
-}): Promise<void> {
-  const detection = await detectWearableStorageMigrationCandidates({
-    includeRecentDenseRaw: false,
-    vaultRoot: input.vaultRoot,
-  });
-  if (detection.retentionEligibleDenseProviderRawTimeseriesCount === 0) {
-    return;
+}): Promise<{ hasMore: boolean }> {
+  try {
+    const detection = await detectWearableStorageMigrationCandidates({
+      includeRecentDenseRaw: false,
+      vaultRoot: input.vaultRoot,
+    });
+    if (detection.retentionEligibleDenseProviderRawTimeseriesCount === 0) {
+      return {
+        hasMore: false,
+      };
+    }
+    if (shouldYieldHostedDeviceSync(input.shouldYield) || input.deadlineMs === 0) {
+      return {
+        hasMore: true,
+      };
+    }
+
+    const result = await runWearableStorageMigrationPass({
+      deadlineMs: input.deadlineMs,
+      includeRecentDenseRaw: false,
+      maxBytes: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES,
+      maxFiles: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES,
+      pruneDenseRaw: true,
+      repairClasses: ["dense_raw_timeseries"],
+      vaultRoot: input.vaultRoot,
+    });
+
+    await writeHostedDeviceSyncDenseRawRetentionRuntimeLog({
+      detection,
+      platform: input.platform,
+      processedJobs: input.processedJobs,
+      result,
+    });
+
+    return {
+      hasMore: result.hasMore,
+    };
+  } catch (error) {
+    await writeHostedDeviceSyncDenseRawRetentionFailureRuntimeLog({
+      error,
+      platform: input.platform,
+      processedJobs: input.processedJobs,
+    });
+    return {
+      hasMore: true,
+    };
   }
-
-  const result = await runWearableStorageMigrationPass({
-    includeRecentDenseRaw: false,
-    maxBytes: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES,
-    maxFiles: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES,
-    pruneDenseRaw: true,
-    vaultRoot: input.vaultRoot,
-  });
-
-  await writeHostedDeviceSyncDenseRawRetentionRuntimeLog({
-    detection,
-    platform: input.platform,
-    processedJobs: input.processedJobs,
-    result,
-  });
 }
 
 async function writeHostedDeviceSyncDenseRawRetentionRuntimeLog(input: {
@@ -1123,13 +1165,13 @@ async function writeHostedDeviceSyncDenseRawRetentionRuntimeLog(input: {
       phase: "invoke",
       redactedJson: {
         denseRawCandidateCount: input.detection.denseProviderRawTimeseriesCount,
-        denseRawBytesAfter: input.result.denseRawBytesAfter,
-        denseRawBytesBefore: input.result.denseRawBytesBefore,
-        denseRawBytesFreed: input.result.denseRawBytesFreed,
+        denseRawAfterBytes: input.result.denseRawBytesAfter,
+        denseRawBeforeBytes: input.result.denseRawBytesBefore,
         denseRawEligibleBytes:
           input.detection.retentionEligibleDenseProviderRawTimeseriesBytes,
         denseRawEligibleCount:
           input.detection.retentionEligibleDenseProviderRawTimeseriesCount,
+        denseRawFreedBytes: input.result.denseRawBytesFreed,
         hasMore: input.result.hasMore,
         processedJobs: input.processedJobs,
         skippedCount: input.result.skippedCount,
@@ -1138,6 +1180,43 @@ async function writeHostedDeviceSyncDenseRawRetentionRuntimeLog(input: {
     },
     platform: input.platform,
   });
+}
+
+async function writeHostedDeviceSyncDenseRawRetentionFailureRuntimeLog(input: {
+  error: unknown;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  processedJobs: number;
+}): Promise<void> {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "device-sync",
+      eventCode: "device-sync.dense_raw_retention",
+      level: "warn",
+      phase: "invoke",
+      redactedJson: {
+        errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(input.error))
+          ?? "dense raw retention failed",
+        failed: true,
+        hasMore: true,
+        processedJobs: input.processedJobs,
+      },
+    },
+    platform: input.platform,
+  });
+}
+
+function errorToString(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return String(error);
 }
 
 export async function runHostedDeviceSyncWakeLane(input: {
