@@ -504,6 +504,7 @@ async function runCodexAppServerTurn(
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
   let releaseLiveTurn = () => {}
+  const pendingProgressDeliveries = new Set<Promise<void>>()
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
     failTurn = reject
@@ -736,7 +737,22 @@ async function runCodexAppServerTurn(
     if (source === 'system') {
       contextCompactionProgressNotified = true
     }
-    void progressDelivery.send(text, { source }).catch(() => undefined)
+    trackProgressDelivery(progressDelivery.send(text, { source }))
+  }
+
+  const trackProgressDelivery = (promise: Promise<unknown>): void => {
+    const tracked = promise
+      .catch(() => undefined)
+      .then(() => {
+        pendingProgressDeliveries.delete(tracked)
+      })
+    pendingProgressDeliveries.add(tracked)
+  }
+
+  const drainPendingProgressDeliveries = async (): Promise<void> => {
+    while (pendingProgressDeliveries.size > 0) {
+      await Promise.allSettled([...pendingProgressDeliveries])
+    }
   }
 
   const handleParsedMessage = (message: CodexRpcMessage) => {
@@ -817,7 +833,8 @@ async function runCodexAppServerTurn(
         return
       }
 
-      void progressDelivery.send(dynamicToolRequest.text, { source: 'model' })
+      const progressToolResponse = progressDelivery
+        .send(dynamicToolRequest.text, { source: 'model' })
         .then((progressResult) => {
           const toolResult = resolveCodexProgressToolResultText(progressResult)
           void tryWriteRpcMessage({
@@ -847,6 +864,7 @@ async function runCodexAppServerTurn(
             },
           })
         })
+      trackProgressDelivery(progressToolResponse)
       return
     }
 
@@ -1182,6 +1200,7 @@ async function runCodexAppServerTurn(
     registerLiveTurn()
 
     await turnCompleted
+    await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()

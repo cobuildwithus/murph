@@ -2758,6 +2758,123 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('waits for in-flight current-channel progress before returning the final turn result', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-progress-drain-')
+    const progressSent = createDeferred<ReturnType<typeof sentProgressResult>>()
+    const progressDelivery = {
+      send: vi.fn(async (_text: string) => {
+        void _text
+        return await progressSent.promise
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-progress-drain',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-progress-drain',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-progress-drain',
+                  type: 'assistant_message',
+                  phase: 'commentary',
+                  message: 'Checking the thread now.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-progress-drain-final',
+                  type: 'assistant_message',
+                  phase: 'final_answer',
+                  message: 'Final answer after progress.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-progress-drain',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    let settled = false
+    const turnPromise = executeCodexAppServerTurn({
+      modelProgressUpdatesEnabled: true,
+      prompt: 'answer with delayed progress',
+      progressDelivery,
+      workingDirectory,
+    }).finally(() => {
+      settled = true
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 200 && progressDelivery.send.mock.calls.length === 0;
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Checking the thread now.',
+      { source: 'model' },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+
+    progressSent.resolve(sentProgressResult())
+    await expect(turnPromise).resolves.toMatchObject({
+      finalMessage: 'Final answer after progress.',
+      sessionId: 'thread-progress-drain',
+      turnId: 'turn-progress-drain',
+    })
+  })
+
   it('returns unavailable for progress tool calls when model progress is disabled', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-disabled-')
     const progressDelivery = createProgressDeliveryMock()

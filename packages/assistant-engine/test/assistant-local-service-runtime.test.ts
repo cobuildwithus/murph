@@ -3342,9 +3342,11 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
       targetKind: 'thread' as const,
     })),
   }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
-      ...createSharedPlan(),
+      ...sharedPlan,
       persistUserPromptOnFailure: false,
     },
   })
@@ -3379,6 +3381,116 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
     'Checking the iMessage thread.',
   )
+})
+
+test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: createAssistantSession({
+      binding: {
+        actorId: null,
+        channel: null,
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-1',
+        },
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+    }),
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only auto-reply',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  const result = await progressDelivery.send('Checking the iMessage thread.')
+
+  assert.deepEqual(result, {
+    kind: 'sent',
+    source: 'model',
+  })
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
+})
+
+test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resolved audience channels', async () => {
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'email'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only auto-reply',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  const result = await progressDelivery.send('Checking the iMessage thread.')
+
+  assert.deepEqual(result, {
+    kind: 'failed',
+    source: 'model',
+  })
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {

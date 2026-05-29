@@ -117,10 +117,12 @@ const MAX_ACTIVE_TURN_INPUT_CONTINUATIONS = 3
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
 
 function resolveAssistantProgressDeliveryChannel(input: {
-  input: AssistantMessageInput
   session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
 }): string | null {
-  return normalizeNullableString(input.input.channel)
+  return normalizeNullableString(
+    input.sharedPlan.conversationPolicy.audience.channel,
+  )
     ?? normalizeNullableString(input.session.binding.channel)
 }
 
