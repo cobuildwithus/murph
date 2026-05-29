@@ -384,14 +384,17 @@ describe("hosted local Linq first-contact e2e", () => {
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
     ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
-    expect(new Set(newSendTexts)).toEqual(new Set([
+    expect(newSendTexts).toEqual([
       progressToolUpdateText,
       progressToolFinalReplyText,
-    ]));
+    ]);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
+      outboundCountBeforeReply + 2,
+    );
   }, 300_000);
 
   itOutsideFastDeployGate(
