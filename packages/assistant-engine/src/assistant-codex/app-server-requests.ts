@@ -13,9 +13,6 @@ import { stripUndefinedRpcParams } from './app-server-rpc.js'
 import {
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from './dynamic-tools.js'
-import {
-  isAssistantModelProgressAvailable,
-} from '../assistant/turn-progress.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 
@@ -64,7 +61,7 @@ export function buildCodexThreadResumeParams(input: {
       input.input.refreshThreadInstructions === true
         ? normalizeNullableString(input.input.developerInstructions)
         : undefined,
-    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
+    dynamicTools: resolveCodexAppServerDynamicTools(),
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
     threadId: input.codexThreadId,
   })
@@ -86,7 +83,7 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
-    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
+    dynamicTools: resolveCodexAppServerDynamicTools(),
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
@@ -94,12 +91,10 @@ export function buildCodexThreadContextParams(input: {
   })
 }
 
-function resolveCodexAppServerDynamicTools(
-  input: CodexAppServerTurnInput,
-): readonly [typeof MURPH_SEND_PROGRESS_UPDATE_TOOL] | undefined {
-  return isAssistantModelProgressAvailable(input)
-    ? [MURPH_SEND_PROGRESS_UPDATE_TOOL]
-    : undefined
+function resolveCodexAppServerDynamicTools(): readonly [
+  typeof MURPH_SEND_PROGRESS_UPDATE_TOOL,
+] {
+  return [MURPH_SEND_PROGRESS_UPDATE_TOOL]
 }
 
 export function buildCodexTurnStartParams(input: {

@@ -190,6 +190,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -209,7 +210,9 @@ describe('assistant codex runtime', () => {
         ...baseInput,
         modelProgressUpdatesEnabled: true,
       }),
-    ).not.toHaveProperty('dynamicTools')
+    ).toMatchObject({
+      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+    })
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
@@ -219,7 +222,9 @@ describe('assistant codex runtime', () => {
           },
         },
       }),
-    ).not.toHaveProperty('dynamicTools')
+    ).toMatchObject({
+      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+    })
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
@@ -240,6 +245,7 @@ describe('assistant codex runtime', () => {
         codexThreadId: 'thread-1',
       }),
     ).toEqual({
+      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -272,6 +278,7 @@ describe('assistant codex runtime', () => {
       }),
     ).toEqual({
       developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
       excludeTurns: true,
       threadId: 'thread-1',
     })
@@ -387,6 +394,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
+              dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -2039,7 +2047,7 @@ describe('assistant codex runtime', () => {
     ['workspace-write', 'workspace-write'],
     ['danger-full-access', 'danger-full-access'],
   ] as const)(
-    'uses Codex app-server SandboxMode %s on thread/start and thin params on thread/resume',
+    'uses Codex app-server SandboxMode %s on thread/start and stable params on thread/resume',
     async (sandbox, expectedSandbox) => {
       const workingDirectory = await createTempDir('assistant-codex-thread-context-')
       const expectedThreadContext = {
@@ -2170,9 +2178,11 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedThreadContext,
+        dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual({
+        dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
         excludeTurns: true,
         threadId: 'thread-resume-request',
       })
@@ -2760,7 +2770,9 @@ describe('assistant codex runtime', () => {
           await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
-          expect(asRecord(threadStart.params)).not.toHaveProperty('dynamicTools')
+          expect(asRecord(threadStart.params)).toMatchObject({
+            dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          })
           child.stdout.write(
             jsonLine({
               id: 2,

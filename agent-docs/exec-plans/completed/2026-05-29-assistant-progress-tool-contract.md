@@ -1,33 +1,33 @@
-# Assistant Progress Tool Contract
+# Assistant Progress Dynamic Tool Contract
 
 ## Goal
 
-Validate and fix the assistant progress-tool contract so model-authored progress is exposed only on eligible user-facing turns, delivery status is explicit, and resume/stub tests match the implemented Codex app-server behavior.
+Ensure hosted user-facing Codex assistant turns expose the single model-authored progress tool, `murph.send_progress_update`, consistently in local Linq/iMessage runtime and regression tests.
+
+Success criteria:
+- Dynamic tool exposure is structural for Codex app-server thread starts and resumes, not based on the presence of a runtime delivery object.
+- Missing progress delivery is a tool-call delivery-policy result, not a reason to omit the tool schema.
+- Hosted local Codex stub tests catch missing `thread/start` or `thread/resume` dynamic tool registration.
+- Focused tests, affected-graph verification, typecheck, and subagent review pass or any unrelated blocker is reported.
 
 ## Constraints
 
-- Keep the shape simple and local to assistant turn/progress plumbing.
-- Do not weaken assistant runtime privacy, delivery idempotency, or outbox invariants.
-- Preserve best-effort progress delivery as an ephemeral current-audience side effect.
-- Do not touch unrelated hosted-runtime or CLI dirty work.
+- Preserve unrelated dirty work.
+- Keep the architecture simple: one model-facing progress tool, no final-response tool, no parallel final-delivery path.
+- Do not expose secrets, user identifiers, local usernames, or home paths in docs, logs, examples, commits, or handoff.
 
-## Plan
+## Findings
 
-1. Verify each reported issue against current implementation and tests.
-2. Use subagents for independent resume/stub and progress-semantics review.
-3. Patch only confirmed issues with focused tests.
-4. Run focused assistant-engine/assistant-runtime verification plus typecheck unless blocked by unrelated failures.
-5. Run required completion audits and land a scoped commit if safe.
+- The missing-tool report came from a hosted local notification/onboarding-style turn that minted a Codex session thread without dynamic tools; later resumes inherited that absence.
+- Live Codex rollout metadata for the affected thread has no persisted dynamic tools, so later resume turns cannot see `murph.send_progress_update`.
+- The durable fix is to make the model-facing dynamic tool structural and keep runtime progress delivery as policy: if delivery is unavailable, the tool call returns unavailable.
 
-## Verification
+## Outcome
 
-- `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-runtime.test.ts test/assistant-turn-progress.test.ts test/assistant-notification-turn-runtime.test.ts`: passed.
-- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-codex-config.test.ts`: passed.
-- `pnpm --dir packages/assistant-engine typecheck`: passed.
-- `pnpm --dir packages/assistant-runtime typecheck`: passed.
-- `pnpm typecheck`: passed.
-- `bash scripts/workspace-verify.sh test:diff packages/assistant-engine/src/assistant/turn-progress.ts packages/assistant-engine/src/assistant/delivery-service.ts packages/assistant-engine/src/assistant-codex.ts packages/assistant-engine/src/assistant-codex/app-server-requests.ts packages/assistant-engine/src/assistant/codex-turn/planning.ts packages/assistant-engine/src/assistant/notification-turn.ts packages/assistant-engine/src/assistant/providers/codex-cli.ts packages/assistant-engine/test/assistant-turn-progress.test.ts packages/assistant-engine/test/assistant-codex-runtime.test.ts packages/assistant-engine/test/assistant-notification-turn-runtime.test.ts packages/assistant-runtime/src/hosted-runtime/codex-e2e-app-server-stub.ts packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts`: passed.
-- `git diff --check`: passed.
+1. `thread/start` and `thread/resume` Codex app-server params now always include exactly `murph.send_progress_update`.
+2. Dynamic tool execution still uses the existing progress delivery policy and returns unavailable when no supported progress sink exists.
+3. Assistant-engine, CLI, and hosted-runtime tests now assert the structural dynamic-tool contract on start, resume, unavailable delivery, and hosted-local stub enforcement.
+4. Final subagent review found no blocking functional, coverage, security/privacy, or simplification issues.
 Status: completed
-Updated: 2026-05-28
-Completed: 2026-05-28
+Updated: 2026-05-29
+Completed: 2026-05-29

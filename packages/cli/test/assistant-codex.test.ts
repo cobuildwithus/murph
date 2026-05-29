@@ -161,12 +161,19 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           method: 'initialized',
           params: {},
         })
-        assert.deepEqual(messages[2], {
+        const threadStart = messages[2]
+        const progressTool = readDynamicTool(threadStart, 0)
+        assert.equal(progressTool.namespace, 'murph')
+        assert.equal(progressTool.name, 'send_progress_update')
+        assertDynamicToolDescription(progressTool)
+        assertDynamicToolInputSchema(progressTool)
+        assert.deepEqual(threadStart, {
           id: 2,
           method: 'thread/start',
           params: {
             approvalPolicy: 'never',
             cwd: expectedWorkingDirectory,
+            dynamicTools: [progressTool],
             model: 'gpt-5',
             sandbox: 'workspace-write',
             serviceName: 'murph',
@@ -412,7 +419,10 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
       void (async () => {
         await waitForRpcMethod(child, 'initialize')
         child.stdout.write(jsonLine({ id: 1, result: {} }))
-        await waitForRpcMethod(child, 'thread/resume')
+        const threadResume = await waitForRpcMethod(child, 'thread/resume')
+        const progressTool = readDynamicTool(threadResume, 0)
+        assert.equal(progressTool.namespace, 'murph')
+        assert.equal(progressTool.name, 'send_progress_update')
         child.stdout.write(
           jsonLine({
             id: 2,
@@ -664,6 +674,33 @@ function readTurnStartInputItems(
     throw new TypeError('Expected turn/start params.input to be an array.')
   }
   return input.map((item) => asRecord(item))
+}
+
+function readDynamicTool(
+  message: Record<string, unknown>,
+  index: number,
+): Record<string, unknown> {
+  const params = asRecord(message.params)
+  const dynamicTools = params.dynamicTools
+  if (!Array.isArray(dynamicTools)) {
+    throw new TypeError('Expected thread/start params.dynamicTools to be an array.')
+  }
+  return asRecord(dynamicTools[index])
+}
+
+function assertDynamicToolDescription(tool: Record<string, unknown>): string {
+  const description = tool.description
+  assert.equal(typeof description, 'string')
+  if (typeof description !== 'string') {
+    throw new TypeError('Expected dynamic tool description to be a string.')
+  }
+  return description
+}
+
+function assertDynamicToolInputSchema(tool: Record<string, unknown>): unknown {
+  const inputSchema = tool.inputSchema
+  assert.ok(inputSchema)
+  return inputSchema
 }
 
 function assertLocalImagePath(item: Record<string, unknown>): string {

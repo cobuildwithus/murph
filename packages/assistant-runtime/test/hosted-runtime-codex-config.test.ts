@@ -471,6 +471,34 @@ test("hosted Codex runtime local E2E app-server stub enforces expected dynamic t
       /expected \[murph\.send_progress_update\] but received \[none\]/u,
     );
 
+    const missingResumeToolChild = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const rejectedResumeMessages = await runHostedLocalCodexStubThreadStartThenResume(
+      missingResumeToolChild,
+      {
+        dynamicTools: [
+          {
+            inputSchema: {
+              type: "object",
+            },
+            name: "send_progress_update",
+            namespace: "murph",
+          },
+        ],
+      },
+      {},
+    );
+    assert.match(
+      readHostedLocalCodexStubRpcErrorMessage(rejectedResumeMessages, 20),
+      /thread\/resume dynamic tools mismatch: expected \[murph\.send_progress_update\] but received \[none\]/u,
+    );
+
     const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
       env: {
         ...process.env,
@@ -2048,6 +2076,100 @@ async function runHostedLocalCodexStubThreadStart(
         const parsed = JSON.parse(trimmed) as Record<string, unknown>;
         messages.push(parsed);
         if (parsed.id === 2) {
+          finish();
+        }
+      }
+    });
+  });
+
+  try {
+    childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 2,
+      method: "thread/start",
+      params: threadStartParams,
+    })}\n`);
+
+    await completed;
+    return messages;
+  } finally {
+    childStdin.end();
+    child.kill();
+  }
+}
+
+async function runHostedLocalCodexStubThreadStartThenResume(
+  child: ReturnType<typeof spawn>,
+  threadStartParams: Record<string, unknown>,
+  threadResumeParams: Record<string, unknown>,
+): Promise<Record<string, unknown>[]> {
+  const childStdin = child.stdin;
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  assert(childStdin);
+  assert(childStdout);
+  assert(childStderr);
+
+  const messages: Record<string, unknown>[] = [];
+  let stdoutBuffer = "";
+  let stderr = "";
+
+  const completed = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for hosted local Codex stub thread/resume. stderr: ${stderr}`));
+    }, 5_000);
+    let resolved = false;
+
+    const finish = (error?: Error): void => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      clearTimeout(timeout);
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    };
+
+    child.once("error", finish);
+    child.once("exit", (code, signal) => {
+      if (resolved) {
+        return;
+      }
+
+      finish(new Error(
+        `Hosted local Codex stub exited before thread/resume response: ${code ?? signal}. stderr: ${stderr}`,
+      ));
+    });
+    childStderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    childStdout.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      const lines = stdoutBuffer.split(/\r?\n/u);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+        messages.push(parsed);
+        if (parsed.id === 2) {
+          writeHostedLocalCodexStubResume(
+            childStdin,
+            20,
+            readHostedLocalCodexStubThreadId(messages),
+            threadResumeParams,
+          );
+        }
+        if (parsed.id === 20) {
           finish();
         }
       }
