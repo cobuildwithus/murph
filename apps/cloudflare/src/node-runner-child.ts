@@ -567,6 +567,12 @@ function readHostedExecutionChildRuntimeWorkspaceSnapshotProcessFailure(
             [...diagnostics.stderrMarkers],
         }
       : {}),
+    ...(diagnostics.stderrTail
+      ? {
+          childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+            redactHostedRuntimeDiagnosticText(diagnostics.stderrTail),
+        }
+      : {}),
     childRuntimeWorkspaceSnapshotProcessStderrTruncated:
       diagnostics.stderrTruncated,
   };

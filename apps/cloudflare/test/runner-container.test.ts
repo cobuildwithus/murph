@@ -2312,6 +2312,8 @@ describe("RunnerContainer", () => {
             childRuntimeWorkspaceSnapshotProcessExitCode: 1,
             childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
             childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+            childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+              "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
             childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
             childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
               "unsupported_format",
@@ -2394,6 +2396,8 @@ describe("RunnerContainer", () => {
         childRuntimeWorkspaceSnapshotProcessExitCode: 1,
         childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
         childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+        childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+          "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
         childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
         childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
           "unsupported_format",
@@ -2473,6 +2477,8 @@ describe("RunnerContainer", () => {
           runnerChildRuntimeWorkspaceSnapshotProcessExitCode: 1,
           runnerChildRuntimeWorkspaceSnapshotProcessLabel: "zstd",
           runnerChildRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+          runnerChildRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+            "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
           runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
           runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers: [
             "unsupported_format",
@@ -2511,6 +2517,7 @@ describe("RunnerContainer", () => {
             "childRuntimeWorkspaceSnapshotProcessExitCode",
             "childRuntimeWorkspaceSnapshotProcessLabel",
             "childRuntimeWorkspaceSnapshotProcessStderrBytes",
+            "childRuntimeWorkspaceSnapshotProcessStderrErrorDetail",
             "childRuntimeWorkspaceSnapshotProcessStderrLineCount",
             "childRuntimeWorkspaceSnapshotProcessStderrMarkers",
             "childRuntimeWorkspaceSnapshotProcessStderrTruncated",
@@ -2533,6 +2540,118 @@ describe("RunnerContainer", () => {
     expect(serializedFailureLog).not.toContain("hidden_code_marker");
     expect(serializedFailureLog).not.toContain("hidden.phase");
     expect(serializedFailureLog).not.toContain("999999");
+    expect(serializedFailureLog).not.toContain("secret-value");
+  });
+
+  it("promotes child-process workspace snapshot diagnostics when no child result is available", async () => {
+    const hiddenStderrTail = "hidden child stderr tail";
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "runtime_error",
+          details: {
+            childProcess: {
+              abortedByParent: false,
+              childRuntimeWorkspaceSnapshotProcessExitCode: 1,
+              childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
+              childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+              childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+                "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
+              childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
+              childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
+                "unsupported_format",
+                "hidden_process_marker",
+              ],
+              childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
+              childRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
+              exitCode: null,
+              firstCompletionKind: "close",
+              runtimeWakeReady: false,
+              signal: "SIGKILL",
+              stderrTail: hiddenStderrTail,
+              stderrTailLineCount: 1,
+            },
+            errorDetail:
+              "Hosted assistant runtime child exited without emitting a result payload.",
+          },
+          error: "Hosted execution runtime failed.",
+          errorName: "Error",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_child_process_snapshot_diagnostics"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      code: "runtime_error",
+      details: {
+        childProcess: {
+          childRuntimeWorkspaceSnapshotProcessExitCode: 1,
+          childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
+          childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+          childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+            "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
+          childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
+          childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
+            "unsupported_format",
+          ],
+          childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
+          childRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
+          stderrTailLineCount: 1,
+          stderrTailPresent: true,
+        },
+      },
+    });
+
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input?.message === "Hosted execution container failed."
+        && input?.details?.runnerChildRuntimeWorkspaceSnapshotRestoreStep
+          === "archive_restore");
+    if (!failureLogInput) {
+      throw new Error("Expected container failure log input.");
+    }
+    expect(failureLogInput.details).toEqual(expect.objectContaining({
+      runnerChildRuntimeWorkspaceSnapshotProcessExitCode: 1,
+      runnerChildRuntimeWorkspaceSnapshotProcessLabel: "zstd",
+      runnerChildRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+      runnerChildRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+        "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
+      runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
+      runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers: [
+        "unsupported_format",
+      ],
+      runnerChildRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
+      runnerChildRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
+      runnerChildStderrTailLineCount: 1,
+      runnerChildStderrTailPresent: true,
+    }));
+    const serializedFailureLog = JSON.stringify(failureLogInput);
+    expect(serializedFailureLog).not.toContain(hiddenStderrTail);
+    expect(serializedFailureLog).not.toContain("hidden_process_marker");
+    expect(serializedFailureLog).not.toContain("secret-value");
   });
 
   it("drops non-allowlisted child runtime error diagnostics from runner response logs", async () => {

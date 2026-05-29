@@ -65,6 +65,7 @@ export interface HostedWorkspaceSnapshotProcessFailureDiagnostics {
   exitCode: number | null;
   label: HostedWorkspaceSnapshotProcessLabel;
   signal: string | null;
+  stderrTail: string | null;
   stderrByteCount: number;
   stderrLineCount: number;
   stderrMarkers: readonly HostedWorkspaceSnapshotProcessStderrMarker[];
@@ -1108,6 +1109,7 @@ function captureHostedWorkspaceSnapshotProcessStderr(
         ? lineBreakCount + (endedWithLineBreak ? 0 : 1)
         : 0,
       stderrMarkers: [...markers].sort(),
+      stderrTail: sawNonWhitespace ? scanText.trim() || null : null,
       stderrTruncated:
         byteCount > HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_SCAN_LIMIT_BYTES,
     }),
@@ -1156,6 +1158,7 @@ function readHostedWorkspaceSnapshotProcessFailureDiagnosticsValue(
     exitCode,
     label,
     signal,
+    stderrTail: readHostedWorkspaceSnapshotProcessStderrTail(record.stderrTail),
     stderrByteCount,
     stderrLineCount,
     stderrMarkers: readHostedWorkspaceSnapshotProcessStderrMarkers(
@@ -1163,6 +1166,14 @@ function readHostedWorkspaceSnapshotProcessFailureDiagnosticsValue(
     ),
     stderrTruncated: record.stderrTruncated === true,
   };
+}
+
+function readHostedWorkspaceSnapshotProcessStderrTail(value: unknown): string | null {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= HOSTED_WORKSPACE_SNAPSHOT_PROCESS_STDERR_SCAN_LIMIT_BYTES
+    ? value
+    : null;
 }
 
 function readHostedWorkspaceSnapshotProcessLabel(

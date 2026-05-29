@@ -361,6 +361,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
         }))}\n`);
         child.stderr.write("OPENAI_API_KEY=secret-value /tmp/hosted-runner/private-file\n");
         child.stderr.write("Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@murphai/missing'\n");
+        child.stderr.write(`${JSON.stringify(createWorkspaceSnapshotProcessFailureLog())}\n`);
         child.stderr.write(`${JSON.stringify(createRuntimePhaseLog({
           durationMs: 7,
           elapsedMs: 10,
@@ -412,9 +413,18 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
         "workspace.restore:start",
         "runtime:fail",
       ],
+      childRuntimeWorkspaceSnapshotProcessExitCode: 1,
+      childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
+      childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
+      childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+        "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=<redacted>",
+      childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
+      childRuntimeWorkspaceSnapshotProcessStderrMarkers: ["unsupported_format"],
+      childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
+      childRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
       runtimeWakeReady: false,
       signal: "SIGKILL",
-      stderrTailLineCount: 3,
+      stderrTailLineCount: 4,
       stderrTailMarkers: ["module_resolution_failed"],
       stdoutTailLineCount: 4,
       stdoutTailMarkers: ["hosted_child_prepared"],
@@ -429,6 +439,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     expect(JSON.stringify(childProcess)).not.toContain("stdout-token");
     expect(JSON.stringify(childProcess)).not.toContain("secret-value");
     expect(JSON.stringify(childProcess)).not.toContain("/tmp/hosted-runner/private-file");
+    expect(JSON.stringify(childProcess)).not.toContain("snapshot-secret");
     expect(processKillSpy).toHaveBeenCalledWith(-4247, "SIGKILL");
   });
 
@@ -869,6 +880,32 @@ function createRuntimePhaseLog(input: {
     level: input.status === "fail" ? "error" : "info",
     message: "Hosted workspace runtime phase boundary.",
     phase: input.status === "fail" ? "failed" : "wake.running",
+    schema: "murph.hosted-execution.log.v1",
+    time: "2026-05-16T00:00:00.000Z",
+    userId: null,
+  };
+}
+
+function createWorkspaceSnapshotProcessFailureLog() {
+  return {
+    component: "hosted.runtime.workspace-snapshot",
+    details: {
+      operation: "workspace_snapshot_restore",
+      workspaceSnapshotProcessExitCode: 1,
+      workspaceSnapshotProcessLabel: "zstd",
+      workspaceSnapshotProcessStderrBytes: 192,
+      workspaceSnapshotProcessStderrErrorDetail:
+        "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=<redacted>",
+      workspaceSnapshotProcessStderrLineCount: 2,
+      workspaceSnapshotProcessStderrMarkers: [
+        "unsupported_format",
+      ],
+      workspaceSnapshotProcessStderrTruncated: false,
+      workspaceSnapshotRestoreStep: "archive_restore",
+    },
+    level: "warn",
+    message: "Hosted workspace snapshot restore step failed.",
+    phase: "runtime.starting",
     schema: "murph.hosted-execution.log.v1",
     time: "2026-05-16T00:00:00.000Z",
     userId: null,

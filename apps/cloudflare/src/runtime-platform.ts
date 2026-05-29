@@ -115,6 +115,9 @@ import {
   readHostedRunnerWebControlRoute,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
+  redactHostedRuntimeDiagnosticText,
+} from "./hosted-runtime-redaction.ts";
+import {
   checkpointHostedRuntimeBridgeWebWorkspace,
   type HostedRuntimeBridgeCheckpointLease,
 } from "./runtime-bridge-checkpoint.ts";
@@ -2629,6 +2632,14 @@ function buildHostedRuntimeControlPlaneSafeErrorMetadata(
             ? {
                 workspaceSnapshotProcessStderrMarkers:
                   [...workspaceSnapshotProcessFailure.stderrMarkers],
+              }
+            : {}),
+          ...(workspaceSnapshotProcessFailure.stderrTail
+            ? {
+                workspaceSnapshotProcessStderrErrorDetail:
+                  redactHostedRuntimeDiagnosticText(
+                    workspaceSnapshotProcessFailure.stderrTail,
+                  ),
               }
             : {}),
           workspaceSnapshotProcessStderrTruncated:

@@ -36,6 +36,7 @@ import {
 } from "./hosted-runtime-redaction.ts";
 import {
   collectHostedRunnerChildRuntimePhaseDiagnostics,
+  collectHostedRunnerChildStructuredRuntimeDiagnostics,
   collectHostedRunnerChildOutputMarkers,
   countHostedRunnerOutputLines,
   type HostedRunnerChildFirstCompletionKind,
@@ -572,6 +573,10 @@ function createHostedRunnerChildExitDiagnostics(input: {
     stderrTail: input.stderrTail,
     stdoutTail: input.stdoutTail,
   });
+  const structuredRuntimeDiagnostics = collectHostedRunnerChildStructuredRuntimeDiagnostics({
+    stderrTail: input.stderrTail,
+    stdoutTail: input.stdoutTail,
+  });
 
   if (abortReasonName) {
     diagnostics.abortReasonName = abortReasonName;
@@ -594,6 +599,7 @@ function createHostedRunnerChildExitDiagnostics(input: {
     diagnostics.stderrTailMarkers = stderrTailMarkers;
   }
   Object.assign(diagnostics, runtimePhaseDiagnostics);
+  Object.assign(diagnostics, structuredRuntimeDiagnostics);
 
   return diagnostics;
 }

@@ -1664,6 +1664,10 @@ function buildHostedRunnerContainerChildProcessMetadata(
     metadata,
     readHostedRunnerChildRuntimePhaseMetadata(childProcess),
   );
+  Object.assign(
+    metadata,
+    readHostedExecutionChildRuntimeDiagnosticMetadata(childProcess),
+  );
 
   return metadata;
 }
@@ -2366,6 +2370,13 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
   )) {
     metadata[key] = value;
   }
+  for (const [key, value] of Object.entries(
+    buildRunnerChildRuntimeDiagnosticMetadata(childProcess),
+  )) {
+    if (metadata[key] === undefined) {
+      metadata[key] = value;
+    }
+  }
 
   return metadata;
 }
@@ -2410,6 +2421,8 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
       "runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount",
     childRuntimeWorkspaceSnapshotProcessStderrMarkers:
       "runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers",
+    childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
+      "runnerChildRuntimeWorkspaceSnapshotProcessStderrErrorDetail",
     childRuntimeWorkspaceSnapshotProcessStderrTruncated:
       "runnerChildRuntimeWorkspaceSnapshotProcessStderrTruncated",
   } as const;

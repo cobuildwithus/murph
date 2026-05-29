@@ -639,6 +639,20 @@ export function collectHostedRunnerChildRuntimePhaseDiagnostics(input: {
   };
 }
 
+export function collectHostedRunnerChildStructuredRuntimeDiagnostics(input: {
+  stderrTail: string;
+  stdoutTail: string;
+}): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {};
+  for (const details of collectHostedRunnerChildStructuredLogDetails([
+    input.stdoutTail,
+    input.stderrTail,
+  ])) {
+    Object.assign(metadata, readHostedRunnerChildWorkspaceSnapshotDiagnostics(details));
+  }
+  return metadata;
+}
+
 export function readHostedRunnerChildRuntimeLastPhase(
   value: unknown,
 ): HostedExecutionChildRuntimeObservedPhase | null {
@@ -796,6 +810,15 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
   if (childRuntimeWorkspaceSnapshotProcessStderrMarkers.length > 0) {
     metadata.childRuntimeWorkspaceSnapshotProcessStderrMarkers =
       childRuntimeWorkspaceSnapshotProcessStderrMarkers;
+  }
+
+  const childRuntimeWorkspaceSnapshotProcessStderrErrorDetail =
+    readHostedWorkspaceSnapshotProcessErrorDetail(
+      record.childRuntimeWorkspaceSnapshotProcessStderrErrorDetail,
+    );
+  if (childRuntimeWorkspaceSnapshotProcessStderrErrorDetail) {
+    metadata.childRuntimeWorkspaceSnapshotProcessStderrErrorDetail =
+      childRuntimeWorkspaceSnapshotProcessStderrErrorDetail;
   }
 
   const childRuntimeFetchCauseKind = readAllowedHostedExecutionChildDiagnostic(
@@ -1004,6 +1027,17 @@ function readHostedWorkspaceSnapshotProcessStderrMarkers(
   return [...markers].sort();
 }
 
+function readHostedWorkspaceSnapshotProcessErrorDetail(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 8192
+    ? normalized
+    : null;
+}
+
 function collectHostedRunnerChildRuntimePhaseTrace(
   values: readonly string[],
 ): HostedExecutionChildRuntimeObservedPhaseTraceEntry[] {
@@ -1023,6 +1057,127 @@ function collectHostedRunnerChildRuntimePhaseTrace(
     }
   }
   return trace;
+}
+
+function collectHostedRunnerChildStructuredLogDetails(
+  values: readonly string[],
+): Record<string, unknown>[] {
+  const details: Record<string, unknown>[] = [];
+  for (const value of values) {
+    for (const line of value.split(/\r?\n/u)) {
+      const record = parseHostedRunnerChildStructuredLogLine(line);
+      if (!record) {
+        continue;
+      }
+      details.push(record);
+    }
+  }
+  return details;
+}
+
+function parseHostedRunnerChildStructuredLogLine(
+  line: string,
+): Record<string, unknown> | null {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || !trimmed.startsWith("{")) {
+    return null;
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.schema !== "murph.hosted-execution.log.v1") {
+    return null;
+  }
+  const details = record.details;
+  if (
+    !details
+    || typeof details !== "object"
+    || Array.isArray(details)
+  ) {
+    return null;
+  }
+
+  return details as Record<string, unknown>;
+}
+
+function readHostedRunnerChildWorkspaceSnapshotDiagnostics(
+  record: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {};
+
+  const restoreStep = readAllowedHostedExecutionChildDiagnostic(
+    record.workspaceSnapshotRestoreStep,
+    HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEPS,
+  );
+  if (restoreStep) {
+    metadata.childRuntimeWorkspaceSnapshotRestoreStep = restoreStep;
+  }
+
+  const processLabel = readAllowedHostedExecutionChildDiagnostic(
+    record.workspaceSnapshotProcessLabel,
+    HOSTED_WORKSPACE_SNAPSHOT_PROCESS_LABEL_SET,
+  );
+  if (processLabel) {
+    metadata.childRuntimeWorkspaceSnapshotProcessLabel = processLabel;
+  }
+
+  const processSignal = readHostedWorkspaceSnapshotProcessSignal(
+    record.workspaceSnapshotProcessSignal,
+  );
+  if (processSignal) {
+    metadata.childRuntimeWorkspaceSnapshotProcessSignal = processSignal;
+  }
+
+  for (const [sourceKey, targetKey] of [
+    [
+      "workspaceSnapshotProcessExitCode",
+      "childRuntimeWorkspaceSnapshotProcessExitCode",
+    ],
+    [
+      "workspaceSnapshotProcessStderrBytes",
+      "childRuntimeWorkspaceSnapshotProcessStderrBytes",
+    ],
+    [
+      "workspaceSnapshotProcessStderrLineCount",
+      "childRuntimeWorkspaceSnapshotProcessStderrLineCount",
+    ],
+  ] as const) {
+    const value = readHostedWorkspaceSnapshotProcessDiagnosticCount(record[sourceKey]);
+    if (value !== null) {
+      metadata[targetKey] = value;
+    }
+  }
+
+  const stderrMarkers = readHostedWorkspaceSnapshotProcessStderrMarkers(
+    record.workspaceSnapshotProcessStderrMarkers,
+  );
+  if (stderrMarkers.length > 0) {
+    metadata.childRuntimeWorkspaceSnapshotProcessStderrMarkers = stderrMarkers;
+  }
+
+  const stderrErrorDetail = readHostedWorkspaceSnapshotProcessErrorDetail(
+    record.workspaceSnapshotProcessStderrErrorDetail,
+  );
+  if (stderrErrorDetail) {
+    metadata.childRuntimeWorkspaceSnapshotProcessStderrErrorDetail =
+      stderrErrorDetail;
+  }
+
+  if (typeof record.workspaceSnapshotProcessStderrTruncated === "boolean") {
+    metadata.childRuntimeWorkspaceSnapshotProcessStderrTruncated =
+      record.workspaceSnapshotProcessStderrTruncated;
+  }
+
+  return metadata;
 }
 
 function parseHostedRunnerChildRuntimePhaseLine(
