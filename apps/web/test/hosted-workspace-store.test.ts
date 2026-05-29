@@ -3,6 +3,9 @@ import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
+import type {
+  HostedRuntimeRedactedJson,
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -1401,7 +1404,7 @@ describe("hosted runtime log store", () => {
       hostedRuntimeLog,
       hostedWorkspace: createHostedWorkspaceDelegate(),
     });
-    const diagnostic = {
+    const diagnostic: HostedRuntimeRedactedJson = {
       codexActionToolSummaries: [
         {
           callCount: 1,
