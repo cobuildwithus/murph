@@ -57,22 +57,26 @@ test(
   INBOX_INCUR_SMOKE_TIMEOUT_MS,
 )
 
-test('inbox bootstrap schema exposes init and setup option families together', async () => {
-  const schema = JSON.parse(
-    await runInboxRawCli(['inbox', 'bootstrap', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
+test(
+  'inbox bootstrap schema exposes init and setup option families together',
+  async () => {
+    const schema = JSON.parse(
+      await runInboxRawCli(['inbox', 'bootstrap', '--schema', '--format', 'json']),
+    ) as {
+      options: {
+        properties: Record<string, unknown>
+        required?: string[]
+      }
     }
-  }
 
-  assert.equal('rebuild' in schema.options.properties, true)
-  assert.equal('strict' in schema.options.properties, true)
-  assert.equal('whisperCommand' in schema.options.properties, true)
-  assert.equal('whisperModelPath' in schema.options.properties, true)
-  assert.equal(schema.options.required?.includes('vault') ?? false, false)
-})
+    assert.equal('rebuild' in schema.options.properties, true)
+    assert.equal('strict' in schema.options.properties, true)
+    assert.equal('whisperCommand' in schema.options.properties, true)
+    assert.equal('whisperModelPath' in schema.options.properties, true)
+    assert.equal(schema.options.required?.includes('vault') ?? false, false)
+  },
+  INBOX_INCUR_SMOKE_TIMEOUT_MS,
+)
 
 test('inbox backfill schema exposes optional parser draining', async () => {
   const schema = JSON.parse(
@@ -224,6 +228,7 @@ async function runInboxRawCli(args: string[]): Promise<string> {
   return await runRawCli(args, {
     env: {
       HOME: isolatedHome,
+      MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
       VAULT: undefined,
     },
   })

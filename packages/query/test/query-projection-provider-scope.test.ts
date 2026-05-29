@@ -22,9 +22,8 @@ test("runtime wearable provider filters do not fall back to all-provider summari
 
   try {
     await mkdir(path.dirname(eventLedgerPath), { recursive: true });
-    await writeFile(
-      eventLedgerPath,
-      Array.from({ length: 7 }, (_, index) => JSON.stringify({
+    const eventRecords = [
+      ...Array.from({ length: 7 }, (_, index) => ({
         schemaVersion: "murph.event.v1",
         id: `evt_provider_scope_steps_${index}`,
         kind: "observation",
@@ -41,7 +40,29 @@ test("runtime wearable provider filters do not fall back to all-provider summari
           resourceType: "daily_activity",
           resourceId: `daily-activity-2026-03-20-${index}`,
         },
-      })).join("\n").concat("\n"),
+      })),
+      ...Array.from({ length: 2 }, (_, index) => ({
+        schemaVersion: "murph.event.v1",
+        id: `evt_provider_scope_floors_${index}`,
+        kind: "observation",
+        occurredAt: "2026-03-20T07:00:00Z",
+        recordedAt: "2026-03-20T07:01:00Z",
+        dayKey: "2026-03-20",
+        source: "device",
+        title: `Provider ${index} floors`,
+        metric: "floors-climbed",
+        value: 10 + index,
+        unit: "count",
+        externalRef: {
+          system: `wearable${index}`,
+          resourceType: "daily_activity",
+          resourceId: `daily-activity-floors-2026-03-20-${index}`,
+        },
+      })),
+    ];
+    await writeFile(
+      eventLedgerPath,
+      eventRecords.map((record) => JSON.stringify(record)).join("\n").concat("\n"),
     );
     await rebuildQueryProjection(vaultRoot);
 
@@ -109,6 +130,8 @@ test("runtime wearable provider filters do not fall back to all-provider summari
     assert.equal(composedProviderPair.length, 1);
     assert.equal(composedProviderPair[0]?.steps.confidence.candidateCount, 2);
     assert.equal(composedProviderPair[0]?.steps.selection.provider, "wearable0");
+    assert.equal(composedProviderPair[0]?.floorsClimbed.confidence.candidateCount, 2);
+    assert.equal(composedProviderPair[0]?.floorsClimbed.selection.provider, "wearable0");
     assert.equal(normalizedSingleProvider[0]?.steps.selection.provider, "wearable0");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

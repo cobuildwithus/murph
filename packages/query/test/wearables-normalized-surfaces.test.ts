@@ -581,6 +581,7 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         id: "activity-expanded-fields",
         date: "2026-05-20T00:00:00Z",
         steps: 9400,
+        floors_climbed: 18,
         vo2_max: 48.5,
         total_elevation_gain: 320,
         elevation_change: -12,
@@ -601,13 +602,18 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         id: "body-expanded-fields",
         date: "2026-05-20T08:00:00Z",
         body_temperature: 36.7,
+        lean_body_mass_kilogram: 40.1,
+        waist_circumference_centimeter: 86.36,
       }],
     },
   });
 
   const latest = summarizeWearableLatest(vault);
+  const leanBodyMass = summarizeWearableMetricLatest(vault, "lean-body-mass", { windowDays: 1 });
+  const waistCircumference = summarizeWearableMetricLatest(vault, "waist-circumference", { windowDays: 1 });
 
   assert.equal(latest?.activity?.steps.selection.value, 9400);
+  assert.equal(latest?.activity?.floorsClimbed.selection.value, 18);
   assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, -12);
@@ -615,7 +621,15 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(latest?.sleep?.timeInBedMinutes.selection.value, 500);
   assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
   assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
+  assert.equal(latest?.bodyState?.leanBodyMassKg.selection.value, 40.1);
   assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
+  assert.equal(latest?.bodyState?.waistCircumference.selection.value, 86.36);
+  assert.equal(leanBodyMass?.metric, "leanBodyMassKg");
+  assert.equal(leanBodyMass?.summaryKind, "bodyState");
+  assert.equal(leanBodyMass?.value, 40.1);
+  assert.equal(waistCircumference?.metric, "waistCircumference");
+  assert.equal(waistCircumference?.summaryKind, "bodyState");
+  assert.equal(waistCircumference?.value, 86.36);
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

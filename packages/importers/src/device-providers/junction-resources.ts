@@ -18,8 +18,21 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "weight",
 ] as const);
 
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
-  "glucose",
+export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
+
+export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([
+  "meal",
+  "menstrual_cycle",
+] as const);
+
+export const JUNCTION_ALLOWED_SUMMARY_RESOURCES = Object.freeze([
+  ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  ...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+] as const);
+
+export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
+  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
 ] as const);
 
 export const JUNCTION_SLEEP_SCORE_PATHS = Object.freeze([
@@ -313,6 +326,8 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
   switch (resource) {
     case "heart_rate":
       return "heartrate";
+    case "meals":
+      return "meal";
     case "body_weight":
       return "weight";
     case "sleep_cycle":

@@ -59,6 +59,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     dayStrain: makeMetric("dayStrain", 7.5),
     distanceKm: makeMetric("distanceKm", 5.2),
     estimatedVo2Max: makeMetric("estimatedVo2Max", 48.6),
+    floorsClimbed: makeMetric("floorsClimbed", 12),
     maxHeartRate: makeMetric("maxHeartRate", 168),
     notes: [],
     percentRecorded: makeMetric("percentRecorded", 99),
@@ -253,7 +254,7 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
   assert.equal(alpha?.candidateMetrics, 1);
   assert.equal(alpha?.exactDuplicatesSuppressed, 1);
   assert.equal(alpha?.activityDays, 1);
-  assert.equal(alpha?.selectedMetrics, 14);
+  assert.equal(alpha?.selectedMetrics, 15);
   assert.equal(alpha?.conflictCount, 1);
   assert.equal(alpha?.stalenessVsNewestDays, 2);
   assert.deepEqual(alpha?.metricsContributed, ["steps"]);

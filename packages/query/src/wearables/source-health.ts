@@ -56,6 +56,7 @@ export function buildWearableSourceHealth(input: {
       day.activeCalories,
       day.totalCalories,
       day.distanceKm,
+      day.floorsClimbed,
       day.totalElevationGainMeters,
       day.altitudeChangeMeters,
       day.activityScore,
@@ -101,7 +102,9 @@ export function buildWearableSourceHealth(input: {
       day.weightKg,
       day.bodyFatPercentage,
       day.bmi,
+      day.leanBodyMassKg,
       day.temperature,
+      day.waistCircumference,
     ]),
   ]);
 
@@ -111,6 +114,7 @@ export function buildWearableSourceHealth(input: {
       day.activeCalories,
       day.totalCalories,
       day.distanceKm,
+      day.floorsClimbed,
       day.totalElevationGainMeters,
       day.altitudeChangeMeters,
       day.activityScore,
@@ -156,7 +160,9 @@ export function buildWearableSourceHealth(input: {
       day.weightKg,
       day.bodyFatPercentage,
       day.bmi,
+      day.leanBodyMassKg,
       day.temperature,
+      day.waistCircumference,
     ]),
   ]);
 

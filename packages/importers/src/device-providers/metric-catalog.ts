@@ -11,7 +11,9 @@ export const wearableCanonicalMetricKeys = [
   "deepMinutes",
   "distanceKm",
   "estimatedVo2Max",
+  "floorsClimbed",
   "hrv",
+  "leanBodyMassKg",
   "lightMinutes",
   "lowestHeartRate",
   "maxHeartRate",
@@ -36,6 +38,7 @@ export const wearableCanonicalMetricKeys = [
   "totalCalories",
   "totalElevationGainMeters",
   "totalSleepMinutes",
+  "waistCircumference",
   "workoutStrain",
   "weightKg",
 ] as const;
@@ -97,7 +100,19 @@ export const wearableMetricCatalog = Object.freeze({
     "cardio_fitness",
     "cardiorespiratory_fitness",
   ]),
+  floorsClimbed: defineMetric("floorsClimbed", "count", "daily_observation", 1, [
+    "floors",
+    "floors_climbed",
+    "floors_ascended",
+  ]),
   hrv: defineMetric("hrv", "ms", "daily_observation", 3, ["hrv_rmssd", "rmssd"]),
+  leanBodyMassKg: defineMetric("leanBodyMassKg", "kg", "daily_observation", 0.2, [
+    "lean_body_mass",
+    "lean_body_mass_kg",
+    "lean_body_mass_kilogram",
+    "lean_mass",
+    "lean_mass_kg",
+  ]),
   lightMinutes: defineMetric("lightMinutes", "minutes", "session_observation", 5, ["light", "light_minutes"]),
   lowestHeartRate: defineMetric("lowestHeartRate", "bpm", "session_observation", 1, ["lowest_heart_rate", "min_hr"]),
   maxHeartRate: defineMetric("maxHeartRate", "bpm", "session_observation", 1, ["max_heart_rate", "max_hr"]),
@@ -138,6 +153,11 @@ export const wearableMetricCatalog = Object.freeze({
     "elevation_gain",
   ]),
   totalSleepMinutes: defineMetric("totalSleepMinutes", "minutes", "session_observation", 5, ["asleep", "total_sleep", "total_sleep_minutes"]),
+  waistCircumference: defineMetric("waistCircumference", "cm", "daily_observation", 0.5, [
+    "waist_circumference",
+    "waist_circumference_centimeter",
+    "waist_circumference_cm",
+  ]),
   workoutStrain: defineMetric("workoutStrain", "whoop_strain", "session_observation", 0.5, ["workout_strain"]),
   weightKg: defineMetric("weightKg", "kg", "daily_observation", 0.2, ["body_weight", "weight"]),
 } satisfies Record<WearableCanonicalMetricKey, WearableMetricCatalogEntry>);
@@ -211,6 +231,7 @@ export function normalizeWearableMetricValue(
         unit: "celsius",
         value: normalizeTemperatureCelsius(value, normalizedUnit),
       };
+    case "leanBodyMassKg":
     case "weightKg": {
       const kilograms = normalizeWeightKilograms(value, normalizedUnit);
       return kilograms === null ? null : { key, unit: "kg", value: kilograms };

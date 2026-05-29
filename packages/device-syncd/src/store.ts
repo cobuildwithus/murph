@@ -254,8 +254,13 @@ export class SqliteDeviceSyncStore {
     code: string,
     message: string,
     status: DeviceSyncAccountStatus | null | undefined,
-  ): void {
-    markStoredSyncFailed(this.database, accountId, now, code, message, status);
+    options: {
+      disconnectGeneration?: number | null;
+      localConnectionRevision?: number | null;
+      metadataPatch?: Record<string, unknown>;
+    } = {},
+  ): boolean {
+    return markStoredSyncFailed(this.database, accountId, now, code, message, status, options);
   }
 
   markConnectionSetupFailed(

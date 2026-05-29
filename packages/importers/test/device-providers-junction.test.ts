@@ -3,9 +3,12 @@ import { workoutSessionSchema } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
@@ -183,11 +186,6 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
           timeZoneOffsetMinutes: null,
           weight_kg: 82.4,
         }],
-        glucose: [{
-          connectionId: "source-withings",
-          observedAt: "2026-04-22T17:00:00Z",
-          value: 101,
-        }],
       },
       timeseries: {
         heartrate: [{
@@ -216,11 +214,10 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.deepEqual(payload.provenance?.timeseriesResources, [
     "heartrate",
     "blood_oxygen",
-    "glucose",
   ]);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
-  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role.includes("glucose")), true);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role.includes("glucose")), false);
 
   const observations = payload.events ?? [];
   const samples = payload.samples ?? [];
@@ -249,12 +246,10 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   const floatingSample = samples.find((sample) => sample.stream === "spo2");
   assert.equal(floatingSample, undefined);
 
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"));
-
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
-test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timestamp and source provenance", () => {
+test("Junction snapshot adapter keeps glucose timeseries unsupported", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     connections: [
@@ -274,9 +269,9 @@ test("Junction snapshot adapter keeps opt-in glucose timeseries wired to timesta
     },
   });
 
-  assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"));
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-glucose"), false);
 });
 
 test("Junction raw receipt hashing treats Date snapshot fields like ISO strings", async () => {
@@ -853,8 +848,36 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   const rawReceiptText = JSON.stringify(rawReceipt);
   const rawReceiptArtifactText = JSON.stringify(rawReceiptArtifact?.content);
   const rawArtifactText = JSON.stringify(payload.rawArtifacts);
-  const rawIdentifierLeakPattern =
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-device-id-acronym|timeseries-app-oura-cloud-1|timeseries-app-id-acronym|timeseries-source-app-id-dashed|timeseries-source-device-id-acronym|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|activity-app-id-acronym|activity-device-id-acronym|activity-source-app-id-dashed|activity-source-device-id-acronym|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw/u;
+  const rawIdentifierSentinels = [
+    "Timeseries Oura Ring",
+    "timeseries-device-oura-ring-1",
+    "timeseries-device-id-acronym",
+    "timeseries-app-oura-cloud-1",
+    "timeseries-app-id-acronym",
+    "timeseries-source-app-id-dashed",
+    "timeseries-source-device-id-acronym",
+    "nested-source-id-raw",
+    "nested-source-uuid-raw",
+    "nested-provider-id-raw",
+    "Nested Provider Oura Ring",
+    "Nested Provider Display Oura Ring",
+    "Connection Oura Ring",
+    "Connection Display Oura Ring",
+    "connection-device-oura-ring-1",
+    "connection-app-oura-cloud-1",
+    "Profile Oura Ring",
+    "activity-connection-raw",
+    "activity-provider-connection-raw",
+    "activity-source-raw",
+    "activity-source-instance-raw",
+    "activity-app-id-acronym",
+    "activity-device-id-acronym",
+    "activity-source-app-id-dashed",
+    "activity-source-device-id-acronym",
+    "timeseries-connection-raw",
+    "timeseries-source-raw",
+    "timeseries-source-instance-raw",
+  ];
 
   assert.equal(Object.hasOwn(rawReceipt, "payload"), false);
   assert.equal(rawReceipt.schemaVersion, "wearable.raw_ingest_receipt.v1");
@@ -866,19 +889,10 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   ]);
   assert.equal(rawReceipt.rawArtifactCount, 3);
   assert.equal(rawReceipt.rawArtifactRoles.some((role) => role.startsWith("wearable-raw-receipt:")), false);
-  assert.doesNotMatch(
-    rawReceiptText,
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-device-id-acronym|timeseries-app-oura-cloud-1|timeseries-app-id-acronym|timeseries-source-app-id-dashed|timeseries-source-device-id-acronym|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|activity-app-id-acronym|activity-device-id-acronym|activity-source-app-id-dashed|activity-source-device-id-acronym|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
-  );
+  assertJsonOmits(rawReceiptText, [...rawIdentifierSentinels, "\"sourceProviderSlug\"", "\"sourceType\"", "\"value\":123"]);
   assert.equal(rawReceiptArtifact?.content, rawReceipt);
-  assert.doesNotMatch(
-    rawReceiptArtifactText,
-    /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-device-id-acronym|timeseries-app-oura-cloud-1|timeseries-app-id-acronym|timeseries-source-app-id-dashed|timeseries-source-device-id-acronym|nested-source-id-raw|nested-source-uuid-raw|nested-provider-id-raw|Nested Provider Oura Ring|Nested Provider Display Oura Ring|Connection Oura Ring|Connection Display Oura Ring|connection-device-oura-ring-1|connection-app-oura-cloud-1|Profile Oura Ring|activity-connection-raw|activity-provider-connection-raw|activity-source-raw|activity-source-instance-raw|activity-app-id-acronym|activity-device-id-acronym|activity-source-app-id-dashed|activity-source-device-id-acronym|timeseries-connection-raw|timeseries-source-raw|timeseries-source-instance-raw|"sourceProviderSlug"|"sourceType"|"value":123/u,
-  );
-  assert.doesNotMatch(
-    rawArtifactText,
-    rawIdentifierLeakPattern,
-  );
+  assertJsonOmits(rawReceiptArtifactText, [...rawIdentifierSentinels, "\"sourceProviderSlug\"", "\"sourceType\"", "\"value\":123"]);
+  assertJsonOmits(rawArtifactText, rawIdentifierSentinels);
   assert.match(rawReceiptText, /"provider":"junction"/u);
   assert.match(rawArtifactText, /"sourceProviderSlug":"oura"/u);
   assert.match(rawArtifactText, /"sourceType":"ring"/u);
@@ -886,7 +900,7 @@ test("Junction snapshot import minimizes grouped source identifiers in raw recei
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
-test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until timezone conversion exists", async () => {
+test("Junction importer keeps glucose timeseries unsupported", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     sourceKind: "poll",
@@ -917,21 +931,12 @@ test("Junction importer keeps Libre +00:00 glucose timestamps raw-only until tim
   const glucoseArtifact = payload.rawArtifacts?.find((artifact) =>
     artifact.role === "junction-timeseries-glucose"
   );
-  assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
+  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.equal(glucoseSamples.length, 0);
-  assert.ok(glucoseArtifact);
-  assert.deepEqual(glucoseArtifact.content, [
-    {
-      sourceProviderSlug: "freestyle_libre",
-      timestamp: "2023-09-27T07:48:00+00:00",
-      value: 101,
-    },
-    {
-      sourceProviderSlug: "abbott_libreview",
-      timestamp: "2023-09-27T07:48:00+00:00",
-      value: 102,
-    },
-  ]);
+  assert.equal(glucoseArtifact, undefined);
+  assert.doesNotMatch(rawArtifactText, /freestyle_libre|abbott_libreview|"value":101|"value":102/u);
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
@@ -1128,6 +1133,14 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "blood_oxygen",
     "weight",
   ]);
+  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
+  assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], ["meal", "menstrual_cycle"]);
+  assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
+    ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+    "meal",
+    "menstrual_cycle",
+  ]);
+  assert.deepEqual([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES], [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
 
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
@@ -1161,6 +1174,86 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "active-calories"), false);
   assert.equal(payload.events?.some((event) => event.fields?.metric === "distance"), false);
   assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction normalizer keeps configured raw-only summaries as sanitized evidence", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      meals: [{
+        id: "meal-1",
+        timestamp: "2026-04-22T18:30:00Z",
+        name: "Dinner",
+        calories: 650,
+        source: {
+          provider: "myfitnesspal",
+          type: "app",
+          app_id: "raw-meal-app",
+          appID: "raw-meal-app-acronym",
+          device_id: "raw-meal-device",
+          deviceID: "raw-meal-device-acronym",
+          displayName: "raw-meal-source-display",
+          "source-app-id": "raw-meal-source-app-dashed",
+          sourceAppID: "raw-meal-source-app-acronym",
+          sourceDeviceID: "raw-meal-source-device-acronym",
+          sourceName: "raw-meal-source-name",
+        },
+      }],
+      menstrual_cycle: [{
+        id: "cycle-1",
+        created_at: "2026-04-01T12:00:00Z",
+        cycle_end: "2026-05-01",
+        period_start: "2026-04-07",
+        period_end: "2026-04-11",
+        menstrual_flow: [
+          { date: "2026-04-07", flow: "light" },
+          { date: "2026-04-10", flow: "medium" },
+        ],
+        sexual_activity: [{ date: "2026-04-13", protection_used: true }],
+        source: {
+          provider: "apple_health",
+          type: "phone",
+          sourceAppID: "raw-cycle-source-app",
+          sourceName: "raw-cycle-source-name",
+        },
+      }],
+      electrocardiogram: [{
+        id: "ecg-1",
+        classification: "sinus_rhythm",
+      }],
+    },
+  });
+
+  const rawMealArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "junction-summary-meal");
+  const rawCycleArtifact = payload.rawArtifacts?.find((artifact) =>
+    artifact.role === "junction-summary-menstrual-cycle"
+  );
+  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["meal", "menstrual_cycle"]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.events, []);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.match(JSON.stringify(rawMealArtifact?.content), /Dinner/u);
+  assert.match(JSON.stringify(rawMealArtifact?.content), /650/u);
+  assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
+  assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
+  assert.match(JSON.stringify(rawCycleArtifact?.content), /protection_used/u);
+  assertJsonOmits(rawArtifactText, [
+    "raw-meal-app",
+    "raw-meal-app-acronym",
+    "raw-meal-device",
+    "raw-meal-device-acronym",
+    "raw-meal-source-display",
+    "raw-meal-source-app-dashed",
+    "raw-meal-source-app-acronym",
+    "raw-meal-source-device-acronym",
+    "raw-meal-source-name",
+    "raw-cycle-source-app",
+    "raw-cycle-source-name",
+    "sinus_rhythm",
+  ]);
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"), false);
 });
 
 test("Junction normalizer ignores unsupported timeseries and workout stream resources", () => {
@@ -1203,10 +1296,6 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
     snapshot: {
       importedAt: "2026-04-22T12:00:00.000Z",
       summaries: {
-        menstrual_cycle: [{
-          id: "cycle-summary-1",
-          period_start: "2026-04-01",
-        }],
         electrocardiogram: [{
           id: "ecg-summary-1",
           classification: "sinus_rhythm",
@@ -1229,7 +1318,110 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")));
-  assert.doesNotMatch(rawArtifactText, /period_start|sinus_rhythm|electrocardiogram_voltage/u);
+  assert.doesNotMatch(rawArtifactText, /sinus_rhythm|electrocardiogram_voltage/u);
+});
+
+test("Junction raw receipt hash ignores unsupported-only resources", async () => {
+  const emptyPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-22T12:00:00.000Z",
+    },
+  });
+  const unsupportedPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-22T12:00:00.000Z",
+      summaries: {
+        electrocardiogram: [{ classification: "sinus_rhythm" }],
+        workout_stream: [{ cadence: 86 }],
+      },
+      timeseries: {
+        electrocardiogram_voltage: [{ timestamp: "2026-04-22T18:00:00Z", value: 0.2 }],
+        glucose: [{ timestamp: "2026-04-22T18:00:00Z", value: 101 }],
+        workout_distance: [{ timestamp: "2026-04-22T18:00:00Z", value: 1200 }],
+      },
+    },
+  });
+
+  const emptyReceipt = readRawReceiptArtifact(emptyPayload);
+  const unsupportedReceipt = readRawReceiptArtifact(unsupportedPayload);
+  const unsupportedArtifactText = JSON.stringify(unsupportedPayload.rawArtifacts);
+
+  assert.equal(unsupportedReceipt.payloadHash, emptyReceipt.payloadHash);
+  assert.equal(unsupportedReceipt.id, emptyReceipt.id);
+  assert.deepEqual(unsupportedPayload.provenance?.summaryResources, []);
+  assert.deepEqual(unsupportedPayload.provenance?.timeseriesResources, []);
+  assert.equal(unsupportedPayload.rawArtifacts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assertJsonOmits(unsupportedArtifactText, [
+    "sinus_rhythm",
+    "workout_stream",
+    "electrocardiogram_voltage",
+    "glucose",
+    "workout_distance",
+    "\"value\":101",
+    "\"value\":1200",
+  ]);
+});
+
+test("Junction raw receipt hash ignores unsupported resources mixed with supported resources", async () => {
+  const supportedSnapshot = {
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        observedAt: "2026-04-22T12:00:00Z",
+        steps: 7200,
+      }],
+    },
+  };
+  const supportedPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: supportedSnapshot,
+  });
+  const mixedPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      ...supportedSnapshot,
+      summaries: {
+        ...supportedSnapshot.summaries,
+        electrocardiogram: [{ classification: "sinus_rhythm" }],
+        workout_stream: [{ cadence: 86 }],
+      },
+      timeseries: {
+        glucose: [{ timestamp: "2026-04-22T18:00:00Z", value: 101 }],
+        workout_distance: [{ timestamp: "2026-04-22T18:00:00Z", value: 1200 }],
+      },
+    },
+  });
+
+  const supportedReceipt = readRawReceiptArtifact(supportedPayload);
+  const mixedReceipt = readRawReceiptArtifact(mixedPayload);
+  const mixedArtifactText = JSON.stringify(mixedPayload.rawArtifacts);
+
+  assert.equal(mixedReceipt.payloadHash, supportedReceipt.payloadHash);
+  assert.equal(mixedReceipt.id, supportedReceipt.id);
+  assert.deepEqual(mixedPayload.provenance?.summaryResources, ["activity"]);
+  assert.deepEqual(mixedPayload.provenance?.timeseriesResources, []);
+  assertJsonOmits(mixedArtifactText, [
+    "sinus_rhythm",
+    "workout_stream",
+    "glucose",
+    "workout_distance",
+    "\"value\":101",
+    "\"value\":1200",
+  ]);
 });
 
 test("Junction normalizer canonicalizes documented resource aliases before allowlisting", () => {
@@ -1603,6 +1795,7 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
               max_bpm: 140,
               duration_seconds: 900,
             },
+            120,
           ],
           route: {
             id: "route-forest-loop",
@@ -1694,6 +1887,10 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
         maxHeartRate: 140,
         durationMinutes: 15,
       },
+      {
+        zone: 3,
+        durationMinutes: 2,
+      },
     ],
     route: {
       routeId: "route-forest-loop",
@@ -1750,6 +1947,45 @@ test("Junction workout detail normalization stays within workout contract bounds
             { duration: 60 },
           ],
         },
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "workout-end-derived",
+          time_end: "2026-05-22T12:30:00+00:00",
+          moving_time: 1800,
+          sport_type: "Virtual Ride",
+        },
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "workout-elapsed-duration",
+          time_start: "2026-05-23T12:00:00+00:00",
+          time_end: "2026-05-23T12:45:00+00:00",
+          moving_time: 1800,
+          sport_type: "Gravel Ride",
+          calories: -10,
+          total_calories: -20,
+          average_hr: -1,
+          max_hr: -2,
+          total_elevation_gain: -3,
+          elevation_change: -12,
+          average_speed: -4,
+          max_speed: -5,
+          average_watts: -6,
+          max_watts: -7,
+          normalized_power: -8,
+          weighted_average_watts: -9,
+          kilojoules: -10,
+          hr_zones: [{
+            min: -100,
+            max: -90,
+            duration: 60,
+          }],
+        },
       ],
     },
   });
@@ -1759,6 +1995,10 @@ test("Junction workout detail normalization stays within workout contract bounds
   const workoutSessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
   const workout = workoutSessionSchema.parse(workoutSessions[0]?.fields?.workout);
   const sparseZoneWorkout = workoutSessionSchema.parse(workoutSessions[1]?.fields?.workout);
+  const endDerivedSession = workoutSessions[2];
+  const endDerivedWorkout = workoutSessionSchema.parse(endDerivedSession?.fields?.workout);
+  const elapsedDurationSession = workoutSessions[3];
+  const elapsedDurationWorkout = workoutSessionSchema.parse(elapsedDurationSession?.fields?.workout);
 
   assert.ok((workout.sport?.length ?? 0) <= 80);
   assert.match(workout.sport ?? "", /^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
@@ -1766,6 +2006,22 @@ test("Junction workout detail normalization stays within workout contract bounds
   assert.equal(workout.heartRateZones?.at(-1)?.zone, 20);
   assert.equal(sparseZoneWorkout.heartRateZones?.length, 1);
   assert.equal(sparseZoneWorkout.heartRateZones?.[0]?.zone, 20);
+  assert.equal(endDerivedSession?.occurredAt, "2026-05-22T12:00:00.000Z");
+  assert.equal(endDerivedSession?.fields?.durationMinutes, 30);
+  assert.equal(endDerivedWorkout.startedAt, "2026-05-22T12:00:00.000Z");
+  assert.equal(endDerivedWorkout.endedAt, "2026-05-22T12:30:00.000Z");
+  assert.equal(endDerivedWorkout.sport, "virtual-ride");
+  assert.equal(endDerivedWorkout.sportName, "Virtual Ride");
+  assert.equal(elapsedDurationSession?.fields?.durationMinutes, 45);
+  assert.equal(elapsedDurationWorkout.movingTimeMinutes, 30);
+  assert.equal(elapsedDurationWorkout.sport, "gravel-ride");
+  assert.deepEqual(elapsedDurationWorkout.metrics, {
+    altitudeChangeMeters: -12,
+  });
+  assert.deepEqual(elapsedDurationWorkout.heartRateZones, [{
+    zone: 1,
+    durationMinutes: 1,
+  }]);
 });
 
 test("Junction normalizer maps documented sleep summary scalar fields", () => {
@@ -1898,7 +2154,7 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
   assert.equal(metricValue("waist-circumference"), 86.36);
-  assert.equal(metricValue("lean-body-mass"), undefined);
+  assert.equal(metricValue("lean-body-mass"), 40.1);
   assert.equal(metricValue("temperature"), 36.7);
   assert.match(JSON.stringify(rawBodyArtifact?.content), /"lean_body_mass_kilogram":40.1/u);
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
@@ -1987,6 +2243,34 @@ test("Junction workout provider IDs drive stable summary external refs", () => {
           moving_time: 2700,
           sport: { name: "Run" },
         },
+        {
+          source: { provider: "garmin" },
+          resource_id: "resource-workout-stable",
+          time_start: "2026-05-26T12:00:00+00:00",
+          moving_time: 1800,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          resource_id: "resource-workout-stable",
+          time_start: "2026-05-27T12:00:00+00:00",
+          moving_time: 2700,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          external_id: "external-workout-stable",
+          time_start: "2026-05-28T12:00:00+00:00",
+          moving_time: 1800,
+          sport: { name: "Run" },
+        },
+        {
+          source: { provider: "garmin" },
+          external_id: "external-workout-stable",
+          time_start: "2026-05-29T12:00:00+00:00",
+          moving_time: 2700,
+          sport: { name: "Run" },
+        },
       ],
     },
   });
@@ -1994,10 +2278,12 @@ test("Junction workout provider IDs drive stable summary external refs", () => {
   assertWorkoutSessionsMatchContract(payload.events ?? []);
 
   const sessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
-  assert.equal(sessions.length, 6);
+  assert.equal(sessions.length, 10);
   assert.equal(sessions[0]?.externalRef?.resourceId, sessions[1]?.externalRef?.resourceId);
   assert.equal(sessions[2]?.externalRef?.resourceId, sessions[3]?.externalRef?.resourceId);
   assert.equal(sessions[4]?.externalRef?.resourceId, sessions[5]?.externalRef?.resourceId);
+  assert.equal(sessions[6]?.externalRef?.resourceId, sessions[7]?.externalRef?.resourceId);
+  assert.equal(sessions[8]?.externalRef?.resourceId, sessions[9]?.externalRef?.resourceId);
   assert.equal(
     workoutSessionSchema.parse(sessions[2]?.fields?.workout).sourceWorkoutId,
     "provider-camel-workout-stable",

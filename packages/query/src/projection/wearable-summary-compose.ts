@@ -424,6 +424,7 @@ function activityResolvedMetrics(summary: ProjectedWearableActivitySummary): Wea
     summary.dayStrain,
     summary.distanceKm,
     summary.estimatedVo2Max,
+    summary.floorsClimbed,
     summary.maxHeartRate,
     summary.percentRecorded,
     summary.sessionCount,
@@ -475,7 +476,9 @@ function bodyStateResolvedMetrics(summary: ProjectedWearableBodyStateSummary): W
   return [
     summary.bmi,
     summary.bodyFatPercentage,
+    summary.leanBodyMassKg,
     summary.temperature,
+    summary.waistCircumference,
     summary.weightKg,
   ];
 }

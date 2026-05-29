@@ -57,7 +57,10 @@ export interface JunctionProviderConnection {
   resourceAvailability: Record<string, unknown>;
 }
 
+export type JunctionDateQueryFormat = "date" | "datetime";
+
 export interface JunctionWindowInput {
+  dateQueryFormat?: JunctionDateQueryFormat;
   resource: string;
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
@@ -364,9 +367,10 @@ export class JunctionClient {
         });
       }
 
+      const dateQueryFormat = input.dateQueryFormat ?? "datetime";
       const search = new URLSearchParams({
-        start_date: toDateParameter(input.windowStart),
-        end_date: toDateParameter(input.windowEnd),
+        start_date: toDateParameter(input.windowStart, dateQueryFormat, "start"),
+        end_date: toDateParameter(input.windowEnd, dateQueryFormat, "end"),
       });
       const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
       if (sourceProviderSlug) {
@@ -932,8 +936,17 @@ function extractNextCursor(payload: unknown): string | null {
   );
 }
 
-function toDateParameter(timestamp: string): string {
-  return new Date(timestamp).toISOString().slice(0, 10);
+function toDateParameter(
+  timestamp: string,
+  format: JunctionDateQueryFormat,
+  boundary: "end" | "start",
+): string {
+  const date = new Date(timestamp);
+  if (format === "date" && boundary === "end") {
+    date.setTime(date.getTime() - 1);
+  }
+  const isoTimestamp = date.toISOString();
+  return format === "date" ? isoTimestamp.slice(0, 10) : isoTimestamp;
 }
 
 function parseJsonResponse<T>(text: string): T {

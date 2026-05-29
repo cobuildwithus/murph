@@ -3384,6 +3384,94 @@ test("device sync service does not persist refreshed tokens after the job lease 
   close();
 });
 
+test("device sync service ignores stale provider failures after account reconnect", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-reconnect-failure");
+  let providerStartedResolve: (() => void) | null = null;
+  let releaseProviderResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const releaseProvider = new Promise<void>((resolve) => {
+    releaseProviderResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          providerStartedResolve?.();
+          await releaseProvider;
+          throw deviceSyncError({
+            code: "TOKEN_REFRESH_FAILED",
+            message: "Reconnect required.",
+            retryable: true,
+            accountStatus: "reauthorization_required",
+            details: {
+              failureMetadataPatch: {
+                staleFailure: true,
+              },
+            },
+          });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "stale-reconnect",
+  });
+  const accountBeforeReconnect = store.getAccountById(connected.account.id);
+
+  assert.ok(accountBeforeReconnect);
+
+  const workerPromise = service.runWorkerOnce();
+  await providerStarted;
+
+  const reconnect = await service.startConnection({
+    provider: "demo",
+  });
+  const reconnected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: reconnect.state,
+    code: "stale-reconnect",
+  });
+
+  assert.equal(reconnected.account.id, connected.account.id);
+  assert.equal(
+    store.getAccountById(connected.account.id)?.localConnectionRevision,
+    accountBeforeReconnect.localConnectionRevision + 1,
+  );
+
+  requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
+  await workerPromise;
+
+  const accountAfter = store.getAccountById(connected.account.id);
+  const jobsAfter = readJobsForAccountForTesting(store, connected.account.id);
+
+  assert.ok(accountAfter);
+  assert.equal(accountAfter.status, "active");
+  assert.equal(accountAfter.lastErrorCode, null);
+  assert.equal(accountAfter.lastErrorMessage, null);
+  assert.deepEqual(accountAfter.metadata, {
+    connectedBy: "stale-reconnect",
+  });
+  assert.equal(Object.hasOwn(accountAfter.metadata, "staleFailure"), false);
+  assert.equal(service.summarize().jobsDead, 0);
+  assert.equal(jobsAfter.some((job) => job.last_error_code !== null), false);
+
+  close();
+});
+
 test("device sync service next wake tracks scheduled reconciles and queued jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-next-wake");
   const { service, store, close } = createServiceFixture({
@@ -3959,6 +4047,80 @@ test("device sync service exposes safe structured diagnostics for provider failu
   close();
 });
 
+test("device sync service persists compact Junction optional resource diagnostics", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-resource-diagnostics");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        provider: "junction",
+        async executeJob() {
+          throw deviceSyncError({
+            code: "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS",
+            message: "Junction timeseries resource steps returned an ambiguous 422 response.",
+            retryable: true,
+            httpStatus: 502,
+            details: {
+              failureMetadataPatch: {
+                junctionResourceDiagnostic: "timeseries.steps.422.ambiguous",
+                junctionResourceDiagnosticAt: "2026-04-07T00:00:00.000Z",
+                junctionResourceDiagnosticCode: "invalid_request",
+                junctionResourceDiagnosticHttpStatus: 422,
+                junctionResourceDiagnosticShape: "json_object",
+              },
+              providerOptionalResourceCategory: "timeseries",
+              providerOptionalResourceFailureDisposition: "ambiguous",
+              providerOptionalResourceName: "steps",
+              providerOptionalResourceStatus: 422,
+              responseErrorCode: "invalid_request",
+              responseShapeKind: "json_object",
+              status: 422,
+            },
+          });
+        },
+      }),
+    ],
+  });
+
+  const account = store.upsertAccount({
+    provider: "junction",
+    externalAccountId: "junction-resource-diagnostics",
+    displayName: "Junction",
+    scopes: [],
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+      credentialMetadata: {},
+    },
+    metadata: {},
+    connectedAt: "2026-04-07T00:00:00.000Z",
+  });
+  store.enqueueJob({
+    accountId: account.id,
+    provider: "junction",
+    kind: "reconcile",
+    payload: {},
+    availableAt: "2026-04-07T00:00:00.000Z",
+  });
+
+  await service.runWorkerOnce();
+
+  const metadata = store.getAccountById(account.id)?.metadata ?? {};
+  assert.equal(metadata.junctionResourceDiagnostic, "timeseries.steps.422.ambiguous");
+  assert.equal(metadata.junctionResourceDiagnosticCode, "invalid_request");
+  assert.equal(metadata.junctionResourceDiagnosticHttpStatus, 422);
+  assert.equal(metadata.junctionResourceDiagnosticShape, "json_object");
+  assert.equal(typeof metadata.junctionResourceDiagnosticAt, "string");
+  assert.equal(JSON.stringify(metadata).includes("date window"), false);
+
+  close();
+});
+
 test("device sync service omits unsafe free-form provider diagnostic reasons", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-unsafe-provider-diagnostics");
   const { service, close } = createServiceFixture({
@@ -4419,6 +4581,57 @@ test("sqlite store sanitizes connection metadata writes and metadataPatch merges
   });
 
   store.close();
+});
+
+test("sqlite store leaves metadata untouched on failures without metadata patches", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-failure-metadata-untouched");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+  const created = store.upsertAccount({
+    connectedAt: "2026-03-20T10:00:00.000Z",
+    displayName: "Failure Metadata Account",
+    externalAccountId: "demo-failure-metadata",
+    metadata: {},
+    nextReconcileAt: null,
+    provider: "demo",
+    scopes: ["offline"],
+    status: "active",
+    tokens: {
+      accessToken: "seed-access",
+      accessTokenEncrypted: "enc:seed-access",
+      refreshToken: "seed-refresh",
+      refreshTokenEncrypted: "enc:seed-refresh",
+    },
+  });
+  const crowdedMetadataJson = JSON.stringify(
+    Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`legacy${index}`, `value-${index}`])),
+  );
+  const database = openSqliteRuntimeDatabase(store.databasePath);
+  try {
+    database.prepare("update device_connection set metadata_json = ? where id = ?").run(
+      crowdedMetadataJson,
+      created.id,
+    );
+    const before = database.prepare("select metadata_json from device_connection where id = ?").get(
+      created.id,
+    ) as { metadata_json?: string } | undefined;
+    assert.equal(before?.metadata_json, crowdedMetadataJson);
+
+    store.markSyncFailed(
+      created.id,
+      "2026-03-20T12:00:00.000Z",
+      "SYNC_FAILED",
+      "sync failed",
+      null,
+    );
+
+    const after = database.prepare("select metadata_json from device_connection where id = ?").get(
+      created.id,
+    ) as { metadata_json?: string } | undefined;
+    assert.equal(after?.metadata_json, crowdedMetadataJson);
+  } finally {
+    database.close();
+    store.close();
+  }
 });
 
 test("sqlite store prioritizes metadataPatch entries when capped metadata is full", async () => {

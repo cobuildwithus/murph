@@ -29,6 +29,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
   const activeCalories = projectWearableResolvedMetricPublicSources(day.activeCalories);
   const totalCalories = projectWearableResolvedMetricPublicSources(day.totalCalories);
   const distanceKm = projectWearableResolvedMetricPublicSources(day.distanceKm);
+  const floorsClimbed = projectWearableResolvedMetricPublicSources(day.floorsClimbed);
   const totalElevationGainMeters = projectWearableResolvedMetricPublicSources(day.totalElevationGainMeters);
   const altitudeChangeMeters = projectWearableResolvedMetricPublicSources(day.altitudeChangeMeters);
   const estimatedVo2Max = projectWearableResolvedMetricPublicSources(day.estimatedVo2Max);
@@ -44,6 +45,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     ["activeCalories", activeCalories],
     ["totalCalories", totalCalories],
     ["distanceKm", distanceKm],
+    ["floorsClimbed", floorsClimbed],
     ["totalElevationGainMeters", totalElevationGainMeters],
     ["altitudeChangeMeters", altitudeChangeMeters],
     ["estimatedVo2Max", estimatedVo2Max],
@@ -64,6 +66,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
       day.activeCalories,
       day.totalCalories,
       day.distanceKm,
+      day.floorsClimbed,
       day.totalElevationGainMeters,
       day.altitudeChangeMeters,
       day.estimatedVo2Max,
@@ -85,6 +88,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     dayStrain,
     distanceKm,
     estimatedVo2Max,
+    floorsClimbed,
     maxHeartRate,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),
@@ -95,6 +99,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
         day.activeCalories,
         day.totalCalories,
         day.distanceKm,
+        day.floorsClimbed,
         day.totalElevationGainMeters,
         day.altitudeChangeMeters,
         day.estimatedVo2Max,
@@ -297,12 +302,16 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
   const weightKg = projectWearableResolvedMetricPublicSources(day.weightKg);
   const bodyFatPercentage = projectWearableResolvedMetricPublicSources(day.bodyFatPercentage);
   const bmi = projectWearableResolvedMetricPublicSources(day.bmi);
+  const leanBodyMassKg = projectWearableResolvedMetricPublicSources(day.leanBodyMassKg);
   const temperature = projectWearableResolvedMetricPublicSources(day.temperature);
+  const waistCircumference = projectWearableResolvedMetricPublicSources(day.waistCircumference);
   const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
     ["weightKg", weightKg],
     ["bodyFatPercentage", bodyFatPercentage],
     ["bmi", bmi],
+    ["leanBodyMassKg", leanBodyMassKg],
     ["temperature", temperature],
+    ["waistCircumference", waistCircumference],
   ];
   const summaryConfidence = rebuildPublicSummaryConfidence(
     metrics,
@@ -312,7 +321,9 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
       day.weightKg,
       day.bodyFatPercentage,
       day.bmi,
+      day.leanBodyMassKg,
       day.temperature,
+      day.waistCircumference,
     ],
   );
 
@@ -328,7 +339,9 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
         day.weightKg,
         day.bodyFatPercentage,
         day.bmi,
+        day.leanBodyMassKg,
         day.temperature,
+        day.waistCircumference,
       ],
       summaryConfidence,
       fallbackNotes: summarizeBodyStateNotes({
@@ -337,8 +350,10 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
         weightKg,
       }),
     }),
+    leanBodyMassKg,
     summaryConfidence,
     temperature,
+    waistCircumference,
     weightKg,
   };
 }

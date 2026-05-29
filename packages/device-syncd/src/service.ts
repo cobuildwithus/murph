@@ -570,6 +570,7 @@ class DeviceSyncServiceController {
     this.store.markSyncStarted(storedAccount.id, now);
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
+    const localConnectionRevision = storedAccount.localConnectionRevision;
     const jobExecutor = resolveProviderJobExecutor(provider);
 
     if (!jobExecutor) {
@@ -598,14 +599,31 @@ class DeviceSyncServiceController {
         }
       }
     };
-    const ensureAccountActive = (): void => {
+    const isAccountExecutionCurrent = (): boolean => {
+      const currentStoredAccount = this.store.getAccountById(storedAccount.id);
+
+      return !!currentStoredAccount
+        && currentStoredAccount.status === "active"
+        && currentStoredAccount.disconnectGeneration === disconnectGeneration
+        && currentStoredAccount.localConnectionRevision === localConnectionRevision;
+    };
+    const releaseActiveJobsIfCurrentAccountActive = (releaseNow: string): number => {
       const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
       if (
-        !currentStoredAccount ||
-        currentStoredAccount.status !== "active" ||
-        currentStoredAccount.disconnectGeneration !== disconnectGeneration
+        !currentStoredAccount
+        || currentStoredAccount.status !== "active"
+        || currentStoredAccount.disconnectGeneration !== disconnectGeneration
       ) {
+        return 0;
+      }
+
+      return activeJobs.filter((activeJob) =>
+        this.store.releaseJobIfOwned(activeJob.id, this.workerId, releaseNow)
+      ).length;
+    };
+    const ensureAccountActive = (): void => {
+      if (!isAccountExecutionCurrent()) {
         throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
       }
     };
@@ -776,9 +794,7 @@ class DeviceSyncServiceController {
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
         const releaseNow = currentNow();
-        const released = activeJobs.filter((activeJob) =>
-          this.store.releaseJobIfOwned(activeJob.id, this.workerId, releaseNow)
-        ).length;
+        const released = releaseActiveJobsIfCurrentAccountActive(releaseNow);
         this.logger.debug?.("Device sync job yielded before completion.", {
           provider: provider.provider,
           jobId: job.id,
@@ -789,16 +805,31 @@ class DeviceSyncServiceController {
       }
 
       if (error instanceof DeviceSyncJobExecutionCancelledError) {
+        const releaseNow = currentNow();
+        const released = releaseActiveJobsIfCurrentAccountActive(releaseNow);
         this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
           provider: provider.provider,
           accountId: storedAccount.id,
           jobId: job.id,
+          ...(released > 0 ? { released } : {}),
         });
         return finishPass();
       }
 
       const failure = normalizeExecutionError(error);
       const failureNow = currentNow();
+      if (!isAccountExecutionCurrent()) {
+        const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
+        this.logger.debug?.("Device sync job failure ignored because account execution was superseded.", {
+          provider: provider.provider,
+          accountId: storedAccount.id,
+          jobId: job.id,
+          jobCount: activeJobs.length,
+          released,
+        });
+        return finishPass();
+      }
+
       const failed = activeJobs
         .map((activeJob) => {
           const retryAt = failure.retryable
@@ -827,7 +858,31 @@ class DeviceSyncServiceController {
         details: failure.details,
         retryable: failure.retryable,
       });
-      this.store.markSyncFailed(storedAccount.id, now, failure.code, failure.message, failure.accountStatus);
+      const failureMetadataPatch = readDeviceSyncFailureMetadataPatch(error);
+      const failureOptions = {
+        disconnectGeneration,
+        localConnectionRevision,
+        ...(failureMetadataPatch ? { metadataPatch: failureMetadataPatch } : {}),
+      };
+      const markedFailed = this.store.markSyncFailed(
+        storedAccount.id,
+        failureNow,
+        failure.code,
+        failure.message,
+        failure.accountStatus,
+        failureOptions,
+      );
+
+      if (!markedFailed) {
+        this.logger.debug?.("Device sync account failure state skipped because execution was superseded.", {
+          provider: provider.provider,
+          accountId: storedAccount.id,
+          jobId: job.id,
+          code: failure.code,
+        });
+        return finishPass();
+      }
+
       if (failure.accountStatus === "reauthorization_required") {
         this.store.markPendingJobsDeadForAccount(
           storedAccount.id,
@@ -1473,6 +1528,15 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerOAuthResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.oauthResponseErrorFieldPresent),
     providerOAuthResponseShapeKind: readSafeDiagnosticToken(error.details?.oauthResponseShapeKind),
   });
+}
+
+function readDeviceSyncFailureMetadataPatch(error: unknown): Record<string, unknown> | undefined {
+  if (!isDeviceSyncError(error)) {
+    return undefined;
+  }
+
+  const patch = toPlainRecord(error.details?.failureMetadataPatch);
+  return patch && Object.keys(patch).length > 0 ? patch : undefined;
 }
 
 function buildUnexpectedErrorFailureDiagnostics(

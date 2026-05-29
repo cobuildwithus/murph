@@ -46,6 +46,11 @@ test("metric catalog normalizes unit conversions across importer-supported branc
     unit: "km",
     value: 5,
   });
+  assert.deepEqual(normalizeWearableMetricValue("floors-climbed", 18, "count"), {
+    key: "floorsClimbed",
+    unit: "count",
+    value: 18,
+  });
 
   assert.deepEqual(normalizeWearableMetricValue("body_temperature", 98.6, "fahrenheit"), {
     key: "temperature",
@@ -67,6 +72,21 @@ test("metric catalog normalizes unit conversions across importer-supported branc
     key: "weightKg",
     unit: "kg",
     value: 70,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("waist-circumference", 86.36, "cm"), {
+    key: "waistCircumference",
+    unit: "cm",
+    value: 86.36,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("lean-body-mass", 40.1, "kg"), {
+    key: "leanBodyMassKg",
+    unit: "kg",
+    value: 40.1,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("lean-body-mass", 100, "pounds"), {
+    key: "leanBodyMassKg",
+    unit: "kg",
+    value: 45.3592,
   });
   assert.equal(normalizeWearableMetricValue("weight", 70, "stone"), null);
 

@@ -170,6 +170,9 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(dateCandidates, "distanceKm"), {
       metricFamily: "activity",
     });
+    const floorsClimbed = resolveMetric("floorsClimbed", selectMetricCandidates(dateCandidates, "floorsClimbed"), {
+      metricFamily: "activity",
+    });
     const totalElevationGainMeters = resolveMetric(
       "totalElevationGainMeters",
       selectMetricCandidates(dateCandidates, "totalElevationGainMeters"),
@@ -214,6 +217,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["activeCalories", activeCalories],
       ["totalCalories", totalCalories],
       ["distanceKm", distanceKm],
+      ["floorsClimbed", floorsClimbed],
       ["totalElevationGainMeters", totalElevationGainMeters],
       ["altitudeChangeMeters", altitudeChangeMeters],
       ["estimatedVo2Max", estimatedVo2Max],
@@ -243,6 +247,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       dayStrain,
       distanceKm,
       estimatedVo2Max,
+      floorsClimbed,
       maxHeartRate,
       notes,
       percentRecorded,
@@ -574,14 +579,22 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const bmi = resolveMetric("bmi", selectMetricCandidates(dateCandidates, "bmi"), {
       metricFamily: "body",
     });
+    const leanBodyMassKg = resolveMetric("leanBodyMassKg", selectMetricCandidates(dateCandidates, "leanBodyMassKg"), {
+      metricFamily: "body",
+    });
     const temperature = resolveMetric("temperature", selectMetricCandidates(dateCandidates, "temperature"), {
       metricFamily: "temperature",
+    });
+    const waistCircumference = resolveMetric("waistCircumference", selectMetricCandidates(dateCandidates, "waistCircumference"), {
+      metricFamily: "body",
     });
     const summaryConfidence = summarizeMetricsConfidence([
       ["weightKg", weightKg],
       ["bodyFatPercentage", bodyFatPercentage],
       ["bmi", bmi],
+      ["leanBodyMassKg", leanBodyMassKg],
       ["temperature", temperature],
+      ["waistCircumference", waistCircumference],
     ], {
       missingSummaryNote: "No body-state metrics were available for this date.",
     });
@@ -595,9 +608,11 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
       bmi,
       bodyFatPercentage,
       date,
+      leanBodyMassKg,
       notes,
       summaryConfidence,
       temperature,
+      waistCircumference,
       weightKg,
     };
   });
@@ -674,6 +689,8 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "sleepEfficiency", summaryKind: "sleep" },
   { metric: "weightKg", summaryKind: "bodyState" },
   { metric: "bodyFatPercentage", summaryKind: "bodyState" },
+  { metric: "leanBodyMassKg", summaryKind: "bodyState" },
+  { metric: "waistCircumference", summaryKind: "bodyState" },
 ];
 const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
   "skin-temp": "temperatureDeviation",

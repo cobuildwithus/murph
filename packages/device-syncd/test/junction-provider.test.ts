@@ -216,6 +216,16 @@ function sha256ForTest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function assertJunctionWindowQuery(
+  url: string,
+  expectedStartDate: string,
+  expectedEndDate: string,
+): void {
+  const searchParams = new URL(url).searchParams;
+  assert.equal(searchParams.get("start_date"), expectedStartDate);
+  assert.equal(searchParams.get("end_date"), expectedEndDate);
+}
+
 function requireJunctionConnectionHandler(provider: ReturnType<typeof createJunctionProvider>) {
   return requireValue(provider.connectionHandler, "Junction provider should expose a connection handler.");
 }
@@ -401,8 +411,10 @@ test("Junction empty historical backfill preserves explicit windows", async () =
 
 test("Junction useful summary historical backfill marks the historical window complete", async () => {
   const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
@@ -441,8 +453,8 @@ test("Junction useful summary historical backfill marks the historical window co
       },
     }),
     createJob("backfill", {
-      windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T06:07:08.000Z",
+      windowEnd: "2026-04-03T09:10:11.000Z",
     }),
   );
 
@@ -450,16 +462,27 @@ test("Junction useful summary historical backfill marks the historical window co
     junctionHistoricalBackfillStatus: "complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
-    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T06:07:08.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T09:10:11.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/activity/")),
+    "Junction historical backfill should fetch summary completion data.",
+  );
+  assertJunctionWindowQuery(
+    summaryRequest,
+    "2026-04-01T06:07:08.000Z",
+    "2026-04-03T09:10:11.000Z",
+  );
 });
 
 test("Junction backfill diagnostic reports redacted provider call counts", async () => {
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
@@ -510,7 +533,9 @@ test("Junction backfill diagnostic reports redacted provider call counts", async
   const result = await provider.diagnostics.diagnoseBackfill({
     account: createAccount(),
     now: "2026-04-03T00:00:00.000Z",
-    timeseriesProbeDays: 1,
+    timeseriesProbeDays: 2,
+    windowStart: "2026-04-02T10:15:30.000Z",
+    windowEnd: "2026-04-03T11:45:00.000Z",
   });
   const diagnostic = result.result;
   const summary = diagnostic.summary as {
@@ -528,6 +553,24 @@ test("Junction backfill diagnostic reports redacted provider call counts", async
   assert.deepEqual(timeseriesProbe.resources?.map((entry) => [entry.resource, entry.recordCount]), [
     ["heartrate", 1],
   ]);
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/activity/")),
+    "Junction backfill diagnostic should inspect summary data.",
+  );
+  assertJunctionWindowQuery(
+    summaryRequest,
+    "2026-04-02T10:15:30.000Z",
+    "2026-04-03T11:45:00.000Z",
+  );
+  const timeseriesRequest = requireValue(
+    requests.find((url) => url.includes("/v2/timeseries/")),
+    "Junction backfill diagnostic should inspect timeseries probe data.",
+  );
+  assertJunctionWindowQuery(
+    timeseriesRequest,
+    "2026-04-02T10:15:30.000Z",
+    "2026-04-03T11:45:00.000Z",
+  );
   assert.doesNotMatch(
     JSON.stringify(result),
     /junction-user-1|provider-garmin-1|summary-activity-1|garmin|Garmin/u,
@@ -567,8 +610,8 @@ test("Junction REST diagnostic probes a resource without returning raw records",
     now: "2026-04-03T12:00:00.000Z",
     resource: "steps",
     sourceProviderSlug: "garmin",
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T10:15:30.000Z",
+    windowEnd: "2026-04-03T11:45:00.000Z",
   });
   const probe = result.result as {
     request?: {
@@ -587,15 +630,21 @@ test("Junction REST diagnostic probes a resource without returning raw records",
   assert.equal(probe.request?.sourceFiltered, true);
   assert.deepEqual(probe.request?.queryParameterNames, ["end_date", "provider", "start_date"]);
   assert.deepEqual(probe.request?.window, {
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T10:15:30.000Z",
+    windowEnd: "2026-04-03T11:45:00.000Z",
   });
   assert.equal(probe.response?.ok, true);
   assert.equal(probe.response?.recordCount, 1);
   assert.equal(probe.response?.shape?.kind, "object");
-  assert.deepEqual(seenUrls, [
-    "https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/steps/grouped?start_date=2026-04-02&end_date=2026-04-03&provider=garmin",
-  ]);
+  assert.equal(seenUrls.length, 1);
+  const seenUrl = requireValue(seenUrls[0], "Junction diagnostic should issue one read request.");
+  assert.equal(new URL(seenUrl).pathname, "/v2/timeseries/junction-user-1/steps/grouped");
+  assert.equal(new URL(seenUrl).searchParams.get("provider"), "garmin");
+  assertJunctionWindowQuery(
+    seenUrl,
+    "2026-04-02T10:15:30.000Z",
+    "2026-04-03T11:45:00.000Z",
+  );
   assert.doesNotMatch(
     JSON.stringify(result),
     /junction-user-1|provider-garmin-1|1234|garmin/u,
@@ -628,9 +677,14 @@ test("Junction maps the weight timeseries resource to the documented body_weight
     windowEnd: "2026-04-03T00:00:00.000Z",
   });
 
-  assert.deepEqual(seenUrls, [
-    "https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/body_weight/grouped?start_date=2026-04-02&end_date=2026-04-03",
-  ]);
+  assert.equal(seenUrls.length, 1);
+  const seenUrl = requireValue(seenUrls[0], "Junction diagnostic should issue one read request.");
+  assert.equal(new URL(seenUrl).pathname, "/v2/timeseries/junction-user-1/body_weight/grouped");
+  assertJunctionWindowQuery(
+    seenUrl,
+    "2026-04-02T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
+  );
 });
 
 test("Junction REST diagnostic can force a bounded user data refresh", async () => {
@@ -838,9 +892,15 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
       });
     }
 
+    const parsedUrl = new URL(url);
     if (
-      url === "https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/steps/grouped?start_date=2026-04-02&end_date=2026-04-03"
-      || url === "https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/steps/grouped?start_date=2026-04-02&end_date=2026-04-03&provider=garmin"
+      parsedUrl.pathname === "/v2/timeseries/junction-user-1/steps/grouped"
+      && parsedUrl.searchParams.get("start_date") === "2026-04-02T00:00:00.000Z"
+      && parsedUrl.searchParams.get("end_date") === "2026-04-03T00:00:00.000Z"
+      && (
+        parsedUrl.searchParams.get("provider") === null
+        || parsedUrl.searchParams.get("provider") === "garmin"
+      )
     ) {
       return createJsonResponse({
         groups: {
@@ -911,16 +971,42 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
     [false, 1],
     [true, 1],
   ]);
-  assert.deepEqual([...seenUrls].sort(), [
-    "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=1",
-    "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=1&provider=garmin",
-    "https://api.sandbox.us.junction.com/v2/introspect/resources?user_id=junction-user-1&user_limit=1",
-    "https://api.sandbox.us.junction.com/v2/introspect/resources?user_id=junction-user-1&user_limit=1&provider=garmin",
-    "https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/steps/grouped?start_date=2026-04-02&end_date=2026-04-03",
-    "https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/steps/grouped?start_date=2026-04-02&end_date=2026-04-03&provider=garmin",
-    "https://api.sandbox.us.junction.com/v2/user/junction-user-1/device",
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+  const parsedSeenUrls = seenUrls.map((url) => new URL(url));
+  assert.deepEqual(parsedSeenUrls.map((url) => url.pathname).sort(), [
+    "/v2/introspect/historical_pull",
+    "/v2/introspect/historical_pull",
+    "/v2/introspect/resources",
+    "/v2/introspect/resources",
+    "/v2/timeseries/junction-user-1/steps/grouped",
+    "/v2/timeseries/junction-user-1/steps/grouped",
+    "/v2/user/junction-user-1/device",
+    "/v2/user/providers/junction-user-1",
   ].sort());
+  const readUrls = parsedSeenUrls.filter((url) => url.pathname === "/v2/timeseries/junction-user-1/steps/grouped");
+  assert.equal(readUrls.length, 2);
+  const unfilteredReadUrl = requireValue(
+    readUrls.find((url) => !url.searchParams.has("provider")),
+    "Junction matrix diagnostic should read the unfiltered resource.",
+  );
+  assertJunctionWindowQuery(
+    unfilteredReadUrl.toString(),
+    "2026-04-02T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
+  );
+  const providerReadUrl = requireValue(
+    readUrls.find((url) => url.searchParams.get("provider") === "garmin"),
+    "Junction matrix diagnostic should read the provider-filtered resource.",
+  );
+  assertJunctionWindowQuery(
+    providerReadUrl.toString(),
+    "2026-04-02T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
+  );
+  const introspectionProviders = parsedSeenUrls
+    .filter((url) => url.pathname.startsWith("/v2/introspect/"))
+    .map((url) => url.searchParams.get("provider") ?? "")
+    .sort();
+  assert.deepEqual(introspectionProviders, ["", "", "garmin", "garmin"]);
   assert.doesNotMatch(
     JSON.stringify(result),
     /junction-user-1|provider-garmin-1|source-device-1|device-row-1|garmin|Garmin|Fenix|2638/u,
@@ -2436,17 +2522,39 @@ test("Junction reconcile keeps summaries current while dense timeseries stays on
 
   const summarySnapshot = importedSnapshots[0] as { windowEnd?: string };
   assert.equal(summarySnapshot.windowEnd, "2026-04-03T12:00:00.000Z");
-  assert.equal(
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/activity/")),
+    "Junction reconcile should fetch current summary data.",
+  );
+  assertJunctionWindowQuery(
+    summaryRequest,
+    "2026-03-27T12:00:00.000Z",
+    "2026-04-03T12:00:00.000Z",
+  );
+  assert.deepEqual(
     requests
       .filter((url) => url.includes("/v2/timeseries/"))
-      .some((url) => url.includes("end_date=2026-04-04")),
-    false,
+      .map((url) => {
+        const searchParams = new URL(url).searchParams;
+        return [searchParams.get("start_date"), searchParams.get("end_date")];
+      }),
+    [
+      ["2026-03-27", "2026-03-27"],
+      ["2026-03-28", "2026-03-28"],
+      ["2026-03-29", "2026-03-29"],
+      ["2026-03-30", "2026-03-30"],
+      ["2026-03-31", "2026-03-31"],
+      ["2026-04-01", "2026-04-01"],
+      ["2026-04-02", "2026-04-02"],
+    ],
   );
 });
 
 test("Junction historical reconcile jobs preserve their summary window", async () => {
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({ providers: [] });
@@ -2482,6 +2590,11 @@ test("Junction historical reconcile jobs preserve their summary window", async (
 
   const summarySnapshot = importedSnapshots[0] as { windowEnd?: string };
   assert.equal(summarySnapshot.windowEnd, "2026-04-02T00:00:00.000Z");
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/activity/")),
+    "Junction full-day reconcile should fetch summary data.",
+  );
+  assertJunctionWindowQuery(summaryRequest, "2026-04-01", "2026-04-01");
 });
 
 test("Junction skips same closed-day timeseries after a completed reconcile", async () => {
@@ -2523,7 +2636,7 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
 });
 
-test("Junction timeseries resource jobs import only closed daily windows", async () => {
+test("Junction timeseries resource jobs fetch the precise hinted window with ISO params", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -2575,7 +2688,7 @@ test("Junction timeseries resource jobs import only closed daily windows", async
       const entry = snapshot as { windowEnd?: string; windowStart?: string };
       return [entry.windowStart, entry.windowEnd];
     }),
-    [["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"]],
+    [["2026-04-02T12:00:00.000Z", "2026-04-03T12:00:00.000Z"]],
   );
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
@@ -2583,15 +2696,18 @@ test("Junction timeseries resource jobs import only closed daily windows", async
   };
   assert.deepEqual(snapshot.summaries, {});
   assert.equal(snapshot.timeseries?.heartrate?.length, 1);
-  assert.equal(
-    requests
-      .filter((url) => url.includes("/v2/timeseries/"))
-      .some((url) => url.includes("end_date=2026-04-04")),
-    false,
+  const timeseriesRequest = requireValue(
+    requests.find((url) => url.includes("/v2/timeseries/")),
+    "Junction resource job should fetch the hinted timeseries resource.",
+  );
+  assertJunctionWindowQuery(
+    timeseriesRequest,
+    "2026-04-02T12:00:00.000Z",
+    "2026-04-03T12:00:00.000Z",
   );
 });
 
-test("Junction timeseries resource jobs yield with a follow-up job between daily imports", async () => {
+test("Junction timeseries resource jobs yield with a precise ISO follow-up window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -2620,7 +2736,7 @@ test("Junction timeseries resource jobs yield with a follow-up job between daily
   const job = createJob("resource", {
     resource: "heartrate",
     resourceCategory: "timeseries",
-    windowStart: "2026-04-01T00:00:00.000Z",
+    windowStart: "2026-04-01T06:00:00.000Z",
     windowEnd: "2026-04-03T00:00:00.000Z",
   });
 
@@ -2632,7 +2748,7 @@ test("Junction timeseries resource jobs yield with a follow-up job between daily
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
-      shouldYield: () => importedSnapshots.length > 0,
+      shouldYield: () => requests.some((url) => url.includes("/v2/timeseries/")),
     }),
     job,
   );
@@ -2643,9 +2759,15 @@ test("Junction timeseries resource jobs yield with a follow-up job between daily
       const entry = snapshot as { windowEnd?: string; windowStart?: string };
       return [entry.windowStart, entry.windowEnd];
     }),
-    [["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"]],
+    [["2026-04-01T06:00:00.000Z", "2026-04-02T06:00:00.000Z"]],
   );
-  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/")).length, 1);
+  const timeseriesRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
+  assert.equal(timeseriesRequests.length, 1);
+  assertJunctionWindowQuery(
+    requireValue(timeseriesRequests[0], "Junction resource job should fetch its first precise chunk."),
+    "2026-04-01T06:00:00.000Z",
+    "2026-04-02T06:00:00.000Z",
+  );
   assert.deepEqual(result.scheduledJobs, [
     {
       kind: "resource",
@@ -2653,13 +2775,13 @@ test("Junction timeseries resource jobs yield with a follow-up job between daily
         resource: "heartrate",
         resourceCategory: "timeseries",
         windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-02T06:00:00.000Z",
       },
       priority: job.priority,
       dedupeKey: sha256ForTest(JSON.stringify([
         "junction",
         "yield-follow-up",
-        "2026-04-02T00:00:00.000Z",
+        "2026-04-02T06:00:00.000Z",
         "2026-04-03T00:00:00.000Z",
         null,
         null,
@@ -3674,7 +3796,7 @@ test("Junction source projection uses provider-level keys for slug-only sources"
     logger: {},
   };
 
-  await executeJunctionJob(
+  const result = await executeJunctionJob(
     provider,
     context,
     createJob("backfill", {
@@ -3722,7 +3844,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     }
 
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
-      return createJsonResponse({ error: "not found" }, 404);
+      return createJsonResponse({ message: "Resource not found." }, 404);
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/steps/grouped")) {
@@ -3737,7 +3859,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
-      return createJsonResponse({ error: "unsupported" }, 422);
+      return createJsonResponse({ error: "unsupported_resource" }, 422);
     }
 
     throw new Error(`Unexpected request: ${url}`);
@@ -3746,7 +3868,13 @@ test("Junction polling skips optional unavailable resource collections", async (
     timeseriesResources: ["steps", "blood_oxygen"],
   });
   const context: ProviderJobContext = {
-    account: createAccount(),
+    account: createAccount({
+      metadata: {
+        junctionSkippedResourceTotal: 10,
+        junctionSkippedSummaryTotal: 4,
+        junctionSkippedTimeseriesTotal: 6,
+      },
+    }),
     now: "2026-04-03T00:00:00.000Z",
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
@@ -3775,7 +3903,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     },
   };
 
-  await executeJunctionJob(
+  const result = await executeJunctionJob(
     provider,
     context,
     createJob("reconcile", {
@@ -3802,6 +3930,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   assert.deepEqual(
     warnings.map((warning) => ({
       accountId: warning.accountId,
+      reason: warning.reason,
       resource: warning.resource,
       resourceCategory: warning.resourceCategory,
       responseStatus: warning.responseStatus,
@@ -3809,18 +3938,268 @@ test("Junction polling skips optional unavailable resource collections", async (
     [
       {
         accountId: undefined,
+        reason: "not_found",
         resource: "profile",
         resourceCategory: "summary",
         responseStatus: 404,
       },
       {
         accountId: undefined,
+        reason: "unsupported",
         resource: "blood_oxygen",
         resourceCategory: "timeseries",
         responseStatus: 422,
       },
     ],
   );
+  assert.deepEqual(result.metadataPatch, {
+    junctionSkippedResourceTotal: 12,
+    junctionSkippedSummaryTotal: 5,
+    junctionSkippedTimeseriesTotal: 7,
+    junctionSkippedResourceJobCount: 2,
+    junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceLast: "timeseries.blood_oxygen.422.unsupported",
+  });
+});
+
+test("Junction polling fails ambiguous optional resource responses for retry", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "The date window is invalid for this request.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        logger: {
+          warn(_message, context) {
+            warnings.push(context ?? {});
+          },
+        },
+      }),
+      createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
+      assert.equal(error.retryable, true);
+      assert.equal(error.details?.providerOptionalResourceCategory, "summary");
+      assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
+      assert.equal(error.details?.providerOptionalResourceName, "profile");
+      assert.equal(error.details?.providerOptionalResourceStatus, 422);
+      assert.equal(error.details?.responseErrorCode, "invalid_request");
+      assert.equal(error.details?.responseErrorDescription, undefined);
+      assert.equal(error.details?.status, 422);
+      assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
+      assert.equal(JSON.stringify(error).includes("date window"), false);
+      return true;
+    },
+  );
+
+  assert.equal(importedSnapshots.length, 0);
+  assert.deepEqual(warnings, []);
+});
+
+test("Junction polling fails ambiguous optional 404 responses for retry", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        error: "not_found",
+        message: "Not found.",
+      }, 404);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        logger: {
+          warn(_message, context) {
+            warnings.push(context ?? {});
+          },
+        },
+      }),
+      createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
+      assert.equal(error.retryable, true);
+      assert.equal(error.details?.providerOptionalResourceCategory, "summary");
+      assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
+      assert.equal(error.details?.providerOptionalResourceName, "profile");
+      assert.equal(error.details?.providerOptionalResourceStatus, 404);
+      assert.equal(error.details?.responseErrorCode, "not_found");
+      assert.equal(error.details?.responseErrorDescription, undefined);
+      assert.equal(error.details?.status, 404);
+      assert.equal(JSON.stringify(error).includes("Not found"), false);
+      return true;
+    },
+  );
+
+  assert.equal(importedSnapshots.length, 0);
+  assert.deepEqual(warnings, []);
+});
+
+test("Junction polling fails request-shape optional resource text for retry", async () => {
+  const ambiguousCases = [
+    {
+      code: "not_found",
+      message: "Resource parameters missing.",
+    },
+    {
+      code: "not_found",
+      message: "Resource not found for startDate.",
+    },
+    {
+      code: "not_found",
+      message: "Resource not found for end_date.",
+    },
+    {
+      code: "resource_not_found",
+      message: "Resource not found for startDate.",
+    },
+  ];
+
+  for (const { code, message } of ambiguousCases) {
+    const warnings: Record<string, unknown>[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              slug: "oura",
+              name: "Oura Ring",
+              status: "connected",
+              resource_availability: {
+                profile: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+        return createJsonResponse({
+          error: code,
+          message,
+        }, 422);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      summaryResources: ["profile"],
+      timeseriesResources: [],
+    });
+
+    await assert.rejects(
+      () => executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          importSnapshot: async (snapshot) => {
+            importedSnapshots.push(snapshot);
+            return { imported: true };
+          },
+          logger: {
+            warn(_message, context) {
+              warnings.push(context ?? {});
+            },
+          },
+        }),
+        createJob("reconcile", {
+          windowStart: "2026-04-02T00:00:00.000Z",
+          windowEnd: "2026-04-03T00:00:00.000Z",
+        }),
+      ),
+      (error) => {
+        assert.ok(error instanceof DeviceSyncError);
+        assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
+        assert.equal(error.retryable, true);
+        assert.equal(error.details?.providerOptionalResourceCategory, "summary");
+        assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
+        assert.equal(error.details?.providerOptionalResourceName, "profile");
+        assert.equal(error.details?.providerOptionalResourceStatus, 422);
+        assert.equal(error.details?.responseErrorCode, code);
+        assert.equal(error.details?.responseErrorDescription, undefined);
+        assert.equal(JSON.stringify(error).includes(message), false);
+        return true;
+      },
+    );
+
+    assert.equal(importedSnapshots.length, 0);
+    assert.deepEqual(warnings, []);
+  }
 });
 
 test("Junction resource jobs import direct daily data webhook payloads without Junction HTTP requests", async () => {
@@ -3857,11 +4236,11 @@ test("Junction resource jobs import direct daily data webhook payloads without J
     },
   });
 
-  await executeJunctionJob(
+  const result = await executeJunctionJob(
     provider,
     context,
     createJob("resource", {
-      eventType: "daily.data.activity.created",
+      eventType: "historical.data.activity.created",
       objectId: "activity-1",
       occurredAt: "2026-04-02T00:00:00.000Z",
       resource: "activity",
@@ -4502,7 +4881,7 @@ test("Junction queued oversized direct resource payloads keep REST fallback", as
       },
     }),
     createJob("resource", {
-      eventType: "daily.data.activity.created",
+      eventType: "historical.data.activity.created",
       objectId: "activity-queued-oversized",
       occurredAt: "2026-04-02T00:00:00.000Z",
       resource: "activity",
@@ -4790,6 +5169,7 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
       event_type: "daily.data.activity.created",
       user_id: "junction-user-1",
       data: {
+        end_date: "2026-04-02",
         date: "2026-04-02",
         id: "activity-inline-too-large",
         memo: "x".repeat(DIRECT_WEBHOOK_JOB_MAX_BYTES_FOR_TEST + 1),
@@ -4797,6 +5177,7 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
           provider: "garmin",
           type: "watch",
         },
+        start_date: "2026-04-02",
         steps: 9999,
         user_id: "junction-user-1",
       },
@@ -4814,6 +5195,8 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
   assert.equal(parsed.acceptanceMode, "durable_webhook_work");
   assert.equal(parsed.jobs[0]?.kind, "resource");
   assert.equal("webhookDataJson" in (parsed.jobs[0]?.payload ?? {}), false);
+  assert.equal(parsed.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 
   await executeJunctionJob(
     provider,
@@ -4826,7 +5209,15 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
     createJob("resource", parsed.jobs[0]?.payload ?? {}),
   );
 
-  assert.equal(requests.some((url) => url.includes("/v2/summary/activity/")), true);
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/activity/")),
+    "Junction oversized summary webhook should fall back to a REST summary read.",
+  );
+  assertJunctionWindowQuery(
+    summaryRequest,
+    "2026-04-02T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
+  );
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
@@ -5248,7 +5639,7 @@ test("Junction timeseries optional later chunk preserves earlier chunk records",
         });
       }
 
-      return createJsonResponse({ error: "unsupported" }, 422);
+      return createJsonResponse({ error: "unsupported_resource" }, 422);
     }
 
     throw new Error(`Unexpected request: ${url}`);
@@ -5285,7 +5676,7 @@ test("Junction timeseries optional later chunk preserves earlier chunk records",
     },
   };
 
-  await executeJunctionJob(
+  const result = await executeJunctionJob(
     provider,
     context,
     createJob("resource", {
@@ -5301,19 +5692,123 @@ test("Junction timeseries optional later chunk preserves earlier chunk records",
 
   assert.equal(timeseriesRequests, 2);
   assert.equal(importedSnapshots.length, 1);
-  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+  const snapshot = importedSnapshots[0] as {
+    timeseries?: Record<string, unknown[]>;
+    windowEnd?: string;
+    windowStart?: string;
+  };
+  assert.equal(snapshot.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(snapshot.windowEnd, "2026-04-02T00:00:00.000Z");
   assert.equal(snapshot.timeseries?.steps?.length, 1);
   assert.deepEqual(warnings.map((warning) => ({
+    reason: warning.reason,
     resource: warning.resource,
     resourceCategory: warning.resourceCategory,
     responseStatus: warning.responseStatus,
   })), [
     {
+      reason: "unsupported",
       resource: "steps",
       resourceCategory: "timeseries",
       responseStatus: 422,
     },
   ]);
+  assert.deepEqual(result.metadataPatch, {
+    junctionSkippedResourceTotal: 1,
+    junctionSkippedSummaryTotal: 0,
+    junctionSkippedTimeseriesTotal: 1,
+    junctionSkippedResourceJobCount: 1,
+    junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceLast: "timeseries.steps.422.unsupported",
+  });
+});
+
+test("Junction timeseries ambiguous later chunk fails instead of preserving partial data", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  let timeseriesRequests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              steps: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/steps/grouped")) {
+      timeseriesRequests += 1;
+      if (timeseriesRequests === 1) {
+        return createJsonResponse({
+          groups: {
+            oura: [{
+              data: [{ timestamp: "2026-04-01T12:00:00Z", unit: "count", value: 1200 }],
+              source: { provider: "oura", type: "ring" },
+            }],
+          },
+        });
+      }
+
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "The date window is invalid for this request.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["steps"],
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        logger: {
+          warn(_message, context) {
+            warnings.push(context ?? {});
+          },
+        },
+      }),
+      createJob("resource", {
+        eventType: "daily.data.steps.created",
+        objectId: "steps-1",
+        occurredAt: "2026-04-02T00:00:00.000Z",
+        resource: "steps",
+        sourceProviderSlug: "oura",
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
+      assert.equal(error.retryable, true);
+      assert.equal(error.details?.providerOptionalResourceCategory, "timeseries");
+      assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
+      assert.equal(error.details?.providerOptionalResourceName, "steps");
+      assert.equal(error.details?.providerOptionalResourceStatus, 422);
+      assert.equal(error.details?.responseErrorCode, "invalid_request");
+      return true;
+    },
+  );
+
+  assert.equal(timeseriesRequests, 2);
+  assert.equal(importedSnapshots.length, 0);
+  assert.deepEqual(warnings, []);
 });
 
 test("Junction resource jobs fetch only the hinted resource window", async () => {
@@ -5374,30 +5869,34 @@ test("Junction resource jobs fetch only the hinted resource window", async () =>
     provider,
     context,
     createJob("resource", {
-      eventType: "daily.data.activity.created",
+      eventType: "historical.data.activity.created",
       objectId: "activity-1",
       occurredAt: "2026-04-02T00:00:00.000Z",
       resource: "activity",
       resourceCategory: "summary",
       sourceProviderSlug: "oura",
-      windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T06:07:08.000Z",
+      windowEnd: "2026-04-03T09:10:11.000Z",
     }),
   );
 
   assert.equal(requests.filter((url) => url.includes("/v2/summary/activity/")).length, 1);
-  assert.equal(
-    requests.some((url) =>
-      url === "https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1?start_date=2026-04-01&end_date=2026-04-03&provider=oura"
-    ),
-    true,
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/activity/")),
+    "Junction resource job should fetch the hinted summary resource.",
+  );
+  assert.equal(new URL(summaryRequest).searchParams.get("provider"), "oura");
+  assertJunctionWindowQuery(
+    summaryRequest,
+    "2026-04-01T06:07:08.000Z",
+    "2026-04-03T09:10:11.000Z",
   );
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
   assert.equal(importedSnapshots.length, 1);
   assert.match(JSON.stringify(importedSnapshots[0]), /"activity"/u);
 });
 
-test("Junction resource jobs skip opt-in glucose when it is not configured", async () => {
+test("Junction resource jobs skip unsupported glucose when it is not configured", async () => {
   const requests: string[] = [];
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5482,87 +5981,29 @@ test("Junction resource jobs skip opt-in glucose when it is not configured", asy
   assert.equal(warnings[0]?.resourceCategory, "timeseries");
 });
 
-test("Junction resource jobs infer opt-in glucose as timeseries", async () => {
-  const requests: string[] = [];
-  const provider = createJunctionProvider(async (input) => {
-    const url = readUrl(input);
-    requests.push(url);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [
-          {
-            slug: "dexcom_v3",
-            name: "Dexcom",
-            status: "connected",
-            resource_availability: {
-              glucose: true,
-            },
-          },
-        ],
-      });
-    }
-
-    if (url.includes("/v2/timeseries/junction-user-1/glucose/grouped")) {
-      return createJsonResponse({
-        groups: {
-          dexcom_v3: [{
-            data: [{ timestamp: "2026-04-02T00:00:00Z", value: 101 }],
-            source: { provider: "dexcom_v3", type: "cgm" },
-          }],
-        },
-      });
-    }
-
-    throw new Error(`Unexpected request: ${url}`);
-  }, {
-    timeseriesResources: ["glucose"],
-  });
-  const importedSnapshots: unknown[] = [];
-  const context: ProviderJobContext = {
-    account: createAccount(),
-    now: "2026-04-03T00:00:00.000Z",
-    importSnapshot: async (snapshot) => {
-      importedSnapshots.push(snapshot);
-      return { imported: true };
-    },
-    upsertConnectionSource: () => ({
-      id: "src-1",
-      connectionId: "acct-junction-1",
-      sourceInstanceKey: "src-key",
-      sourceProviderSlug: "dexcom_v3",
-      displayName: null,
-      status: "connected",
-      resourceAvailabilitySummary: {},
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      firstSeenAt: "2026-04-03T00:00:00.000Z",
-      lastSeenAt: "2026-04-03T00:00:00.000Z",
-      createdAt: "2026-04-03T00:00:00.000Z",
-      updatedAt: "2026-04-03T00:00:00.000Z",
+test("Junction provider rejects unsupported glucose timeseries configuration", () => {
+  assert.throws(
+    () => createJunctionProvider(async () => createJsonResponse({}), {
+      timeseriesResources: ["glucose"],
     }),
-    refreshAccountTokens: async () => createAccount(),
-    logger: {},
-  };
-
-  await executeJunctionJob(
-    provider,
-    context,
-    createJob("resource", {
-      eventType: "daily.data.glucose.created",
-      objectId: "glucose-1",
-      occurredAt: "2026-04-02T00:00:00.000Z",
-      resource: "glucose",
-      sourceProviderSlug: "dexcom_v3",
-      windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-03T00:00:00.000Z",
-    }),
+    /Junction timeseries resources include unsupported resource\(s\): glucose\./u,
   );
+});
 
-  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/glucose/grouped")).length, 2);
-  assert.equal(requests.some((url) => url.includes("/v2/summary/glucose/")), false);
-  assert.equal(importedSnapshots.length, 1);
-  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
-  assert.equal(snapshot.timeseries?.glucose?.length, 1);
-  assert.match(JSON.stringify(snapshot), /"glucose"/u);
+test("Junction provider rejects unsupported configured resources", () => {
+  assert.doesNotThrow(() => createJunctionProvider(async () => createJsonResponse({}), {
+    summaryResources: ["meal", "menstrual_cycle"],
+  }));
+  assert.throws(
+    () => createJunctionProvider(async () => createJsonResponse({}), {
+      summaryResources: ["electrocardiogram"],
+    }),
+    /Junction summary resources include unsupported resource\(s\): electrocardiogram\./u,
+  );
+  assert.throws(
+    () => createJunctionProvider(async () => createJsonResponse({}), {
+      timeseriesResources: ["workout_distance"],
+    }),
+    /Junction timeseries resources include unsupported resource\(s\): workout_distance\./u,
+  );
 });

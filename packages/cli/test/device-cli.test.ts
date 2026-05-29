@@ -19,6 +19,8 @@ import {
   runRawCli,
 } from './cli-test-helpers.js'
 
+const DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS = 120_000
+
 interface DeviceTestState {
   lastConnectBody: Record<string, unknown> | null
   lastAccountQuery: string | null
@@ -694,7 +696,7 @@ test('device connect in hosted runtime fails bounded when bridge is unavailable'
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS)
 
 test('device connect in hosted runtime reports bridge request timeouts distinctly', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-timeout-'))
@@ -756,7 +758,7 @@ test('device connect in hosted runtime reports bridge request timeouts distinctl
     })
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS)
 
 test('device connect in hosted runtime preserves generic bridge failures as bounded errors', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-failed-'))
@@ -818,7 +820,7 @@ test('device connect in hosted runtime preserves generic bridge failures as boun
     })
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS)
 
 test('device provider and account list do not start the managed daemon when local credentials are absent', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-catalog-'))

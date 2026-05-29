@@ -2,9 +2,10 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_STAGE_ARRAY_PATHS,
   JUNCTION_SLEEP_STAGE_COUNT_PATHS,
@@ -27,6 +28,7 @@ import {
 import {
   JunctionClient,
   type JunctionClientConfig,
+  type JunctionDateQueryFormat,
   type JunctionEnvironment,
   type JunctionProviderConnection,
   type JunctionRegion,
@@ -101,11 +103,13 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+type JunctionResourceCategory = "summary" | "timeseries";
+
 interface JunctionDirectResourceJobInput {
   estimatedBytes: number;
   record: Record<string, unknown>;
   resource: string;
-  resourceCategory: "summary" | "timeseries";
+  resourceCategory: JunctionResourceCategory;
   sourceProviderSlug: string;
   windowEnd: string;
   windowStart: string;
@@ -113,6 +117,10 @@ interface JunctionDirectResourceJobInput {
 
 interface JunctionDirectResourceJobBatchInput extends JunctionDirectResourceJobInput {
   key: string;
+}
+
+interface JunctionWindowFetchOptions {
+  dateQueryFormat?: JunctionDateQueryFormat;
 }
 
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
@@ -127,6 +135,31 @@ type JunctionHistoricalBackfillCompletionSummaryResource =
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
 );
+
+type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported";
+
+interface JunctionOptionalResourceFailureSkip {
+  disposition: "skip";
+  reason: JunctionOptionalResourceFailureReason;
+  responseStatus: number;
+}
+
+interface JunctionOptionalResourceFailureAmbiguous {
+  disposition: "ambiguous";
+  responseStatus: number;
+}
+
+type JunctionOptionalResourceFailure =
+  | JunctionOptionalResourceFailureAmbiguous
+  | JunctionOptionalResourceFailureSkip;
+
+interface JunctionSkippedOptionalResource {
+  reason: JunctionOptionalResourceFailureReason;
+  resource: string;
+  resourceCategory: JunctionResourceCategory;
+  responseStatus: number;
+}
+
 const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   activity: [
     "steps",
@@ -210,8 +243,8 @@ const JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "freestyle_libre",
 ]);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
-  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  "glucose",
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = 90;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
@@ -250,11 +283,13 @@ export function createJunctionDeviceSyncProvider(
   const summaryResources = normalizeResourceList(
     config.summaryResources,
     JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+    JUNCTION_ALLOWED_SUMMARY_RESOURCES,
     "summary",
   );
   const timeseriesResources = normalizeResourceList(
     config.timeseriesResources,
     JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     "timeseries",
   );
   const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
@@ -424,8 +459,10 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
   ): Promise<ProviderJobResult> {
+    const skippedOptionalResources: JunctionSkippedOptionalResource[] = [];
+
     if (job.kind === "resource") {
-      return executeResourceJob(context, job);
+      return executeResourceJob(context, job, skippedOptionalResources);
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
@@ -434,10 +471,22 @@ export function createJunctionDeviceSyncProvider(
     });
     await projectJunctionSources(context, sourceProviders);
 
-    const summaryWindow = job.kind === "reconcile" && isCurrentScheduledClosedWindow(window, context.now, reconcileDays)
+    const isCurrentSummaryReconcile =
+      job.kind === "reconcile" && isCurrentScheduledClosedWindow(window, context.now, reconcileDays);
+    const summaryWindow = isCurrentSummaryReconcile
       ? resolveCurrentSummaryWindow(context.now, reconcileDays)
       : window;
-    const summaries = await fetchSummarySnapshots(context, summaryWindow.windowStart, summaryWindow.windowEnd);
+    const summaryDateQueryFormat: JunctionDateQueryFormat =
+      job.kind === "reconcile" && !isCurrentSummaryReconcile && isFullUtcDayWindow(summaryWindow)
+        ? "date"
+        : "datetime";
+    const summaries = await fetchSummarySnapshots(
+      context,
+      summaryWindow.windowStart,
+      summaryWindow.windowEnd,
+      skippedOptionalResources,
+      { dateQueryFormat: summaryDateQueryFormat },
+    );
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
@@ -464,14 +513,19 @@ export function createJunctionDeviceSyncProvider(
         sourceProviders,
         timeseriesWindowStart,
         window.windowEnd,
+        skippedOptionalResources,
       );
       if (timeseriesImport.yieldedAt) {
-        return buildYieldedJunctionJobResult({
+        return withJunctionSkippedResourceMetadata(
           context,
-          job,
-          windowEnd: window.windowEnd,
-          windowStart: timeseriesImport.yieldedAt,
-        });
+          buildYieldedJunctionJobResult({
+            context,
+            job,
+            windowEnd: window.windowEnd,
+            windowStart: timeseriesImport.yieldedAt,
+          }),
+          skippedOptionalResources,
+        );
       }
     }
 
@@ -485,10 +539,14 @@ export function createJunctionDeviceSyncProvider(
         })
       : {};
 
-    return {
-      ...backfillFollowUp,
-      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-    };
+    return withJunctionSkippedResourceMetadata(
+      context,
+      {
+        ...backfillFollowUp,
+        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      },
+      skippedOptionalResources,
+    );
   }
 
   function describeJobBatch(job: DeviceSyncJobRecord): ProviderJobBatchDescriptor | null {
@@ -919,6 +977,7 @@ export function createJunctionDeviceSyncProvider(
   async function executeResourceJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(job, context.now, reconcileDays);
     const resource = normalizeJunctionResourceName(job.payload.resource);
@@ -967,31 +1026,41 @@ export function createJunctionDeviceSyncProvider(
 
         if (inferredCategory === "timeseries") {
           const sourceProviders = await loadAndProjectSourceProviders();
-          const timeseriesImport = await importTimeseriesDailySnapshots(
+          const timeseriesImport = await importTimeseriesPreciseSnapshots(
             context,
             sourceProviders,
             window.windowStart,
             window.windowEnd,
+            skippedOptionalResources,
             [resource],
             sourceProviderSlug,
           );
           if (timeseriesImport.yieldedAt) {
-            return buildYieldedJunctionJobResult({
+            return withJunctionSkippedResourceMetadata(
               context,
-              job,
-              windowEnd: window.windowEnd,
-              windowStart: timeseriesImport.yieldedAt,
-            });
+              buildYieldedJunctionJobResult({
+                context,
+                job,
+                windowEnd: window.windowEnd,
+                windowStart: timeseriesImport.yieldedAt,
+              }),
+              skippedOptionalResources,
+            );
           }
-          return {
-            nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-          };
+          return withJunctionSkippedResourceMetadata(
+            context,
+            {
+              nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+            },
+            skippedOptionalResources,
+          );
         }
 
         summaries[resource] = await fetchOptionalJunctionResourceRecords(
           context,
           "summary",
           resource,
+          skippedOptionalResources,
           () => client.listSummary({
             resource,
             signal: context.signal ?? null,
@@ -1017,9 +1086,13 @@ export function createJunctionDeviceSyncProvider(
       timeseries: {},
     });
 
-    return {
-      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-    };
+    return withJunctionSkippedResourceMetadata(
+      context,
+      {
+        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      },
+      skippedOptionalResources,
+    );
   }
 
   function isConfiguredJunctionResource(
@@ -1109,6 +1182,8 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     windowStart: string,
     windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    options: JunctionWindowFetchOptions = {},
   ): Promise<Record<string, unknown[]>> {
     const snapshots: Record<string, unknown[]> = {};
 
@@ -1117,12 +1192,14 @@ export function createJunctionDeviceSyncProvider(
         context,
         "summary",
         resource,
+        skippedOptionalResources,
         () => client.listSummary({
           resource,
           signal: context.signal ?? null,
           userId: context.account.externalAccountId,
           windowStart,
           windowEnd,
+          ...(options.dateQueryFormat ? { dateQueryFormat: options.dateQueryFormat } : {}),
         }),
       );
     }
@@ -1134,8 +1211,10 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     windowStart: string,
     windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources: readonly string[] = timeseriesResources,
     sourceProviderSlug?: string | null,
+    options: JunctionWindowFetchOptions = {},
   ): Promise<Record<string, unknown[]>> {
     const snapshots: Record<string, unknown[]> = {};
 
@@ -1145,7 +1224,9 @@ export function createJunctionDeviceSyncProvider(
         resource,
         windowStart,
         windowEnd,
+        skippedOptionalResources,
         sourceProviderSlug,
+        options,
       );
     }
 
@@ -1157,7 +1238,9 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     windowStart: string,
     windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
     sourceProviderSlug?: string | null,
+    options: JunctionWindowFetchOptions = {},
   ): Promise<unknown[]> {
     const records: unknown[] = [];
     let chunkStart = Date.parse(windowStart);
@@ -1166,32 +1249,51 @@ export function createJunctionDeviceSyncProvider(
 
     while (chunkStart < end) {
       const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
+      const chunkWindowStart = new Date(chunkStart).toISOString();
+      const chunkWindowEnd = new Date(chunkEnd).toISOString();
       try {
         const chunkRecords = await client.listTimeseries({
           resource,
           signal: context.signal ?? null,
           sourceProviderSlug,
           userId: context.account.externalAccountId,
-          windowStart: new Date(chunkStart).toISOString(),
-          windowEnd: new Date(chunkEnd).toISOString(),
+          windowStart: chunkWindowStart,
+          windowEnd: chunkWindowEnd,
+          ...(options.dateQueryFormat ? { dateQueryFormat: options.dateQueryFormat } : {}),
         });
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
             chunkRecords,
-            new Date(chunkStart).toISOString(),
-            new Date(chunkEnd).toISOString(),
+            chunkWindowStart,
+            chunkWindowEnd,
           ),
         );
       } catch (error) {
-        const status = readOptionalJunctionResourceFailureStatus(error);
-        if (status === null) {
+        const failure = classifyOptionalJunctionResourceFailure(error);
+        if (!failure) {
           throw error;
         }
 
+        if (failure.disposition === "ambiguous") {
+          throw buildAmbiguousOptionalJunctionResourceError(
+            error,
+            "timeseries",
+            resource,
+            failure.responseStatus,
+            context.now,
+          );
+        }
+
         if (!optionalFailureLogged) {
-          logSkippedOptionalJunctionResource(context, "timeseries", resource, status);
+          logSkippedOptionalJunctionResource(context, "timeseries", resource, failure);
           optionalFailureLogged = true;
         }
+        skippedOptionalResources.push({
+          reason: failure.reason,
+          resource,
+          resourceCategory: "timeseries",
+          responseStatus: failure.responseStatus,
+        });
         break;
       }
       chunkStart = chunkEnd;
@@ -1200,11 +1302,77 @@ export function createJunctionDeviceSyncProvider(
     return dedupeJunctionTimeseriesRecords(resource, records);
   }
 
+  async function importTimeseriesPreciseSnapshots(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources: readonly string[],
+    sourceProviderSlug?: string | null,
+  ): Promise<JunctionTimeseriesImportResult> {
+    const accumulatedTimeseries: Record<string, unknown[]> = {};
+    let executionWindowEnd: string | null = null;
+    let executionWindowStart: string | null = null;
+    let yieldedAt: string | null = null;
+
+    for (const window of buildPreciseTimeseriesWindows(windowStart, windowEnd)) {
+      if (context.shouldYield?.()) {
+        yieldedAt = window.windowStart;
+        break;
+      }
+
+      const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+      const timeseries = await fetchTimeseriesSnapshots(
+        context,
+        window.windowStart,
+        window.windowEnd,
+        skippedOptionalResources,
+        resources,
+        sourceProviderSlug,
+        { dateQueryFormat: "datetime" },
+      );
+
+      if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
+        break;
+      }
+
+      executionWindowStart ??= window.windowStart;
+      executionWindowEnd = window.windowEnd;
+      for (const [resource, records] of Object.entries(timeseries)) {
+        accumulatedTimeseries[resource] = [
+          ...(accumulatedTimeseries[resource] ?? []),
+          ...records,
+        ];
+      }
+    }
+
+    const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
+    if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.id),
+        connectionId: context.account.id,
+        importedAt: executionWindowEnd,
+        windowStart: executionWindowStart,
+        windowEnd: executionWindowEnd,
+        connections: sanitizeJunctionImportConnections(sourceProviders),
+        summaries: {},
+        timeseries: sanitizeJunctionImportSnapshots(dedupedTimeseries, sourceProviders),
+      });
+    }
+
+    return {
+      yieldedAt,
+    };
+  }
+
   async function importTimeseriesDailySnapshots(
     context: ProviderJobContext,
     sourceProviders: readonly JunctionProviderConnection[],
     windowStart: string,
     windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
   ): Promise<JunctionTimeseriesImportResult> {
@@ -1218,8 +1386,10 @@ export function createJunctionDeviceSyncProvider(
         context,
         window.windowStart,
         window.windowEnd,
+        skippedOptionalResources,
         resources,
         sourceProviderSlug,
+        { dateQueryFormat: "date" },
       );
       if (!hasJunctionSnapshotRecords(timeseries)) {
         continue;
@@ -1279,35 +1449,53 @@ export function createJunctionDeviceSyncProvider(
 
   async function fetchOptionalJunctionResourceRecords(
     context: ProviderJobContext,
-    resourceCategory: "summary" | "timeseries",
+    resourceCategory: JunctionResourceCategory,
     resource: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
     load: () => Promise<unknown[]>,
   ): Promise<unknown[]> {
     try {
       return await load();
     } catch (error) {
-      const status = readOptionalJunctionResourceFailureStatus(error);
-      if (status === null) {
+      const failure = classifyOptionalJunctionResourceFailure(error);
+      if (!failure) {
         throw error;
       }
 
-      logSkippedOptionalJunctionResource(context, resourceCategory, resource, status);
+      if (failure.disposition === "ambiguous") {
+        throw buildAmbiguousOptionalJunctionResourceError(
+          error,
+          resourceCategory,
+          resource,
+          failure.responseStatus,
+          context.now,
+        );
+      }
+
+      logSkippedOptionalJunctionResource(context, resourceCategory, resource, failure);
+      skippedOptionalResources.push({
+        reason: failure.reason,
+        resource,
+        resourceCategory,
+        responseStatus: failure.responseStatus,
+      });
       return [];
     }
   }
 
   function logSkippedOptionalJunctionResource(
     context: ProviderJobContext,
-    resourceCategory: "summary" | "timeseries",
+    resourceCategory: JunctionResourceCategory,
     resource: string,
-    responseStatus: number,
+    failure: JunctionOptionalResourceFailureSkip,
   ): void {
     context.logger.warn?.("Skipping unavailable Junction resource response.", {
       errorCode: "JUNCTION_API_REQUEST_FAILED",
       provider: "junction",
+      reason: failure.reason,
       resource,
       resourceCategory,
-      responseStatus,
+      responseStatus: failure.responseStatus,
     });
   }
 
@@ -1419,13 +1607,295 @@ export function createJunctionDeviceSyncProvider(
   };
 }
 
-function readOptionalJunctionResourceFailureStatus(error: unknown): number | null {
+function withJunctionSkippedResourceMetadata(
+  context: ProviderJobContext,
+  result: ProviderJobResult,
+  skippedOptionalResources: readonly JunctionSkippedOptionalResource[],
+): ProviderJobResult {
+  if (skippedOptionalResources.length === 0) {
+    return result;
+  }
+
+  return {
+    ...result,
+    metadataPatch: {
+      ...(result.metadataPatch ?? {}),
+      ...buildJunctionSkippedResourceMetadataPatch(context, skippedOptionalResources),
+    },
+  };
+}
+
+function buildJunctionSkippedResourceMetadataPatch(
+  context: ProviderJobContext,
+  skippedOptionalResources: readonly JunctionSkippedOptionalResource[],
+): Record<string, unknown> {
+  const summaryCount = skippedOptionalResources.filter((entry) => entry.resourceCategory === "summary").length;
+  const timeseriesCount = skippedOptionalResources.filter((entry) => entry.resourceCategory === "timeseries").length;
+  const last = skippedOptionalResources[skippedOptionalResources.length - 1]!;
+
+  return {
+    junctionSkippedResourceTotal:
+      readJunctionMetadataCount(context.account.metadata.junctionSkippedResourceTotal) + skippedOptionalResources.length,
+    junctionSkippedSummaryTotal:
+      readJunctionMetadataCount(context.account.metadata.junctionSkippedSummaryTotal) + summaryCount,
+    junctionSkippedTimeseriesTotal:
+      readJunctionMetadataCount(context.account.metadata.junctionSkippedTimeseriesTotal) + timeseriesCount,
+    junctionSkippedResourceJobCount: skippedOptionalResources.length,
+    junctionSkippedResourceLastAt: context.now,
+    junctionSkippedResourceLast: [
+      last.resourceCategory,
+      last.resource,
+      last.responseStatus,
+      last.reason,
+    ].join("."),
+  };
+}
+
+function readJunctionMetadataCount(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function classifyOptionalJunctionResourceFailure(error: unknown): JunctionOptionalResourceFailure | null {
   if (!isDeviceSyncError(error) || error.code !== "JUNCTION_API_REQUEST_FAILED") {
     return null;
   }
 
   const status = error.details?.status;
-  return status === 404 || status === 422 ? status : null;
+  if (status !== 404 && status !== 422) {
+    return null;
+  }
+
+  const reason = classifyClearOptionalJunctionResourceFailureReason({
+    responseErrorCode: readJunctionDiagnosticString(error.details?.responseErrorCode),
+    responseErrorDescription: readJunctionDiagnosticString(error.details?.responseErrorDescription),
+  });
+
+  return reason
+    ? {
+        disposition: "skip",
+        reason,
+        responseStatus: status,
+      }
+    : {
+        disposition: "ambiguous",
+        responseStatus: status,
+      };
+}
+
+function buildAmbiguousOptionalJunctionResourceError(
+  error: unknown,
+  resourceCategory: JunctionResourceCategory,
+  resource: string,
+  responseStatus: number,
+  now: string,
+): Error {
+  const safeApiDetails = copySafeJunctionApiErrorDetails(error);
+  const safeResource = readJunctionDiagnosticToken(resource) ?? "unknown";
+  const responseErrorCode = readJunctionDiagnosticToken(safeApiDetails.responseErrorCode);
+  const responseShapeKind = readJunctionDiagnosticToken(safeApiDetails.responseShapeKind);
+
+  return deviceSyncError({
+    code: "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS",
+    message: `Junction ${resourceCategory} resource ${resource} returned an ambiguous ${responseStatus} response.`,
+    retryable: true,
+    httpStatus: 502,
+    details: {
+      ...safeApiDetails,
+      failureMetadataPatch: buildJunctionOptionalResourceFailureMetadataPatch({
+        at: now,
+        resource: safeResource,
+        resourceCategory,
+        responseErrorCode,
+        responseShapeKind,
+        responseStatus,
+      }),
+      providerOptionalResourceCategory: resourceCategory,
+      providerOptionalResourceFailureDisposition: "ambiguous",
+      providerOptionalResourceName: safeResource,
+      providerOptionalResourceStatus: responseStatus,
+    },
+    cause: error,
+  });
+}
+
+const JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS = [
+  "requestAuthKind",
+  "requestAuthPlacement",
+  "requestBodyFieldNames",
+  "requestBodyKind",
+  "requestContentType",
+  "requestEndpointKind",
+  "requestMethod",
+  "requestQueryParameterNames",
+  "responseErrorCode",
+  "responseShapeKind",
+] as const;
+
+const JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS = [
+  "requestBodyFieldCount",
+  "requestQueryParameterCount",
+  "status",
+] as const;
+
+const JUNCTION_SAFE_API_DETAIL_BOOLEAN_KEYS = [
+  "requestCredentialPresent",
+  "responseErrorDescriptionFieldPresent",
+  "responseErrorFieldPresent",
+] as const;
+
+function copySafeJunctionApiErrorDetails(error: unknown): Record<string, unknown> {
+  if (!isDeviceSyncError(error) || !error.details) {
+    return {};
+  }
+
+  const details: Record<string, unknown> = {};
+  for (const key of JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS) {
+    const value = readJunctionDiagnosticToken(error.details[key]);
+    if (value !== null) {
+      details[key] = value;
+    }
+  }
+  for (const key of JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS) {
+    const value = readJunctionDiagnosticNumber(error.details[key]);
+    if (value !== null) {
+      details[key] = value;
+    }
+  }
+  for (const key of JUNCTION_SAFE_API_DETAIL_BOOLEAN_KEYS) {
+    if (typeof error.details[key] === "boolean") {
+      details[key] = error.details[key];
+    }
+  }
+  return details;
+}
+
+function buildJunctionOptionalResourceFailureMetadataPatch(input: {
+  at: string;
+  resource: string;
+  resourceCategory: JunctionResourceCategory;
+  responseErrorCode: string | null;
+  responseShapeKind: string | null;
+  responseStatus: number;
+}): Record<string, unknown> {
+  const metadataPatch: Record<string, unknown> = {
+    junctionResourceDiagnostic: [
+      input.resourceCategory,
+      input.resource,
+      input.responseStatus,
+      "ambiguous",
+    ].join("."),
+    junctionResourceDiagnosticAt: input.at,
+    junctionResourceDiagnosticHttpStatus: input.responseStatus,
+  };
+
+  if (input.responseErrorCode) {
+    metadataPatch.junctionResourceDiagnosticCode = input.responseErrorCode;
+  }
+  if (input.responseShapeKind) {
+    metadataPatch.junctionResourceDiagnosticShape = input.responseShapeKind;
+  }
+
+  return metadataPatch;
+}
+
+function classifyClearOptionalJunctionResourceFailureReason(input: {
+  responseErrorCode: string | null;
+  responseErrorDescription: string | null;
+}): JunctionOptionalResourceFailureReason | null {
+  const rawDescription = input.responseErrorDescription?.trim() ?? "";
+  if (rawDescription && hasJunctionRequestShapeFailureTerms(rawDescription)) {
+    return null;
+  }
+
+  const codeReason = classifyClearOptionalJunctionResourceCode(input.responseErrorCode);
+  if (codeReason) {
+    return codeReason;
+  }
+
+  if (!rawDescription) {
+    return null;
+  }
+
+  const description = rawDescription.toLowerCase();
+  if (/\b(resource|collection|provider|endpoint)\b/u.test(description)) {
+    if (/\bnot[\s_-]*found\b/u.test(description)) {
+      return "not_found";
+    }
+    if (/\b(unavailable|not[\s_-]*available)\b/u.test(description)) {
+      return "unavailable";
+    }
+    if (/\b(unsupported|not[\s_-]*supported)\b/u.test(description)) {
+      return "unsupported";
+    }
+  }
+
+  return null;
+}
+
+function classifyClearOptionalJunctionResourceCode(value: string | null): JunctionOptionalResourceFailureReason | null {
+  const code = value?.toLowerCase().replace(/[-\s]+/gu, "_") ?? "";
+  if (!code) {
+    return null;
+  }
+
+  if (
+    code === "collection_not_found"
+    || code === "endpoint_not_found"
+    || code === "provider_not_found"
+    || code === "resource_not_found"
+  ) {
+    return "not_found";
+  }
+  if (
+    code === "collection_not_available"
+    || code === "collection_unavailable"
+    || code === "endpoint_not_available"
+    || code === "endpoint_unavailable"
+    || code === "provider_not_available"
+    || code === "provider_unavailable"
+    || code === "resource_not_available"
+    || code === "resource_unavailable"
+  ) {
+    return "unavailable";
+  }
+  if (
+    code === "collection_unsupported"
+    || code === "endpoint_unsupported"
+    || code === "provider_unsupported"
+    || code === "resource_unsupported"
+    || code === "unsupported_collection"
+    || code === "unsupported_endpoint"
+    || code === "unsupported_provider"
+    || code === "unsupported_resource"
+  ) {
+    return "unsupported";
+  }
+  return null;
+}
+
+function hasJunctionRequestShapeFailureTerms(value: string): boolean {
+  const normalized = value
+    .replace(/([a-z])([A-Z])/gu, "$1 $2")
+    .toLowerCase()
+    .replace(/[_-]+/gu, " ");
+  return /\b(dates?|date window|start date|end date|windows?|filters?|formats?|invalid|parameters?|params?|queries?|requests?|schemas?|fields?|contracts?)\b/u.test(normalized);
+}
+
+function readJunctionDiagnosticString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readJunctionDiagnosticToken(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const token = value.trim();
+  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) ? token : null;
+}
+
+function readJunctionDiagnosticNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 interface JunctionDiagnosticCallResult {
@@ -2359,21 +2829,18 @@ function resolveDiagnosticBackfillWindow(
   );
   const requestedWindowEnd =
     parseJunctionDiagnosticRequestedTimestamp(context.windowEnd, "windowEnd")
-    ?? parseJunctionDiagnosticStoredTimestamp(metadataWindowEnd)
-    ?? parseJunctionDiagnosticStoredTimestamp(context.now)
+    ?? parseJunctionDiagnosticStoredTimestamp(metadataWindowEnd);
+  const fallbackWindowEnd =
+    parseJunctionDiagnosticStoredTimestamp(context.now)
     ?? new Date().toISOString();
-  const windowEnd = floorUtcDayTimestamp(requestedWindowEnd);
+  const windowEnd = requestedWindowEnd ?? floorUtcDayTimestamp(fallbackWindowEnd);
   const earliestWindowStart = subtractDays(windowEnd, summaryBackfillDays);
   const requestedWindowStart = parseJunctionDiagnosticRequestedTimestamp(
     context.windowStart,
     "windowStart",
   )
-    ?? parseJunctionDiagnosticStoredTimestamp(metadataWindowStart)
-    ?? earliestWindowStart;
-  const boundedWindowStart = maxIsoTimestamp(
-    floorUtcDayTimestamp(requestedWindowStart),
-    earliestWindowStart,
-  );
+    ?? parseJunctionDiagnosticStoredTimestamp(metadataWindowStart);
+  const boundedWindowStart = maxIsoTimestamp(requestedWindowStart ?? earliestWindowStart, earliestWindowStart);
 
   return {
     windowStart: Date.parse(boundedWindowStart) > Date.parse(windowEnd) ? windowEnd : boundedWindowStart,
@@ -2467,12 +2934,20 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
 function normalizeResourceList(
   value: string[] | undefined,
   defaults: readonly string[],
+  allowedResources: readonly string[],
   label: string,
 ): string[] {
-  const blockedResources = new Set(["cgm", "blood_glucose"]);
   const normalized = (value && value.length > 0 ? value : defaults)
     .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null && !blockedResources.has(entry));
+    .filter((entry): entry is string => entry !== null);
+  const allowedResourceSet = new Set<string>(allowedResources);
+  const unsupportedResources = normalized.filter((entry) => !allowedResourceSet.has(entry));
+
+  if (unsupportedResources.length > 0) {
+    throw new TypeError(
+      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
+    );
+  }
 
   if (normalized.length === 0) {
     throw new TypeError(`Junction ${label} resources must include at least one supported resource.`);
@@ -2689,6 +3164,16 @@ function dedupeJunctionTimeseriesRecords(resource: string, records: unknown[]): 
   return deduped;
 }
 
+function dedupeJunctionTimeseriesSnapshotRecords(
+  snapshot: Record<string, unknown[]>,
+): Record<string, unknown[]> {
+  const deduped: Record<string, unknown[]> = {};
+  for (const [resource, records] of Object.entries(snapshot)) {
+    deduped[resource] = dedupeJunctionTimeseriesRecords(resource, records);
+  }
+  return deduped;
+}
+
 function filterJunctionTimeseriesRecordsToWindow(
   records: readonly unknown[],
   windowStart: string,
@@ -2874,6 +3359,12 @@ function isCurrentScheduledClosedWindow(
   return window.windowStart === expectedWindowStart && window.windowEnd === expectedWindowEnd;
 }
 
+function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }): boolean {
+  return Date.parse(window.windowStart) < Date.parse(window.windowEnd)
+    && window.windowStart === floorUtcDayTimestamp(window.windowStart)
+    && window.windowEnd === floorUtcDayTimestamp(window.windowEnd);
+}
+
 function shouldImportClosedTimeseriesForReconcile(
   lastSyncCompletedAt: string | null | undefined,
   windowEnd: string,
@@ -2914,6 +3405,33 @@ function buildClosedDailyWindows(
       ),
     );
     const chunkEndMs = Math.min(nextDayMs, closedEndMs);
+    if (chunkEndMs <= chunkStartMs) {
+      break;
+    }
+    windows.push({
+      windowStart: new Date(chunkStartMs).toISOString(),
+      windowEnd: new Date(chunkEndMs).toISOString(),
+    });
+    chunkStartMs = chunkEndMs;
+  }
+
+  return windows;
+}
+
+function buildPreciseTimeseriesWindows(
+  windowStart: string,
+  windowEnd: string,
+): Array<{ windowStart: string; windowEnd: string }> {
+  const startMs = Date.parse(windowStart);
+  const endMs = Date.parse(windowEnd);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return [];
+  }
+
+  const windows: Array<{ windowStart: string; windowEnd: string }> = [];
+  let chunkStartMs = startMs;
+  while (chunkStartMs < endMs) {
+    const chunkEndMs = Math.min(chunkStartMs + TIMESERIES_CHUNK_MS, endMs);
     if (chunkEndMs <= chunkStartMs) {
       break;
     }
@@ -3969,15 +4487,15 @@ function buildJunctionWebhookWindow(
   now: string,
 ): { windowStart: string; windowEnd: string } {
   const explicitStart =
-    toIsoTimestampIfValid(data?.window_start)
-    ?? toIsoTimestampIfValid(data?.start_date)
-    ?? toIsoTimestampIfValid(data?.start)
-    ?? toIsoTimestampIfValid(data?.from);
+    toJunctionWebhookWindowBoundaryTimestampIfValid(data?.window_start, "start")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.start_date, "start")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.start, "start")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.from, "start");
   const explicitEnd =
-    toIsoTimestampIfValid(data?.window_end)
-    ?? toIsoTimestampIfValid(data?.end_date)
-    ?? toIsoTimestampIfValid(data?.end)
-    ?? toIsoTimestampIfValid(data?.to);
+    toJunctionWebhookWindowBoundaryTimestampIfValid(data?.window_end, "end")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.end_date, "end")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.end, "end")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.to, "end");
 
   if (explicitStart && explicitEnd) {
     return {
@@ -4005,6 +4523,29 @@ function buildJunctionWebhookWindow(
     windowStart: subtractDays(boundedOccurredAt, 1),
     windowEnd: minIsoTimestamp(addMilliseconds(boundedOccurredAt, 24 * 60 * 60_000), now),
   };
+}
+
+function toJunctionWebhookWindowBoundaryTimestampIfValid(
+  value: unknown,
+  boundary: "end" | "start",
+): string | null {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(normalized)) {
+    const startOfDay = new Date(`${normalized}T00:00:00.000Z`);
+    if (!Number.isFinite(startOfDay.getTime()) || startOfDay.toISOString().slice(0, 10) !== normalized) {
+      return null;
+    }
+    const timestampMs = boundary === "end"
+      ? startOfDay.getTime() + TIMESERIES_CHUNK_MS
+      : startOfDay.getTime();
+    return new Date(timestampMs).toISOString();
+  }
+
+  return toIsoTimestampIfValid(normalized);
 }
 
 function readJunctionWebhookDataTimestampRange(

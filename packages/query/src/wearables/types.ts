@@ -80,6 +80,7 @@ export interface WearableActivityDay {
   dayStrain: WearableResolvedMetric;
   distanceKm: WearableResolvedMetric;
   estimatedVo2Max: WearableResolvedMetric;
+  floorsClimbed: WearableResolvedMetric;
   maxHeartRate: WearableResolvedMetric;
   notes: string[];
   percentRecorded: WearableResolvedMetric;
@@ -138,9 +139,11 @@ export interface WearableBodyStateDay {
   bmi: WearableResolvedMetric;
   bodyFatPercentage: WearableResolvedMetric;
   date: string;
+  leanBodyMassKg: WearableResolvedMetric;
   notes: string[];
   summaryConfidence: WearableSummaryConfidence;
   temperature: WearableResolvedMetric;
+  waistCircumference: WearableResolvedMetric;
   weightKg: WearableResolvedMetric;
 }
 
@@ -450,7 +453,9 @@ export const RECOVERY_METRIC_KEYS = new Set<WearableMetricKey>([
 export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
   "bmi",
   "bodyFatPercentage",
+  "leanBodyMassKg",
   "temperature",
+  "waistCircumference",
   "weightKg",
 ]);
 
@@ -461,6 +466,7 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "dayStrain",
   "distanceKm",
   "estimatedVo2Max",
+  "floorsClimbed",
   "maxHeartRate",
   "percentRecorded",
   "sessionCount",

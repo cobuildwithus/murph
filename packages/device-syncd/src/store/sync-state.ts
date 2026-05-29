@@ -100,18 +100,59 @@ export function markSyncFailed(
   code: string,
   message: string,
   status: DeviceSyncAccountStatus | null | undefined,
-): void {
-  withImmediateTransaction(database, () => {
+  options: {
+    disconnectGeneration?: number | null;
+    localConnectionRevision?: number | null;
+    metadataPatch?: Record<string, unknown>;
+  } = {},
+): boolean {
+  return withImmediateTransaction(database, () => {
     const existing = getAccountById(database, accountId);
-    const nextStatus = status ?? existing?.status ?? "active";
-    const terminalFailure = nextStatus === "reauthorization_required" || nextStatus === "disconnected";
 
-    database.prepare(`
-      update device_connection
-      set status = ?,
-          updated_at = ?
-      where id = ?
-    `).run(nextStatus, now, accountId);
+    if (!existing) {
+      return false;
+    }
+
+    const expectedDisconnectGeneration = options.disconnectGeneration ?? null;
+    if (
+      expectedDisconnectGeneration !== null
+      && (
+        existing.status !== "active"
+        || existing.disconnectGeneration !== expectedDisconnectGeneration
+      )
+    ) {
+      return false;
+    }
+
+    const expectedLocalConnectionRevision = options.localConnectionRevision ?? null;
+    if (
+      expectedLocalConnectionRevision !== null
+      && existing.localConnectionRevision !== expectedLocalConnectionRevision
+    ) {
+      return false;
+    }
+
+    const nextStatus = status ?? existing.status;
+    const terminalFailure = nextStatus === "reauthorization_required" || nextStatus === "disconnected";
+    const metadataPatch = options.metadataPatch;
+
+    if (metadataPatch && Object.keys(metadataPatch).length > 0) {
+      const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, metadataPatch);
+      database.prepare(`
+        update device_connection
+        set status = ?,
+            metadata_json = ?,
+            updated_at = ?
+        where id = ?
+      `).run(nextStatus, stringifyJson(metadata), now, accountId);
+    } else {
+      database.prepare(`
+        update device_connection
+        set status = ?,
+            updated_at = ?
+        where id = ?
+      `).run(nextStatus, now, accountId);
+    }
 
     database.prepare(`
       update device_observation_state
@@ -123,6 +164,8 @@ export function markSyncFailed(
           updated_at = ?
       where account_id = ?
     `).run(now, code, message, terminalFailure ? 1 : 0, now, accountId);
+
+    return true;
   });
 }
 
