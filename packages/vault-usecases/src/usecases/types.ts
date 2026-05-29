@@ -745,6 +745,7 @@ export interface WearableStorageRepairResult {
   legacyCanonicalArtifactCount: number
   denseProviderSampleShardCount: number
   denseProviderRawTimeseriesCount: number
+  retentionEligibleDenseProviderRawTimeseriesBytes: number
   retentionEligibleDenseProviderRawTimeseriesCount: number
   mutated: boolean
   hasMore: boolean
@@ -752,6 +753,9 @@ export interface WearableStorageRepairResult {
   bytesAfter: number
   bytesFreed: number
   compactedReceiptCount: number
+  denseRawBytesAfter: number
+  denseRawBytesBefore: number
+  denseRawBytesFreed: number
   tombstonedCanonicalArtifactCount: number
   tombstonedDenseRawArtifactCount: number
   skippedCount: number
@@ -1449,6 +1453,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     legacyCanonicalArtifactCount: number
     denseProviderSampleShardCount: number
     denseProviderRawTimeseriesCount: number
+    retentionEligibleDenseProviderRawTimeseriesBytes: number
     retentionEligibleDenseProviderRawTimeseriesCount: number
   }>
   runWearableStorageMigrationPass(input: {
@@ -1467,6 +1472,9 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     bytesAfter: number
     bytesFreed: number
     compactedReceiptCount: number
+    denseRawBytesAfter: number
+    denseRawBytesBefore: number
+    denseRawBytesFreed: number
     tombstonedCanonicalArtifactCount: number
     tombstonedDenseRawArtifactCount: number
     skippedCount: number

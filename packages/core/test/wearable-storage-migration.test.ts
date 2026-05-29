@@ -105,6 +105,54 @@ test("dense raw timeseries tombstoning requires explicit prune flag", async () =
   assert.equal(afterDetection.denseProviderRawTimeseriesCount, 0);
 });
 
+test("Junction dense raw retention covers current dense timeseries role variants", async () => {
+  const denseRoles = [
+    "junction-timeseries-heartrate",
+    "junction-timeseries-distance",
+    "junction-timeseries-calories-active",
+    "junction-timeseries-calories_active",
+  ];
+
+  for (const denseRole of denseRoles) {
+    const vaultRoot = await createRawArtifactFixture({
+      denseRole,
+      denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
+    });
+    const detection = await detectWearableStorageMigrationCandidates({
+      now: REPAIR_NOW,
+      vaultRoot,
+    });
+
+    assert.equal(detection.denseProviderRawTimeseriesCount, 1, denseRole);
+    assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 1, denseRole);
+    assert.ok(detection.retentionEligibleDenseProviderRawTimeseriesBytes > 0, denseRole);
+
+    const defaultResult = await runWearableStorageMigrationPass({
+      maxFiles: 5,
+      now: REPAIR_NOW,
+      vaultRoot,
+    });
+    assert.equal(defaultResult.tombstonedDenseRawArtifactCount, 0, denseRole);
+
+    const denseResult = await runWearableStorageMigrationPass({
+      maxFiles: 5,
+      now: REPAIR_NOW,
+      pruneDenseRaw: true,
+      vaultRoot,
+    });
+
+    assert.equal(denseResult.tombstonedDenseRawArtifactCount, 1, denseRole);
+    assert.ok(denseResult.denseRawBytesBefore > 0, denseRole);
+    assert.ok(denseResult.denseRawBytesFreed > 0, denseRole);
+    assert.equal(denseResult.bytesFreed >= denseResult.denseRawBytesFreed, true, denseRole);
+    const rawTombstone = JSON.parse(
+      await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    ) as Record<string, unknown>;
+    assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1", denseRole);
+    assert.equal(rawTombstone.originalRole, denseRole, denseRole);
+  }
+});
+
 test("bounded passes report more work when later repair classes remain", async () => {
   const vaultRoot = await createRawArtifactFixture();
   await createLegacyReceiptPayloadFixture(vaultRoot);
@@ -199,6 +247,111 @@ test("dense raw timeseries tombstoning preserves recent artifacts unless explici
   assert.equal(explicitRecentResult.tombstonedDenseRawArtifactCount, 1);
   const rawTombstone = JSON.parse(await fs.readFile(rawPath, "utf8")) as Record<string, unknown>;
   assert.equal(rawTombstone.schemaVersion, "wearable.dense_provider_timeseries_pruned.v1");
+});
+
+test("Junction dense raw retention preserves recent heartrate unless explicitly included", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    importedAt: "2026-05-22T00:00:00.000Z",
+  });
+
+  const detection = await detectWearableStorageMigrationCandidates({
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+  assert.equal(detection.denseProviderRawTimeseriesCount, 1);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 0);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesBytes, 0);
+
+  const recentResult = await runWearableStorageMigrationPass({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    vaultRoot,
+  });
+
+  assert.equal(recentResult.tombstonedDenseRawArtifactCount, 0);
+  assert.equal(recentResult.denseRawBytesFreed, 0);
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    /sampleValues/u,
+  );
+});
+
+test("Junction dense raw retention preserves shared raw artifacts with a recent manifest reference", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-distance",
+  });
+  await writeAdditionalRawManifest(vaultRoot, (manifest) => ({
+    ...manifest,
+    importedAt: "2026-05-22T00:00:00.000Z",
+  }));
+
+  const detection = await detectWearableStorageMigrationCandidates({
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+  assert.equal(detection.denseProviderRawTimeseriesCount, 1);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 0);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesBytes, 0);
+
+  const result = await runWearableStorageMigrationPass({
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    vaultRoot,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    /sampleValues/u,
+  );
+
+  const explicitRecentResult = await runWearableStorageMigrationPass({
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    vaultRoot,
+  });
+
+  assert.equal(explicitRecentResult.tombstonedDenseRawArtifactCount, 1);
+  await assertManifestArtifactMatchesFile(vaultRoot, "01-provider-timeseries-heart-rate.json");
+  await assertManifestArtifactMatchesFile(
+    vaultRoot,
+    "01-provider-timeseries-heart-rate.json",
+    "manifest.shared.json",
+  );
+});
+
+test("Junction dense raw retention leaves summary artifacts untouched", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-summary-daily-activity",
+  });
+
+  const detection = await detectWearableStorageMigrationCandidates({
+    includeRecentDenseRaw: true,
+    now: REPAIR_NOW,
+    vaultRoot,
+  });
+  assert.equal(detection.denseProviderRawTimeseriesCount, 0);
+
+  const result = await runWearableStorageMigrationPass({
+    includeRecentDenseRaw: true,
+    maxFiles: 5,
+    now: REPAIR_NOW,
+    pruneDenseRaw: true,
+    vaultRoot,
+  });
+
+  assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+  assert.equal(result.denseRawBytesFreed, 0);
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    /sampleValues/u,
+  );
+  await assertManifestArtifactMatchesFile(vaultRoot, "01-provider-timeseries-heart-rate.json");
 });
 
 test("raw tombstoning skips when required evidence files are missing", async () => {
@@ -606,6 +759,7 @@ test("runWearableStorageMigrationPass leaves manual sample shards untouched", as
 async function createRawArtifactFixture(
   options: {
     denseRole?: string;
+    denseSampleValues?: number[];
     importedAt?: string;
     receiptSchemaVersion?: string;
     receiptRawArtifactRoles?: string[];
@@ -619,7 +773,7 @@ async function createRawArtifactFixture(
     await writeRawJsonArtifact({
       content: {
         resource: "heart_rate",
-        sampleValues: [70, 71, 72],
+        sampleValues: options.denseSampleValues ?? [70, 71, 72],
       },
       fileName: "01-provider-timeseries-heart-rate.json",
       role: options.denseRole ?? "provider-timeseries-heart-rate",

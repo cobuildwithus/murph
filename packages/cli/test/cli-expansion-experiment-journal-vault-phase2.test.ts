@@ -2883,7 +2883,12 @@ test.sequential(
         mode: 'dry-run' | 'apply'
         hasWork: boolean
         denseProviderRawTimeseriesCount: number
+        retentionEligibleDenseProviderRawTimeseriesBytes: number
         retentionEligibleDenseProviderRawTimeseriesCount: number
+        denseRawBytesAfter: number
+        denseRawBytesBefore: number
+        denseRawBytesFreed: number
+        tombstonedDenseRawArtifactCount: number
         mutated: boolean
         touchedPathCount: number
       }>([
@@ -2898,12 +2903,21 @@ test.sequential(
       assert.equal(requireData(dryRun).mode, 'dry-run')
       assert.equal(requireData(dryRun).hasWork, false)
       assert.equal(requireData(dryRun).denseProviderRawTimeseriesCount, 0)
+      assert.equal(requireData(dryRun).retentionEligibleDenseProviderRawTimeseriesBytes, 0)
       assert.equal(requireData(dryRun).retentionEligibleDenseProviderRawTimeseriesCount, 0)
+      assert.equal(requireData(dryRun).denseRawBytesBefore, 0)
+      assert.equal(requireData(dryRun).denseRawBytesAfter, 0)
+      assert.equal(requireData(dryRun).denseRawBytesFreed, 0)
+      assert.equal(requireData(dryRun).tombstonedDenseRawArtifactCount, 0)
       assert.equal(requireData(dryRun).mutated, false)
 
       const applied = await runSliceCli<{
         mode: 'dry-run' | 'apply'
+        denseRawBytesAfter: number
+        denseRawBytesBefore: number
+        denseRawBytesFreed: number
         mutated: boolean
+        tombstonedDenseRawArtifactCount: number
         touchedPathCount: number
       }>([
         'vault',
@@ -2921,6 +2935,10 @@ test.sequential(
 
       assert.equal(applied.ok, true)
       assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).denseRawBytesBefore, 0)
+      assert.equal(requireData(applied).denseRawBytesAfter, 0)
+      assert.equal(requireData(applied).denseRawBytesFreed, 0)
+      assert.equal(requireData(applied).tombstonedDenseRawArtifactCount, 0)
       assert.equal(requireData(applied).mutated, false)
       assert.equal(requireData(applied).touchedPathCount, 0)
     } finally {

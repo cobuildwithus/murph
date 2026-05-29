@@ -20,6 +20,10 @@ import {
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
+import {
+  detectWearableStorageMigrationCandidates,
+  runWearableStorageMigrationPass,
+} from "@murphai/core";
 
 import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
@@ -72,6 +76,8 @@ const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 const HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT = 20;
 const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
+const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
+const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -919,6 +925,21 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
+    await runHostedDeviceSyncDenseRawRetention({
+      platform: options.runtimeLogPlatform ?? null,
+      processedJobs,
+      vaultRoot,
+    });
+
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        service,
+        syncState,
+        wake,
+      });
+    }
+
     if (secret && controlPlaneSynced) {
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -1053,6 +1074,70 @@ async function drainHostedDeviceSyncWorker(input: {
     }
   }
   return processedJobs;
+}
+
+async function runHostedDeviceSyncDenseRawRetention(input: {
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  processedJobs: number;
+  vaultRoot: string;
+}): Promise<void> {
+  const detection = await detectWearableStorageMigrationCandidates({
+    includeRecentDenseRaw: false,
+    vaultRoot: input.vaultRoot,
+  });
+  if (detection.retentionEligibleDenseProviderRawTimeseriesCount === 0) {
+    return;
+  }
+
+  const result = await runWearableStorageMigrationPass({
+    includeRecentDenseRaw: false,
+    maxBytes: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES,
+    maxFiles: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES,
+    pruneDenseRaw: true,
+    vaultRoot: input.vaultRoot,
+  });
+
+  await writeHostedDeviceSyncDenseRawRetentionRuntimeLog({
+    detection,
+    platform: input.platform,
+    processedJobs: input.processedJobs,
+    result,
+  });
+}
+
+async function writeHostedDeviceSyncDenseRawRetentionRuntimeLog(input: {
+  detection: Awaited<ReturnType<typeof detectWearableStorageMigrationCandidates>>;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  processedJobs: number;
+  result: Awaited<ReturnType<typeof runWearableStorageMigrationPass>>;
+}): Promise<void> {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "device-sync",
+      eventCode: "device-sync.dense_raw_retention",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        denseRawCandidateCount: input.detection.denseProviderRawTimeseriesCount,
+        denseRawBytesAfter: input.result.denseRawBytesAfter,
+        denseRawBytesBefore: input.result.denseRawBytesBefore,
+        denseRawBytesFreed: input.result.denseRawBytesFreed,
+        denseRawEligibleBytes:
+          input.detection.retentionEligibleDenseProviderRawTimeseriesBytes,
+        denseRawEligibleCount:
+          input.detection.retentionEligibleDenseProviderRawTimeseriesCount,
+        hasMore: input.result.hasMore,
+        processedJobs: input.processedJobs,
+        skippedCount: input.result.skippedCount,
+        tombstonedDenseRawArtifactCount: input.result.tombstonedDenseRawArtifactCount,
+      },
+    },
+    platform: input.platform,
+  });
 }
 
 export async function runHostedDeviceSyncWakeLane(input: {

@@ -40,6 +40,7 @@ export interface WearableStorageMigrationDetection {
   legacyCanonicalArtifactCount: number;
   denseProviderSampleShardCount: number;
   denseProviderRawTimeseriesCount: number;
+  retentionEligibleDenseProviderRawTimeseriesBytes: number;
   retentionEligibleDenseProviderRawTimeseriesCount: number;
 }
 
@@ -50,6 +51,9 @@ export interface WearableStorageMigrationResult {
   bytesAfter: number;
   bytesFreed: number;
   compactedReceiptCount: number;
+  denseRawBytesAfter: number;
+  denseRawBytesBefore: number;
+  denseRawBytesFreed: number;
   tombstonedCanonicalArtifactCount: number;
   tombstonedDenseRawArtifactCount: number;
   skippedCount: number;
@@ -144,8 +148,13 @@ const DENSE_SAMPLE_STREAMS = new Set([
   "temperature",
 ]);
 const DENSE_RAW_ROLE_TERMS = Object.freeze([
+  "active-calories",
+  "active_calories",
   "blood-oxygen",
   "blood_oxygen",
+  "calories-active",
+  "calories_active",
+  "distance",
   "heartrate",
   "heart-rate",
   "heart_rate",
@@ -158,21 +167,7 @@ const DENSE_RAW_ROLE_TERMS = Object.freeze([
   "steps",
   "temperature",
 ]);
-const DENSE_RAW_EXACT_ROLES = new Set([
-  "blood-oxygen",
-  "blood_oxygen",
-  "heartrate",
-  "heart-rate",
-  "heart_rate",
-  "hrv",
-  "respiratory-rate",
-  "respiratory_rate",
-  "sleep-stage",
-  "sleep_stage",
-  "spo2",
-  "steps",
-  "temperature",
-]);
+const DENSE_RAW_EXACT_ROLES = new Set(DENSE_RAW_ROLE_TERMS);
 
 export async function detectWearableStorageMigrationCandidates({
   includeRecentDenseRaw = false,
@@ -193,6 +188,10 @@ export async function detectWearableStorageMigrationCandidates({
     manifests,
     (artifact) => isDenseRawTimeseriesArtifact(artifact),
   );
+  const retentionEligibleDenseRawReferences = denseRawReferences.filter((references) =>
+    includeRecentDenseRaw
+    || isDenseRawReferenceGroupOlderThanRetentionWindow(references, now)
+  );
   const canonicalBytes = sumLargestReferenceBytes(canonicalReferences);
   const denseRawBytes = sumLargestReferenceBytes(denseRawReferences);
   const denseSampleBytes = sampleShardCandidates.reduce(
@@ -203,10 +202,9 @@ export async function detectWearableStorageMigrationCandidates({
   return {
     denseProviderRawTimeseriesCount: denseRawReferences.length,
     denseProviderSampleShardCount: sampleShardCandidates.length,
-    retentionEligibleDenseProviderRawTimeseriesCount: denseRawReferences.filter((references) =>
-      includeRecentDenseRaw
-      || isArtifactOlderThanDenseRetentionWindow(references[0]?.manifest.importedAt ?? "", now)
-    ).length,
+    retentionEligibleDenseProviderRawTimeseriesBytes:
+      sumLargestReferenceBytes(retentionEligibleDenseRawReferences),
+    retentionEligibleDenseProviderRawTimeseriesCount: retentionEligibleDenseRawReferences.length,
     hasWork:
       receiptDetection.hasWork
       || canonicalReferences.length > 0
@@ -236,6 +234,8 @@ export async function runWearableStorageMigrationPass({
   let bytesBefore = 0;
   let bytesAfter = 0;
   let compactedReceiptCount = 0;
+  let denseRawBytesAfter = 0;
+  let denseRawBytesBefore = 0;
   let tombstonedCanonicalArtifactCount = 0;
   let tombstonedDenseRawArtifactCount = 0;
   let attemptedReceiptCompaction = false;
@@ -319,6 +319,8 @@ export async function runWearableStorageMigrationPass({
     skippedCount += denseRawResult.skippedCount;
     bytesBefore += denseRawResult.bytesBefore;
     bytesAfter += denseRawResult.bytesAfter;
+    denseRawBytesBefore = denseRawResult.bytesBefore;
+    denseRawBytesAfter = denseRawResult.bytesAfter;
     for (const touchedPath of denseRawResult.touchedPaths) {
       touchedPaths.add(touchedPath);
     }
@@ -371,6 +373,9 @@ export async function runWearableStorageMigrationPass({
     bytesBefore,
     bytesFreed: Math.max(0, bytesBefore - bytesAfter),
     compactedReceiptCount,
+    denseRawBytesAfter,
+    denseRawBytesBefore,
+    denseRawBytesFreed: Math.max(0, denseRawBytesBefore - denseRawBytesAfter),
     hasMore,
     mutated,
     skippedCount,
@@ -577,7 +582,7 @@ async function prepareRawArtifactTombstone(input: {
   if (
     input.artifactClass === "dense_provider_timeseries"
     && input.denseRetentionPolicy?.includeRecent !== true
-    && !isArtifactOlderThanDenseRetentionWindow(firstReference.manifest.importedAt, input.now)
+    && !isDenseRawReferenceGroupOlderThanRetentionWindow(input.references, input.now)
   ) {
     return null;
   }
@@ -1080,6 +1085,16 @@ function isArtifactOlderThanDenseRetentionWindow(importedAt: string, now: Date):
   }
   const retentionMs = 7 * 24 * 60 * 60 * 1000;
   return now.getTime() - importedMs >= retentionMs;
+}
+
+function isDenseRawReferenceGroupOlderThanRetentionWindow(
+  references: readonly RawArtifactReference[],
+  now: Date,
+): boolean {
+  return references.length > 0
+    && references.every((reference) =>
+      isArtifactOlderThanDenseRetentionWindow(reference.manifest.importedAt, now)
+    );
 }
 
 function deadlineExceeded(startedAtMs: number, deadlineMs: number | undefined): boolean {

@@ -126,6 +126,7 @@ test("repairWearableStorage dry-run scopes dense raw hasMore to selected work", 
     hasWork: true,
     legacyCanonicalArtifactCount: 0,
     legacyReceiptPayloadCount: 0,
+    retentionEligibleDenseProviderRawTimeseriesBytes: 2048,
     retentionEligibleDenseProviderRawTimeseriesCount: 1,
     suspectedBytes: 4096,
   }));
@@ -155,6 +156,7 @@ test("repairWearableStorage dry-run scopes dense raw hasMore to selected work", 
   assert.equal(defaultDryRun.hasWork, false);
   assert.equal(defaultDryRun.hasMore, false);
   assert.equal(defaultDryRun.denseProviderRawTimeseriesCount, 1);
+  assert.equal(defaultDryRun.retentionEligibleDenseProviderRawTimeseriesBytes, 2048);
   assert.equal(defaultDryRun.retentionEligibleDenseProviderRawTimeseriesCount, 1);
 
   const denseDryRun = await services.core.repairWearableStorage({
@@ -165,6 +167,80 @@ test("repairWearableStorage dry-run scopes dense raw hasMore to selected work", 
 
   assert.equal(denseDryRun.hasWork, true);
   assert.equal(denseDryRun.hasMore, true);
+});
+
+test("repairWearableStorage apply surfaces dense raw byte metrics", async () => {
+  const runWearableStorageMigrationPass = vi.fn(async (_input: unknown) => ({
+    bytesAfter: 128,
+    bytesBefore: 8192,
+    bytesFreed: 8064,
+    compactedReceiptCount: 0,
+    denseRawBytesAfter: 128,
+    denseRawBytesBefore: 8192,
+    denseRawBytesFreed: 8064,
+    hasMore: false,
+    mutated: true,
+    skippedCount: 1,
+    tombstonedCanonicalArtifactCount: 0,
+    tombstonedDenseRawArtifactCount: 2,
+    touchedPaths: ["raw/integrations/wearable-provider/2026/04/import/01.json"],
+  }));
+  const coreRuntime = {
+    ...createCoreRuntimeStub(),
+    detectWearableStorageMigrationCandidates: vi.fn(async () => ({
+      denseProviderRawTimeseriesCount: 2,
+      denseProviderSampleShardCount: 0,
+      hasWork: true,
+      legacyCanonicalArtifactCount: 0,
+      legacyReceiptPayloadCount: 0,
+      retentionEligibleDenseProviderRawTimeseriesBytes: 4096,
+      retentionEligibleDenseProviderRawTimeseriesCount: 2,
+      suspectedBytes: 4096,
+    })),
+    runWearableStorageMigrationPass,
+  };
+  const runtimeModule = {
+    createUnwiredMethod,
+    loadCoreRuntime: vi.fn(async () => coreRuntime),
+    loadImporterRuntime: vi.fn(async () => {
+      throw new Error("loadImporterRuntime should not be called");
+    }),
+    loadQueryRuntime: vi.fn(async () => {
+      throw new Error("loadQueryRuntime should not be called");
+    }),
+  };
+  const integratedServicesModule = await importWithMocks<typeof import("../src/usecases/integrated-services.ts")>(
+    "../src/usecases/integrated-services.ts",
+    {
+      "../src/usecases/runtime.js": () => runtimeModule,
+    },
+  );
+  const services = integratedServicesModule.createIntegratedVaultServices();
+
+  const result = await services.core.repairWearableStorage({
+    apply: true,
+    maxBytes: 1024,
+    maxFiles: 5,
+    pruneDenseRaw: true,
+    requestId: "repair-dense-raw-apply",
+    vault: "fixture-vault",
+  });
+
+  assert.equal(result.mode, "apply");
+  assert.equal(result.retentionEligibleDenseProviderRawTimeseriesBytes, 4096);
+  assert.equal(result.retentionEligibleDenseProviderRawTimeseriesCount, 2);
+  assert.equal(result.denseRawBytesBefore, 8192);
+  assert.equal(result.denseRawBytesAfter, 128);
+  assert.equal(result.denseRawBytesFreed, 8064);
+  assert.equal(result.tombstonedDenseRawArtifactCount, 2);
+  assert.equal(result.touchedPathCount, 1);
+  assert.deepEqual(runWearableStorageMigrationPass.mock.calls[0]?.[0], {
+    includeRecentDenseRaw: undefined,
+    maxBytes: 1024,
+    maxFiles: 5,
+    pruneDenseRaw: true,
+    vaultRoot: "fixture-vault",
+  });
 });
 
 test("loadCoreRuntime validates module shape and caches the successful runtime", async () => {

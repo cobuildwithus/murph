@@ -219,6 +219,8 @@ function createIntegratedCoreServices(): CoreWriteServices {
           legacyCanonicalArtifactCount: detection.legacyCanonicalArtifactCount,
           denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
           denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
+          retentionEligibleDenseProviderRawTimeseriesBytes:
+            detection.retentionEligibleDenseProviderRawTimeseriesBytes,
           retentionEligibleDenseProviderRawTimeseriesCount:
             detection.retentionEligibleDenseProviderRawTimeseriesCount,
           mutated: false,
@@ -227,6 +229,9 @@ function createIntegratedCoreServices(): CoreWriteServices {
           bytesAfter: 0,
           bytesFreed: 0,
           compactedReceiptCount: 0,
+          denseRawBytesAfter: 0,
+          denseRawBytesBefore: 0,
+          denseRawBytesFreed: 0,
           tombstonedCanonicalArtifactCount: 0,
           tombstonedDenseRawArtifactCount: 0,
           skippedCount: 0,
@@ -250,6 +255,8 @@ function createIntegratedCoreServices(): CoreWriteServices {
         legacyCanonicalArtifactCount: detection.legacyCanonicalArtifactCount,
         denseProviderSampleShardCount: detection.denseProviderSampleShardCount,
         denseProviderRawTimeseriesCount: detection.denseProviderRawTimeseriesCount,
+        retentionEligibleDenseProviderRawTimeseriesBytes:
+          detection.retentionEligibleDenseProviderRawTimeseriesBytes,
         retentionEligibleDenseProviderRawTimeseriesCount:
           detection.retentionEligibleDenseProviderRawTimeseriesCount,
         mutated: result.mutated,
@@ -258,6 +265,9 @@ function createIntegratedCoreServices(): CoreWriteServices {
         bytesAfter: result.bytesAfter,
         bytesFreed: result.bytesFreed,
         compactedReceiptCount: result.compactedReceiptCount,
+        denseRawBytesAfter: result.denseRawBytesAfter,
+        denseRawBytesBefore: result.denseRawBytesBefore,
+        denseRawBytesFreed: result.denseRawBytesFreed,
         tombstonedCanonicalArtifactCount: result.tombstonedCanonicalArtifactCount,
         tombstonedDenseRawArtifactCount: result.tombstonedDenseRawArtifactCount,
         skippedCount: result.skippedCount,
