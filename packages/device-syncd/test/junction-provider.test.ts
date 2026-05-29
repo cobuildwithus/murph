@@ -1179,6 +1179,14 @@ for (const testCase of [
       patientName: "Raw Patient Name",
       sourceProviderSlug: "garmin",
       status: "synced",
+      items: [
+        {
+          subjectId: "raw-meal-subject-id",
+          subject: {
+            id: "raw-meal-nested-subject-id",
+          },
+        },
+      ],
     },
   },
   {
@@ -1199,6 +1207,16 @@ for (const testCase of [
       profile: {
         patient_id: "raw-cycle-patient-id",
       },
+      symptoms: [
+        {
+          subjectId: "raw-cycle-subject-id",
+          subjects: [
+            {
+              id: "raw-cycle-subjects-container-id",
+            },
+          ],
+        },
+      ],
     },
   },
 ] as const) {

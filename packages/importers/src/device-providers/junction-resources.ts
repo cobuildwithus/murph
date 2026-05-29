@@ -102,6 +102,7 @@ export function isJunctionRawDirectIdentityKey(key: string): boolean {
     "patient",
     "person",
     "profile",
+    "subject",
     "user",
   ].some((entity) => normalized.includes(`${entity}id`))
     || [
@@ -137,6 +138,7 @@ export function isJunctionRawDirectIdentityKey(key: string): boolean {
       "patient",
       "person",
       "profile",
+      "subject",
       "user",
     ].some((entity) => normalized === `${entity}name`)
     || normalized.includes("email")
@@ -163,6 +165,8 @@ const JUNCTION_RAW_DIRECT_IDENTITY_CONTAINER_KEYS = new Set([
   "people",
   "profile",
   "profiles",
+  "subject",
+  "subjects",
   "user",
   "users",
 ]);

@@ -1708,6 +1708,7 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
             personId: "raw-meal-person-sentinel",
             member_id: "raw-meal-member-sentinel",
             profileId: "raw-meal-profile-sentinel",
+            subjectId: "raw-meal-subject-sentinel",
             user: {
               id: "raw-meal-nested-user-sentinel",
             },
@@ -1725,6 +1726,14 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
             profiles: [
               {
                 id: "raw-meal-profiles-container-sentinel",
+              },
+            ],
+            subject: {
+              id: "raw-meal-nested-subject-sentinel",
+            },
+            subjects: [
+              {
+                id: "raw-meal-subjects-container-sentinel",
               },
             ],
           },
@@ -1776,11 +1785,14 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
     "raw-meal-person-sentinel",
     "raw-meal-member-sentinel",
     "raw-meal-profile-sentinel",
+    "raw-meal-subject-sentinel",
     "raw-meal-nested-user-sentinel",
     "raw-meal-nested-account-sentinel",
     "raw-meal-owner-sentinel",
     "raw-meal-patients-container-sentinel",
     "raw-meal-profiles-container-sentinel",
+    "raw-meal-nested-subject-sentinel",
+    "raw-meal-subjects-container-sentinel",
     "raw-cycle-birth-date-sentinel",
     "raw-cycle-dob-sentinel",
     "raw-cycle-owner-sentinel",
