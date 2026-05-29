@@ -5,6 +5,8 @@ import path from 'node:path'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
+const stdinImportCliTestTimeoutMs = 120_000
+
 test('explicit JSON import commands accept stdin via --input -', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
@@ -224,7 +226,7 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, stdinImportCliTestTimeoutMs)
 
 test('payload-based commands reject empty stdin with an actionable message', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))

@@ -380,7 +380,6 @@ async function runWorkspaceChildJob(input: {
 
   input.noteRuntimeStage("bridge.options");
   const jobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
-    consumePendingRuntimeWake: () => input.runtimeWakeSignal.consumePending(),
     decodeMailboxPayload,
     platform,
     requireMailboxPayloadDecoder: true,

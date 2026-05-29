@@ -26,5 +26,10 @@ Make hosted device sync idle-only so foreground assistant replies never run or w
 - Focused hosted assistant-runtime tests for workspace assistant phase and maintenance: passed.
 - `pnpm --dir packages/assistant-runtime test:coverage`: passed.
 - `pnpm typecheck`: passed.
-- `pnpm verify:repo`: pending.
-- `pnpm test:e2e:hosted-local`: pending.
+- Focused Linq hosted-local regressions (`linq-first-contact`, `linq-webhook`, `linq-scheduled-reminder`): passed.
+- `pnpm test:e2e:hosted-local`: passed.
+- `pnpm --dir packages/cli exec vitest run --config vitest.config.ts --coverage`: passed.
+- `pnpm verify:repo`: passed.
+Status: completed
+Updated: 2026-05-29
+Completed: 2026-05-29
