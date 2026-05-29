@@ -96,7 +96,11 @@ describe("cloudflare dev-worker script", () => {
     );
     expect(spawnSync).toHaveBeenCalledWith(
       "docker",
-      ["image", "inspect", "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en"],
+      [
+        "image",
+        "inspect",
+        "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en",
+      ],
       expect.any(Object),
     );
   });

@@ -414,7 +414,7 @@ jobs:
           tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
             -C apps/cloudflare/.deploy \
             runner-bundle
-          docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \
+          docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \
             | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
 
       - name: Upload immediate build handoff
@@ -786,7 +786,7 @@ jobs:
         run: |
           docker build \
             --file Dockerfile.cloudflare-hosted-runner-base \
-            --tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \
+            --tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en \
             .
 
       - name: Render Worker secrets

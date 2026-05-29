@@ -5,7 +5,7 @@ ARG WHISPER_CPP_SHA256=b7c6b05635e5fda85cbcc5a012d29b3a4ca1cc22d9fa54d5b6c33e4ac
 ARG WHISPER_CPP_BUILD_JOBS=1
 ARG WHISPER_MODEL_FILE=ggml-base.en.bin
 ARG WHISPER_MODEL_SHA256=a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
-ARG CODEX_CLI_VERSION=0.130.0
+ARG CODEX_CLI_VERSION=0.135.0
 
 FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS whisper-builder
 
@@ -108,6 +108,7 @@ RUN python3 --version \
   && python --version \
   && zstd --version \
   && codex --version \
-  && codex app-server --help >/dev/null
+  && codex app-server --help >/dev/null \
+  && codex doctor --help >/dev/null
 
 EXPOSE 8080

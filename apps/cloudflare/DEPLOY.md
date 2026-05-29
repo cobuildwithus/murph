@@ -281,9 +281,9 @@ Local deploys and Docker smoke checks also prepare the stable native base image:
 pnpm --dir apps/cloudflare runner:docker:base
 ```
 
-That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en`.
+That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en`.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `ffmpeg`, `whisper.cpp`, the default Whisper model, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle or worker secrets.
-The base image build runs `python3 --version`, `python --version`, and `codex app-server --help` under the runner user, and the Docker smoke repeats the Python checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
+The base image build runs `python3 --version`, `python --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke.
 
 When you need to backstop lifecycle rules locally or in CI:

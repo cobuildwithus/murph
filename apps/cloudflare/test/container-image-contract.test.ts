@@ -15,7 +15,7 @@ import {
 } from "../scripts/runner-bundle-contract.js";
 
 const hostedRunnerBaseImageTag =
-  "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en";
+  "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-codex0.135.0-base-en";
 
 const runnerDockerSmokeFinallyCleanupBlock = `} finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
@@ -365,7 +365,7 @@ describe("hosted runner container image contract", () => {
 
     expect(baseDockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
     expect(baseDockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.130.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.135.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -442,6 +442,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("zstd --version");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
+    expect(baseDockerfile).toContain("codex doctor --help >/dev/null");
     expect(baseDockerfile).toContain("tini");
     expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
