@@ -73,6 +73,7 @@ export interface AssistantChannelDependencies {
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
+    signal?: AbortSignal
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
   }) => Promise<

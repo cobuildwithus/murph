@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
 import * as coreRuntime from "@murphai/core";
-import { workoutSessionSchema, type WorkoutSessionMetrics } from "@murphai/contracts";
+import {
+  workoutSessionSchema,
+  type RawImportManifest,
+  type WorkoutSessionMetrics,
+} from "@murphai/contracts";
 
 import {
   createDeviceProviderRegistry,
@@ -40,6 +44,12 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
     DeviceBatchImportPayload & { snapshot: unknown }
   >
 >;
+
+interface RawArtifactProvenanceEntry {
+  role: string;
+  relativePath: string;
+  metadata: unknown;
+}
 
 function makeTestDeviceProviderAdapter<TSnapshot>(
   adapter: Pick<DeviceProviderAdapter<TSnapshot>, "provider" | "normalizeSnapshot"> &
@@ -81,6 +91,34 @@ function workoutMetricsFromEvent(
 
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
+}
+
+function readRawArtifactProvenanceEntries(
+  manifest: RawImportManifest,
+): RawArtifactProvenanceEntry[] {
+  const rawArtifacts = manifest.provenance.rawArtifacts;
+  assert.ok(Array.isArray(rawArtifacts));
+
+  return rawArtifacts.map((entry) => {
+    assert.ok(isRecord(entry));
+    const role = entry.role;
+    const relativePath = entry.relativePath;
+    if (typeof role !== "string") {
+      assert.fail("Raw artifact provenance role should be a string.");
+    }
+    if (typeof relativePath !== "string") {
+      assert.fail("Raw artifact provenance relativePath should be a string.");
+    }
+    return {
+      metadata: entry.metadata,
+      relativePath,
+      role,
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 test("makeNormalizedDeviceBatch preserves the canonical device payload shape and hardcodes device source", () => {
@@ -1637,6 +1675,216 @@ test("prepareDeviceProviderSnapshotImport routes Junction floating timeseries en
       value: 72.4,
     },
   ]);
+});
+
+test("prepareDeviceProviderSnapshotImport strips direct Junction identities from raw-only resources", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    snapshot: {
+      accountId: "junction-user-1",
+      importedAt: "2026-03-16T12:00:00.000Z",
+      summaries: {
+        meal: [
+          {
+            id: "meal-1",
+            name: "Greek yogurt bowl",
+            sourceProviderSlug: "garmin",
+            mealType: "breakfast",
+            clientId: "raw-meal-client-id-sentinel",
+            user_id: "raw-meal-user-id-sentinel",
+            userId: "raw-meal-user-camel-sentinel",
+            client_user_id: "raw-meal-client-user-sentinel",
+            account_id: "raw-meal-account-sentinel",
+            patientName: "raw-meal-patient-name-sentinel",
+            memberName: "raw-meal-member-name-sentinel",
+            fullName: "raw-meal-full-name-sentinel",
+            firstName: "raw-meal-first-name-sentinel",
+            lastName: "raw-meal-last-name-sentinel",
+            dateOfBirth: "raw-meal-date-of-birth-sentinel",
+            addressLine1: "raw-meal-address-sentinel",
+            email: "raw-meal-email-sentinel",
+            phoneNumber: "raw-meal-phone-sentinel",
+            patient_id: "raw-meal-patient-sentinel",
+            personId: "raw-meal-person-sentinel",
+            member_id: "raw-meal-member-sentinel",
+            profileId: "raw-meal-profile-sentinel",
+            user: {
+              id: "raw-meal-nested-user-sentinel",
+            },
+            account: {
+              id: "raw-meal-nested-account-sentinel",
+            },
+            owner: {
+              id: "raw-meal-owner-sentinel",
+            },
+            patients: [
+              {
+                id: "raw-meal-patients-container-sentinel",
+              },
+            ],
+            profiles: [
+              {
+                id: "raw-meal-profiles-container-sentinel",
+              },
+            ],
+          },
+        ],
+        menstrual_cycle: [
+          {
+            id: "cycle-1",
+            sourceProviderSlug: "garmin",
+            cycleDay: 3,
+            birthDate: "raw-cycle-birth-date-sentinel",
+            dob: "raw-cycle-dob-sentinel",
+            ownerId: "raw-cycle-owner-sentinel",
+            phone: "raw-cycle-phone-sentinel",
+            client: {
+              id: "raw-cycle-client-sentinel",
+            },
+            member: {
+              id: "raw-cycle-member-sentinel",
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-meal"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
+  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(payload.samples?.length ?? 0, 0);
+
+  const rawArtifactText = JSON.stringify(payload.rawArtifacts);
+  const rawReceiptText = JSON.stringify(readRawReceiptArtifact(payload));
+  for (const sentinel of [
+    "raw-meal-user-id-sentinel",
+    "raw-meal-user-camel-sentinel",
+    "raw-meal-client-id-sentinel",
+    "raw-meal-client-user-sentinel",
+    "raw-meal-account-sentinel",
+    "raw-meal-patient-name-sentinel",
+    "raw-meal-member-name-sentinel",
+    "raw-meal-full-name-sentinel",
+    "raw-meal-first-name-sentinel",
+    "raw-meal-last-name-sentinel",
+    "raw-meal-date-of-birth-sentinel",
+    "raw-meal-address-sentinel",
+    "raw-meal-email-sentinel",
+    "raw-meal-phone-sentinel",
+    "raw-meal-patient-sentinel",
+    "raw-meal-person-sentinel",
+    "raw-meal-member-sentinel",
+    "raw-meal-profile-sentinel",
+    "raw-meal-nested-user-sentinel",
+    "raw-meal-nested-account-sentinel",
+    "raw-meal-owner-sentinel",
+    "raw-meal-patients-container-sentinel",
+    "raw-meal-profiles-container-sentinel",
+    "raw-cycle-birth-date-sentinel",
+    "raw-cycle-dob-sentinel",
+    "raw-cycle-owner-sentinel",
+    "raw-cycle-phone-sentinel",
+    "raw-cycle-client-sentinel",
+    "raw-cycle-member-sentinel",
+  ]) {
+    assert.doesNotMatch(rawArtifactText, new RegExp(sentinel, "u"), sentinel);
+    assert.doesNotMatch(rawReceiptText, new RegExp(sentinel, "u"), sentinel);
+  }
+  assert.match(rawArtifactText, /breakfast/u);
+  assert.match(rawArtifactText, /Greek yogurt bowl/u);
+  assert.match(rawArtifactText, /cycleDay/u);
+});
+
+test("importDeviceProviderSnapshot tags and prunes actual Junction dense timeseries while preserving weight", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-dense-retention");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-05-01T00:00:00.000Z",
+    vaultRoot,
+  });
+
+  const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-user-1",
+        importedAt: "2026-05-01T00:00:00.000Z",
+        timeseries: {
+          heartrate: [
+            {
+              timestamp: "2026-05-01T00:00:00.000Z",
+              value: 70,
+            },
+          ],
+          weight: [
+            {
+              day: "2026-05-01",
+              value: 72.4,
+            },
+          ],
+        },
+      },
+    },
+    {
+      corePort: coreRuntime,
+    },
+  );
+
+  const manifest = JSON.parse(
+    await readFile(join(vaultRoot, result.manifestPath), "utf8"),
+  ) as RawImportManifest;
+  const rawManifestArtifacts = readRawArtifactProvenanceEntries(manifest);
+  const heartrateArtifact = rawManifestArtifacts.find(
+    (artifact) => artifact.role === "junction-timeseries-heartrate",
+  );
+  const weightArtifact = rawManifestArtifacts.find(
+    (artifact) => artifact.role === "junction-timeseries-weight",
+  );
+  assert.ok(heartrateArtifact);
+  assert.ok(weightArtifact);
+  const metadataByRole = new Map(
+    rawManifestArtifacts.map((artifact) => [
+      artifact.role,
+      artifact.metadata,
+    ]),
+  );
+  assert.deepEqual(metadataByRole.get("junction-timeseries-heartrate"), {
+    artifactClass: "dense_provider_timeseries",
+    provider: "junction",
+    resource: "heartrate",
+    resourceCategory: "timeseries",
+    retentionClass: "debug_temporary",
+  });
+  assert.deepEqual(metadataByRole.get("junction-timeseries-weight"), {
+    artifactClass: "sparse_provider_timeseries",
+    provider: "junction",
+    resource: "weight",
+    resourceCategory: "timeseries",
+    retentionClass: "provider_evidence",
+  });
+
+  const detection = await coreRuntime.detectWearableStorageMigrationCandidates({
+    now: new Date("2026-05-09T00:00:00.000Z"),
+    vaultRoot,
+  });
+  assert.equal(detection.denseProviderRawTimeseriesCount, 1);
+  assert.equal(detection.retentionEligibleDenseProviderRawTimeseriesCount, 1);
+
+  const pruneResult = await coreRuntime.pruneWearableDenseRawTimeseries({
+    maxFiles: 5,
+    now: new Date("2026-05-09T00:00:00.000Z"),
+    vaultRoot,
+  });
+  assert.equal(pruneResult.tombstonedDenseRawArtifactCount, 1);
+
+  assert.match(
+    await readFile(join(vaultRoot, heartrateArtifact.relativePath), "utf8"),
+    /wearable\.dense_provider_timeseries_pruned\.v1/u,
+  );
+  const weightRawText = await readFile(join(vaultRoot, weightArtifact.relativePath), "utf8");
+  assert.match(weightRawText, /72\.4/u);
+  assert.doesNotMatch(weightRawText, /dense_provider_timeseries_pruned/u);
 });
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {

@@ -141,6 +141,34 @@ describe('assistant turn progress', () => {
     expect(deliver).toHaveBeenCalledTimes(1)
   })
 
+  it('can be closed so later progress sends fail without delivery', async () => {
+    const delivered: DeliverProgressInput[] = []
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+      delivered.push(input)
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await expect(progress.send('Checking the latest message now.')).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    expect(delivered[0]?.signal?.aborted).toBe(false)
+
+    progress.close?.()
+    expect(delivered[0]?.signal?.aborted).toBe(true)
+    await expect(progress.send('Preparing a concise final reply.')).resolves.toEqual({
+      kind: 'failed',
+      source: 'model',
+    })
+    expect(deliver).toHaveBeenCalledTimes(1)
+  })
+
   it('resolves the current delivery context when sending progress', async () => {
     const initialInput = createMessageInput({
       deliveryIdempotencyKey: 'initial-reply-key',

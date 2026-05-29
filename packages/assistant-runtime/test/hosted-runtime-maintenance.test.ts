@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
-  runWearableStorageMigrationPass: vi.fn(),
+  pruneWearableDenseRawTimeseries: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
@@ -60,7 +60,7 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
 vi.mock("@murphai/core", () => ({
   detectWearableStorageMigrationCandidates:
     mocks.detectWearableStorageMigrationCandidates,
-  runWearableStorageMigrationPass: mocks.runWearableStorageMigrationPass,
+  pruneWearableDenseRawTimeseries: mocks.pruneWearableDenseRawTimeseries,
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
@@ -226,7 +226,7 @@ beforeEach(() => {
     retentionEligibleDenseProviderRawTimeseriesCount: 0,
     suspectedBytes: 0,
   });
-  mocks.runWearableStorageMigrationPass.mockResolvedValue({
+  mocks.pruneWearableDenseRawTimeseries.mockResolvedValue({
     bytesAfter: 0,
     bytesBefore: 0,
     bytesFreed: 0,
@@ -1417,17 +1417,7 @@ describe("runHostedDeviceSyncPass", () => {
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       runSchedulerOnce,
     });
-    mocks.detectWearableStorageMigrationCandidates.mockResolvedValueOnce({
-      denseProviderRawTimeseriesCount: 3,
-      denseProviderSampleShardCount: 0,
-      hasWork: true,
-      legacyCanonicalArtifactCount: 0,
-      legacyReceiptPayloadCount: 0,
-      retentionEligibleDenseProviderRawTimeseriesBytes: 12_345,
-      retentionEligibleDenseProviderRawTimeseriesCount: 2,
-      suspectedBytes: 12_345,
-    });
-    mocks.runWearableStorageMigrationPass.mockResolvedValueOnce({
+    mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
       bytesAfter: 500,
       bytesBefore: 9_000,
       bytesFreed: 8_500,
@@ -1475,20 +1465,14 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 2,
       skipped: false,
     });
-    expect(mocks.detectWearableStorageMigrationCandidates).toHaveBeenCalledWith({
-      includeRecentDenseRaw: false,
-      vaultRoot: "/tmp/vault-root",
-    });
-    expect(mocks.runWearableStorageMigrationPass).toHaveBeenCalledWith(expect.objectContaining({
-      includeRecentDenseRaw: false,
+    expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
+    expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
       maxFiles: 25,
-      pruneDenseRaw: true,
-      repairClasses: ["dense_raw_timeseries"],
       vaultRoot: "/tmp/vault-root",
     }));
     assert.equal(
-      typeof mocks.runWearableStorageMigrationPass.mock.calls[0]?.[0]?.deadlineMs,
+      typeof mocks.pruneWearableDenseRawTimeseries.mock.calls[0]?.[0]?.deadlineMs,
       "number",
     );
 
@@ -1500,11 +1484,8 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.level, "info");
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
-      denseRawCandidateCount: 3,
       denseRawAfterBytes: 500,
       denseRawBeforeBytes: 9_000,
-      denseRawEligibleBytes: 12_345,
-      denseRawEligibleCount: 2,
       denseRawFreedBytes: 8_500,
       hasMore: false,
       processedJobs: 2,
@@ -1526,17 +1507,7 @@ describe("runHostedDeviceSyncPass", () => {
       getNextWakeAt: () => null,
       runSchedulerOnce,
     });
-    mocks.detectWearableStorageMigrationCandidates.mockResolvedValueOnce({
-      denseProviderRawTimeseriesCount: 30,
-      denseProviderSampleShardCount: 0,
-      hasWork: true,
-      legacyCanonicalArtifactCount: 0,
-      legacyReceiptPayloadCount: 0,
-      retentionEligibleDenseProviderRawTimeseriesBytes: 123_456,
-      retentionEligibleDenseProviderRawTimeseriesCount: 30,
-      suspectedBytes: 123_456,
-    });
-    mocks.runWearableStorageMigrationPass.mockResolvedValueOnce({
+    mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
       bytesAfter: 1_000,
       bytesBefore: 10_000,
       bytesFreed: 9_000,
@@ -1569,14 +1540,49 @@ describe("runHostedDeviceSyncPass", () => {
     );
 
     assert.equal(result.nextWakeAt, "2026-04-08T00:00:30.000Z");
-    expect(mocks.runWearableStorageMigrationPass).toHaveBeenCalledWith(expect.objectContaining({
-      includeRecentDenseRaw: false,
+    expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
       maxFiles: 25,
-      pruneDenseRaw: true,
-      repairClasses: ["dense_raw_timeseries"],
       vaultRoot: "/tmp/vault-root",
     }));
+  });
+
+  it("does not start dense raw retention when the maintenance deadline is exhausted", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => null,
+      runSchedulerOnce,
+    });
+
+    const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
+      runHostedDeviceSyncPass(
+        {
+          eventId: "evt_device_sync_dense_raw_retention_deadline",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        0,
+      )
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: false,
+    });
+    expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
+    expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
   });
 
   it("logs dense raw retention failures without blocking device-sync reconcile", async () => {
@@ -1591,17 +1597,7 @@ describe("runHostedDeviceSyncPass", () => {
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       runSchedulerOnce,
     });
-    mocks.detectWearableStorageMigrationCandidates.mockResolvedValueOnce({
-      denseProviderRawTimeseriesCount: 1,
-      denseProviderSampleShardCount: 0,
-      hasWork: true,
-      legacyCanonicalArtifactCount: 0,
-      legacyReceiptPayloadCount: 0,
-      retentionEligibleDenseProviderRawTimeseriesBytes: 12_345,
-      retentionEligibleDenseProviderRawTimeseriesCount: 1,
-      suspectedBytes: 12_345,
-    });
-    mocks.runWearableStorageMigrationPass.mockRejectedValueOnce(
+    mocks.pruneWearableDenseRawTimeseries.mockRejectedValueOnce(
       new Error("repair failed for /tmp/vault-root/raw/provider.json"),
     );
 

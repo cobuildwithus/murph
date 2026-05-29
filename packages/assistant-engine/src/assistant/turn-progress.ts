@@ -18,6 +18,7 @@ import type {
 } from './service-contracts.js'
 
 export interface AssistantProgressDelivery {
+  close?(): void
   send(
     text: string,
     options?: AssistantProgressDeliverySendOptions,
@@ -51,6 +52,7 @@ type AssistantProgressDeliveryContext = {
   messageInput: AssistantMessageInput
   session: AssistantSession
 }
+type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
 
 export function shouldEnableAssistantModelProgressUpdates(
   input: Pick<AssistantMessageInput, 'deliverResponse'>,
@@ -73,6 +75,7 @@ export function createAssistantProgressDelivery(input: {
   turnId: string
 }): AssistantProgressDelivery {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
+  const abortController = new AbortController()
   const sentTexts = new Set<string>()
   const sentCountsBySource: Record<AssistantProgressDeliverySource, number> = {
     model: 0,
@@ -83,6 +86,12 @@ export function createAssistantProgressDelivery(input: {
   return {
     async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {
       const source = options?.source ?? 'model'
+      if (abortController.signal.aborted) {
+        return {
+          kind: 'failed',
+          source,
+        }
+      }
       const text = normalizeAssistantProgressText(rawText)
       if (!text || sentTexts.has(text)) {
         return {
@@ -109,14 +118,16 @@ export function createAssistantProgressDelivery(input: {
           messageInput: input.messageInput,
           session: input.session,
         }
-        await deliver({
+        const progressInput: AssistantProgressDeliverInput = {
           input: deliveryContext.messageInput,
           ordinal,
           session: deliveryContext.session,
+          signal: abortController.signal,
           sharedPlan: input.sharedPlan,
           text,
           turnId: input.turnId,
-        })
+        }
+        await deliver(progressInput)
         return {
           kind: 'sent',
           source,
@@ -131,6 +142,9 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       }
+    },
+    close() {
+      abortController.abort()
     },
   }
 }

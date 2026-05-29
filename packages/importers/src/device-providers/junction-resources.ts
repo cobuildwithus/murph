@@ -7,16 +7,33 @@ export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "body",
 ] as const);
 
-export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-  "hrv",
-  "respiratory_rate",
-  "blood_oxygen",
-  "weight",
+export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
+  { resource: "steps", retentionClass: "debug_temporary" },
+  { resource: "distance", retentionClass: "debug_temporary" },
+  { resource: "calories_active", retentionClass: "debug_temporary" },
+  { resource: "heartrate", retentionClass: "debug_temporary" },
+  { resource: "hrv", retentionClass: "debug_temporary" },
+  { resource: "respiratory_rate", retentionClass: "debug_temporary" },
+  { resource: "blood_oxygen", retentionClass: "debug_temporary" },
+  { resource: "weight", retentionClass: "provider_evidence" },
 ] as const);
+
+export type JunctionTimeseriesResource =
+  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]["resource"];
+export type JunctionTimeseriesRetentionClass =
+  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]["retentionClass"];
+
+export interface JunctionTimeseriesRawArtifactMetadata extends Record<string, unknown> {
+  artifactClass: "dense_provider_timeseries" | "sparse_provider_timeseries";
+  provider: "junction";
+  resource: JunctionTimeseriesResource;
+  resourceCategory: "timeseries";
+  retentionClass: JunctionTimeseriesRetentionClass;
+}
+
+export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
+  ...JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => policy.resource),
+]);
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 
@@ -34,6 +51,121 @@ export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
 ] as const);
+
+const JUNCTION_TIMESERIES_RESOURCE_POLICY_BY_RESOURCE: ReadonlyMap<
+  string,
+  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]
+> = new Map(
+  JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => [policy.resource, policy]),
+);
+
+export function readJunctionTimeseriesRawArtifactMetadata(
+  resource: string,
+): JunctionTimeseriesRawArtifactMetadata | null {
+  const normalized = normalizeJunctionResourceName(resource);
+  if (!normalized) {
+    return null;
+  }
+  const policy = JUNCTION_TIMESERIES_RESOURCE_POLICY_BY_RESOURCE.get(normalized);
+  if (!policy) {
+    return null;
+  }
+
+  return {
+    artifactClass: policy.retentionClass === "debug_temporary"
+      ? "dense_provider_timeseries"
+      : "sparse_provider_timeseries",
+    provider: "junction",
+    resource: policy.resource,
+    resourceCategory: "timeseries",
+    retentionClass: policy.retentionClass,
+  };
+}
+
+export function isJunctionDenseTimeseriesResource(resource: string): boolean {
+  return readJunctionTimeseriesRawArtifactMetadata(resource)?.artifactClass
+    === "dense_provider_timeseries";
+}
+
+export function normalizeJunctionRawIdentityKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
+export function isJunctionRawDirectIdentityKey(key: string): boolean {
+  const normalized = normalizeJunctionRawIdentityKey(key);
+  return [
+    "account",
+    "client",
+    "clientuser",
+    "member",
+    "owner",
+    "patient",
+    "person",
+    "profile",
+    "user",
+  ].some((entity) => normalized.includes(`${entity}id`))
+    || [
+      "address",
+      "addressline1",
+      "addressline2",
+      "birthdate",
+      "city",
+      "dateofbirth",
+      "displayname",
+      "dob",
+      "familyname",
+      "firstname",
+      "fullname",
+      "givenname",
+      "lastname",
+      "maidenname",
+      "middlename",
+      "postalcode",
+      "preferredname",
+      "state",
+      "street",
+      "streetaddress",
+      "zipcode",
+      "zip",
+    ].includes(normalized)
+    || [
+      "account",
+      "client",
+      "clientuser",
+      "member",
+      "owner",
+      "patient",
+      "person",
+      "profile",
+      "user",
+    ].some((entity) => normalized === `${entity}name`)
+    || normalized.includes("email")
+    || normalized.includes("phone");
+}
+
+export function isJunctionRawDirectIdentityContainerKey(key: string): boolean {
+  const normalized = normalizeJunctionRawIdentityKey(key);
+  return JUNCTION_RAW_DIRECT_IDENTITY_CONTAINER_KEYS.has(normalized);
+}
+
+const JUNCTION_RAW_DIRECT_IDENTITY_CONTAINER_KEYS = new Set([
+  "account",
+  "accounts",
+  "client",
+  "clients",
+  "member",
+  "members",
+  "owner",
+  "owners",
+  "patient",
+  "patients",
+  "person",
+  "people",
+  "profile",
+  "profiles",
+  "user",
+  "users",
+]);
 
 export const JUNCTION_SLEEP_SCORE_PATHS = Object.freeze([
   "sleepScore",

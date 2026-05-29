@@ -24,6 +24,9 @@ import {
 import type {
   HostedRuntimeMailboxPort,
 } from "./platform.ts";
+import type {
+  HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
 
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
 
@@ -40,6 +43,7 @@ export type HostedMailboxItemImportOutcome =
   | {
       status: "imported" | "skipped";
       assistantInputId?: string | null;
+      linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
     };
@@ -67,6 +71,7 @@ export interface HostedMailboxImportLoopResult {
   conversationImportedCount?: number;
   fetchedCount: number;
   importedCount: number;
+  latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
 }
@@ -173,6 +178,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let conversationImportedCount = 0;
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
+  let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
   const expectedSeqByLane = Object.fromEntries(
@@ -358,6 +364,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         assistantInputIds.push(outcome.assistantInputId);
       }
     }
+    if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
+      latestLinqDeliveryContext = outcome.linqDeliveryContext;
+    }
     expectedSeqByLane[lane] += 1n;
   }
 
@@ -367,6 +376,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     conversationImportedCount,
     fetchedCount: fetched.items.length,
     importedCount,
+    ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };

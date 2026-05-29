@@ -135,6 +135,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(order, []);
     assert.equal(outcome.status, "imported");
     assert.equal(outcome.reasonCode, undefined);
+    assert.deepEqual(outcome.linqDeliveryContext, {
+      directRecipientPhoneNumber: "redacted-contact-sentinel",
+      fromPhoneNumber: null,
+      replyToMessageId: "msg_synthetic_projection_failure",
+      target: "chat_synthetic",
+    });
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,

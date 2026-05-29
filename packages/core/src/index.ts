@@ -47,10 +47,12 @@ export type {
 } from "./wearable-receipts.ts";
 export {
   detectWearableStorageMigrationCandidates,
+  pruneWearableDenseRawTimeseries,
   runWearableStorageMigrationPass,
 } from "./wearable-storage-migration.ts";
 export type {
   DetectWearableStorageMigrationCandidatesInput,
+  PruneWearableDenseRawTimeseriesInput,
   RunWearableStorageMigrationPassInput,
   WearableStorageMigrationDetection,
   WearableStorageMigrationResult,

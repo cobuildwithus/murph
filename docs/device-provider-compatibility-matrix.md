@@ -64,7 +64,7 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 
 These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer raw artifacts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples.
 
-Junction timeseries are the concrete model for this boundary: `junction-timeseries-*` raw artifacts are evidence/debug data only. They must not emit per-point observation events, appear in default read/search surfaces, or feed wearable summaries by themselves. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
+Junction timeseries are the concrete model for this boundary: `junction-timeseries-*` raw artifacts are evidence/debug data only. They must not emit per-point observation events, appear in default read/search surfaces, or feed wearable summaries by themselves. Dense Junction timeseries are tagged for short-lived debug retention and pruned by the hosted post-device-sync retention pass; sparse resources such as `weight` remain raw evidence unless a separate policy changes that. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
 
 ### Observation metrics already in active use
 

@@ -37,6 +37,10 @@ import type {
   HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
+import {
+  buildHostedAssistantLinqDeliveryContextFromWake,
+  type HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
 import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -169,6 +173,7 @@ export type HostedConversationMailboxImportOutcome =
       afterCheckpoint?: (() => Promise<HostedMailboxPostCheckpointEffectResult>) | null;
       assistantInputId?: string | null;
       captureId: string | null;
+      linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
       status: "imported";
@@ -307,6 +312,7 @@ export async function importHostedConversationMailboxItem(input: {
     wake: decoded.wake,
   });
 
+  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   return {
     afterCheckpoint: async () => {
       return await projectHostedConversationAssistantInputBestEffort({
@@ -321,6 +327,7 @@ export async function importHostedConversationMailboxItem(input: {
     },
     assistantInputId: stagedInput.inputId,
     captureId: null,
+    ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
     metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported",
   };

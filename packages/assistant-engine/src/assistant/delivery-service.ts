@@ -126,6 +126,7 @@ export async function deliverAssistantProgressUpdate(input: {
   input: AssistantMessageInput
   ordinal: number
   session: AssistantSession
+  signal?: AbortSignal
   sharedPlan: AssistantTurnSharedPlan
   text: string
   turnId: string
@@ -161,6 +162,7 @@ export async function deliverAssistantProgressUpdate(input: {
       turnId: input.turnId,
     },
     vault: input.input.vault,
+    signal: input.signal,
   })
 }
 

@@ -267,3 +267,88 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
     signal,
   });
 });
+
+test("hosted progress Linq delivery aborts provider send when request signal aborts", async () => {
+  const requestAbort = new AbortController();
+  const providerAbort = new Error("progress delivery closed");
+  let providerEnteredResolve: (() => void) | null = null;
+  const providerEntered = new Promise<void>((resolve) => {
+    providerEnteredResolve = resolve;
+  });
+  mocks.sendHostedProviderLinqMessage.mockImplementationOnce(async (_payload, options) => {
+    providerEnteredResolve?.();
+    return await new Promise((_resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(options.signal.reason);
+        return;
+      }
+      options.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+    });
+  });
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    forwardedEnv: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    userEnv: {},
+  });
+
+  const sendPromise = delivery.sendLinq?.({
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: null,
+    signal: requestAbort.signal,
+    target: "linq-thread",
+    targetKind: "thread",
+  });
+  await providerEntered;
+  requestAbort.abort(providerAbort);
+
+  assert.ok(sendPromise);
+  await assert.rejects(sendPromise, /progress delivery closed/u);
+  assert.equal(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[1]?.signal?.aborted, true);
+});
+
+test("hosted progress Linq delivery recovers same-wake direct recipient only", async () => {
+  const wake = buildHostedExecutionLinqConversationMessageWake({
+    eventId: "evt_linq_progress",
+    linqMessage: {
+      chatId: "linq-thread",
+      from: "+15550000001",
+      isFromMe: false,
+      messageId: "linq-reply",
+      parts: [],
+    },
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    phoneLookupKey: "+15550000002",
+    userId: "member_123",
+  });
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    forwardedEnv: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    userEnv: {},
+    wake,
+  });
+
+  await delivery.sendLinq?.({
+    directRecipientPhoneNumber: null,
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: null,
+    target: "linq-thread",
+    targetKind: "thread",
+  });
+
+  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
+    directRecipientPhoneNumber: "+15550000001",
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: null,
+    target: "linq-thread",
+    targetKind: "thread",
+  });
+});

@@ -1127,9 +1127,19 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "ain_hashed_thread",
       transportIdempotent: true,
     });
-    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, {
-      status: 204,
-    }));
+    const providerFetch = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/phone_numbers")) {
+        return new Response(JSON.stringify({
+          phone_numbers: [{ phone_number: "+15559990000" }],
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      return new Response(null, {
+        status: 204,
+      });
+    });
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_materialized",
@@ -1168,12 +1178,12 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
-      fromPhoneNumber: "+15559990000",
+      fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
-      target: "+15550001",
-      targetKind: "participant",
+      target: "ain_hashed_thread",
+      targetKind: "thread",
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
@@ -1361,7 +1371,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("attaches same-wake Linq recovery context by reply id when the delivery target is redacted", async () => {
+  it("does not use same-wake contact fields as Linq sender authority", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_hashed_target",
       linqMessage: {
@@ -1427,12 +1437,12 @@ describe("hosted runtime callbacks", () => {
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
-      fromPhoneNumber: "+15559990000",
+      fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
-      target: "+15550001",
-      targetKind: "participant",
+      target: "ain_hashed_thread",
+      targetKind: "thread",
     }, {
       env: {},
       fetchImplementation: undefined,

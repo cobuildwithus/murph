@@ -243,7 +243,11 @@ export class SqliteDeviceSyncStore {
     accountId: string,
     now: string,
     disconnectGeneration: number | null = null,
-    options: { metadataPatch?: Record<string, unknown>; nextReconcileAt?: string | null } = {},
+    options: {
+      localConnectionRevision?: number | null;
+      metadataPatch?: Record<string, unknown>;
+      nextReconcileAt?: string | null;
+    } = {},
   ): boolean {
     return markStoredSyncSucceeded(this.database, accountId, now, disconnectGeneration, options);
   }

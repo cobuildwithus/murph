@@ -2875,6 +2875,120 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('releases the final turn when current-channel progress never settles', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-progress-drain-timeout-')
+    const stalledProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
+    const progressDelivery = {
+      close: vi.fn(() => {
+        stalledProgress.resolve(sentProgressResult())
+      }),
+      send: vi.fn(async (_text: string) => {
+        void _text
+        return await stalledProgress.promise
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-progress-drain-timeout',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-progress-drain-timeout',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-progress-drain-timeout',
+                  type: 'assistant_message',
+                  phase: 'commentary',
+                  message: 'Checking the thread now.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-progress-drain-timeout-final',
+                  type: 'assistant_message',
+                  phase: 'final_answer',
+                  message: 'Final answer after stalled progress.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-progress-drain-timeout',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    const turnPromise = executeCodexAppServerTurn({
+      modelProgressUpdatesEnabled: true,
+      prompt: 'answer with stalled progress',
+      progressDelivery,
+      workingDirectory,
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 200 && progressDelivery.send.mock.calls.length === 0;
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Checking the thread now.',
+      { source: 'model' },
+    )
+
+    await expect(turnPromise).resolves.toMatchObject({
+      finalMessage: 'Final answer after stalled progress.',
+      sessionId: 'thread-progress-drain-timeout',
+      turnId: 'turn-progress-drain-timeout',
+    })
+    expect(progressDelivery.close).toHaveBeenCalledTimes(1)
+  })
+
   it('returns unavailable for progress tool calls when model progress is disabled', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-disabled-')
     const progressDelivery = createProgressDeliveryMock()

@@ -3035,10 +3035,54 @@ test("device sync store updates existing accounts and rejects stale success writ
       },
       updated.disconnectGeneration,
     );
+    assert.ok(refreshed);
 
     const refreshedOAuthCredential = requireStoredOAuthCredential(refreshed);
     assert.equal(refreshedOAuthCredential.accessTokenEncrypted, "enc:fresh-access");
     assert.equal(refreshedOAuthCredential.refreshTokenEncrypted, "enc:fresh-refresh");
+    const successRevision = refreshed.localConnectionRevision;
+    const concurrentlyPatched = store.patchAccount(updated.id, {
+      metadata: {
+        concurrent: true,
+      },
+      nextReconcileAt: "2026-04-07T07:00:00.000Z",
+    });
+    assert.notEqual(concurrentlyPatched.localConnectionRevision, successRevision);
+    assert.equal(
+      store.markSyncSucceeded(updated.id, "2026-04-07T06:00:00.000Z", updated.disconnectGeneration, {
+        localConnectionRevision: successRevision,
+        metadataPatch: {
+          staleSuccess: true,
+        },
+        nextReconcileAt: "2026-04-07T08:00:00.000Z",
+      }),
+      false,
+    );
+    const afterStaleSuccess = store.getAccountById(updated.id);
+    assert.equal(afterStaleSuccess?.lastSyncCompletedAt, null);
+    assert.equal(afterStaleSuccess?.nextReconcileAt, "2026-04-07T07:00:00.000Z");
+    assert.deepEqual(afterStaleSuccess?.metadata, {
+      fresh: true,
+      concurrent: true,
+    });
+    assert.equal(
+      store.markSyncSucceeded(updated.id, "2026-04-07T06:30:00.000Z", updated.disconnectGeneration, {
+        localConnectionRevision: concurrentlyPatched.localConnectionRevision,
+        metadataPatch: {
+          success: true,
+        },
+        nextReconcileAt: "2026-04-07T09:00:00.000Z",
+      }),
+      true,
+    );
+    const afterCurrentSuccess = store.getAccountById(updated.id);
+    assert.equal(afterCurrentSuccess?.lastSyncCompletedAt, "2026-04-07T06:30:00.000Z");
+    assert.equal(afterCurrentSuccess?.nextReconcileAt, "2026-04-07T09:00:00.000Z");
+    assert.deepEqual(afterCurrentSuccess?.metadata, {
+      fresh: true,
+      concurrent: true,
+      success: true,
+    });
     assert.equal(
       store.markSyncSucceeded(updated.id, "2026-04-07T06:00:00.000Z", updated.disconnectGeneration + 1),
       false,

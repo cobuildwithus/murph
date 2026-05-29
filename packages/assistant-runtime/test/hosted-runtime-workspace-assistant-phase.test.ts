@@ -2659,6 +2659,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("passes foreground Linq delivery context into hosted progress dependencies", async () => {
+    const linqDeliveryContext = {
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: "+15550000002",
+      replyToMessageId: "linq-message-1",
+      target: "linq-thread-1",
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      linqDeliveryContext,
+    }));
+
+    expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqDeliveryContext,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
   it("limits restored foreground replay to the latest prompt window", async () => {
     const assistantInputIds = [
       "ain_00000000000000000000000000000001",
@@ -3508,6 +3529,12 @@ function createPhaseInput(input: {
   assistantInputIds?: string[];
   conversationImportedCount?: number;
   importedCount?: number;
+  linqDeliveryContext?: {
+    directRecipientPhoneNumber: string | null;
+    fromPhoneNumber: string | null;
+    replyToMessageId: string | null;
+    target: string | null;
+  };
   logRequests?: HostedRuntimeLogRequest[];
   now?: () => string;
   reason?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["reason"];
@@ -3534,6 +3561,7 @@ function createPhaseInput(input: {
           ?? (assistantInputIds.length > 0 ? input.importedCount ?? 0 : 0),
         fetchedCount: input.importedCount ?? 0,
         importedCount: input.importedCount ?? 0,
+        ...(input.linqDeliveryContext ? { latestLinqDeliveryContext: input.linqDeliveryContext } : {}),
         state: {
           recentStatuses: [],
           watermarks: {

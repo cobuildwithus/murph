@@ -1,5 +1,4 @@
 import type {
-  HostedExecutionLinqConversationMessagePayload,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -46,6 +45,11 @@ import {
 import {
   sendHostedProviderLinqMessage,
 } from "../hosted-provider-effects.ts";
+import {
+  buildHostedAssistantLinqDeliveryContextFromWake,
+  resolveHostedAssistantLinqDeliveryContextForRequest,
+  type HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
@@ -276,9 +280,11 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
   forwardedEnv?: Readonly<Record<string, string>>;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
+  wake?: HostedRuntimeEvent | null;
 }): AssistantHostedProgressDeliveryDependencies {
   const linqEnv = buildHostedLinqChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
@@ -289,6 +295,8 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     ...(input.signal ? { signal: input.signal } : {}),
     sendLinq: createHostedAssistantLinqSendDependency({
       linqEnv,
+      linqDeliveryContext: input.linqDeliveryContext
+        ?? (input.wake ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake) : null),
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -440,12 +448,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           assertLiveness: input.assertLiveness,
           linqEnv: input.linqEnv,
+          linqDeliveryContext: input.wake
+            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+            : null,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
           signal: input.signal,
-          wake: input.wake,
         }),
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
@@ -529,34 +539,27 @@ function shouldResetHostedPreparedForegroundDeliveryOnAbort(input: {
 
 function createHostedAssistantLinqSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
   signal: AbortSignal | null;
-  wake?: HostedRuntimeEvent | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
+    const deliveryContext = resolveHostedAssistantLinqDeliveryContextForRequest({
+      context: input.linqDeliveryContext ?? null,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
+    });
     const directRecipientPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
-      ?? (input.wake
-        ? readHostedWakeDirectLinqRecipientForDelivery({
-            replyToMessageId: request.replyToMessageId ?? null,
-            target: request.target,
-            targetKind: request.targetKind ?? null,
-            wake: input.wake,
-          })
-        : null);
+      ?? normalizeHostedLinqDirectRecipient(deliveryContext?.directRecipientPhoneNumber);
     const fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
-      ?? (input.wake
-        ? readHostedWakeLinqSenderForDelivery({
-            replyToMessageId: request.replyToMessageId ?? null,
-            target: request.target,
-            targetKind: request.targetKind ?? null,
-            wake: input.wake,
-          })
-        : null);
+      ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
+    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({
       directRecipientPhoneNumber,
@@ -569,79 +572,11 @@ function createHostedAssistantLinqSendDependency(input: {
     }, {
       env: input.linqEnv,
       fetchImplementation: input.providerFetch ?? undefined,
-      signal: input.signal ?? undefined,
+      signal,
     });
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
-}
-
-function readHostedWakeDirectLinqRecipientForDelivery(input: {
-  replyToMessageId: string | null;
-  target: string;
-  targetKind: string | null;
-  wake: HostedRuntimeEvent;
-}): string | null {
-  if (!isSameHostedLinqWakeDelivery(input)) {
-    return null;
-  }
-  return normalizeHostedLinqDirectRecipient(input.wake.message.linqMessage.from);
-}
-
-function readHostedWakeLinqSenderForDelivery(input: {
-  replyToMessageId: string | null;
-  target: string;
-  targetKind: string | null;
-  wake: HostedRuntimeEvent;
-}): string | null {
-  if (!isSameHostedLinqWakeDelivery(input)) {
-    return null;
-  }
-  return normalizeHostedLinqDirectRecipient(
-    input.wake.message.phoneLookupKey
-      ?? (input.wake.message.contactKind === "phone"
-        ? input.wake.message.contactLookupKey
-        : null),
-  );
-}
-
-function isSameHostedLinqWakeDelivery(input: {
-  replyToMessageId: string | null;
-  target: string;
-  targetKind: string | null;
-  wake: HostedRuntimeEvent;
-}): input is {
-  replyToMessageId: string | null;
-  target: string;
-  targetKind: string | null;
-  wake: Extract<HostedRuntimeEvent, { kind: "conversation.message" }> & {
-    message: HostedExecutionLinqConversationMessagePayload;
-  };
-} {
-  if (
-    input.targetKind !== "thread"
-    && input.targetKind !== "explicit"
-  ) {
-    return false;
-  }
-  if (
-    input.wake.kind !== "conversation.message"
-    || input.wake.message.channel !== "linq"
-  ) {
-    return false;
-  }
-  const target = normalizeHostedProviderText(input.target);
-  const wakeThread = normalizeHostedProviderText(
-    input.wake.message.linqMessage.chatId,
-  );
-  if (target && target === wakeThread) {
-    return true;
-  }
-  const replyToMessageId = normalizeHostedProviderText(input.replyToMessageId);
-  const wakeMessageId = normalizeHostedProviderText(
-    input.wake.message.linqMessage.messageId,
-  );
-  return Boolean(replyToMessageId && replyToMessageId === wakeMessageId);
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
@@ -649,9 +584,17 @@ function normalizeHostedLinqDirectRecipient(value: string | null | undefined): s
   return normalized.startsWith("+") ? normalized : null;
 }
 
-function normalizeHostedProviderText(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
+function mergeHostedAssistantLinqSignals(
+  first: AbortSignal | null,
+  second: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (!first) {
+    return second;
+  }
+  if (!second || first === second) {
+    return first;
+  }
+  return AbortSignal.any([first, second]);
 }
 
 async function assertHostedDeliveryLiveNow(input: {

@@ -3149,6 +3149,89 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   close();
 });
 
+test("device sync service fences success writes after local connection revision changes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-success-revision-fence");
+  let providerStartedResolve: (() => void) | null = null;
+  let releaseProviderResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const releaseProvider = new Promise<void>((resolve) => {
+    releaseProviderResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context, _job) {
+          providerStartedResolve?.();
+          await releaseProvider;
+          return {
+            metadataPatch: {
+              providerSucceeded: true,
+            },
+            nextReconcileAt: "2026-03-19T00:00:00.000Z",
+            scheduledJobs: [
+              {
+                kind: "follow-up",
+                dedupeKey: `follow-up:${context.account.id}`,
+              },
+            ],
+          };
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "success-fence",
+  });
+  const accountBeforeWorker = store.getAccountById(connected.account.id);
+  assert.ok(accountBeforeWorker);
+  const originalCompleteJobsIfOwned = store.completeJobsIfOwned.bind(store);
+  store.completeJobsIfOwned = (jobIds, workerId, now) => {
+    const completed = originalCompleteJobsIfOwned(jobIds, workerId, now);
+    if (completed) {
+      store.patchAccount(connected.account.id, {
+        metadata: {
+          localRevisionChanged: true,
+        },
+      });
+    }
+    return completed;
+  };
+
+  const workerPromise = service.runWorkerOnce();
+  await providerStarted;
+  requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
+  const processedJob = await workerPromise;
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobs = readJobsForAccountForTesting(store, connected.account.id);
+
+  assert.equal(processedJob?.kind, "backfill");
+  assert.ok(storedAccount);
+  assert.deepEqual(storedAccount.metadata, {
+    connectedBy: "success-fence",
+    localRevisionChanged: true,
+  });
+  assert.equal(storedAccount.lastSyncCompletedAt, null);
+  assert.equal(storedAccount.nextReconcileAt, accountBeforeWorker.nextReconcileAt);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.status, "succeeded");
+
+  close();
+});
+
 test("device sync service does not fail jobs reclaimed by another worker after the original lease expires", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-worker-failure");
   let providerStartedResolve: (() => void) | null = null;

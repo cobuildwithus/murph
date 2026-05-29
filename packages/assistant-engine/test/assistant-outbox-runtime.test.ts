@@ -44,6 +44,16 @@ import {
   readAssistantTurnReceipt,
   updateAssistantTurnReceipt,
 } from '../src/assistant/turns.ts'
+import {
+  deliverAssistantProgressUpdate,
+} from '../src/assistant/delivery-service.ts'
+import type {
+  AssistantChannelDependencies,
+} from '../src/assistant/channels/types.ts'
+import type {
+  AssistantMessageInput,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.ts'
 import { deliverAssistantMessageOverBinding } from '../src/outbound-channel.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -1600,6 +1610,50 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('threads progress close aborts through the real outbox delivery path', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-progress-signal-')
+    const dependencyController = new AbortController()
+    const progressController = new AbortController()
+    let deliveryDependencies: AssistantChannelDependencies | undefined
+
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(
+      async (_input, dependencies) => {
+        deliveryDependencies = dependencies
+        return {
+          delivery: createDelivery({
+            providerMessageId: 'provider-progress-signal',
+          }),
+          deliveryDeduplicated: false,
+          deliveryTransportIdempotent: false,
+          outboxIntentId: null,
+          session: undefined,
+        }
+      },
+    )
+
+    await deliverAssistantProgressUpdate({
+      dependencies: {
+        signal: dependencyController.signal,
+      },
+      input: createMessageInput(vaultRoot),
+      ordinal: 0,
+      session: createAssistantSession({
+        sessionId: 'session-progress-signal',
+      }),
+      sharedPlan: createSharedPlan(),
+      signal: progressController.signal,
+      text: 'Checking current context.',
+      turnId: 'turn-progress-signal',
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(deliveryDependencies?.signal).toBeDefined()
+    expect(deliveryDependencies?.signal).not.toBe(dependencyController.signal)
+    expect(deliveryDependencies?.signal?.aborted).toBe(false)
+    progressController.abort()
+    expect(deliveryDependencies?.signal?.aborted).toBe(true)
+  })
+
   it('drains only due intents and summarizes mixed outbox states', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-drain-')
     vi.useFakeTimers()
@@ -1763,6 +1817,47 @@ async function createIntent(
     turnId,
     vault,
   })
+}
+
+function createMessageInput(vault: string): AssistantMessageInput {
+  return {
+    deliverResponse: true,
+    deliveryIdempotencyKey: 'reply-key',
+    prompt: 'process this report',
+    vault,
+  }
+}
+
+function createSharedPlan(): AssistantTurnSharedPlan {
+  return {
+    allowSensitiveHealthContext: false,
+    cliAccess: {
+      env: {},
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationPolicy: {
+      allowSensitiveHealthContext: false,
+      audience: {
+        actorId: null,
+        bindingDelivery: null,
+        channel: null,
+        deliveryPolicy: 'not-requested',
+        effectiveThreadIsDirect: null,
+        explicitTarget: null,
+        identityId: null,
+        replyToMessageId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      operatorAuthority: 'direct-operator',
+    },
+    firstContactStateDocIds: [],
+    onboardingGuidanceOpen: false,
+    operatorAuthority: 'direct-operator',
+    persistUserPromptOnFailure: false,
+    requestedWorkingDirectory: '/work',
+  }
 }
 
 async function useActualOutboundDeliveryImplementation(): Promise<void> {

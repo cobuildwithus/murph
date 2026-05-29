@@ -30,20 +30,32 @@ export function markSyncSucceeded(
   accountId: string,
   now: string,
   disconnectGeneration: number | null = null,
-  options: { metadataPatch?: Record<string, unknown>; nextReconcileAt?: string | null } = {},
+  options: {
+    localConnectionRevision?: number | null;
+    metadataPatch?: Record<string, unknown>;
+    nextReconcileAt?: string | null;
+  } = {},
 ): boolean {
-  const existing = getAccountById(database, accountId);
-
-  if (!existing) {
-    return false;
-  }
-
-  const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
-  const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
-    ? options.nextReconcileAt ?? null
-    : existing.nextReconcileAt;
-
   return withImmediateTransaction(database, () => {
+    const existing = getAccountById(database, accountId);
+
+    if (!existing) {
+      return false;
+    }
+
+    const expectedLocalConnectionRevision = options.localConnectionRevision ?? null;
+    if (
+      expectedLocalConnectionRevision !== null
+      && existing.localConnectionRevision !== expectedLocalConnectionRevision
+    ) {
+      return false;
+    }
+
+    const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
+    const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
+      ? options.nextReconcileAt ?? null
+      : existing.nextReconcileAt;
+
     const connectionResult = database.prepare(`
       update device_connection
       set status = case when status = 'disconnected' then status else 'active' end,

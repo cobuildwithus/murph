@@ -712,6 +712,7 @@ export async function deliverAssistantOutboxMessage(input: {
 export async function sendAssistantOutboxPayload(input: {
   dependencies?: AssistantChannelDependencies
   payload: AssistantOutboxDispatchPayload
+  signal?: AbortSignal
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
   const subject = normalizeAssistantDeliverySubject({
@@ -747,7 +748,7 @@ export async function sendAssistantOutboxPayload(input: {
           delivery: input.payload.bindingDelivery ?? null,
         },
       },
-    }, input.dependencies),
+    }, withAssistantOutboxSignal(input.dependencies, input.signal)),
     payload: input.payload,
     vault: input.vault,
   })
@@ -757,14 +758,28 @@ function withAssistantOutboxSignal(
   dependencies: AssistantChannelDependencies | undefined,
   signal: AbortSignal | undefined,
 ): AssistantChannelDependencies | undefined {
-  if (!signal) {
+  const mergedSignal = mergeAssistantOutboxSignals(dependencies?.signal, signal)
+  if (!mergedSignal) {
     return dependencies
   }
 
   return {
     ...dependencies,
-    signal,
+    signal: mergedSignal,
   }
+}
+
+function mergeAssistantOutboxSignals(
+  first: AbortSignal | undefined,
+  second: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (!first) {
+    return second
+  }
+  if (!second || first === second) {
+    return first
+  }
+  return AbortSignal.any([first, second])
 }
 
 async function materializeAssistantOutboxDeliveredSession(input: {

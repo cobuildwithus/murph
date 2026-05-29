@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
+  jsonObjectSchema,
+  type JsonObject,
   type RawImportManifest,
   type RawImportManifestArtifact,
 } from "@murphai/contracts";
@@ -84,6 +86,15 @@ export interface RunWearableStorageMigrationPassInput {
   validateAfter?: boolean;
 }
 
+export interface PruneWearableDenseRawTimeseriesInput {
+  vaultRoot: string;
+  maxFiles?: number;
+  maxBytes?: number;
+  deadlineMs?: number;
+  now?: Date;
+  validateAfter?: boolean;
+}
+
 interface RawManifestSnapshot {
   manifest: RawImportManifest;
   relativePath: string;
@@ -104,12 +115,24 @@ interface RawArtifactReference {
   manifestPath: string;
 }
 
+type RawArtifactTombstonePredicate = (
+  artifact: RawImportManifestArtifact,
+  manifest: RawImportManifest,
+) => boolean;
+
+interface RawArtifactRetentionMetadata {
+  artifactClass: "dense_provider_timeseries" | "sparse_provider_timeseries";
+  resourceCategory: "timeseries";
+  retentionClass: "debug_temporary" | "provider_evidence";
+}
+
 interface PreparedRawTombstone {
   artifactClass: "dense_provider_timeseries" | "derived_canonical_records";
   bytesAfter: number;
   bytesBefore: number;
   content: string;
   manifestPaths: string[];
+  replacementArtifact: Pick<RawImportManifestArtifact, "byteSize" | "role" | "sha256">;
   targetPath: string;
 }
 
@@ -201,7 +224,7 @@ export async function detectWearableStorageMigrationCandidates({
   );
   const denseRawReferences = collectRawArtifactReferenceGroups(
     manifests,
-    (artifact) => isDenseRawTimeseriesArtifact(artifact),
+    (artifact, manifest) => isDenseRawTimeseriesArtifact(artifact, manifest),
   );
   const retentionEligibleDenseRawReferences = denseRawReferences.filter((references) =>
     includeRecentDenseRaw
@@ -429,6 +452,27 @@ export async function runWearableStorageMigrationPass({
   };
 }
 
+export async function pruneWearableDenseRawTimeseries({
+  vaultRoot,
+  maxFiles,
+  maxBytes,
+  deadlineMs,
+  now,
+  validateAfter,
+}: PruneWearableDenseRawTimeseriesInput): Promise<WearableStorageMigrationResult> {
+  return await runWearableStorageMigrationPass({
+    deadlineMs,
+    includeRecentDenseRaw: false,
+    maxBytes,
+    maxFiles,
+    now,
+    pruneDenseRaw: true,
+    repairClasses: ["dense_raw_timeseries"],
+    validateAfter,
+    vaultRoot,
+  });
+}
+
 async function tombstoneRawArtifactClass(input: {
   artifactClass: PreparedRawTombstone["artifactClass"];
   denseRetentionPolicy?: {
@@ -438,7 +482,7 @@ async function tombstoneRawArtifactClass(input: {
   maxBytes: number;
   maxFiles: number;
   now: Date;
-  predicate: (artifact: RawImportManifestArtifact) => boolean;
+  predicate: RawArtifactTombstonePredicate;
   reason: string;
   schemaVersion: string;
   startedAtMs: number;
@@ -464,7 +508,7 @@ async function tombstoneRawArtifactClassLocked(input: {
   maxBytes: number;
   maxFiles: number;
   now: Date;
-  predicate: (artifact: RawImportManifestArtifact) => boolean;
+  predicate: RawArtifactTombstonePredicate;
   reason: string;
   schemaVersion: string;
   startedAtMs: number;
@@ -549,6 +593,10 @@ async function tombstoneRawArtifactClassLocked(input: {
       ...touchedManifestPaths,
     ]),
   ].sort();
+  const manifestUpdates = buildRawTombstoneManifestUpdates({
+    manifestSnapshots,
+    prepared,
+  });
 
   await runCanonicalWrite({
     hostedCanonicalWritePort: null,
@@ -564,12 +612,8 @@ async function tombstoneRawArtifactClassLocked(input: {
           overwrite: true,
         });
       }
-      for (const manifestPath of touchedManifestPaths) {
-        const snapshot = manifestSnapshots.find((entry) => entry.relativePath === manifestPath);
-        if (!snapshot) {
-          throw new Error(`Missing touched raw manifest snapshot for ${manifestPath}.`);
-        }
-        await batch.stageTextWrite(manifestPath, `${JSON.stringify(snapshot.manifest, null, 2)}\n`, {
+      for (const [manifestPath, manifest] of manifestUpdates) {
+        await batch.stageTextWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
           allowRaw: true,
           overwrite: true,
         });
@@ -684,25 +728,86 @@ async function prepareRawArtifactTombstone(input: {
   const tombstoneSha = sha256Buffer(Buffer.from(tombstoneContent, "utf8"));
   const replacementRole = replacementRoleForTombstone(input.artifactClass);
 
-  for (const snapshot of input.manifestSnapshots) {
-    for (const artifact of snapshot.manifest.artifacts) {
-      if (artifact.relativePath !== targetArtifact.relativePath) {
-        continue;
-      }
-      artifact.byteSize = tombstoneBytes;
-      artifact.role = replacementRole;
-      artifact.sha256 = tombstoneSha;
-    }
-  }
-
   return {
     artifactClass: input.artifactClass,
     bytesAfter: tombstoneBytes,
     bytesBefore: originalByteSize,
     content: tombstoneContent,
     manifestPaths: manifestPathsWithTargetPath,
+    replacementArtifact: {
+      byteSize: tombstoneBytes,
+      role: replacementRole,
+      sha256: tombstoneSha,
+    },
     targetPath: targetArtifact.relativePath,
   };
+}
+
+function buildRawTombstoneManifestUpdates(input: {
+  manifestSnapshots: readonly RawManifestSnapshot[];
+  prepared: readonly PreparedRawTombstone[];
+}): Map<string, RawImportManifest> {
+  const updates = new Map<string, RawImportManifest>();
+
+  for (const tombstone of input.prepared) {
+    for (const manifestPath of tombstone.manifestPaths) {
+      let manifest = updates.get(manifestPath);
+      if (!manifest) {
+        const snapshot = input.manifestSnapshots.find((entry) => entry.relativePath === manifestPath);
+        if (!snapshot) {
+          throw new Error(`Missing touched raw manifest snapshot for ${manifestPath}.`);
+        }
+        manifest = structuredClone(snapshot.manifest);
+        updates.set(manifestPath, manifest);
+      }
+
+      for (const artifact of manifest.artifacts) {
+        if (artifact.relativePath !== tombstone.targetPath) {
+          continue;
+        }
+        artifact.byteSize = tombstone.replacementArtifact.byteSize;
+        artifact.role = tombstone.replacementArtifact.role;
+        artifact.sha256 = tombstone.replacementArtifact.sha256;
+      }
+      updateRawTombstoneManifestProvenance({
+        manifest,
+        tombstone,
+      });
+    }
+  }
+
+  return updates;
+}
+
+function updateRawTombstoneManifestProvenance(input: {
+  manifest: RawImportManifest;
+  tombstone: PreparedRawTombstone;
+}): void {
+  const rawArtifacts = readRecordArray(input.manifest.provenance.rawArtifacts);
+  if (!rawArtifacts) {
+    return;
+  }
+
+  let updated = false;
+  const nextRawArtifacts: JsonObject[] = rawArtifacts.map((entry) => {
+    if (entry.relativePath !== input.tombstone.targetPath) {
+      return jsonObjectSchema.parse(entry);
+    }
+
+    updated = true;
+    const replacement: Record<string, unknown> = {
+      ...entry,
+      byteSize: input.tombstone.replacementArtifact.byteSize,
+      role: input.tombstone.replacementArtifact.role,
+      sha256: input.tombstone.replacementArtifact.sha256,
+    };
+    delete replacement.metadata;
+    return jsonObjectSchema.parse(replacement);
+  });
+
+  if (updated) {
+    input.manifest.provenance.rawArtifacts = nextRawArtifacts;
+  }
 }
 
 async function readRawManifestSnapshots(
@@ -753,13 +858,13 @@ async function readRawManifestReadResult(
 
 function collectRawArtifactReferenceGroups(
   manifests: readonly RawManifestSnapshot[],
-  predicate: (artifact: RawImportManifestArtifact) => boolean,
+  predicate: (artifact: RawImportManifestArtifact, manifest: RawImportManifest) => boolean,
 ): RawArtifactReference[][] {
   const referencesByPath = new Map<string, RawArtifactReference[]>();
 
   for (const snapshot of manifests) {
     for (const artifact of snapshot.manifest.artifacts) {
-      if (!predicate(artifact)) {
+      if (!predicate(artifact, snapshot.manifest)) {
         continue;
       }
       const relativePath = normalizeRelativeVaultPath(artifact.relativePath);
@@ -1049,12 +1154,84 @@ function isCanonicalRecordArtifact(artifact: RawImportManifestArtifact): boolean
   return artifact.role.startsWith(CANONICAL_RECORDS_ROLE_PREFIX);
 }
 
-function isDenseRawTimeseriesArtifact(artifact: RawImportManifestArtifact): boolean {
+function isDenseRawTimeseriesArtifact(
+  artifact: RawImportManifestArtifact,
+  manifest?: RawImportManifest,
+): boolean {
+  const metadata = manifest
+    ? readRawArtifactProvenanceMetadata(artifact, manifest)
+    : null;
+  const retentionMetadata = parseRawArtifactRetentionMetadata(metadata);
+  if (retentionMetadata) {
+    return retentionMetadata.artifactClass === "dense_provider_timeseries"
+      && retentionMetadata.resourceCategory === "timeseries"
+      && retentionMetadata.retentionClass === "debug_temporary";
+  }
+
   const role = artifact.role.toLowerCase();
   return DENSE_RAW_EXACT_ROLES.has(role)
     || role.includes("timeseries")
     && !role.includes("summary")
     && DENSE_RAW_ROLE_TERMS.some((term) => role.includes(term));
+}
+
+function readRawArtifactProvenanceMetadata(
+  artifact: RawImportManifestArtifact,
+  manifest: RawImportManifest,
+): Record<string, unknown> | null {
+  const rawArtifacts = readRecordArray(manifest.provenance.rawArtifacts);
+  if (!rawArtifacts) {
+    return null;
+  }
+
+  for (const entry of rawArtifacts) {
+    if (
+      entry.role !== artifact.role
+      || entry.relativePath !== artifact.relativePath
+      || entry.sha256 !== artifact.sha256
+    ) {
+      continue;
+    }
+    return isPlainRecord(entry.metadata) ? entry.metadata : null;
+  }
+
+  return null;
+}
+
+function readRecordArray(value: unknown): Record<string, unknown>[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const records: Record<string, unknown>[] = [];
+  for (const entry of value) {
+    if (!isPlainRecord(entry)) {
+      return null;
+    }
+    records.push(entry);
+  }
+  return records;
+}
+
+function parseRawArtifactRetentionMetadata(
+  metadata: Record<string, unknown> | null,
+): RawArtifactRetentionMetadata | null {
+  if (metadata === null) {
+    return null;
+  }
+  const { artifactClass, resourceCategory, retentionClass } = metadata;
+  if (
+    (artifactClass !== "dense_provider_timeseries" && artifactClass !== "sparse_provider_timeseries")
+    || resourceCategory !== "timeseries"
+    || (retentionClass !== "debug_temporary" && retentionClass !== "provider_evidence")
+  ) {
+    return null;
+  }
+
+  return {
+    artifactClass,
+    resourceCategory,
+    retentionClass,
+  };
 }
 
 function replacementRoleForTombstone(

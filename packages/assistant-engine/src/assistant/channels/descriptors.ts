@@ -120,6 +120,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       targetKind: candidate.kind,
       message,
       replyToMessageId: replyToMessageId ?? null,
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     }
     try {
       delivered = dependencies.sendLinq
@@ -127,7 +128,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             ...request,
             directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
           })
-        : await sendLinqMessage(request)
+        : await sendLinqMessage(request, dependencies.signal ? { signal: dependencies.signal } : {})
     } catch (error) {
       const recovered = await maybeRecoverMissingLinqDirectThread({
         actorId,
@@ -326,7 +327,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
         targetKind: 'participant',
         message: input.message,
         replyToMessageId: input.replyToMessageId ?? null,
-      })
+      }, input.dependencies.signal ? { signal: input.dependencies.signal } : {})
     } catch (error) {
       if (shouldContinueLinqDirectThreadRecoveryAfterError(error)) {
         continue

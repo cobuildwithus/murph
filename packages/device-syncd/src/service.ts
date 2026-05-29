@@ -766,9 +766,12 @@ class DeviceSyncServiceController {
       }
 
       const successOptions: {
+        localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
-      } = {};
+      } = {
+        localConnectionRevision,
+      };
 
       if (Object.prototype.hasOwnProperty.call(result, "metadataPatch")) {
         successOptions.metadataPatch = result.metadataPatch;

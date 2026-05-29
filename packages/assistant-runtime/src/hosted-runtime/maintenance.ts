@@ -21,8 +21,7 @@ import {
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
-  detectWearableStorageMigrationCandidates,
-  runWearableStorageMigrationPass,
+  pruneWearableDenseRawTimeseries,
 } from "@murphai/core";
 
 import type {
@@ -1100,33 +1099,20 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
   vaultRoot: string;
 }): Promise<{ hasMore: boolean }> {
   try {
-    const detection = await detectWearableStorageMigrationCandidates({
-      includeRecentDenseRaw: false,
-      vaultRoot: input.vaultRoot,
-    });
-    if (detection.retentionEligibleDenseProviderRawTimeseriesCount === 0) {
-      return {
-        hasMore: false,
-      };
-    }
     if (shouldYieldHostedDeviceSync(input.shouldYield) || input.deadlineMs === 0) {
       return {
         hasMore: true,
       };
     }
 
-    const result = await runWearableStorageMigrationPass({
+    const result = await pruneWearableDenseRawTimeseries({
       deadlineMs: input.deadlineMs,
-      includeRecentDenseRaw: false,
       maxBytes: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES,
       maxFiles: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES,
-      pruneDenseRaw: true,
-      repairClasses: ["dense_raw_timeseries"],
       vaultRoot: input.vaultRoot,
     });
 
     await writeHostedDeviceSyncDenseRawRetentionRuntimeLog({
-      detection,
       platform: input.platform,
       processedJobs: input.processedJobs,
       result,
@@ -1148,12 +1134,19 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
 }
 
 async function writeHostedDeviceSyncDenseRawRetentionRuntimeLog(input: {
-  detection: Awaited<ReturnType<typeof detectWearableStorageMigrationCandidates>>;
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   processedJobs: number;
-  result: Awaited<ReturnType<typeof runWearableStorageMigrationPass>>;
+  result: Awaited<ReturnType<typeof pruneWearableDenseRawTimeseries>>;
 }): Promise<void> {
   if (!input.platform?.logPort) {
+    return;
+  }
+  if (
+    input.result.tombstonedDenseRawArtifactCount === 0
+    && input.result.skippedCount === 0
+    && input.result.denseRawBytesBefore === 0
+    && !input.result.hasMore
+  ) {
     return;
   }
 
@@ -1164,13 +1157,8 @@ async function writeHostedDeviceSyncDenseRawRetentionRuntimeLog(input: {
       level: "info",
       phase: "invoke",
       redactedJson: {
-        denseRawCandidateCount: input.detection.denseProviderRawTimeseriesCount,
         denseRawAfterBytes: input.result.denseRawBytesAfter,
         denseRawBeforeBytes: input.result.denseRawBytesBefore,
-        denseRawEligibleBytes:
-          input.detection.retentionEligibleDenseProviderRawTimeseriesBytes,
-        denseRawEligibleCount:
-          input.detection.retentionEligibleDenseProviderRawTimeseriesCount,
         denseRawFreedBytes: input.result.denseRawBytesFreed,
         hasMore: input.result.hasMore,
         processedJobs: input.processedJobs,

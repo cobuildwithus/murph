@@ -78,6 +78,47 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "0");
   });
 
+  test("returns the latest Linq delivery context imported from the mailbox prefix", async () => {
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_linq_context",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [item],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        assert.equal(input.item.id, "mailbox_item_conversation_linq_context");
+        return {
+          linqDeliveryContext: {
+            directRecipientPhoneNumber: "+15550000001",
+            fromPhoneNumber: null,
+            replyToMessageId: "linq-message-1",
+            target: "linq-thread-1",
+          },
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_linq_context",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.deepEqual(result.latestLinqDeliveryContext, {
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: null,
+      replyToMessageId: "linq-message-1",
+      target: "linq-thread-1",
+    });
+    assert.equal(result.state.watermarks.conversation, "1");
+  });
+
   test("interleaves mailbox lanes so conversation replies are not starved by system backlogs", async () => {
     const firstSystem = createMailboxItem({
       id: "mailbox_item_system_001",

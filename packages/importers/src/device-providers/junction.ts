@@ -54,8 +54,12 @@ import {
   JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS,
   JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
   JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
+  isJunctionRawDirectIdentityContainerKey,
+  isJunctionRawDirectIdentityKey,
+  normalizeJunctionRawIdentityKey,
   normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
+  readJunctionTimeseriesRawArtifactMetadata,
   type JunctionSleepStageValue,
 } from "./junction-resources.ts";
 import {
@@ -83,7 +87,11 @@ export {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  JUNCTION_TIMESERIES_RESOURCE_POLICIES,
   normalizeJunctionResourceName,
+  readJunctionTimeseriesRawArtifactMetadata,
+  type JunctionTimeseriesRawArtifactMetadata,
+  type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
 
 export interface JunctionSnapshotInput {
@@ -391,13 +399,31 @@ function normalizeTimeseries(
     const resourceSlug = slugify(resource, "timeseries");
     pushRawArtifact(
       context.rawArtifacts,
-      createRawArtifact(
-        `junction-timeseries-${resourceSlug}`,
-        `junction-timeseries-${resourceSlug}.json`,
-        buildRawResourcePayload(resource, payload, context.connectionsByKey),
+      withJunctionTimeseriesMetadata(
+        resource,
+        createRawArtifact(
+          `junction-timeseries-${resourceSlug}`,
+          `junction-timeseries-${resourceSlug}.json`,
+          buildRawResourcePayload(resource, payload, context.connectionsByKey),
+        ),
       ),
     );
   }
+}
+
+function withJunctionTimeseriesMetadata(
+  resource: string,
+  artifact: DeviceRawArtifactPayload | null,
+): DeviceRawArtifactPayload | null {
+  if (!artifact) {
+    return null;
+  }
+
+  const metadata = readJunctionTimeseriesRawArtifactMetadata(resource);
+  return {
+    ...artifact,
+    ...(metadata ? { metadata } : {}),
+  };
 }
 
 function buildRawResourcePayload(
@@ -513,15 +539,13 @@ function sanitizeJunctionRawValue(value: unknown, inSourceObject: boolean): unkn
 }
 
 function shouldDropJunctionRawSourceKey(key: string, inSourceObject: boolean): boolean {
-  const normalized = normalizeJunctionRawSourceKey(key);
-  return RAW_SOURCE_IDENTIFIER_KEYS.has(normalized)
+  const normalized = normalizeJunctionRawIdentityKey(key);
+  return isJunctionRawDirectIdentityKey(key)
+    || isJunctionRawDirectIdentityContainerKey(key)
+    || RAW_SOURCE_IDENTIFIER_KEYS.has(normalized)
     || RAW_SOURCE_LINKAGE_KEY_PARTS.some((part) => normalized === part)
     || (inSourceObject && RAW_SOURCE_CONTAINER_LINKAGE_KEY_PARTS.some((part) => normalized === part))
     || (inSourceObject && RAW_SOURCE_NAME_KEYS.has(normalized));
-}
-
-function normalizeJunctionRawSourceKey(key: string): string {
-  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }
 
 function isPlainRecord(value: unknown): value is PlainObject {

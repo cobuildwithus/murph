@@ -104,6 +104,7 @@ const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
+const CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS = 2_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const HOSTED_RUNTIME_PROCESS_ENV_MARKER = HOSTED_RUNTIME_PROCESS_ENV
 const HOSTED_CODEX_APP_SERVER_COMMAND = 'codex'
@@ -130,6 +131,31 @@ function resolveCodexAppServerProgressDelivery(
   return isAssistantModelProgressAvailable(input)
     ? input.progressDelivery ?? null
     : null
+}
+
+async function waitForCodexProgressDrain(
+  pending: readonly Promise<unknown>[],
+): Promise<boolean> {
+  if (pending.length === 0) {
+    return true
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.allSettled(pending).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(
+          () => resolve(false),
+          CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS,
+        )
+      }),
+    ])
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
 }
 
 function resolveCodexProgressToolResultText(
@@ -749,9 +775,19 @@ async function runCodexAppServerTurn(
     pendingProgressDeliveries.add(tracked)
   }
 
+  const closeProgressDelivery = (): void => {
+    resolveCodexAppServerProgressDelivery(input)?.close?.()
+  }
+
   const drainPendingProgressDeliveries = async (): Promise<void> => {
     while (pendingProgressDeliveries.size > 0) {
-      await Promise.allSettled([...pendingProgressDeliveries])
+      const drained = await waitForCodexProgressDrain([
+        ...pendingProgressDeliveries,
+      ])
+      if (!drained) {
+        closeProgressDelivery()
+        return
+      }
     }
   }
 

@@ -13,6 +13,8 @@ import {
   JUNCTION_SLEEP_STAGE_VALUE_PATHS,
   JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS,
+  isJunctionRawDirectIdentityContainerKey,
+  isJunctionRawDirectIdentityKey,
   normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
@@ -129,6 +131,8 @@ const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze(
   "sleep_cycle",
   "workouts",
   "body",
+  "meal",
+  "menstrual_cycle",
 ] as const);
 type JunctionHistoricalBackfillCompletionSummaryResource =
   (typeof JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES)[number];
@@ -172,6 +176,11 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "total_calories",
     "distanceKm",
     "distance_km",
+    "floors",
+    "floorsClimbed",
+    "floors_climbed",
+    "floorsAscended",
+    "floors_ascended",
     "activityScore",
     "activity_score",
     "score",
@@ -185,6 +194,18 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "bodyFatPercentage",
     "body_fat_percentage",
     "body_fat_percent",
+    "leanBodyMassKg",
+    "lean_body_mass_kg",
+    "leanBodyMassKilogram",
+    "lean_body_mass_kilogram",
+    "leanMassKg",
+    "lean_mass_kg",
+    "waistCircumference",
+    "waist_circumference",
+    "waistCircumferenceCentimeter",
+    "waist_circumference_centimeter",
+    "waistCircumferenceCm",
+    "waist_circumference_cm",
   ],
   sleep: JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS,
   sleep_cycle: [],
@@ -200,7 +221,105 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "max_heart_rate",
     "max_hr",
   ],
+  meal: [],
+  menstrual_cycle: [],
 } satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
+const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
+  meal: {
+    strings: [
+      "timestamp",
+      "recordedAt",
+      "recorded_at",
+      "loggedAt",
+      "logged_at",
+      "date",
+      "day",
+      "name",
+      "mealName",
+      "meal_name",
+      "mealType",
+      "meal_type",
+      "description",
+      "notes",
+    ],
+    numbers: [
+      "calories",
+      "caloriesKcal",
+      "calories_kcal",
+      "energyKcal",
+      "energy_kcal",
+      "kcal",
+      "protein",
+      "proteinGrams",
+      "protein_grams",
+      "protein_g",
+      "carbs",
+      "carbohydrates",
+      "carbohydrateGrams",
+      "carbohydrate_grams",
+      "carbohydrate_g",
+      "fat",
+      "fatGrams",
+      "fat_grams",
+      "fat_g",
+    ],
+    arrays: [
+      "foods",
+      "foodItems",
+      "food_items",
+      "items",
+      "ingredients",
+      "nutrients",
+    ],
+  },
+  menstrual_cycle: {
+    strings: [
+      "timestamp",
+      "recordedAt",
+      "recorded_at",
+      "createdAt",
+      "created_at",
+      "date",
+      "day",
+      "cycleStart",
+      "cycle_start",
+      "cycleEnd",
+      "cycle_end",
+      "periodStart",
+      "period_start",
+      "periodEnd",
+      "period_end",
+      "flow",
+      "menstrualFlow",
+      "menstrual_flow",
+      "cyclePhase",
+      "cycle_phase",
+      "menstrualPhase",
+      "menstrual_phase",
+    ],
+    numbers: [
+      "cycleDay",
+      "cycle_day",
+      "menstrualCycleDay",
+      "menstrual_cycle_day",
+      "cycleLengthDays",
+      "cycle_length_days",
+      "periodLengthDays",
+      "period_length_days",
+    ],
+    arrays: [
+      "menstrualFlow",
+      "menstrual_flow",
+      "symptoms",
+      "sexualActivity",
+      "sexual_activity",
+    ],
+  },
+} satisfies Record<"meal" | "menstrual_cycle", {
+  readonly strings: readonly string[];
+  readonly numbers: readonly string[];
+  readonly arrays: readonly string[];
+}>);
 const JUNCTION_WEBHOOK_NESTED_RECORD_KEYS = Object.freeze([
   "data",
   "results",
@@ -488,10 +607,11 @@ export function createJunctionDeviceSyncProvider(
       { dateQueryFormat: summaryDateQueryFormat },
     );
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
+    const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    if (job.kind !== "backfill" || historicalSummaryHasRecords) {
+    if (job.kind !== "backfill" || summaryHasFetchedRecords) {
       await context.importSnapshot({
         provider: "junction",
         accountId: buildJunctionImportAccountId(context.account.id),
@@ -3114,7 +3234,8 @@ function normalizeJunctionImportSourceIdentityKey(key: string): string {
 function isBlockedJunctionImportSourceIdentityKey(key: string): boolean {
   const normalized = normalizeJunctionImportSourceIdentityKey(key);
 
-  return normalized.includes("connectionid")
+  return isJunctionRawDirectIdentityKey(key)
+    || normalized.includes("connectionid")
     || normalized.includes("providerconnectionid")
     || normalized.includes("sourceid")
     || normalized.includes("sourceinstanceid")
@@ -3135,7 +3256,8 @@ function isBlockedJunctionImportSourceIdentityKey(key: string): boolean {
 function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean {
   const normalized = normalizeJunctionImportSourceIdentityKey(key);
 
-  return normalized === "source"
+  return isJunctionRawDirectIdentityContainerKey(key)
+    || normalized === "source"
     || normalized === "provider"
     || normalized === "device"
     || normalized === "app"
@@ -3527,7 +3649,21 @@ function hasUsefulJunctionHistoricalBackfillSummaryRecord(
     return hasUsefulJunctionWorkoutSessionRecord(entry, sourceProviderSlug);
   }
 
+  if (resource === "meal" || resource === "menstrual_cycle") {
+    return hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(resource, entry);
+  }
+
   return false;
+}
+
+function hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(
+  resource: "meal" | "menstrual_cycle",
+  entry: Record<string, unknown>,
+): boolean {
+  const paths = JUNCTION_RAW_ONLY_COMPLETION_PATHS[resource];
+  return hasStringFromJunctionRecordPaths(entry, paths.strings)
+    || hasFiniteNumberFromJunctionRecordPaths(entry, paths.numbers)
+    || hasNonEmptyJunctionRecordArrayFromPaths(entry, paths.arrays);
 }
 
 function hasUsefulJunctionSleepCycleStageRecord(
@@ -3683,6 +3819,13 @@ function hasFiniteNumberFromJunctionRecordPaths(
   return paths.some((path) => finiteJunctionNumber(readJunctionRecordPath(entry, path)) !== undefined);
 }
 
+function hasStringFromJunctionRecordPaths(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+): boolean {
+  return paths.some((path) => normalizeString(readJunctionRecordPath(entry, path)) !== undefined);
+}
+
 function hasPositiveFiniteNumberFromJunctionRecordPaths(
   entry: Record<string, unknown>,
   paths: readonly string[],
@@ -3691,6 +3834,48 @@ function hasPositiveFiniteNumberFromJunctionRecordPaths(
     const numeric = finiteJunctionNumber(readJunctionRecordPath(entry, path));
     return numeric !== undefined && numeric > 0;
   });
+}
+
+function hasNonEmptyJunctionRecordArrayFromPaths(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+): boolean {
+  return paths.some((path) =>
+    readJunctionRecordArray(readJunctionRecordPath(entry, path)).some(isUsefulJunctionRawOnlyArrayEntry)
+  );
+}
+
+function isUsefulJunctionRawOnlyArrayEntry(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return normalizeString(value) !== undefined;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === "boolean") {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(isUsefulJunctionRawOnlyArrayEntry);
+  }
+
+  const record = readPlainObject(value);
+  if (!record) {
+    return false;
+  }
+
+  return Object.entries(record).some(([key, nested]) =>
+    !isBlockedJunctionImportSourceIdentityKey(key)
+    && !isBlockedJunctionImportSourceIdentityContainerKey(key)
+    && isUsefulJunctionRawOnlyArrayEntry(nested)
+  );
 }
 
 function hasPositiveJunctionTimestampRange(
@@ -5159,7 +5344,9 @@ function sanitizeJunctionResourceAvailabilitySummary(
 
 function isBlockedJunctionSourceAvailabilityKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
-  return normalized.includes("userid")
+  return isJunctionRawDirectIdentityKey(key)
+    || isJunctionRawDirectIdentityContainerKey(key)
+    || normalized.includes("userid")
     || normalized.includes("accountid")
     || normalized.includes("clientuserid")
     || normalized === "owner"

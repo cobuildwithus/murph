@@ -1057,6 +1057,213 @@ const usefulHistoricalSummaryRecordByResource = {
   },
 } satisfies Record<"sleep" | "workouts" | "body", Record<string, unknown>>;
 
+const usefulHistoricalSummaryCompletionCases = [
+  {
+    label: "activity floors",
+    resource: "activity",
+    record: {
+      id: "activity-floors-1",
+      connectionId: "provider-garmin-1",
+      floorsClimbed: 8,
+    },
+  },
+  {
+    label: "body lean mass",
+    resource: "body",
+    record: {
+      id: "body-lean-1",
+      connectionId: "provider-garmin-1",
+      leanBodyMassKg: 58.2,
+    },
+  },
+  {
+    label: "body waist circumference",
+    resource: "body",
+    record: {
+      id: "body-waist-1",
+      connectionId: "provider-garmin-1",
+      waistCircumferenceCm: 82,
+    },
+  },
+  {
+    label: "meal raw-only",
+    resource: "meal",
+    record: {
+      id: "meal-1",
+      sourceProviderSlug: "garmin",
+      mealType: "breakfast",
+    },
+  },
+  {
+    label: "menstrual cycle raw-only",
+    resource: "menstrual_cycle",
+    record: {
+      id: "cycle-1",
+      sourceProviderSlug: "garmin",
+      cycleDay: 3,
+    },
+  },
+] as const;
+
+for (const testCase of usefulHistoricalSummaryCompletionCases) {
+  test(`Junction ${testCase.label} summary historical backfill marks the historical window complete`, async () => {
+    const importedSnapshots: unknown[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                [testCase.resource]: true,
+                heartrate: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${testCase.resource}/junction-user-1`)) {
+        return createJsonResponse({ data: [testCase.record] });
+      }
+
+      if (url.includes("/v2/timeseries/junction-user-1/heartrate/grouped")) {
+        return createJsonResponse({ groups: {} });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      summaryResources: [testCase.resource],
+    });
+
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual(result.metadataPatch, {
+      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    });
+    assert.equal(result.scheduledJobs, undefined);
+    assert.equal(importedSnapshots.length, 1);
+  });
+}
+
+for (const testCase of [
+  {
+    label: "meal identity/debug-only",
+    resource: "meal",
+    record: {
+      id: "meal-provenance-only",
+      clientId: "provider-client-1",
+      debug: true,
+      fullName: "Raw Member Name",
+      patientName: "Raw Patient Name",
+      sourceProviderSlug: "garmin",
+      status: "synced",
+    },
+  },
+  {
+    label: "menstrual cycle identity/contact-only",
+    resource: "menstrual_cycle",
+    record: {
+      addressLine1: "123 Private Street",
+      birthDate: "1980-01-01",
+      dateOfBirth: "1980-01-01",
+      dob: "1980-01-01",
+      id: "cycle-identity-only",
+      memberName: "Raw Member Name",
+      provider_connection_id: "provider-garmin-1",
+      sourceProviderSlug: "garmin",
+      user: {
+        id: "raw-cycle-user-id",
+      },
+      profile: {
+        patient_id: "raw-cycle-patient-id",
+      },
+    },
+  },
+] as const) {
+  test(`Junction ${testCase.label} raw-only summary keeps the historical window retrying`, async () => {
+    const importedSnapshots: unknown[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                [testCase.resource]: true,
+                heartrate: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith(`https://api.sandbox.us.junction.com/v2/summary/${testCase.resource}/junction-user-1`)) {
+        return createJsonResponse({ data: [testCase.record] });
+      }
+
+      if (url.includes("/v2/timeseries/junction-user-1/heartrate/grouped")) {
+        return createJsonResponse({ groups: {} });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      summaryResources: [testCase.resource],
+    });
+
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        now: "2026-04-04T00:00:00.000Z",
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual(result.metadataPatch, {
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    });
+    assert.equal(result.scheduledJobs?.length, 1);
+    assert.equal(importedSnapshots.length, 1);
+  });
+}
+
 for (const summaryResource of ["sleep", "workouts", "body"] as const) {
   test(`Junction ${summaryResource} summary historical backfill marks the historical window complete`, async () => {
     const importedSnapshots: unknown[] = [];
@@ -1244,7 +1451,7 @@ for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const
       junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
     });
     assert.equal(result.scheduledJobs?.length, 1);
-    assert.equal(importedSnapshots.length, 0);
+    assert.equal(importedSnapshots.length, 1);
   });
 }
 
@@ -1322,7 +1529,7 @@ for (const summaryResource of ["sleep", "workouts"] as const) {
       junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
     });
     assert.equal(result.scheduledJobs?.length, 1);
-    assert.equal(importedSnapshots.length, 0);
+    assert.equal(importedSnapshots.length, 1);
   });
 }
 
@@ -1382,7 +1589,7 @@ test("Junction useful summary without source linkage keeps the historical window
     junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs?.length, 1);
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(importedSnapshots.length, 1);
 });
 
 test("Junction floating-provider metric-only summary keeps the historical window retrying", async () => {
@@ -1442,7 +1649,7 @@ test("Junction floating-provider metric-only summary keeps the historical window
     junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs?.length, 1);
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(importedSnapshots.length, 1);
 });
 
 test("Junction source envelope summary historical backfill marks the historical window complete", async () => {
@@ -1636,7 +1843,7 @@ test("Junction profile-only historical backfill keeps the summary window retryin
     junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs?.length, 1);
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(importedSnapshots.length, 1);
 });
 
 test("Junction empty historical backfill stops retrying after the bounded budget", async () => {
