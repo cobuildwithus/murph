@@ -538,7 +538,6 @@ export function createJunctionDeviceSyncProvider(
       first.resourceCategory,
       batchInputs.map((entry) => entry.record),
     );
-    await tryProjectJunctionSourcesBestEffort(context);
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };
@@ -961,7 +960,6 @@ export function createJunctionDeviceSyncProvider(
             directInput.resourceCategory,
             [directInput.record],
           );
-          await tryProjectJunctionSourcesBestEffort(context);
           return {
             nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
           };
@@ -1022,31 +1020,6 @@ export function createJunctionDeviceSyncProvider(
     return {
       nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
     };
-  }
-
-  async function tryProjectJunctionSourcesBestEffort(
-    context: ProviderJobContext,
-  ): Promise<void> {
-    if (!context.upsertConnectionSource) {
-      return;
-    }
-
-    try {
-      const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
-        signal: context.signal ?? null,
-      });
-      await projectJunctionSources(context, sourceProviders);
-    } catch (error) {
-      if (context.signal?.aborted) {
-        throw error;
-      }
-
-      context.throwIfAborted?.();
-      context.logger.warn?.(
-        "Junction source projection skipped after direct webhook import.",
-        describeJunctionSourceProjectionFailure(error),
-      );
-    }
   }
 
   function isConfiguredJunctionResource(
@@ -1538,23 +1511,6 @@ function readJunctionDiagnosticResponseStatus(error: unknown): number | null {
 
   const status = error.details?.status;
   return typeof status === "number" && Number.isInteger(status) ? status : null;
-}
-
-function describeJunctionSourceProjectionFailure(error: unknown): Record<string, unknown> {
-  if (isDeviceSyncError(error)) {
-    return stripUndefined({
-      errorCode: error.code,
-      provider: "junction",
-      responseStatus: readJunctionDiagnosticResponseStatus(error),
-      retryable: error.retryable,
-    });
-  }
-
-  return {
-    errorCode: "JUNCTION_SOURCE_PROJECTION_FAILED",
-    provider: "junction",
-    retryable: false,
-  };
 }
 
 function describeJunctionDiagnosticRecords(

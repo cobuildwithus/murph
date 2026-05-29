@@ -3823,7 +3823,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   );
 });
 
-test("Junction resource jobs import direct daily data webhook payloads without collection fetches", async () => {
+test("Junction resource jobs import direct daily data webhook payloads without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -3879,9 +3879,7 @@ test("Junction resource jobs import direct daily data webhook payloads without c
     }),
   );
 
-  assert.deepEqual(requests, [
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
-  ]);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -3898,7 +3896,7 @@ test("Junction resource jobs import direct daily data webhook payloads without c
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
 });
 
-test("Junction resource batches import compatible direct daily payloads in one snapshot", async () => {
+test("Junction resource batches import compatible direct daily payloads without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -3975,9 +3973,7 @@ test("Junction resource batches import compatible direct daily payloads in one s
 
   await executeJunctionJobBatch(provider, context, [firstJob, secondJob]);
 
-  assert.deepEqual(requests, [
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
-  ]);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -3999,7 +3995,100 @@ test("Junction resource batches import compatible direct daily payloads in one s
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
 });
 
-test("Junction resource jobs import direct Garmin sleep webhook payloads without collection fetches", async () => {
+test("Junction resource batches import compatible direct timeseries payloads without Junction HTTP requests", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["steps"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+  const firstJob = createJob("resource", {
+    eventType: "daily.data.steps.created",
+    objectId: "steps-1",
+    occurredAt: "2026-04-02T14:30:00.000Z",
+    resource: "steps",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    webhookDataJson: JSON.stringify({
+      data: [
+        {
+          end: "2026-04-02T14:30:00.000Z",
+          start: "2026-04-02T14:00:00.000Z",
+          unit: "count",
+          value: 111,
+        },
+      ],
+      sourceProviderSlug: "garmin",
+    }),
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  const secondJob = createJob("resource", {
+    eventType: "daily.data.steps.created",
+    objectId: "steps-2",
+    occurredAt: "2026-04-02T15:30:00.000Z",
+    resource: "steps",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    webhookDataJson: JSON.stringify({
+      data: [
+        {
+          end: "2026-04-02T15:30:00.000Z",
+          start: "2026-04-02T15:00:00.000Z",
+          unit: "count",
+          value: 222,
+        },
+      ],
+      sourceProviderSlug: "garmin",
+    }),
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+
+  const executor = provider.jobExecutor;
+  assert.ok(executor?.batch, "Junction provider should expose a batch descriptor.");
+  const firstDescriptor = executor.batch.describe(firstJob);
+  const secondDescriptor = executor.batch.describe(secondJob);
+  assert.ok(firstDescriptor);
+  assert.equal(secondDescriptor?.key, firstDescriptor.key);
+
+  await executeJunctionJobBatch(provider, context, [firstJob, secondJob]);
+
+  assert.deepEqual(requests, []);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, unknown[]>;
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.deepEqual(snapshot.summaries, {});
+  const steps = snapshot.timeseries?.steps ?? [];
+  assert.equal(steps.length, 2);
+  assert.deepEqual(
+    steps.flatMap((record) => {
+      const samples = record.data;
+      return Array.isArray(samples)
+        ? samples.flatMap((sample) =>
+            typeof sample === "object" && sample !== null && "value" in sample ? [sample.value] : [],
+          )
+        : [];
+    }),
+    [111, 222],
+  );
+  assert.deepEqual(steps.map((record) => record.sourceProviderSlug), ["garmin", "garmin"]);
+  assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+});
+
+test("Junction resource jobs import direct Garmin sleep webhook payloads without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -4067,9 +4156,7 @@ test("Junction resource jobs import direct Garmin sleep webhook payloads without
     }),
   );
 
-  assert.deepEqual(requests, [
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
-  ]);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -4083,7 +4170,7 @@ test("Junction resource jobs import direct Garmin sleep webhook payloads without
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction resource jobs import direct Garmin sleep webhook object data without collection fetches", async () => {
+test("Junction resource jobs import direct Garmin sleep webhook object data without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -4149,9 +4236,7 @@ test("Junction resource jobs import direct Garmin sleep webhook object data with
     }),
   );
 
-  assert.deepEqual(requests, [
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
-  ]);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -4165,7 +4250,7 @@ test("Junction resource jobs import direct Garmin sleep webhook object data with
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction resource jobs import direct Garmin sleep-cycle stage payloads without collection fetches", async () => {
+test("Junction resource jobs import direct Garmin sleep-cycle stage payloads without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -4229,9 +4314,7 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
     }),
   );
 
-  assert.deepEqual(requests, [
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
-  ]);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -4367,55 +4450,6 @@ test("Junction direct Garmin sleep-cycle payloads fall back when they contain no
     assert.notEqual(snapshot.summaries?.sleep_cycle?.[0]?.id, testCase.directRecord.id, testCase.label);
     assert.deepEqual(snapshot.timeseries, {}, testCase.label);
   }
-});
-
-test("Junction direct webhook source projection rethrows foreground yield aborts", async () => {
-  const abortController = new AbortController();
-  const abortError = new Error("foreground yield");
-  const provider = createJunctionProvider(async (input, init) => {
-    const url = readUrl(input);
-
-    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      abortController.abort(abortError);
-      const signal = init?.signal;
-      assert.ok(signal);
-
-      if (signal.aborted) {
-        throw signal.reason;
-      }
-    }
-
-    throw new Error(`Unexpected request: ${url}`);
-  }, {
-    summaryResources: ["activity"],
-    timeseriesResources: [],
-  });
-
-  await assert.rejects(
-    () => executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        signal: abortController.signal,
-      }),
-      createJob("resource", {
-        eventType: "daily.data.activity.created",
-        objectId: "activity-1",
-        occurredAt: "2026-04-02T00:00:00.000Z",
-        resource: "activity",
-        resourceCategory: "summary",
-        sourceProviderSlug: "garmin",
-        webhookDataJson: JSON.stringify({
-          date: "2026-04-02",
-          id: "activity-1",
-          sourceProviderSlug: "garmin",
-          steps: 4321,
-        }),
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-05T00:00:00.000Z",
-      }),
-    ),
-    (error) => error === abortError,
-  );
 });
 
 test("Junction queued oversized direct resource payloads keep REST fallback", async () => {
@@ -4853,7 +4887,7 @@ test("Junction nested timeseries webhooks use sample timestamps for stable jobs"
   assert.equal(firstParse.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
-test("Junction signed daily timeseries webhooks import payload samples without collection fetches", async () => {
+test("Junction signed daily timeseries webhooks import payload samples without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -4920,9 +4954,7 @@ test("Junction signed daily timeseries webhooks import payload samples without c
     createJob("resource", parsed.jobs[0]?.payload ?? {}),
   );
 
-  assert.deepEqual(requests, [
-    "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
-  ]);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
@@ -4941,10 +4973,9 @@ test("Junction signed daily timeseries webhooks import payload samples without c
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
 });
 
-test("Junction direct daily timeseries payload import survives provider-list outages", async () => {
+test("Junction direct daily timeseries payload import does not depend on provider-list availability", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
-  const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
@@ -4972,11 +5003,6 @@ test("Junction direct daily timeseries payload import survives provider-list out
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
-      logger: {
-        warn(_message, context) {
-          warnings.push(context ?? {});
-        },
-      },
     }),
     createJob("resource", {
       eventType: "daily.data.steps.created",
@@ -5001,11 +5027,7 @@ test("Junction direct daily timeseries payload import survives provider-list out
     }),
   );
 
-  assert.equal(requests.length > 0, true);
-  assert.equal(
-    requests.every((url) => url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1"),
-    true,
-  );
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
@@ -5021,15 +5043,6 @@ test("Junction direct daily timeseries payload import survives provider-list out
       value: 321,
     },
   ]);
-  assert.equal(
-    warnings.some((warning) =>
-      warning.errorCode === "JUNCTION_API_REQUEST_FAILED"
-      && warning.provider === "junction"
-      && warning.responseStatus === 503
-      && warning.retryable === true
-    ),
-    true,
-  );
   assert.doesNotMatch(JSON.stringify(importedSnapshots), /junction-user-1/u);
 });
 
@@ -5187,8 +5200,7 @@ test("Junction splits oversized daily timeseries webhook samples into bounded di
     await executeJunctionJob(provider, context, createJob(job.kind, job.payload));
   }
 
-  assert.equal(requests.every((url) => url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1"), true);
-  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, directJobs.length);
   const importedSamples = importedSnapshots.flatMap((snapshot) => {
     const records = (snapshot as {
