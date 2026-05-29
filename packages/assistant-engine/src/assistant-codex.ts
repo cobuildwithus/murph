@@ -86,6 +86,11 @@ import type {
 } from './assistant/provider-traces.js'
 import type {
   AssistantProgressDelivery,
+  AssistantProgressDeliveryResult,
+  AssistantProgressDeliverySource,
+} from './assistant/turn-progress.js'
+import {
+  isAssistantModelProgressAvailable,
 } from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
@@ -115,6 +120,76 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
+
+function resolveCodexAppServerProgressDelivery(
+  input: Pick<
+    CodexAppServerTurnInput,
+    'modelProgressUpdatesEnabled' | 'progressDelivery'
+  >,
+): AssistantProgressDelivery | null {
+  return isAssistantModelProgressAvailable(input)
+    ? input.progressDelivery ?? null
+    : null
+}
+
+function resolveCodexProgressToolResultText(
+  result: AssistantProgressDeliveryResult,
+): { success: boolean; text: string } {
+  if (result.kind === 'sent') {
+    return {
+      success: true,
+      text: 'progress update sent',
+    }
+  }
+
+  if (result.kind === 'failed') {
+    return {
+      success: false,
+      text: 'progress update failed during best-effort delivery',
+    }
+  }
+
+  if (result.reason === 'limit') {
+    return {
+      success: false,
+      text: 'progress update skipped: one progress update was already sent',
+    }
+  }
+
+  if (result.reason === 'duplicate') {
+    return {
+      success: false,
+      text: 'progress update skipped: duplicate progress update',
+    }
+  }
+
+  return {
+    success: false,
+    text: 'progress update skipped: empty progress update',
+  }
+}
+
+function resolveCodexCurrentChannelProgressSource(
+  normalizedEvent: CodexNormalizedEvent,
+): AssistantProgressDeliverySource | null {
+  if (
+    normalizedEvent.kind === 'assistant_message' &&
+    normalizedEvent.itemState === 'completed' &&
+    normalizedEvent.messagePhase === 'commentary'
+  ) {
+    return 'model'
+  }
+
+  if (
+    normalizedEvent.kind === 'status_item' &&
+    normalizedEvent.itemType === 'context.compaction' &&
+    normalizedEvent.itemState === 'running'
+  ) {
+    return 'system'
+  }
+
+  return null
+}
 
 export interface CodexAppServerTurnInput {
   abortSignal?: AbortSignal
@@ -646,17 +721,22 @@ async function runCodexAppServerTurn(
     })
   }
 
-  const notifyContextCompactionProgress = (text: string) => {
+  const notifyCurrentChannelProgress = (
+    text: string,
+    source: AssistantProgressDeliverySource,
+  ) => {
+    const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
-      input.modelProgressUpdatesEnabled !== true ||
-      !input.progressDelivery ||
-      contextCompactionProgressNotified
+      !progressDelivery ||
+      (source === 'system' && contextCompactionProgressNotified)
     ) {
       return
     }
 
-    contextCompactionProgressNotified = true
-    void input.progressDelivery.send(text).catch(() => undefined)
+    if (source === 'system') {
+      contextCompactionProgressNotified = true
+    }
+    void progressDelivery.send(text, { source }).catch(() => undefined)
   }
 
   const handleParsedMessage = (message: CodexRpcMessage) => {
@@ -720,10 +800,8 @@ async function runCodexAppServerTurn(
         return
       }
 
-      if (
-        input.modelProgressUpdatesEnabled !== true ||
-        !input.progressDelivery
-      ) {
+      const progressDelivery = resolveCodexAppServerProgressDelivery(input)
+      if (!progressDelivery) {
         void tryWriteRpcMessage({
           id: requestId,
           result: {
@@ -739,16 +817,17 @@ async function runCodexAppServerTurn(
         return
       }
 
-      void input.progressDelivery.send(dynamicToolRequest.text)
-        .then(() => {
+      void progressDelivery.send(dynamicToolRequest.text, { source: 'model' })
+        .then((progressResult) => {
+          const toolResult = resolveCodexProgressToolResultText(progressResult)
           void tryWriteRpcMessage({
             id: requestId,
             result: {
-              success: true,
+              success: toolResult.success,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'progress update accepted',
+                  text: toolResult.text,
                 },
               ],
             },
@@ -762,7 +841,7 @@ async function runCodexAppServerTurn(
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'progress update failed',
+                  text: 'progress update failed during best-effort delivery',
                 },
               ],
             },
@@ -808,8 +887,11 @@ async function runCodexAppServerTurn(
 
     const progressDeliveryText =
       extractCodexCurrentChannelProgressTextFromNormalized(normalizedEvent)
-    if (progressDeliveryText) {
-      notifyContextCompactionProgress(progressDeliveryText)
+    const progressDeliverySource = progressDeliveryText
+      ? resolveCodexCurrentChannelProgressSource(normalizedEvent)
+      : null
+    if (progressDeliveryText && progressDeliverySource) {
+      notifyCurrentChannelProgress(progressDeliveryText, progressDeliverySource)
     }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)

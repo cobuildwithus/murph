@@ -47,7 +47,6 @@ import {
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
 import {
-  createAssistantProgressDelivery,
   shouldEnableAssistantModelProgressUpdates,
 } from './turn-progress.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
@@ -190,15 +189,11 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
       const modelProgressUpdatesEnabled =
-        shouldEnableAssistantModelProgressUpdates(messageInput)
-      const progressDelivery = modelProgressUpdatesEnabled
-        ? createAssistantProgressDelivery({
-            messageInput,
-            session: resolved.session,
-            sharedPlan,
-            turnId,
-          })
-        : null
+        shouldEnableAssistantModelProgressUpdates(
+          messageInput,
+          ASSISTANT_NOTIFICATION_TURN_PROFILE,
+        )
+      const progressDelivery = null
       const typingIndicator = startAssistantChannelTypingIndicator({
         channelDependencies:
           executionContext?.hosted?.channelTypingDependencies ?? null,

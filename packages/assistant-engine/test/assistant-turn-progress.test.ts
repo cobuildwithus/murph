@@ -56,17 +56,69 @@ describe('assistant turn progress', () => {
       turnId: 'turn-progress',
     })
 
-    await progress.send('Extracting the PDF and checking relevant results.')
-    await progress.send('Extracting the PDF and checking relevant results.')
-    await progress.send('Checking the saved context now.')
-
-    await progress.send('Checking the saved context now.')
-
-    await progress.send('Preparing a concise final reply.')
+    await expect(
+      progress.send('Extracting the PDF and checking relevant results.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Extracting the PDF and checking relevant results.'),
+    ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'duplicate',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Checking the saved context now.'),
+    ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'limit',
+      source: 'model',
+    })
 
     expect(deliver).toHaveBeenCalledTimes(1)
     expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
       [0, 'Extracting the PDF and checking relevant results.'],
+    ])
+  })
+
+  it('tracks system and model progress budgets independently', async () => {
+    const delivered: DeliverProgressInput[] = []
+    const deliver = vi.fn(async (input: DeliverProgressInput): Promise<void> => {
+      delivered.push(input)
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await expect(
+      progress.send('Compacting prior context.', { source: 'system' }),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'system',
+    })
+    await expect(
+      progress.send('Checking the saved context now.', { source: 'model' }),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await expect(
+      progress.send('Preparing a concise final reply.', { source: 'model' }),
+    ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'limit',
+      source: 'model',
+    })
+
+    expect(delivered.map((input) => [input.ordinal, input.text])).toEqual([
+      [0, 'Compacting prior context.'],
+      [1, 'Checking the saved context now.'],
     ])
   })
 
@@ -82,7 +134,10 @@ describe('assistant turn progress', () => {
       turnId: 'turn-progress',
     })
 
-    await expect(progress.send('Still working on the file.')).resolves.toBeUndefined()
+    await expect(progress.send('Still working on the file.')).resolves.toEqual({
+      kind: 'failed',
+      source: 'model',
+    })
     expect(deliver).toHaveBeenCalledTimes(1)
   })
 

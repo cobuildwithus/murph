@@ -18,7 +18,32 @@ import type {
 } from './service-contracts.js'
 
 export interface AssistantProgressDelivery {
-  send(text: string): Promise<void>
+  send(
+    text: string,
+    options?: AssistantProgressDeliverySendOptions,
+  ): Promise<AssistantProgressDeliveryResult>
+}
+
+export type AssistantProgressDeliverySource = 'model' | 'system'
+
+export interface AssistantProgressDeliverySendOptions {
+  source?: AssistantProgressDeliverySource
+}
+
+export type AssistantProgressDeliveryResult =
+  | { kind: 'sent'; source: AssistantProgressDeliverySource }
+  | {
+      kind: 'skipped'
+      reason: 'duplicate' | 'empty' | 'limit'
+      source: AssistantProgressDeliverySource
+    }
+  | { kind: 'failed'; source: AssistantProgressDeliverySource }
+
+export function isAssistantModelProgressAvailable(input: {
+  modelProgressUpdatesEnabled?: boolean | null
+  progressDelivery?: AssistantProgressDelivery | null
+}): boolean {
+  return input.modelProgressUpdatesEnabled === true && Boolean(input.progressDelivery)
 }
 
 type DeliverAssistantProgressUpdate = typeof deliverAssistantProgressUpdate
@@ -29,8 +54,14 @@ type AssistantProgressDeliveryContext = {
 
 export function shouldEnableAssistantModelProgressUpdates(
   input: Pick<AssistantMessageInput, 'deliverResponse'>,
+  profile?: {
+    promptProfile?: 'conversation' | 'notification-decision' | null
+    toolProfile?: 'provider-turn' | 'notification-turn' | null
+  } | null,
 ): boolean {
-  return input.deliverResponse === true
+  return input.deliverResponse === true &&
+    (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
+    (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
 }
 
 export function createAssistantProgressDelivery(input: {
@@ -43,20 +74,34 @@ export function createAssistantProgressDelivery(input: {
 }): AssistantProgressDelivery {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
   const sentTexts = new Set<string>()
-  let sentCount = 0
+  const sentCountsBySource: Record<AssistantProgressDeliverySource, number> = {
+    model: 0,
+    system: 0,
+  }
+  let deliveryOrdinal = 0
 
   return {
-    async send(rawText: string) {
+    async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {
+      const source = options?.source ?? 'model'
       const text = normalizeAssistantProgressText(rawText)
       if (!text || sentTexts.has(text)) {
-        return
+        return {
+          kind: 'skipped',
+          reason: text ? 'duplicate' : 'empty',
+          source,
+        }
       }
-      if (sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
-        return
+      if (sentCountsBySource[source] >= MAX_PROGRESS_UPDATES_PER_TURN) {
+        return {
+          kind: 'skipped',
+          reason: 'limit',
+          source,
+        }
       }
 
-      const ordinal = sentCount
-      sentCount += 1
+      const ordinal = deliveryOrdinal
+      deliveryOrdinal += 1
+      sentCountsBySource[source] += 1
       sentTexts.add(text)
 
       try {
@@ -72,11 +117,19 @@ export function createAssistantProgressDelivery(input: {
           text,
           turnId: input.turnId,
         })
+        return {
+          kind: 'sent',
+          source,
+        }
       } catch (error) {
         warnAssistantBestEffortFailure({
           error,
           operation: 'progress update delivery',
         })
+        return {
+          kind: 'failed',
+          source,
+        }
       }
     },
   }

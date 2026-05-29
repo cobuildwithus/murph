@@ -1952,7 +1952,12 @@ async function runHostedLocalCodexStubTurn(
             continue;
           }
           assert(activeThreadId, "Expected active hosted local Codex thread id.");
-          writeHostedLocalCodexStubResume(childStdin, 20 + completedTurns, activeThreadId);
+          writeHostedLocalCodexStubResume(
+            childStdin,
+            20 + completedTurns,
+            activeThreadId,
+            readHostedLocalCodexStubThreadResumeParams(threadStartParams),
+          );
           writeHostedLocalCodexStubTurnStart(
             childStdin,
             30 + completedTurns,
@@ -2082,14 +2087,24 @@ function writeHostedLocalCodexStubResume(
   childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
   id: number,
   threadId: string,
+  threadResumeParams: Record<string, unknown> = {},
 ): void {
   childStdin.write(`${JSON.stringify({
     id,
     method: "thread/resume",
     params: {
+      ...threadResumeParams,
       threadId,
     },
   })}\n`);
+}
+
+function readHostedLocalCodexStubThreadResumeParams(
+  threadStartParams: Record<string, unknown>,
+): Record<string, unknown> {
+  return Array.isArray(threadStartParams.dynamicTools)
+    ? { dynamicTools: threadStartParams.dynamicTools }
+    : {};
 }
 
 function writeHostedLocalCodexStubTurnStart(

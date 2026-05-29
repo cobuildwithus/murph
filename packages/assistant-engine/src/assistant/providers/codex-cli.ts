@@ -46,6 +46,9 @@ import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import {
+  isAssistantModelProgressAvailable,
+} from '../turn-progress.js'
 import type {
   CodexAppServerImageInput,
   CodexAppServerTurnFailureContext,
@@ -229,7 +232,7 @@ export async function executeCodexAssistantTurnAttempt(
     onTraceEvent: input.onTraceEvent,
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
-    modelProgressUpdatesEnabled: input.modelProgressUpdatesEnabled === true,
+    modelProgressUpdatesEnabled: isAssistantModelProgressAvailable(input),
     progressDelivery: input.progressDelivery ?? undefined,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,

@@ -128,6 +128,8 @@ export async function deliverAssistantProgressUpdate(input: {
   text: string
   turnId: string
 }): Promise<void> {
+  // Progress updates are ephemeral current-audience sends, not final-reply
+  // delivery or commit-aware outbox decisions.
   if (!input.input.deliverResponse) {
     return
   }

@@ -13,6 +13,9 @@ import { stripUndefinedRpcParams } from './app-server-rpc.js'
 import {
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from './dynamic-tools.js'
+import {
+  isAssistantModelProgressAvailable,
+} from '../assistant/turn-progress.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 
@@ -94,7 +97,7 @@ export function buildCodexThreadContextParams(input: {
 function resolveCodexAppServerDynamicTools(
   input: CodexAppServerTurnInput,
 ): readonly [typeof MURPH_SEND_PROGRESS_UPDATE_TOOL] | undefined {
-  return input.modelProgressUpdatesEnabled === true
+  return isAssistantModelProgressAvailable(input)
     ? [MURPH_SEND_PROGRESS_UPDATE_TOOL]
     : undefined
 }

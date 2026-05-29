@@ -49,6 +49,9 @@ import type {
   AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
+  isAssistantModelProgressAvailable,
+} from '../turn-progress.js'
+import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -342,7 +345,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     promptTimeContext,
     route: input.route,
     sharedPlan: input.plan,
-    modelProgressUpdatesEnabled: input.modelProgressUpdatesEnabled === true,
+    modelProgressUpdatesEnabled: isAssistantModelProgressAvailable(input),
     progressDelivery: input.progressDelivery ?? null,
     turnId: input.turnId,
   }
