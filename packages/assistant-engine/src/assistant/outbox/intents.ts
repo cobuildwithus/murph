@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
+import { resolveAssistantBindingDelivery } from '../bindings.js'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
 
@@ -68,15 +69,27 @@ export function buildAssistantOutboxRawTargetIdentity(
 export function buildAssistantOutboxPersistedTarget(
   input: AssistantOutboxPersistedTargetInput,
 ): AssistantOutboxPersistedTarget {
+  const channel = normalizeNullableString(input.channel)
+  const actorId = normalizeNullableString(input.actorId)
+  const threadId = normalizeNullableString(input.threadId)
+  const threadIsDirect =
+    typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null
+
   return {
-    channel: normalizeNullableString(input.channel),
+    channel,
     identityId: normalizeNullableString(input.identityId),
-    actorId: normalizeNullableString(input.actorId),
-    threadId: normalizeNullableString(input.threadId),
-    threadIsDirect:
-      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
+    actorId,
+    threadId,
+    threadIsDirect,
     replyToMessageId: normalizeNullableString(input.replyToMessageId),
-    bindingDelivery: input.bindingDelivery ?? null,
+    bindingDelivery:
+      input.bindingDelivery ??
+      resolveAssistantBindingDelivery({
+        actorId,
+        channel,
+        threadId,
+        threadIsDirect,
+      }),
     deliverySource: input.deliverySource ?? null,
     explicitTarget: normalizeNullableString(input.explicitTarget),
   }

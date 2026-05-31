@@ -49,6 +49,7 @@ export function buildHostedE2ECodexAppServerStubSource(input: {
   const turnDelayMs = input.turnDelayMs ?? 25;
   const expectedThreadStartDynamicTools = input.expectedThreadStartDynamicTools ?? [];
   return `#!/usr/bin/env node
+const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
@@ -440,15 +441,28 @@ function extractE2EToolDirective(responseText) {
       parsed &&
       typeof parsed === "object" &&
       !Array.isArray(parsed) &&
-      Array.isArray(parsed.__murphE2eToolCalls) &&
+      (
+        Array.isArray(parsed.__murphE2eToolCalls) ||
+        Array.isArray(parsed.__murphE2eVaultCliCommands)
+      ) &&
       typeof parsed.text === "string" &&
       parsed.text.trim()
     ) {
-      const toolCalls = parsed.__murphE2eToolCalls
+      const rawToolCalls = Array.isArray(parsed.__murphE2eToolCalls)
+        ? parsed.__murphE2eToolCalls
+        : [];
+      const rawVaultCliCommands = Array.isArray(parsed.__murphE2eVaultCliCommands)
+        ? parsed.__murphE2eVaultCliCommands
+        : [];
+      const toolCalls = rawToolCalls
         .map(normalizeE2EToolCall)
+        .filter(Boolean);
+      const vaultCliCommands = rawVaultCliCommands
+        .map(normalizeE2EVaultCliCommand)
         .filter(Boolean);
       return {
         toolCalls,
+        vaultCliCommands,
         text: parsed.text.trim(),
       };
     }
@@ -458,6 +472,7 @@ function extractE2EToolDirective(responseText) {
 
   return {
     toolCalls: [],
+    vaultCliCommands: [],
     text: responseText,
   };
 }
@@ -482,6 +497,70 @@ function normalizeE2EToolCall(value) {
     namespace: value.namespace.trim(),
     tool: value.tool.trim(),
   };
+}
+
+function normalizeE2EVaultCliCommand(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  if (!Array.isArray(value.args)) {
+    return null;
+  }
+  if (!value.args.every((arg) => typeof arg === "string")) {
+    return null;
+  }
+  return {
+    args: value.args,
+  };
+}
+
+function redactE2ECommandOutput(value) {
+  let output = typeof value === "string" ? value : String(value ?? "");
+  const sensitivePathValues = [
+    process.env.ASSISTANT_MEMORY_BOUND_VAULT,
+    process.env.CODEX_HOME,
+    process.env.HOME,
+    process.env.VAULT,
+  ].filter((entry) => typeof entry === "string" && entry.trim().length > 0);
+  for (const sensitivePath of sensitivePathValues) {
+    output = output.split(sensitivePath).join("<redacted-path>");
+  }
+  return output.slice(-4000);
+}
+
+function validateE2EVaultCliAutomationSaveArgs(args) {
+  if (args.length < 3 || args.length > 64) {
+    throw new Error("E2E vault-cli directive must include 3 to 64 arguments");
+  }
+  for (const arg of args) {
+    if (arg.length === 0 || arg.length > 4096 || arg.includes(String.fromCharCode(0))) {
+      throw new Error("E2E vault-cli directive includes an invalid argument");
+    }
+  }
+  if (args[0] !== "automation" || args[1] !== "save") {
+    throw new Error("E2E vault-cli directive only supports automation save");
+  }
+}
+
+function callVaultCliCommand(command) {
+  validateE2EVaultCliAutomationSaveArgs(command.args);
+  const result = childProcess.spawnSync("vault-cli", command.args, {
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30000,
+  });
+  if (result.error) {
+    throw new Error("E2E vault-cli automation save failed: " + redactE2ECommandOutput(result.error.message));
+  }
+  if (result.status !== 0) {
+    throw new Error([
+      "E2E vault-cli automation save failed with exit code " + result.status,
+      redactE2ECommandOutput(result.stderr),
+      redactE2ECommandOutput(result.stdout),
+    ].filter(Boolean).join("\\n"));
+  }
 }
 
 function callDynamicTool(toolCall) {
@@ -558,8 +637,12 @@ async function completeTurn(turn) {
     const rawText = await fetchAssistantResponse(providerInput);
     const {
       toolCalls,
+      vaultCliCommands,
       text,
     } = extractE2EToolDirective(rawText);
+    for (const command of vaultCliCommands) {
+      callVaultCliCommand(command);
+    }
     for (const toolCall of toolCalls) {
       await callDynamicTool(toolCall);
     }

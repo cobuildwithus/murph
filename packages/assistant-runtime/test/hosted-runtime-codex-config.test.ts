@@ -432,6 +432,69 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
   }
 });
 
+test("hosted Codex runtime local E2E app-server stub preserves ordinary JSON responses", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const requests: string[] = [];
+  const notificationDecision = JSON.stringify({
+    kind: "send_message",
+    privateSummary: "deliver",
+    text: "Time to sleep.",
+  });
+  const server = await startResponsesStubServer({
+    requests,
+    responseTexts: [
+      notificationDecision,
+      JSON.stringify({
+        __murphE2eVaultCliCommands: [],
+        text: "directive text",
+      }),
+    ],
+  });
+
+  try {
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "",
+        OPENAI_API_KEY: "secret-openai-key",
+      },
+    });
+    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const messages = await runHostedLocalCodexStubTurn(
+      child,
+      ["notification decision", "explicit directive"],
+    );
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(
+      messages
+        .filter((message) => message.type === "item.completed")
+        .map((message) =>
+          typeof message.item === "object" && message.item !== null && "text" in message.item
+            ? (message.item as { text?: unknown }).text
+            : null
+        ),
+      [
+        notificationDecision,
+        "directive text",
+      ],
+    );
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
 test("hosted Codex runtime local E2E app-server stub enforces expected dynamic tools", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const requests: string[] = [];

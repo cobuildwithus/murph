@@ -408,6 +408,42 @@ test("dense raw pruning skips manifest scans when the deadline is already exhaus
   );
 });
 
+test("dense raw pruning reports interrupted proof without tombstoning", async () => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
+  });
+  let nowCallCount = 0;
+  const dateNow = vi.spyOn(Date, "now").mockImplementation(() => {
+    nowCallCount += 1;
+    return nowCallCount >= 3 ? 2 : 0;
+  });
+
+  try {
+    const result = await runWearableStorageMigrationPass({
+      deadlineMs: 1,
+      maxFiles: 5,
+      now: REPAIR_NOW,
+      pruneDenseRaw: true,
+      repairClasses: ["dense_raw_timeseries"],
+      vaultRoot,
+    });
+
+    assert.equal(result.mutated, false);
+    assert.equal(result.hasMore, true);
+    assert.equal(result.tombstonedDenseRawArtifactCount, 0);
+    assert.equal(result.touchedPaths.length, 0);
+  } finally {
+    dateNow.mockRestore();
+  }
+
+  assert.match(
+    await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
+    /sampleValues/u,
+  );
+  await assertManifestArtifactMatchesFile(vaultRoot, "01-provider-timeseries-heart-rate.json");
+});
+
 test("dense raw classifier uses retention metadata before role fallback", async () => {
   const metadataDenseVaultRoot = await createRawArtifactFixture({
     denseRole: "provider-debug-payload",

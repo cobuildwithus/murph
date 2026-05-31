@@ -519,6 +519,70 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('persists inferred Linq thread delivery on queue-only intents before dispatch', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-thread-inferred-',
+    )
+
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      message: 'queue the Linq reminder',
+      sessionId: 'session-linq-thread-inferred',
+      threadId: 'linq-thread-inferred',
+      threadIsDirect: true,
+      turnId: 'turn-linq-thread-inferred',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'linq-thread-inferred',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-linq-thread-inferred',
+        providerThreadId: 'linq-thread-inferred',
+        sentAt: '2026-04-08T03:03:00.000Z',
+        target: 'linq-thread-inferred',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: {
+          binding: expect.objectContaining({
+            channel: 'linq',
+            delivery: {
+              kind: 'thread',
+              target: 'linq-thread-inferred',
+            },
+            threadId: 'linq-thread-inferred',
+            threadIsDirect: true,
+          }),
+        },
+      }),
+      undefined,
+    )
+  })
+
   it('persists caller-provided transport idempotency when queueing delivery intents', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-caller-idempotent-',

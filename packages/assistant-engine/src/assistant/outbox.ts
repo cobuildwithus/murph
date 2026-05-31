@@ -173,13 +173,14 @@ export async function createAssistantOutboxIntent(input: {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
     const message = normalizeRequiredMessage(input.message)
+    const persistedTarget = buildAssistantOutboxPersistedTarget(input)
     const subject = normalizeAssistantDeliverySubject({
-      bindingDelivery: input.bindingDelivery ?? null,
-      channel: input.channel ?? null,
-      explicitTarget: input.explicitTarget ?? null,
+      bindingDelivery: persistedTarget.bindingDelivery,
+      channel: persistedTarget.channel,
+      explicitTarget: persistedTarget.explicitTarget,
       subject: input.subject ?? null,
     })
-    const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(input)
+    const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(persistedTarget)
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
       message,
@@ -231,7 +232,7 @@ export async function createAssistantOutboxIntent(input: {
       subject,
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
-      ...buildAssistantOutboxPersistedTarget(input),
+      ...persistedTarget,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
