@@ -1,5 +1,10 @@
 # Baseline Invariants
 
+## Implementation Bias
+
+- Prefer simple, composable primitives over complex abstractions. Add a new abstraction only when it removes real duplication, clarifies ownership, or makes an invariant easier to enforce.
+- Do not introduce broad managers, speculative frameworks, or compatibility layers when a named primitive, package-owned seam, or direct function can express the behavior clearly.
+
 ## Canonical Storage
 
 - Human-facing truth lives in Markdown: `CORE.md`, `journal/`, and `bank/`.
@@ -27,6 +32,12 @@
 - Idle-only work must be preemptible. If fresh user input arrives while background maintenance or idle checkpointing is running, that work must yield, abort, or reschedule instead of making the user message wait for completion.
 - Assistant reply code must not import, call, await, or coordinate with device-sync execution. Device sync may preserve a follow-up wake or recovery marker, but it must stay out of the foreground reply path.
 - Foreground preemption is not permission to publish partial or corrupt state. Wrong-user authority, stale lease, invalid auth, undecryptable mailbox payloads, and checkpoint compare-and-swap conflicts still fail closed.
+
+## Observability And Logging
+
+- Log errors at the root failure boundary, where the system first has enough context to classify the failing owner, operation, and cause. Do not scatter patchwork logs across callers, retries, or fallback layers to compensate for an unclear source.
+- When an error is safe to log, preserve the full error chain and structured metadata, then pass it through the shared redaction helper before emission. The shared redactor must remove secrets, keys, credentials, tokens, authorization headers, local paths, and direct identifiers.
+- Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, or caller-local redaction rules.
 
 ## Append-Only Bias
 
