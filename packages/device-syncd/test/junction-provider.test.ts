@@ -5044,7 +5044,11 @@ test("Junction direct Garmin sleep-cycle payloads fall back when they contain no
       }),
     );
 
-    assert.equal(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")), true, testCase.label);
+    const summaryRequest = requireValue(
+      requests.find((url) => url.includes("/v2/summary/sleep_cycle/")),
+      `Junction sleep-cycle fallback should fetch REST summary data for ${testCase.label}.`,
+    );
+    assertJunctionWindowQuery(summaryRequest, "2026-04-01", "2026-04-04");
     assert.equal(importedSnapshots.length, 1, testCase.label);
     const snapshot = importedSnapshots[0] as {
       summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -5440,8 +5444,8 @@ test("Junction oversized daily summary webhook payloads keep REST fallback", asy
   );
   assertJunctionWindowQuery(
     summaryRequest,
-    "2026-04-02T00:00:00.000Z",
-    "2026-04-03T00:00:00.000Z",
+    "2026-04-02",
+    "2026-04-02",
   );
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
   assert.equal(importedSnapshots.length, 1);

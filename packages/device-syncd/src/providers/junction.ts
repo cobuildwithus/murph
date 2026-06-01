@@ -1176,12 +1176,14 @@ export function createJunctionDeviceSyncProvider(
           );
         }
 
+        const dateQueryFormat: JunctionDateQueryFormat = isFullUtcDayWindow(window) ? "date" : "datetime";
         summaries[resource] = await fetchOptionalJunctionResourceRecords(
           context,
           "summary",
           resource,
           skippedOptionalResources,
           () => client.listSummary({
+            dateQueryFormat,
             resource,
             signal: context.signal ?? null,
             sourceProviderSlug,
