@@ -13,6 +13,9 @@ import {
   sendHostedProviderTelegramMessage,
   sendHostedProviderWhatsAppMessage,
 } from "../src/hosted-provider-effects.ts";
+import {
+  HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+} from "../src/hosted-runtime/provider-fetch.ts";
 
 describe("hosted provider effects", () => {
   afterEach(() => {
@@ -41,6 +44,7 @@ describe("hosted provider effects", () => {
       env: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -51,6 +55,115 @@ describe("hosted provider effects", () => {
       action: "typing",
       chat_id: "12345",
     });
+  });
+
+  it("fails closed instead of using ambient fetch when the hosted provider fetch dependency is missing", async () => {
+    const rawGlobalFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => {
+      throw new Error("raw global fetch should not be used");
+    });
+    vi.stubGlobal("fetch", rawGlobalFetch);
+
+    await expect(sendHostedProviderTelegramMessage({
+      message: "hello",
+      target: "12345",
+    }, {
+      env: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(sendHostedProviderTelegramChatAction({
+      action: "typing",
+      target: "12345",
+    }, {
+      env: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(getHostedProviderTelegramFile({
+      fileId: "file_123",
+    }, {
+      env: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(downloadHostedProviderTelegramFile({
+      filePath: "/photos/cat.jpg",
+    }, {
+      env: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(sendHostedProviderLinqMessage({
+      message: "hello",
+      target: "chat_123",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(sendHostedProviderLinqChatAction({
+      action: "typing",
+      target: "chat_123",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(markHostedProviderLinqRead({
+      chatId: "chat_123",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(sendHostedProviderWhatsAppMessage({
+      message: "hello",
+      target: "15550100001",
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: "test-access-token",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+    await expect(deleteHostedProviderLinqMessages({
+      messageIds: ["message_123"],
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation: null,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+
+    expect(rawGlobalFetch).not.toHaveBeenCalled();
   });
 
   it("uses the hosted provider fetch dependency for Telegram effects", async () => {
@@ -203,6 +316,7 @@ describe("hosted provider effects", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       providerMessageId: "recovered-message",
       providerThreadId: "recovered-chat",
@@ -365,6 +479,7 @@ describe("hosted provider effects", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     })).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED",
       context: expect.objectContaining({
@@ -407,6 +522,7 @@ describe("hosted provider effects", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     })).rejects.toMatchObject({
       code: "LINQ_API_REQUEST_FAILED",
       context: expect.objectContaining({
@@ -469,6 +585,7 @@ describe("hosted provider effects", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       providerMessageId: "materialized-message",
       providerThreadId: "materialized-chat",
@@ -499,6 +616,7 @@ describe("hosted provider effects", () => {
       env: {
         LINQ_API_TOKEN: "linq-token",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     };
 
     await sendHostedProviderLinqChatAction({
@@ -591,6 +709,7 @@ describe("hosted provider effects", () => {
         WHATSAPP_ACCESS_TOKEN: "test-access-token",
         WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
       },
+      fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       providerMessageId: "wamid.MESSAGE_1",
       providerThreadId: "15550100001",

@@ -110,6 +110,7 @@ function createProviderEffectDependencies(input: {
 }): HostedProviderEffectDependencies {
   return {
     env: asWorkerStringEnvironment(input.env) as NodeJS.ProcessEnv,
+    fetchImplementation: fetch,
     signal: input.requestSignal,
   };
 }

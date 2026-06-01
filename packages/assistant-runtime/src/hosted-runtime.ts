@@ -2050,6 +2050,12 @@ function createAbortGuardedHostedRuntimePlatform(
           },
         }
       : {}),
+    ...(platform.publicInternetFetch
+      ? {
+          publicInternetFetch: (async (request, init) =>
+            guard(() => platform.publicInternetFetch!(request, init))) as typeof fetch,
+        }
+      : {}),
     ...(platform.usageRecordPort
       ? {
           usageRecordPort: {

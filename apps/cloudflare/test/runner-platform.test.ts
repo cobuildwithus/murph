@@ -2016,13 +2016,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
 
-    const response = await hostedFetch("https://api.openai.example.test/v1/responses");
+    const response = await hostedFetch("https://api.openai.com/v1/responses");
 
     expect(response.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "external provider fetch");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
-  it("preserves Request init overrides for external fetch passthrough", async () => {
+  it("preserves Request init overrides and authority-binds external provider fetches", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const hostedFetch = createCloudflareHostedProviderFetch(
       "member_123",
@@ -2037,7 +2042,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
     const abortController = new AbortController();
-    const original = new Request("https://example.test/", {
+    const original = new Request("https://api.openai.com/v1/responses", {
       body: "a",
       method: "POST",
     });
@@ -2052,9 +2057,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const forwarded = requireFetchRequest(fetchMock.mock.calls[0], "external passthrough fetch");
     expect(forwarded.headers.get("x-test")).toBe("1");
-    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
-    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwarded.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(forwarded.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(forwarded.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(forwarded.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
     expect(forwarded.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(forwarded.method).toBe("PUT");
     expect(await forwarded.text()).toBe("b");
@@ -2062,6 +2068,111 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(forwarded.signal.aborted).toBe(false);
     abortController.abort();
     expect(forwarded.signal.aborted).toBe(true);
+  });
+
+  it("rejects external provider fetches to hosts outside the intercepted provider boundary", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    await expect(hostedFetch("https://example.test/")).rejects.toThrow(
+      "Hosted provider request for example.test is not routed through the hosted provider egress boundary.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects external provider fetches when the runtime write-fence lease is missing", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => null,
+      },
+    );
+
+    await expect(
+      hostedFetch("https://api.openai.com/v1/responses"),
+    ).rejects.toThrow(
+      "Hosted provider request for api.openai.com is missing a runtime write-fence lease.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("authority-binds platform providerFetch without relying on proxy header opt-in", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await platform.providerFetch!("https://api.telegram.org/bot/sendMessage", {
+      body: "{}",
+      method: "POST",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "platform provider fetch");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+  });
+
+  it("keeps public Internet fetches free of runtime authority headers", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    const authorityBearingRequest = new Request("https://cdn.linqapp.com/files/direct.png", {
+      headers: {
+        [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        "x-hosted-execution-runner-proxy-token": "proxy_token",
+        "x-hosted-runtime-attempt-id": "runtime_write_123",
+        "x-hosted-runtime-lease-generation": "7",
+        "x-hosted-runtime-workspace-version": "6",
+        "x-test": "retained",
+      },
+    });
+
+    await platform.publicInternetFetch!(authorityBearingRequest);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "platform public fetch");
+    expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(request.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(request.headers.get("x-test")).toBe("retained");
   });
 
   it("classifies internal authority 401 responses as stale invocation authority", async () => {

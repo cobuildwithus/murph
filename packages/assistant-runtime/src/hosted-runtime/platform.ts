@@ -310,6 +310,7 @@ export interface HostedRuntimePlatform {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;

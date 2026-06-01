@@ -43,6 +43,15 @@ function createLogPlatform(logRequests: HostedRuntimeLogRequest[]) {
   };
 }
 
+function createAmbientFetchLinqDriver(
+  options: Parameters<typeof createHostedLinqAttachmentDownloadDriver>[0] = {},
+) {
+  return createHostedLinqAttachmentDownloadDriver({
+    ...options,
+    allowAmbientFetchForLocalRuntime: true,
+  });
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
@@ -114,7 +123,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     const fetchMock = vi.fn();
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -140,7 +149,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       }));
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
 
     await expect(
@@ -165,7 +174,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       ));
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
 
     await expect(
@@ -179,10 +188,22 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
 describe("createHostedLinqAttachmentDownloadDriver", () => {
   it("returns null when fetch is unavailable", () => {
     setFetch(undefined);
-    assert.equal(createHostedLinqAttachmentDownloadDriver(), null);
+    assert.equal(createAmbientFetchLinqDriver(), null);
   });
 
-  it("uses hosted provider fetch for metadata and downloaded bytes when available", async () => {
+  it("does not fall back to ambient fetch when hosted provider fetch is missing", () => {
+    const globalFetchMock = vi.fn(async () => {
+      throw new Error("global fetch should not be used for hosted Linq attachments");
+    });
+    setFetch(globalFetchMock as typeof globalThis.fetch);
+
+    assert.equal(createHostedLinqAttachmentDownloadDriver({
+      platform: createLogPlatform([]),
+    }), null);
+    expect(globalFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses provider fetch for metadata and public fetch for downloaded bytes", async () => {
     process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
     process.env.LINQ_API_TOKEN = "linq-token";
 
@@ -191,7 +212,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(globalFetchMock as typeof globalThis.fetch);
 
-    const providerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
       if (url === "https://api.linqapp.com/api/partner/v3/attachments/att_image_123") {
         assert.equal(
@@ -208,17 +229,27 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
         });
       }
 
+      throw new Error(`Unexpected provider fetch url: ${url}`);
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
       if (url === "https://cdn.linqapp.com/files/fresh-image.png") {
+        const headers = new Headers(init?.headers);
+        assert.equal(headers.has("x-hosted-runtime-attempt-id"), false);
+        assert.equal(headers.has("x-hosted-runtime-lease-generation"), false);
+        assert.equal(headers.has("x-hosted-runtime-workspace-version"), false);
+        assert.equal(headers.has("x-hosted-runner-bound-user-id"), false);
         return new Response(Uint8Array.from([1, 2, 3]), { status: 200 });
       }
 
-      throw new Error(`Unexpected provider fetch url: ${url}`);
+      throw new Error(`Unexpected public fetch url: ${url}`);
     });
 
     const driver = createHostedLinqAttachmentDownloadDriver({
       platform: {
         ...createLogPlatform([]),
-        providerFetch: providerFetch as typeof fetch,
+        providerFetch,
+        publicInternetFetch,
       },
     });
     assert.ok(driver);
@@ -230,18 +261,27 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       type: "media",
     }, undefined)).resolves.toEqual(Uint8Array.from([1, 2, 3]));
 
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(publicInternetFetch).toHaveBeenCalledTimes(1);
     expect(globalFetchMock).not.toHaveBeenCalled();
   });
 
-  it("uses hosted provider fetch for direct attachment downloads when available", async () => {
+  it("uses public fetch for direct attachment downloads when available", async () => {
     const globalFetchMock = vi.fn(async () => {
       throw new Error("global fetch should not be used for hosted Linq attachments");
     });
     setFetch(globalFetchMock as typeof globalThis.fetch);
 
-    const providerFetch = vi.fn(async (input: RequestInfo | URL) => {
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      throw new Error("provider fetch should not be used for direct attachment bytes");
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.has("x-hosted-runtime-attempt-id"), false);
+      assert.equal(headers.has("x-hosted-runtime-lease-generation"), false);
+      assert.equal(headers.has("x-hosted-runtime-workspace-version"), false);
+      assert.equal(headers.has("x-hosted-runner-bound-user-id"), false);
       if (url === "https://cdn.linqapp.com/files/direct-url.png") {
         return new Response(Uint8Array.from([4, 5, 6]), { status: 200 });
       }
@@ -250,13 +290,14 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
         return new Response(Uint8Array.from([7, 8, 9]), { status: 200 });
       }
 
-      throw new Error(`Unexpected provider fetch url: ${url}`);
+      throw new Error(`Unexpected public fetch url: ${url}`);
     });
 
     const driver = createHostedLinqAttachmentDownloadDriver({
       platform: {
         ...createLogPlatform([]),
-        providerFetch: providerFetch as typeof fetch,
+        providerFetch,
+        publicInternetFetch,
       },
     });
     assert.ok(driver);
@@ -272,7 +313,8 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       url: "https://cdn.linqapp.com/files/direct-part.png",
     }, undefined)).resolves.toEqual(Uint8Array.from([7, 8, 9]));
 
-    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(publicInternetFetch).toHaveBeenCalledTimes(2);
     expect(globalFetchMock).not.toHaveBeenCalled();
   });
 
@@ -280,7 +322,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     const fetchMock = vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 }));
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
 
     await expect(driver.downloadUrl("https://example.com/not-linq", undefined)).resolves.toBeNull();
@@ -293,7 +335,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       new Response(Uint8Array.from([7, 8, 9]), { status: 200 }));
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver({
+    const driver = createAmbientFetchLinqDriver({
       platform: createLogPlatform(logRequests),
     });
     assert.ok(driver);
@@ -338,7 +380,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver({
+    const driver = createAmbientFetchLinqDriver({
       platform: createLogPlatform(logRequests),
     });
     assert.ok(driver);
@@ -400,7 +442,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
 
     await expect(
@@ -450,7 +492,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -493,7 +535,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -536,7 +578,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -580,7 +622,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -627,7 +669,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -667,7 +709,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -692,7 +734,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       }));
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -720,7 +762,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     });
     setFetch(fetchMock as typeof globalThis.fetch);
 
-    const driver = createHostedLinqAttachmentDownloadDriver();
+    const driver = createAmbientFetchLinqDriver();
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 

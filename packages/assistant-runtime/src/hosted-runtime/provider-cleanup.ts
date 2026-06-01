@@ -16,6 +16,9 @@ import type {
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
 import { deleteHostedLinqMessages } from "./message-cleanup.ts";
+import {
+  requireHostedProviderFetchDependencies,
+} from "./provider-fetch.ts";
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
@@ -64,7 +67,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   assertLiveness?: () => Promise<void>;
   env: NodeJS.ProcessEnv;
-  fetchImplementation?: Parameters<typeof deleteHostedLinqMessages>[0]["fetchImplementation"];
+  fetchImplementation: typeof fetch | null;
   checkpoint: HostedProviderCleanupCheckpoint;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -91,11 +94,14 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
 
   try {
     await assertHostedProviderCleanupLiveNow(input);
-    await deleteHostedLinqMessages({
+    const dependencies = requireHostedProviderFetchDependencies({
       env: input.env,
       fetchImplementation: input.fetchImplementation,
+      ...(input.signal ? { signal: input.signal } : {}),
+    }, "Hosted Linq provider cleanup");
+    await deleteHostedLinqMessages({
+      ...dependencies,
       messageIds,
-      signal: input.signal ?? undefined,
     });
     await assertHostedProviderCleanupLiveNow(input);
   } catch (error) {

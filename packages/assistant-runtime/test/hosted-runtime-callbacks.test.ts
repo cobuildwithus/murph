@@ -68,6 +68,9 @@ import {
   drainHostedPreparedAssistantDeliveries,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
+  HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+} from "../src/hosted-runtime/provider-fetch.ts";
+import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
@@ -639,6 +642,7 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
+        providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
         wake: HOSTED_WAKE.wake,
@@ -702,6 +706,7 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
+        providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
         wake: HOSTED_WAKE.wake,
@@ -773,6 +778,7 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
+        providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
         wake: HOSTED_WAKE.wake,
@@ -1061,6 +1067,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
     const assertLiveness = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>();
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
@@ -1076,6 +1083,7 @@ describe("hosted runtime callbacks", () => {
       },
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -1091,6 +1099,8 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
+      fetchImplementation: providerFetch,
+      signal: undefined,
     });
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -1098,6 +1108,33 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+  });
+
+  it("fails closed instead of using ambient fetch when hosted outbox provider fetch is missing", async () => {
+    const effect = createEffect();
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+      throw new Error("unreachable");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      platformEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toMatchObject({
+      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
 
   it("uses providerFetch for hosted Linq deliveries when the runtime can intercept egress", async () => {
@@ -1140,7 +1177,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
-        directRecipientPhoneNumber: null,
+        directRecipientPhoneNumber: "+15550001",
         fromPhoneNumber: "+15550002",
         idempotencyKey: "assistant-outbox:intent_hashed_target",
         message: "hello from hosted",
@@ -1339,6 +1376,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -1352,7 +1390,7 @@ describe("hosted runtime callbacks", () => {
       targetKind: "thread",
     }, {
       env: {},
-      fetchImplementation: undefined,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -1408,6 +1446,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     })).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED",
@@ -1481,6 +1520,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -1495,7 +1535,7 @@ describe("hosted runtime callbacks", () => {
       targetKind: "participant",
     }, {
       env: {},
-      fetchImplementation: undefined,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([

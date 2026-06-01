@@ -25,7 +25,10 @@ type HostedLinqAttachmentDownloadDriver =
   };
 
 type HostedLinqAttachmentDownloadPlatform =
-  Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort" | "providerFetch">;
+  Pick<
+    NormalizedHostedAssistantRuntimeConfig["platform"],
+    "logPort" | "providerFetch" | "publicInternetFetch"
+  >;
 
 type HostedLinqAttachmentDownloadResult = "failed" | "not_downloaded" | "succeeded";
 
@@ -71,16 +74,24 @@ const HOSTED_LINQ_LOCAL_ATTACHMENT_CDN_HOSTNAMES = new Set([
 
 export function createHostedLinqAttachmentDownloadDriver(
   options: {
+    allowAmbientFetchForLocalRuntime?: boolean;
     platform?: HostedLinqAttachmentDownloadPlatform | null;
   } = {},
 ): HostedLinqAttachmentDownloadDriver | null {
   const platform = options.platform ?? null;
-  const fetchImplementation = resolveHostedLinqAttachmentFetchImplementation(platform);
-  if (!fetchImplementation) {
+  const fetchImplementation = resolveHostedLinqAttachmentFetchImplementation({
+    allowAmbientFetchForLocalRuntime: options.allowAmbientFetchForLocalRuntime === true,
+    platform,
+  });
+  const downloadFetch = fetchImplementation?.downloadFetch ?? null;
+  if (!downloadFetch) {
     return null;
   }
+  const metadataFetch = fetchImplementation?.metadataFetch ?? null;
 
-  const apiConfig = resolveHostedLinqAttachmentApiConfig();
+  const apiConfig = metadataFetch
+    ? resolveHostedLinqAttachmentApiConfig()
+    : null;
 
   return {
     downloadUrl: async (url: string, signal?: AbortSignal) => {
@@ -103,7 +114,7 @@ export function createHostedLinqAttachmentDownloadDriver(
 
       try {
         const bytes = await downloadHostedLinqAttachmentBytes(normalizedUrl, {
-          fetchImplementation,
+          fetchImplementation: downloadFetch,
           signal,
         });
         await writeHostedLinqAttachmentDownloadAttemptLog({
@@ -142,7 +153,8 @@ export function createHostedLinqAttachmentDownloadDriver(
     downloadPart: async (part: HostedLinqAttachmentDownloadPart, signal?: AbortSignal) =>
       downloadHostedLinqAttachmentPart({
         apiConfig,
-        fetchImplementation,
+        downloadFetch,
+        metadataFetch,
         part,
         platform,
         signal,
@@ -175,7 +187,8 @@ export function normalizeHostedLinqAttachmentUrl(value: string | null | undefine
 
 async function downloadHostedLinqAttachmentPart(input: {
   apiConfig: HostedLinqAttachmentApiConfig | null;
-  fetchImplementation: typeof fetch;
+  downloadFetch: typeof fetch;
+  metadataFetch: typeof fetch | null;
   part: HostedLinqAttachmentDownloadPart;
   platform: HostedLinqAttachmentDownloadPlatform | null;
   signal?: AbortSignal;
@@ -218,7 +231,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     try {
       const bytes = await downloadHostedLinqAttachmentBytes(directUrl, {
         declaredSize,
-        fetchImplementation: input.fetchImplementation,
+        fetchImplementation: input.downloadFetch,
         signal: input.signal,
       });
       await writeHostedLinqAttachmentDownloadAttemptLog({
@@ -240,7 +253,7 @@ async function downloadHostedLinqAttachmentPart(input: {
   }
 
   const attachmentId = normalizeHostedLinqAttachmentId(input.part.attachmentId);
-  if (!attachmentId || !input.apiConfig) {
+  if (!attachmentId || !input.apiConfig || !input.metadataFetch) {
     await writeHostedLinqAttachmentDownloadAttemptLog({
       attempt: {
         ...baseAttempt,
@@ -249,7 +262,11 @@ async function downloadHostedLinqAttachmentPart(input: {
         directLocatorAllowed: Boolean(directUrl),
         downloadStatus: directFailure?.status ?? null,
         failureCode: directFailure?.code
-          ?? (!attachmentId ? "missing_attachment_key" : "api_not_configured"),
+          ?? (!attachmentId
+            ? "missing_attachment_key"
+            : !input.apiConfig
+              ? "api_not_configured"
+              : "metadata_fetch_unavailable"),
         result: directError ? "failed" : "not_downloaded",
       },
       platform: input.platform,
@@ -265,7 +282,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     apiBaseUrl: input.apiConfig.apiBaseUrl,
     apiToken: input.apiConfig.apiToken,
     attachmentId,
-    fetchImplementation: input.fetchImplementation,
+    fetchImplementation: input.metadataFetch,
     signal: input.signal,
   });
   const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(metadataResult.downloadLocator)
@@ -300,7 +317,7 @@ async function downloadHostedLinqAttachmentPart(input: {
   try {
     const bytes = await downloadHostedLinqAttachmentBytes(normalizedRefreshedUrl, {
       declaredSize,
-      fetchImplementation: input.fetchImplementation,
+      fetchImplementation: input.downloadFetch,
       signal: input.signal,
     });
     await writeHostedLinqAttachmentDownloadAttemptLog({
@@ -577,16 +594,31 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
   }
 }
 
-function resolveHostedLinqAttachmentFetchImplementation(
-  platform: HostedLinqAttachmentDownloadPlatform | null,
-): typeof fetch | null {
-  if (typeof platform?.providerFetch === "function") {
-    return platform.providerFetch;
-  }
-
-  return typeof globalThis.fetch === "function"
+function resolveHostedLinqAttachmentFetchImplementation(input: {
+  allowAmbientFetchForLocalRuntime: boolean;
+  platform: HostedLinqAttachmentDownloadPlatform | null;
+}): {
+  downloadFetch: typeof fetch | null;
+  metadataFetch: typeof fetch | null;
+} | null {
+  const ambientFetch = input.allowAmbientFetchForLocalRuntime && typeof globalThis.fetch === "function"
     ? globalThis.fetch.bind(globalThis) as typeof fetch
     : null;
+  const metadataFetch = typeof input.platform?.providerFetch === "function"
+    ? input.platform.providerFetch
+    : ambientFetch;
+  const downloadFetch = typeof input.platform?.publicInternetFetch === "function"
+    ? input.platform.publicInternetFetch
+    : ambientFetch;
+
+  if (!downloadFetch && !metadataFetch) {
+    return null;
+  }
+
+  return {
+    downloadFetch,
+    metadataFetch,
+  };
 }
 
 function normalizeHostedAttachmentDownloadUrlField(value: unknown): string | null {

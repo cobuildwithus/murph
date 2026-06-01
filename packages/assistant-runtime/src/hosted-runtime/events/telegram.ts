@@ -11,13 +11,17 @@ const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 
 export function createHostedTelegramAttachmentDownloadDriver(
   options: {
+    allowAmbientFetchForLocalRuntime?: boolean;
     env?: Readonly<Record<string, string | undefined>>;
     fetchImplementation?: typeof fetch | null;
   } = {},
 ): TelegramAttachmentDownloadDriver | null {
   const env = options.env ?? process.env;
   const token = readHostedTelegramString(env, "TELEGRAM_BOT_TOKEN");
-  const fetchImplementation = resolveHostedTelegramFetchImplementation(options.fetchImplementation);
+  const fetchImplementation = resolveHostedTelegramFetchImplementation({
+    allowAmbientFetchForLocalRuntime: options.allowAmbientFetchForLocalRuntime === true,
+    fetchImplementation: options.fetchImplementation,
+  });
   if (!token || !fetchImplementation) {
     return null;
   }
@@ -114,16 +118,19 @@ function normalizeHostedTelegramBaseUrl(value: string | null, fallback: string):
 }
 
 function resolveHostedTelegramFetchImplementation(
-  fetchImplementation: typeof fetch | null | undefined,
+  input: {
+    allowAmbientFetchForLocalRuntime: boolean;
+    fetchImplementation: typeof fetch | null | undefined;
+  },
 ): typeof fetch | null {
-  if (typeof fetchImplementation === "function") {
-    return fetchImplementation;
+  if (typeof input.fetchImplementation === "function") {
+    return input.fetchImplementation;
   }
-  if (fetchImplementation === null) {
+  if (input.fetchImplementation === null) {
     return null;
   }
 
-  return typeof globalThis.fetch === "function"
+  return input.allowAmbientFetchForLocalRuntime && typeof globalThis.fetch === "function"
     ? globalThis.fetch.bind(globalThis) as typeof fetch
     : null;
 }

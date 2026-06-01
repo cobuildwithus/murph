@@ -1938,7 +1938,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         forwardedEnv: input.input.runtime.forwardedEnv,
         userEnv: input.input.runtime.userEnv,
       }) as NodeJS.ProcessEnv,
-      fetchImplementation: input.input.runtime.platform.providerFetch ?? undefined,
+      fetchImplementation: input.input.runtime.platform.providerFetch ?? null,
       signal: input.input.signal ?? null,
       vaultRoot: input.input.restored.vaultRoot,
       wake: input.wake,

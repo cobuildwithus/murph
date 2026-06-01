@@ -9,7 +9,6 @@ import {
   markLinqChatRead,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
-  type LinqFetch,
 } from "@murphai/operator-config/linq-runtime";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
@@ -19,6 +18,9 @@ import {
 import {
   deleteHostedLinqMessages,
 } from "./hosted-runtime/message-cleanup.ts";
+import {
+  requireHostedProviderFetchDependencies,
+} from "./hosted-runtime/provider-fetch.ts";
 import type {
   HostedRuntimeLinqChatActionRequest,
   HostedRuntimeLinqDeleteMessagesRequest,
@@ -37,7 +39,13 @@ import type {
 
 export interface HostedProviderEffectDependencies {
   env: NodeJS.ProcessEnv;
-  fetchImplementation?: typeof fetch;
+  fetchImplementation: typeof fetch | null;
+  signal?: AbortSignal;
+}
+
+interface HostedProviderEffectContext {
+  env: NodeJS.ProcessEnv;
+  fetchImplementation: typeof fetch;
   signal?: AbortSignal;
 }
 
@@ -45,10 +53,14 @@ export async function sendHostedProviderTelegramMessage(
   request: HostedRuntimeTelegramSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeTelegramSendResponse> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Telegram message delivery",
+  );
   return await sendTelegramMessage(request, {
-    env: dependencies.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    signal: dependencies.signal,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
   });
 }
 
@@ -57,12 +69,16 @@ export async function sendHostedProviderTelegramChatAction(
   dependencies: HostedProviderEffectDependencies,
 ): Promise<void> {
   assertTypingAction(request.action);
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Telegram chat action",
+  );
   const handle = await startTelegramTypingIndicator({
     target: request.target,
   }, {
-    env: dependencies.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    signal: dependencies.signal,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
   });
   await handle.stop();
 }
@@ -71,39 +87,51 @@ export async function getHostedProviderTelegramFile(
   request: HostedRuntimeTelegramGetFileRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeTelegramFile | null> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Telegram file lookup",
+  );
   const driver = createHostedTelegramAttachmentDownloadDriver({
-    env: dependencies.env,
-    fetchImplementation: dependencies.fetchImplementation,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
   });
   if (!driver) {
     return null;
   }
 
-  return await driver.getFile(request.fileId, dependencies.signal);
+  return await driver.getFile(request.fileId, context.signal);
 }
 
 export async function downloadHostedProviderTelegramFile(
   request: HostedRuntimeTelegramDownloadFileRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<Uint8Array | null> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Telegram file download",
+  );
   const driver = createHostedTelegramAttachmentDownloadDriver({
-    env: dependencies.env,
-    fetchImplementation: dependencies.fetchImplementation,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
   });
   if (!driver) {
     return null;
   }
 
-  return await driver.downloadFile(request.filePath, dependencies.signal);
+  return await driver.downloadFile(request.filePath, context.signal);
 }
 
 export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Linq message delivery",
+  );
   if (shouldMaterializeHostedProviderLinqDirectThreadFirst(request)) {
     const recovered = await materializeHostedProviderLinqDirectThread({
-      dependencies,
+      context,
       request,
     });
     if (recovered) {
@@ -113,10 +141,10 @@ export async function sendHostedProviderLinqMessage(
   }
 
   try {
-    return await sendHostedProviderLinqMessageDirect(request, dependencies);
+    return await sendHostedProviderLinqMessageDirect(request, context);
   } catch (error) {
     const recovered = await maybeRecoverHostedProviderMissingLinqThread({
-      dependencies,
+      context,
       error,
       request,
     });
@@ -131,10 +159,14 @@ export async function sendHostedProviderWhatsAppMessage(
   request: HostedRuntimeWhatsAppSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeWhatsAppSendResponse> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted WhatsApp message delivery",
+  );
   return await sendWhatsAppMessage(request, {
-    env: dependencies.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    signal: dependencies.signal,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
   });
 }
 
@@ -142,16 +174,17 @@ export async function sendHostedProviderLinqChatAction(
   request: HostedRuntimeLinqChatActionRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<void> {
-  const fetchImplementation = adaptHostedProviderFetchForLinq(
-    dependencies.fetchImplementation,
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Linq chat action",
   );
   if (request.action === "typing") {
     await startLinqChatTypingIndicator({
       chatId: request.target,
     }, {
-      env: dependencies.env,
-      fetchImplementation,
-      signal: dependencies.signal,
+      env: context.env,
+      fetchImplementation: context.fetchImplementation,
+      signal: context.signal,
     });
     return;
   }
@@ -160,9 +193,9 @@ export async function sendHostedProviderLinqChatAction(
     await stopLinqChatTypingIndicator({
       chatId: request.target,
     }, {
-      env: dependencies.env,
-      fetchImplementation,
-      signal: dependencies.signal,
+      env: context.env,
+      fetchImplementation: context.fetchImplementation,
+      signal: context.signal,
     });
     return;
   }
@@ -174,14 +207,16 @@ export async function markHostedProviderLinqRead(
   request: HostedRuntimeLinqMarkReadRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<void> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Linq read receipt",
+  );
   await markLinqChatRead({
     chatId: request.chatId,
   }, {
-    env: dependencies.env,
-    fetchImplementation: adaptHostedProviderFetchForLinq(
-      dependencies.fetchImplementation,
-    ),
-    signal: dependencies.signal,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
   });
 }
 
@@ -189,13 +224,15 @@ export async function deleteHostedProviderLinqMessages(
   request: HostedRuntimeLinqDeleteMessagesRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<void> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Linq message cleanup",
+  );
   await deleteHostedLinqMessages({
-    env: dependencies.env,
-    fetchImplementation: adaptHostedProviderFetchForLinq(
-      dependencies.fetchImplementation,
-    ),
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
     messageIds: request.messageIds,
-    signal: dependencies.signal,
+    signal: context.signal,
   });
 }
 
@@ -207,7 +244,7 @@ function assertTypingAction(action: string): asserts action is "typing" {
 
 async function sendHostedProviderLinqMessageDirect(
   request: HostedRuntimeLinqSendRequest,
-  dependencies: HostedProviderEffectDependencies,
+  context: HostedProviderEffectContext,
 ): Promise<HostedRuntimeLinqSendResponse> {
   return await sendLinqMessage({
     fromPhoneNumber: request.fromPhoneNumber ?? null,
@@ -219,24 +256,21 @@ async function sendHostedProviderLinqMessageDirect(
       ? {}
       : { targetKind: request.targetKind }),
   }, {
-    env: dependencies.env,
-    fetchImplementation: adaptHostedProviderFetchForLinq(dependencies.fetchImplementation),
-    signal: dependencies.signal,
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
   });
 }
 
-function adaptHostedProviderFetchForLinq(
-  fetchImplementation: typeof fetch | undefined,
-): LinqFetch | undefined {
-  if (!fetchImplementation) {
-    return undefined;
-  }
-
-  return async (input, init) => fetchImplementation(input, init);
+function createHostedProviderEffectContext(
+  dependencies: HostedProviderEffectDependencies,
+  operation: string,
+): HostedProviderEffectContext {
+  return requireHostedProviderFetchDependencies(dependencies, operation);
 }
 
 async function maybeRecoverHostedProviderMissingLinqThread(input: {
-  dependencies: HostedProviderEffectDependencies;
+  context: HostedProviderEffectContext;
   error: unknown;
   request: HostedRuntimeLinqSendRequest;
 }): Promise<HostedRuntimeLinqSendResponse | null> {
@@ -251,7 +285,7 @@ async function maybeRecoverHostedProviderMissingLinqThread(input: {
 }
 
 async function materializeHostedProviderLinqDirectThread(input: {
-  dependencies: HostedProviderEffectDependencies;
+  context: HostedProviderEffectContext;
   request: HostedRuntimeLinqSendRequest;
 }): Promise<HostedRuntimeLinqSendResponse | null> {
   const recipient = normalizeDirectLinqRecipient(input.request.directRecipientPhoneNumber);
@@ -272,7 +306,7 @@ async function materializeHostedProviderLinqDirectThread(input: {
       replyToMessageId: input.request.replyToMessageId ?? null,
       target: recipient,
       targetKind: "participant",
-    }, input.dependencies);
+    }, input.context);
     const target =
       normalizeHostedProviderText(delivered.target) ??
       normalizeHostedProviderText(delivered.providerThreadId);

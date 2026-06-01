@@ -70,6 +70,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       vaultRoot,
     });
     const assertLiveness = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>();
 
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [
@@ -94,6 +95,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       env: {
         LINQ_API_TOKEN: "test-token",
       },
+      fetchImplementation: providerFetch,
       checkpoint,
       vaultRoot,
       wake,
@@ -110,6 +112,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       env: {
         LINQ_API_TOKEN: "test-token",
       },
+      fetchImplementation: providerFetch,
       messageIds: ["linq_inbound_1", "linq_outbound_1", "linq_outbound_2"],
     });
     await assert.rejects(readHostedProviderCleanupFile(vaultRoot), {
@@ -129,7 +132,7 @@ test("hosted provider cleanup uses direct provider cleanup with provider fetch",
       checkpoint,
       vaultRoot,
     });
-    const providerFetch = vi.fn() as unknown as typeof fetch;
+    const providerFetch = vi.fn<typeof fetch>();
 
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [],
@@ -166,7 +169,6 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
-    mocks.deleteHostedLinqMessages.mockRejectedValueOnce(new Error("delete unavailable"));
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1"],
       checkpoint,
@@ -176,6 +178,7 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [],
       env: {},
+      fetchImplementation: null,
       checkpoint,
       vaultRoot,
       wake,
@@ -190,6 +193,7 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
     const raw = await readHostedProviderCleanupFile(vaultRoot);
     assert.deepEqual(raw.linqMessageIds, ["linq_inbound_1"]);
     assert.deepEqual(raw.checkpoint, checkpoint);
+    expect(mocks.deleteHostedLinqMessages).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
     await cleanup();
@@ -202,7 +206,6 @@ test("hosted provider cleanup persists a future retry checkpoint after failed de
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
-    mocks.deleteHostedLinqMessages.mockRejectedValueOnce(new Error("delete unavailable"));
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1"],
       checkpoint: {
@@ -214,6 +217,7 @@ test("hosted provider cleanup persists a future retry checkpoint after failed de
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [],
       env: {},
+      fetchImplementation: null,
       checkpoint: {
         nextWakeAt: null,
       },
@@ -233,6 +237,7 @@ test("hosted provider cleanup persists a future retry checkpoint after failed de
         nextWakeAt: "2026-04-08T00:05:00.000Z",
       },
     );
+    expect(mocks.deleteHostedLinqMessages).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
     await cleanup();
@@ -255,6 +260,7 @@ test("hosted provider cleanup ignores malformed retry state", async () => {
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [],
       env: {},
+      fetchImplementation: null,
       checkpoint: {
         nextWakeAt: null,
       },

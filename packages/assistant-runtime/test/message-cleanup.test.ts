@@ -1,5 +1,3 @@
-import assert from "node:assert/strict";
-
 import { afterEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -57,6 +55,7 @@ test("deleteHostedLinqMessages deletes unique non-empty ids and forwards depende
 
 test("deleteHostedTelegramMessages skips empty batches after normalization", async () => {
   await deleteHostedTelegramMessages({
+    fetchImplementation: vi.fn(),
     messageIds: ["", "   "],
     target: "chat_123",
   });

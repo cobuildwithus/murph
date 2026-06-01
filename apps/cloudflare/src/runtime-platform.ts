@@ -281,7 +281,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   webControlBaseUrl?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimePlatform {
-  const fetchImpl = createCloudflareHostedProviderFetch(
+  const fetchImpl = createCloudflareHostedInternalFetch(
     input.boundUserId,
     input.fetchImpl ?? fetch,
     {
@@ -655,12 +655,13 @@ export function buildHostedExecutionRuntimePlatform(input: {
             input.boundUserId,
             input.fetchImpl ?? fetch,
             {
-              injectBoundUserIdHeader: input.proxyBoundUserIdHeader ?? false,
+              injectBoundUserIdHeader: true,
               readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
             },
           ),
         }
       : {}),
+    publicInternetFetch: createCloudflareHostedPublicInternetFetch(input.fetchImpl ?? fetch),
     ...(hostedWebControlTransport
       ? {
           logPort: createHostedWebRuntimeLogPort({
@@ -1123,8 +1124,8 @@ export function createCloudflareHostedProviderFetch(
   fetchImpl: typeof fetch,
   options: {
     injectBoundUserIdHeader?: boolean;
-    readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
-  } = {},
+    readCurrentLease: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
+  },
 ): typeof fetch {
   const internalFetch = createCloudflareHostedInternalFetch(boundUserId, fetchImpl, options);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1133,18 +1134,60 @@ export function createCloudflareHostedProviderFetch(
     if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
       return await internalFetch(request);
     }
+    assertCloudflareHostedProviderFetchHost(url);
 
     const headers = new Headers(request.headers);
-    const lease = await options.readCurrentLease?.() ?? null;
-    if (options.injectBoundUserIdHeader && lease) {
-      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    const lease = await options.readCurrentLease();
+    if (!lease) {
+      throw new Error(
+        `Hosted provider request for ${url.hostname} is missing a runtime write-fence lease.`,
+      );
     }
-    if (options.injectBoundUserIdHeader) {
-      headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
-    }
+    writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
 
     return await fetchImpl(new Request(request, { headers }));
   }) as typeof fetch;
+}
+
+const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
+  "api.linqapp.com",
+  "api.mapbox.com",
+  "api.openai.com",
+  "api.telegram.org",
+  "graph.facebook.com",
+]);
+
+function assertCloudflareHostedProviderFetchHost(url: URL): void {
+  if (CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES.has(normalizeCloudflareHostedFetchHostname(url.hostname))) {
+    return;
+  }
+
+  throw new Error(
+    `Hosted provider request for ${url.hostname} is not routed through the hosted provider egress boundary.`,
+  );
+}
+
+function createCloudflareHostedPublicInternetFetch(fetchImpl: typeof fetch): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    const headers = stripCloudflareHostedRuntimeAuthorityHeaders(request.headers);
+    return await fetchImpl(new Request(request, { headers }));
+  }) as typeof fetch;
+}
+
+function stripCloudflareHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
+  const stripped = new Headers(headers);
+  stripped.delete(HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
+  stripped.delete(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+  stripped.delete(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+  stripped.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
+  stripped.delete("x-hosted-execution-runner-proxy-token");
+  return stripped;
+}
+
+function normalizeCloudflareHostedFetchHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/u, "");
 }
 
 function isInternalAuthorityRejectedStatus(status: number): boolean {

@@ -15,6 +15,10 @@ import {
   markLinqChatRead,
 } from "@murphai/operator-config/linq-runtime";
 
+import {
+  requireHostedProviderFetchDependencies,
+} from "./provider-fetch.ts";
+
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
@@ -86,24 +90,26 @@ export function createHostedAssistantChannelTypingDependencies(input: {
 }): AssistantChannelTypingDependencies {
   return {
     startLinqTyping: async (request) => {
-      return startLinqTypingIndicator(request, {
+      const dependencies = requireHostedProviderFetchDependencies({
         env: buildHostedLinqChannelEnv({
           forwardedEnv: input.forwardedEnv,
           userEnv: input.userEnv,
         }) as NodeJS.ProcessEnv,
-        fetchImplementation: input.providerFetch ?? undefined,
+        fetchImplementation: input.providerFetch,
         signal: input.signal,
-      });
+      }, "Hosted Linq typing indicator");
+      return startLinqTypingIndicator(request, dependencies);
     },
     startTelegramTyping: async (request) => {
-      return startTelegramTypingIndicator(request, {
+      const dependencies = requireHostedProviderFetchDependencies({
         env: buildHostedTelegramChannelEnv({
           forwardedEnv: input.forwardedEnv,
           platformEnv: input.platformEnv,
         }) as NodeJS.ProcessEnv,
-        fetchImplementation: input.providerFetch ?? undefined,
+        fetchImplementation: input.providerFetch,
         signal: input.signal,
-      });
+      }, "Hosted Telegram typing indicator");
+      return startTelegramTypingIndicator(request, dependencies);
     },
   };
 }
@@ -125,18 +131,19 @@ export async function markHostedConversationReadBestEffort(input: {
   }
 
   try {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: buildHostedLinqChannelEnv({
+        forwardedEnv: input.forwardedEnv,
+        userEnv: input.userEnv,
+      }) as NodeJS.ProcessEnv,
+      fetchImplementation: input.providerFetch,
+      signal: input.signal,
+    }, "Hosted Linq read receipt");
     await markLinqChatRead(
       {
         chatId: linqMessage.chatId,
       },
-      {
-        env: buildHostedLinqChannelEnv({
-          forwardedEnv: input.forwardedEnv,
-          userEnv: input.userEnv,
-        }) as NodeJS.ProcessEnv,
-        fetchImplementation: input.providerFetch ?? undefined,
-        signal: input.signal,
-      },
+      dependencies,
     );
   } catch {
     // Best-effort provider-visible acknowledgement; local import remains authoritative.

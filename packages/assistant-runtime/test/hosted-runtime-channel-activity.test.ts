@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { beforeEach, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import {
   buildHostedExecutionLinqConversationMessageWake,
@@ -79,6 +79,7 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
     platformEnv: {
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
+    providerFetch: vi.fn<typeof fetch>(),
     userEnv,
   });
 
@@ -87,6 +88,7 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
   });
   await markHostedConversationReadBestEffort({
     forwardedEnv,
+    providerFetch: vi.fn<typeof fetch>(),
     userEnv,
     wake: buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
@@ -170,6 +172,7 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
       TELEGRAM_BOT_TOKEN: "untrusted-forwarded-token",
     },
     platformEnv: telegramEnv,
+    providerFetch: vi.fn<typeof fetch>(),
     userEnv: {},
   });
 
@@ -181,7 +184,7 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
 });
 
 test("hosted channel activity uses provider fetch instead of effects-port provider tunnels", async () => {
-  const providerFetch = vi.fn() as unknown as typeof fetch;
+  const providerFetch = vi.fn<typeof fetch>();
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {},
     platformEnv: {},
@@ -220,8 +223,42 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
   assert.equal(mocks.markLinqChatRead.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
 });
 
+test("hosted channel activity does not use ambient fetch when provider fetch is missing", async () => {
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {},
+    platformEnv: {},
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "linq_chat_123",
+  })).rejects.toMatchObject({
+    code: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
+  });
+  await markHostedConversationReadBestEffort({
+    forwardedEnv: {},
+    userEnv: {},
+    wake: buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup",
+      userId: "member_123",
+    }),
+  });
+
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+  expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
+});
+
 test("hosted progress delivery dependencies use the hosted Linq provider effect", async () => {
-  const providerFetch = vi.fn() as unknown as typeof fetch;
+  const providerFetch = vi.fn<typeof fetch>();
   const signal = new AbortController().signal;
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     forwardedEnv: {
@@ -290,6 +327,7 @@ test("hosted progress Linq delivery aborts provider send when request signal abo
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",
     },
+    providerFetch: vi.fn<typeof fetch>(),
     userEnv: {},
   });
 
@@ -328,6 +366,7 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",
     },
+    providerFetch: vi.fn<typeof fetch>(),
     userEnv: {},
     wake,
   });

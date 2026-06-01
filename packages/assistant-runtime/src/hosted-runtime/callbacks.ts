@@ -50,6 +50,9 @@ import {
   resolveHostedAssistantLinqDeliveryContextForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import {
+  requireHostedProviderFetchDependencies,
+} from "./provider-fetch.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
@@ -436,12 +439,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          providerDispatchEntered = true;
-          const result = await sendTelegramMessage(request, {
+          const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
-            fetchImplementation: input.providerFetch ?? undefined,
-            signal: input.signal ?? undefined,
-          });
+            fetchImplementation: input.providerFetch,
+            ...(input.signal ? { signal: input.signal } : {}),
+          }, "Hosted assistant Telegram delivery");
+          providerDispatchEntered = true;
+          const result = await sendTelegramMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -459,12 +463,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          providerDispatchEntered = true;
-          const result = await sendWhatsAppMessage(request, {
+          const dependencies = requireHostedProviderFetchDependencies({
             env: input.whatsAppEnv,
-            fetchImplementation: input.providerFetch ?? undefined,
-            signal: input.signal ?? undefined,
-          });
+            fetchImplementation: input.providerFetch,
+            ...(input.signal ? { signal: input.signal } : {}),
+          }, "Hosted assistant WhatsApp delivery");
+          providerDispatchEntered = true;
+          const result = await sendWhatsAppMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -560,6 +565,11 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.linqEnv,
+      fetchImplementation: input.providerFetch,
+      ...(signal ? { signal } : {}),
+    }, "Hosted assistant Linq delivery");
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({
       directRecipientPhoneNumber,
@@ -569,11 +579,7 @@ function createHostedAssistantLinqSendDependency(input: {
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
-    }, {
-      env: input.linqEnv,
-      fetchImplementation: input.providerFetch ?? undefined,
-      signal,
-    });
+    }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;
   };

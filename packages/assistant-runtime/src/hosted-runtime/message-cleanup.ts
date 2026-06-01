@@ -9,11 +9,15 @@ import {
 
 export async function deleteHostedLinqMessages(input: {
   env?: NodeJS.ProcessEnv;
-  fetchImplementation?: LinqFetch;
+  fetchImplementation: LinqFetch;
   messageIds: readonly string[];
   signal?: AbortSignal;
 }): Promise<void> {
   const messageIds = normalizeHostedProviderMessageIds(input.messageIds);
+  if (messageIds.length === 0) {
+    return;
+  }
+
   for (const messageId of messageIds) {
     await deleteLinqMessage({
       messageId,
@@ -27,7 +31,7 @@ export async function deleteHostedLinqMessages(input: {
 
 export async function deleteHostedTelegramMessages(input: {
   env?: NodeJS.ProcessEnv;
-  fetchImplementation?: TelegramFetchImplementation;
+  fetchImplementation: TelegramFetchImplementation;
   messageIds: readonly string[];
   signal?: AbortSignal;
   target: string;
