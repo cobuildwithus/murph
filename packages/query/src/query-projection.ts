@@ -41,6 +41,7 @@ import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
   readVaultSourceTolerant,
+  type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
 import type {
@@ -93,6 +94,8 @@ function readStoredPublicWearableSummaryBundle(
     filters,
   );
 }
+
+const pendingQueryProjectionRebuilds = new Map<string, Promise<void>>();
 
 export async function getQueryProjectionStatus(
   vaultRoot: string,
@@ -292,8 +295,60 @@ async function ensureFreshQueryProjection(
   const status = await readProjectionStatus(location, currentManifest);
 
   if (!status?.fresh) {
-    await rebuildQueryProjectionWithManifest(vaultRoot, currentManifest, location, readSource);
+    await rebuildQueryProjectionWithManifestOnce({
+      currentManifest,
+      location,
+      readSource,
+      vaultRoot,
+    });
+    const rebuiltStatus = await readProjectionStatus(location, currentManifest);
+
+    if (!rebuiltStatus?.fresh) {
+      const refreshedManifest = await listCanonicalSourceManifest(vaultRoot);
+      const refreshedStatus = await readProjectionStatus(location, refreshedManifest);
+
+      if (!refreshedStatus?.fresh) {
+        await rebuildQueryProjectionWithManifestOnce({
+          currentManifest: refreshedManifest,
+          location,
+          readSource,
+          vaultRoot,
+        });
+      }
+    }
   }
 
   return location;
+}
+
+async function rebuildQueryProjectionWithManifestOnce(input: {
+  currentManifest: readonly QuerySourceManifestEntry[];
+  location: QueryProjectionLocation;
+  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot>;
+  vaultRoot: string;
+}): Promise<void> {
+  const key = input.location.absolutePath;
+  const pending = pendingQueryProjectionRebuilds.get(key);
+
+  if (pending) {
+    await pending;
+    return;
+  }
+
+  const rebuild = rebuildQueryProjectionWithManifest(
+    input.vaultRoot,
+    input.currentManifest,
+    input.location,
+    input.readSource,
+  ).then(() => undefined);
+
+  pendingQueryProjectionRebuilds.set(key, rebuild);
+
+  try {
+    await rebuild;
+  } finally {
+    if (pendingQueryProjectionRebuilds.get(key) === rebuild) {
+      pendingQueryProjectionRebuilds.delete(key);
+    }
+  }
 }
