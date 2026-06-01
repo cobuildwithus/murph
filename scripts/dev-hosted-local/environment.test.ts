@@ -245,6 +245,7 @@ describe("mergeCloudflareLocalEnv", () => {
       generatedAuthorityPrivateJwkJson,
     );
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
+    expect(merged.HOSTED_LOG_FINGERPRINT_SECRET).toBe("generated-envelope");
     expect(merged.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
     expect(merged.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON).toBeUndefined();
     expect(merged.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
@@ -267,6 +268,44 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
+  });
+
+  it("preserves an existing hosted-local log fingerprint secret", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_LOG_FINGERPRINT_SECRET: "persisted-log-fingerprint-secret",
+      },
+      oidcIdentity,
+      createEnvelopeKey: () => "generated-envelope",
+    });
+
+    expect(merged.HOSTED_LOG_FINGERPRINT_SECRET).toBe(
+      "persisted-log-fingerprint-secret",
+    );
+  });
+
+  it("generates the Worker log fingerprint secret for hosted-local E2E isolation", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+      },
+      createEnvelopeKey: () => "generated-envelope",
+    });
+    const workerEnvText = buildWranglerEnvFileText(merged);
+    const workerConfig = buildWranglerLocalDevConfig(merged);
+
+    expect(merged.HOSTED_LOG_FINGERPRINT_SECRET).toBe("generated-envelope");
+    expect(workerEnvText).toContain(
+      'HOSTED_LOG_FINGERPRINT_SECRET="generated-envelope"',
+    );
+    expect(readRequiredSecretNames(workerConfig)).toContain(
+      "HOSTED_LOG_FINGERPRINT_SECRET",
+    );
   });
 
   it("lets current env overrides replace stale existing optional worker vars", () => {
@@ -1140,9 +1179,16 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
+        HOSTED_LOG_FINGERPRINT_SECRET: "local-log-fingerprint-secret",
         HOSTED_MAILBOX_FINGERPRINT_KEY: "mailbox-fingerprint-key",
       }),
     ).not.toContain("HOSTED_MAILBOX_FINGERPRINT_KEY");
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
+        HOSTED_LOG_FINGERPRINT_SECRET: "local-log-fingerprint-secret",
+      }),
+    ).toContain('HOSTED_LOG_FINGERPRINT_SECRET="local-log-fingerprint-secret"');
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
@@ -1193,11 +1239,12 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).not.toContain("HOSTED_WEB_ENCRYPTION_KEY_VERSION=");
   });
 
-  it("writes only hosted-local keyring state for persistence", () => {
+  it("writes only hosted-local generated state for persistence", () => {
     const text = buildHostedLocalStateEnvFileText({
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: generatedPrivateJwkJson,
       HOSTED_CRYPTO_ENV: "local",
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
+      HOSTED_LOG_FINGERPRINT_SECRET: "local-log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
       LINQ_API_TOKEN: "remote-linq-token",
     });
@@ -1205,6 +1252,7 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK=");
     expect(text).toContain('HOSTED_CRYPTO_ENV="local"');
     expect(text).toContain('HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY="local-wrap-key"');
+    expect(text).toContain('HOSTED_LOG_FINGERPRINT_SECRET="local-log-fingerprint-secret"');
     expect(text).toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=");
     expect(text).not.toContain("LINQ_API_TOKEN");
   });
@@ -1217,11 +1265,13 @@ describe("buildWranglerEnvFileText", () => {
         "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "test-wrap-key",
       HOSTED_DEVICE_ROUTING_INDEX_KEY: "device-routing-key",
+      HOSTED_LOG_FINGERPRINT_SECRET: "test-log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
       LINQ_API_TOKEN: "remote-linq-token",
     });
 
     expect(text).not.toContain("HOSTED_CRYPTO_");
+    expect(text).not.toContain("HOSTED_LOG_FINGERPRINT_SECRET");
     expect(text).not.toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
     expect(text).toContain('HOSTED_DEVICE_ROUTING_INDEX_KEY="device-routing-key"');
     expect(text).not.toContain("LINQ_API_TOKEN");
@@ -1383,6 +1433,19 @@ describe("buildWranglerLocalDevConfig", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
     });
     expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
+  });
+
+  it("declares the log fingerprint key as a local worker secret", () => {
+    const config = buildWranglerLocalDevConfig({
+      HOSTED_LOG_FINGERPRINT_SECRET: "local-log-fingerprint-secret",
+    });
+
+    expect(config.secrets).toEqual({
+      required: expect.arrayContaining([
+        "HOSTED_LOG_FINGERPRINT_SECRET",
+      ]),
+    });
+    expect(config.vars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
   });
 
   it("declares each local worker secret binding only once", () => {

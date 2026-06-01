@@ -248,6 +248,9 @@ export function mergeCloudflareLocalEnv(input: {
   });
   const hostedDeviceRoutingIndexKey =
     readHostedLocalKey("HOSTED_DEVICE_ROUTING_INDEX_KEY") ?? createEnvelopeKey();
+  const hostedLogFingerprintSecret =
+    normalizeOptionalString(resolvedExisting.HOSTED_LOG_FINGERPRINT_SECRET)
+    ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
   const workerOrigin =
     `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
@@ -310,6 +313,7 @@ export function mergeCloudflareLocalEnv(input: {
     ...(localKmsWrapKey ? { HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: localKmsWrapKey } : {}),
     ...hostedLocalR2PresignEnv,
     HOSTED_DEVICE_ROUTING_INDEX_KEY: hostedDeviceRoutingIndexKey,
+    HOSTED_LOG_FINGERPRINT_SECRET: hostedLogFingerprintSecret,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
@@ -871,6 +875,7 @@ export function buildHostedLocalStateEnvFileText(
       !shouldPersistGeneratedCryptoState
       && (
         key.startsWith("HOSTED_CRYPTO_")
+        || key === "HOSTED_LOG_FINGERPRINT_SECRET"
         || key.startsWith("HOSTED_WEB_CALLBACK_SIGNING_")
       )
     ) {
