@@ -2361,6 +2361,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+    const recordLatencyTrace = vi.fn(async () => ({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    }));
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_bridge_decoder_conversation",
       linqMessage: {
@@ -2391,7 +2396,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       decodeMailboxPayload,
-      platform: createPlatform({ putArtifact: async () => {} }),
+      platform: createPlatform({
+        latencyTracePort: {
+          record: recordLatencyTrace,
+        },
+        putArtifact: async () => {},
+      }),
       readEncryptionEnvironment,
       request: createBridgeRequest(item.userId),
       runtime: {
@@ -2420,10 +2430,20 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         },
         state: "route",
       },
+    }, {
+      runtimeAttemptId: "attempt_1",
     })).resolves.toMatchObject({
       status: "imported",
     });
 
+    expect(recordLatencyTrace).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        mailboxItemId: item.id,
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      }),
+    });
     expect(decodeMailboxPayload.decode).toHaveBeenCalledWith({
       itemRef: {
         dedupeKey: item.dedupeKey,
@@ -2767,6 +2787,7 @@ Run the sauna protocol and review the resulting biomarker trend.
 
 function createPlatform(input: {
   getArtifact?: (hash: string) => Promise<Uint8Array | null>;
+  latencyTracePort?: NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["latencyTracePort"]>;
   omitBrowserVaultReplicaPort?: boolean;
   putArtifact: (payload: { bytes: Uint8Array; sha256: string }) => Promise<void>;
   readWorkspace?: () => Promise<HostedWorkspaceReadResponse>;
@@ -2808,6 +2829,11 @@ function createPlatform(input: {
       readRawEmailMessage: async () => null,
       sendEmail: async () => undefined,
     },
+    ...(input.latencyTracePort
+      ? {
+          latencyTracePort: input.latencyTracePort,
+        }
+      : {}),
     ...(input.writeLog
       ? {
           logPort: {

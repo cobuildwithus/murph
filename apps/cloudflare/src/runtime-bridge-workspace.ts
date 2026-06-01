@@ -95,6 +95,8 @@ type HostedWorkspaceRuntimeBridgeImportItem =
   HostedWorkspaceRuntimeJobOptions["importItem"];
 type HostedWorkspaceRuntimeBridgeImportItemInput =
   Parameters<HostedWorkspaceRuntimeBridgeImportItem>[0];
+type HostedWorkspaceRuntimeBridgeImportItemContext =
+  Parameters<HostedWorkspaceRuntimeBridgeImportItem>[1];
 type HostedRuntimeBridgeReadCurrentLease = () =>
   | HostedRuntimeBridgeCheckpointLease
   | null
@@ -1086,6 +1088,7 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
 
     return importHostedWorkspaceBridgeMailboxItem({
       ...input,
+      context,
       importConversationItem,
       item,
     });
@@ -1093,9 +1096,9 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
 }
 
 async function importHostedWorkspaceBridgeMailboxItem(input: {
-  importConversationItem: (item: HostedWorkspaceRuntimeBridgeImportItemInput) =>
-    ReturnType<HostedWorkspaceRuntimeBridgeImportItem>;
+  importConversationItem: HostedWorkspaceRuntimeBridgeImportItem;
   item: HostedWorkspaceRuntimeBridgeImportItemInput;
+  context?: HostedWorkspaceRuntimeBridgeImportItemContext;
   decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
   runtime: {
     forwardedEnv: Readonly<Record<string, string>>;
@@ -1108,7 +1111,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     input.item.route.action === "import-conversation-message"
     && input.item.item.kind === "conversation.message"
   ) {
-    return await input.importConversationItem(input.item);
+    return await input.importConversationItem(input.item, input.context);
   }
 
   if (
