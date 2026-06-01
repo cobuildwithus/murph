@@ -651,6 +651,41 @@ test("Junction REST diagnostic probes a resource without returning raw records",
   );
 });
 
+test("Junction REST diagnostics use date params for date-only summary resources", async () => {
+  const seenUrls: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    seenUrls.push(url);
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/menstrual_cycle/junction-user-1")) {
+      return createJsonResponse({ menstrual_cycle: [] });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["menstrual_cycle"],
+    timeseriesResources: [],
+  });
+  const probeRest = provider.diagnostics?.probeRest;
+  assert.ok(probeRest);
+
+  await probeRest({
+    account: createAccount(),
+    endpoint: "summary",
+    now: "2026-04-03T12:00:00.000Z",
+    resource: "menstrual_cycle",
+    windowStart: "2026-04-02T10:15:30.000Z",
+    windowEnd: "2026-04-03T11:45:00.000Z",
+  });
+
+  assert.equal(seenUrls.length, 1);
+  assertJunctionWindowQuery(
+    requireValue(seenUrls[0], "Junction summary diagnostic should issue one read request."),
+    "2026-04-02",
+    "2026-04-03",
+  );
+});
+
 test("Junction maps the weight timeseries resource to the documented body_weight endpoint", async () => {
   const seenUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -1167,6 +1202,70 @@ for (const testCase of usefulHistoricalSummaryCompletionCases) {
   });
 }
 
+test("Junction summary reads extract the documented top-level meals envelope", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              meal: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/meal/junction-user-1")) {
+      return createJsonResponse({
+        meals: [{
+          id: "meal-doc-envelope-1",
+          mealType: "breakfast",
+          sourceProviderSlug: "garmin",
+        }],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["meal"],
+    timeseriesResources: [],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  const mealRecord = snapshot.summaries?.meal?.[0];
+  assert.equal(mealRecord?.id, "meal-doc-envelope-1");
+  assert.equal(Object.hasOwn(mealRecord ?? {}, "meals"), false);
+});
+
 for (const testCase of [
   {
     label: "meal identity/debug-only",
@@ -1346,8 +1445,10 @@ for (const summaryResource of ["sleep", "workouts", "body"] as const) {
 
 test("Junction sleep_cycle stage-count-only historical backfill marks the historical window complete", async () => {
   const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
+    requests.push(url);
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
@@ -1408,6 +1509,11 @@ test("Junction sleep_cycle stage-count-only historical backfill marks the histor
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
+  const summaryRequest = requireValue(
+    requests.find((url) => url.includes("/v2/summary/sleep_cycle/")),
+    "Junction sleep-cycle backfill should fetch REST summary data.",
+  );
+  assertJunctionWindowQuery(summaryRequest, "2026-04-01", "2026-04-02");
 });
 
 for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const) {

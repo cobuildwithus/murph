@@ -88,6 +88,7 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
+const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["menstrual_cycle", "sleep_cycle"]);
 
 export const JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS = Object.freeze([
   "junction.com",
@@ -293,7 +294,10 @@ export class JunctionClient {
   async listSummary(input: JunctionWindowInput): Promise<unknown[]> {
     return this.fetchWindowedCollection(
       `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
-      input,
+      {
+        ...input,
+        dateQueryFormat: resolveJunctionSummaryDateQueryFormat(input),
+      },
       { endpointKind: "junction_summary_collection" },
     );
   }
@@ -599,6 +603,12 @@ function resolveJunctionTimeseriesApiResource(resource: string): string {
   return resource === "weight" ? "body_weight" : resource;
 }
 
+function resolveJunctionSummaryDateQueryFormat(input: JunctionWindowInput): JunctionDateQueryFormat {
+  return JUNCTION_DATE_ONLY_SUMMARY_RESOURCES.has(input.resource)
+    ? "date"
+    : input.dateQueryFormat ?? "datetime";
+}
+
 function normalizeJunctionRefreshTimeoutSeconds(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -840,9 +850,13 @@ function extractCollectionRecords(payload: unknown, resource?: string): unknown[
   }
 
   const record = payload as Record<string, unknown>;
-  const resourceRecords = resource ? record[resource] : undefined;
-  if (Array.isArray(resourceRecords)) {
-    return resourceRecords;
+  if (resource) {
+    for (const resourceKey of resolveCollectionEnvelopeKeys(resource)) {
+      const resourceRecords = record[resourceKey];
+      if (Array.isArray(resourceRecords)) {
+        return resourceRecords;
+      }
+    }
   }
 
   const candidates = [
@@ -860,6 +874,10 @@ function extractCollectionRecords(payload: unknown, resource?: string): unknown[
   }
 
   return resource ? [record] : [];
+}
+
+function resolveCollectionEnvelopeKeys(resource: string): readonly string[] {
+  return resource === "meal" ? ["meal", "meals"] : [resource];
 }
 
 function extractTimeseriesRecords(payload: unknown, resource: string): unknown[] {
