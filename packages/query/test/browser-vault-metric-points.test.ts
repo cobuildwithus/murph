@@ -51,6 +51,29 @@ test("browser-vault exposes metric-key rows and selections without legacy domain
   assert.deepEqual(client.metrics.seriesMany([{ metricKey: "hrv-rmssd" }, { metricKey: "deep-sleep-minutes" }]).map((series) => series.at(-1)?.value), [72, 81]);
 });
 
+test("browser-vault biomarker selection prefers the primary metric when secondary metrics share a biomarker", () => {
+  const points: MetricPoint[] = [
+    point("2026-04-29", "lowest-spo2", "biomarker:blood-oxygen-spo2", 91.2, "percent"),
+    point("2026-04-29", "spo2", "biomarker:blood-oxygen-spo2", 97.1, "percent"),
+  ];
+  const metricRows = toBrowserVaultMetricRows({ points });
+  const metricSelectionRows = createBrowserVaultMetricSelectionRows({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    metricPoints: points,
+    requestedMetrics: [
+      { metricKey: "lowest-spo2", biomarkerKey: "biomarker:blood-oxygen-spo2" },
+      { metricKey: "spo2", biomarkerKey: "biomarker:blood-oxygen-spo2" },
+    ],
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplica({
+    metricRows,
+    metricSelectionRows,
+  })));
+
+  assert.equal(client.metricSelections.getByBiomarker("biomarker:blood-oxygen-spo2")?.metricKey, "spo2");
+  assert.equal(client.metricSelections.get("lowest-spo2")?.value, 91.2);
+});
+
 function point(date: string, metricKey: string, biomarkerKey: string | null, value: number, unit: string): MetricPoint {
   return {
     biomarkerKey,

@@ -70,6 +70,84 @@ test("browser vault replica creation emits metric-key rows from wearable and vau
   assert.equal(Object.hasOwn(replica, "metricDayRows"), false);
 });
 
+test("browser vault replica creation emits Junction blood oxygen aggregate rows", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-22T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createCanonicalEntity("event", "evt_junction_spo2_mean", {
+          attributes: {
+            dataOrigin: { sourceProviderSlug: "garmin", sourceType: "watch" },
+            externalRef: {
+              facet: "spo2",
+              resourceId: "blood-oxygen-2026-04-22",
+              resourceType: "junction-garmin-blood-oxygen",
+              system: "junction",
+            },
+            metric: "spo2",
+            observationGrain: "daily_timeseries_aggregate",
+            sampleCount: 3,
+            unit: "%",
+            value: 95.9333,
+          },
+          date: "2026-04-22",
+          kind: "observation",
+          occurredAt: "2026-04-22T08:15:00.000Z",
+          title: "Junction blood oxygen average",
+        }),
+        createCanonicalEntity("event", "evt_junction_spo2_min", {
+          attributes: {
+            dataOrigin: { sourceProviderSlug: "garmin", sourceType: "watch" },
+            externalRef: {
+              facet: "lowest-spo2",
+              resourceId: "blood-oxygen-2026-04-22",
+              resourceType: "junction-garmin-blood-oxygen",
+              system: "junction",
+            },
+            metric: "lowest-spo2",
+            minObservedAt: "2026-04-22T07:45:00.000Z",
+            observationGrain: "daily_timeseries_aggregate",
+            sampleCount: 3,
+            unit: "%",
+            value: 92.5,
+          },
+          date: "2026-04-22",
+          kind: "observation",
+          occurredAt: "2026-04-22T08:15:00.000Z",
+          title: "Junction blood oxygen minimum",
+        }),
+      ],
+      metadata: { title: "Junction blood oxygen browser vault" },
+      vaultRoot: "browser://junction-spo2",
+    }),
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  assert.equal(replica.metricRows.some((row) =>
+    row.metricKey === "spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 95.9333
+  ), true);
+  assert.equal(replica.metricRows.some((row) =>
+    row.metricKey === "lowest-spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 92.5
+  ), true);
+  assert.equal(replica.metricSelectionRows.some((row) =>
+    row.metricKey === "spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 95.9333
+  ), true);
+  assert.equal(replica.metricSelectionRows.some((row) =>
+    row.metricKey === "lowest-spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 92.5
+  ), true);
+  assert.equal(client.metricSelections.getByBiomarker("biomarker:blood-oxygen-spo2")?.metricKey, "spo2");
+  assert.equal(client.metricSelections.get("lowest-spo2")?.metricKey, "lowest-spo2");
+});
+
 test("browser vault replica excludes dense provider observations but keeps display-grade facts", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-20T12:00:00.000Z",

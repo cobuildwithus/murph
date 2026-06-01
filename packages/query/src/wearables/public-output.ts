@@ -138,6 +138,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     night.hrv,
     night.lightMinutes,
     night.lowestHeartRate,
+    night.lowestSpo2,
     night.remMinutes,
     night.respiratoryRate,
     night.sessionMinutes,
@@ -155,6 +156,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
   const hrv = projectWearableResolvedMetricPublicSources(night.hrv);
   const lightMinutes = projectWearableResolvedMetricPublicSources(night.lightMinutes);
   const lowestHeartRate = projectWearableResolvedMetricPublicSources(night.lowestHeartRate);
+  const lowestSpo2 = projectWearableResolvedMetricPublicSources(night.lowestSpo2);
   const remMinutes = projectWearableResolvedMetricPublicSources(night.remMinutes);
   const respiratoryRate = projectWearableResolvedMetricPublicSources(night.respiratoryRate);
   const sessionMinutes = projectWearableResolvedMetricPublicSources(night.sessionMinutes);
@@ -175,6 +177,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     ["sleepConsistency", sleepConsistency],
     ["averageHeartRate", averageHeartRate],
     ["lowestHeartRate", lowestHeartRate],
+    ["lowestSpo2", lowestSpo2],
     ["hrv", hrv],
     ["respiratoryRate", respiratoryRate],
     ["spo2", spo2],
@@ -195,6 +198,7 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     hrv,
     lightMinutes,
     lowestHeartRate,
+    lowestSpo2,
     notes: projectSummaryNotes({
       metrics: projectedMetrics,
       originalNotes: night.notes,

@@ -101,6 +101,7 @@ export interface WearableSleepNight {
   hrv: WearableResolvedMetric;
   lightMinutes: WearableResolvedMetric;
   lowestHeartRate: WearableResolvedMetric;
+  lowestSpo2: WearableResolvedMetric;
   notes: string[];
   provider: string | null;
   remMinutes: WearableResolvedMetric;
@@ -425,6 +426,7 @@ export const SLEEP_METRIC_KEYS = new Set<WearableMetricKey>([
   "hrv",
   "lightMinutes",
   "lowestHeartRate",
+  "lowestSpo2",
   "remMinutes",
   "respiratoryRate",
   "sessionMinutes",

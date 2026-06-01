@@ -407,6 +407,9 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     const lowestHeartRate = resolveMetric("lowestHeartRate", selectMetricCandidates(dateCandidates, "lowestHeartRate"), {
       metricFamily: "sleep",
     });
+    const lowestSpo2 = resolveMetric("lowestSpo2", selectMetricCandidates(dateCandidates, "lowestSpo2"), {
+      metricFamily: "sleep",
+    });
     const hrv = resolveMetric("hrv", selectMetricCandidates(dateCandidates, "hrv"), {
       metricFamily: "sleep",
     });
@@ -426,6 +429,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       ["sleepConsistency", sleepConsistency],
       ["averageHeartRate", averageHeartRate],
       ["lowestHeartRate", lowestHeartRate],
+      ["lowestSpo2", lowestSpo2],
       ["hrv", hrv],
       ["respiratoryRate", respiratoryRate],
       ["spo2", spo2],
@@ -448,6 +452,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       hrv,
       lightMinutes,
       lowestHeartRate,
+      lowestSpo2,
       notes,
       provider: windowSelection.selection?.provider ?? null,
       remMinutes,

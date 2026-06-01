@@ -334,6 +334,65 @@ test("renders private trend values for catalog-supported biomarker keys", () => 
   }
 });
 
+test("renders secondary private biomarker metrics from Health Commons bindings", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("blood-oxygen-spo2");
+  assert.ok(biomarker);
+  const averageRows = metricRowsForTest({
+    biomarkerKey: biomarker.key,
+    metricKey: "spo2",
+    rows: [
+      ["2026-04-25", 96.4],
+      ["2026-04-26", 96.8],
+      ["2026-04-27", 96.9],
+      ["2026-04-28", 97],
+      ["2026-04-29", 97.1],
+    ],
+    unit: "percent",
+  });
+  const minimumRows = metricRowsForTest({
+    biomarkerKey: biomarker.key,
+    metricKey: "lowest-spo2",
+    rows: [
+      ["2026-04-25", 92.8],
+      ["2026-04-26", 93.1],
+      ["2026-04-27", 92.4],
+      ["2026-04-28", 91.9],
+      ["2026-04-29", 91.2],
+    ],
+    unit: "percent",
+  });
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: createBrowserVaultQueryClient(createReplica({
+      metricRows: [...averageRows, ...minimumRows],
+      metricSelectionRows: [
+        metricSelectionFromRows(averageRows),
+        metricSelectionFromRows(minimumRows, {
+          status: "stale",
+          warnings: [{ code: "SOURCE_STALE", message: "Source is stale." }],
+        }),
+      ],
+    })),
+    dataVersion: "sha256:browser-vault-private-card-test",
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+  );
+
+  assert.match(markup, /Latest/u);
+  assert.match(markup, />97\.1</u);
+  assert.match(markup, /Lowest blood oxygen/u);
+  assert.match(markup, />91\.2</u);
+  assert.match(markup, /Stale/u);
+  assert.match(markup, />%<\/span>/u);
+  assert.doesNotMatch(markup, /Biomarker unavailable/u);
+});
+
 test("renders the insufficient-data state from real browser-vault rows", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);

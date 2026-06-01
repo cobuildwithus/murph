@@ -40,12 +40,23 @@ interface TrendLatestValue {
   value: number;
 }
 
+interface TrendContextValue {
+  date: string;
+  label: string;
+  sourceLabel: string;
+  stale: boolean;
+  unit: string;
+  value: number;
+  valuePrecision: number;
+}
+
 type PrivateTrendState =
   | { status: "loading" }
   | { body: string; detail?: string; panelStatus: BrowserVaultBiomarkerPanelStatus; status: "empty"; title: string }
   | { message: string; status: "error" }
   | {
       comparison: BrowserVaultBiomarkerTrend | null;
+      context: TrendContextValue[];
       latest: TrendLatestValue;
       series: TrendPoint[];
       stale: boolean;
@@ -132,28 +143,31 @@ export function BiomarkerPrivateTrendCard({
   }
 
   return (
-    <div className="grid items-start gap-6 md:grid-cols-[minmax(0,1fr)_280px]">
-      <TrendLineChart series={trend.series} unit={biomarker.unit} precision={biomarker.valuePrecision} />
-      <div className="flex flex-col gap-4">
-        <MetricCard
-          label="Latest"
-          value={formatMetricValue(trend.latest.value, biomarker.valuePrecision)}
-          unit={biomarker.unit}
-          delta={avg7 !== null && avg7 !== 0 ? `${Math.abs(((trend.latest.value - avg7) / avg7) * 100).toFixed(1)}%` : ""}
-          deltaTone="neutral"
-          direction={avg7 !== null && avg7 !== 0 ? (Math.abs(((trend.latest.value - avg7) / avg7) * 100) < 1 ? "neutral" : trend.latest.value > avg7 ? "up" : "down") : "neutral"}
-          baseline={`${formatChipLabel(trend.latest.sourceLabel)} · ${formatDateLabel(trend.latest.date)}`}
-        />
-        <MetricCard
-          label="7-day average"
-          value={avg7 !== null ? formatMetricValue(avg7, biomarker.valuePrecision) : "---"}
-          unit={biomarker.unit}
-          delta={pctChange !== null ? `${Math.abs(pctChange).toFixed(1)}%` : ""}
-          deltaTone="neutral"
-          direction={pctDirection}
-          baseline={avg30 !== null ? `30d avg: ${formatMetricValue(avg30, biomarker.valuePrecision)}${abbreviateUnit(biomarker.unit)}` : undefined}
-        />
+    <div className="flex flex-col gap-4">
+      <div className="grid items-start gap-6 md:grid-cols-[minmax(0,1fr)_280px]">
+        <TrendLineChart series={trend.series} unit={biomarker.unit} precision={biomarker.valuePrecision} />
+        <div className="flex flex-col gap-4">
+          <MetricCard
+            label="Latest"
+            value={formatMetricValue(trend.latest.value, biomarker.valuePrecision)}
+            unit={biomarker.unit}
+            delta={avg7 !== null && avg7 !== 0 ? `${Math.abs(((trend.latest.value - avg7) / avg7) * 100).toFixed(1)}%` : ""}
+            deltaTone="neutral"
+            direction={avg7 !== null && avg7 !== 0 ? (Math.abs(((trend.latest.value - avg7) / avg7) * 100) < 1 ? "neutral" : trend.latest.value > avg7 ? "up" : "down") : "neutral"}
+            baseline={`${formatChipLabel(trend.latest.sourceLabel)} · ${formatDateLabel(trend.latest.date)}`}
+          />
+          <MetricCard
+            label="7-day average"
+            value={avg7 !== null ? formatMetricValue(avg7, biomarker.valuePrecision) : "---"}
+            unit={biomarker.unit}
+            delta={pctChange !== null ? `${Math.abs(pctChange).toFixed(1)}%` : ""}
+            deltaTone="neutral"
+            direction={pctDirection}
+            baseline={avg30 !== null ? `30d avg: ${formatMetricValue(avg30, biomarker.valuePrecision)}${abbreviateUnit(biomarker.unit)}` : undefined}
+          />
+        </div>
       </div>
+      {trend.context.length > 0 ? <ContextMetricStrip metrics={trend.context} /> : null}
     </div>
   );
 }
@@ -204,7 +218,7 @@ function TrendLineChart({ series, unit, precision }: { precision: number; series
           domain={["auto", "auto"]}
           className="text-[10px]"
         />
-<ChartTooltip
+        <ChartTooltip
           cursor={false}
           content={
             <ChartTooltipContent
@@ -290,6 +304,20 @@ function resolvePrivateTrend(input: {
 
   return {
     comparison: panel.primary?.trend ?? null,
+    context: panel.context.flatMap((contextPanel) => {
+      const contextLatest = contextPanel.latest;
+      if (!contextLatest) return [];
+
+      return [{
+        date: contextLatest.date,
+        label: contextPanel.label,
+        sourceLabel: contextLatest.sourceLabel,
+        stale: contextPanel.selection?.status === "stale",
+        unit: contextPanel.unit,
+        value: contextLatest.value,
+        valuePrecision: contextPanel.valuePrecision,
+      }];
+    }),
     latest: {
       confidence: latest.confidence,
       date: latest.date,
@@ -300,6 +328,42 @@ function resolvePrivateTrend(input: {
     stale: panel.status === "stale",
     status: "ready",
   };
+}
+
+function ContextMetricStrip({ metrics }: { metrics: TrendContextValue[] }) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-2">
+      {metrics.map((metric) => (
+        <div
+          key={`${metric.label}:${metric.sourceLabel}:${metric.date}`}
+          className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3"
+        >
+          <dt className="flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-widest text-foreground/50">
+            <span className="min-w-0 truncate">{metric.label}</span>
+            {metric.stale ? (
+              <span className="shrink-0 text-[9px] text-muted-foreground">
+                Stale
+              </span>
+            ) : null}
+          </dt>
+          <dd className="mt-1 flex items-baseline gap-1.5">
+            <span className="font-serif text-2xl font-semibold text-foreground">
+              {formatMetricValue(metric.value, metric.valuePrecision)}
+            </span>
+            <span className="text-sm text-foreground/50">
+              {displayUnitLabel(metric.unit)}
+            </span>
+          </dd>
+          <div
+            className="mt-1 min-w-0 truncate text-xs text-foreground/45"
+            title={`${formatChipLabel(metric.sourceLabel)} · ${formatDateLabel(metric.date)}`}
+          >
+            {formatChipLabel(metric.sourceLabel)} · {formatDateLabel(metric.date)}
+          </div>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function emptyStateAction(status: BrowserVaultBiomarkerPanelStatus): { href: string; label: string } | null {
@@ -354,6 +418,10 @@ const unitAbbreviations: Record<string, string> = {
 
 function abbreviateUnit(unit: string): string {
   return unitAbbreviations[unit.toLowerCase()] ?? ` ${unit}`;
+}
+
+function displayUnitLabel(unit: string): string {
+  return unit.toLowerCase() === "percent" ? "%" : unit;
 }
 
 function formatChipLabel(value: string): string {

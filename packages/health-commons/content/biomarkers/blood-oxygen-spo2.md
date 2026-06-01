@@ -46,6 +46,11 @@ biomarker:
       source: metric
       metricKey: spo2
       role: primary
+    -
+      source: metric
+      metricKey: lowest-spo2
+      role: secondary
+      unit: "%"
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 30

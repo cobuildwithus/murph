@@ -305,8 +305,33 @@ const JUNCTION_WORKOUT_STABLE_ID_PATHS = [
   ...JUNCTION_WORKOUT_ID_PATHS,
   ...JUNCTION_GENERIC_SUMMARY_ID_PATHS,
 ] as const;
+const JUNCTION_BLOOD_OXYGEN_VALUE_PATHS = [
+  "value",
+  "spo2",
+  "spO2",
+  "bloodOxygen",
+  "blood_oxygen",
+  "oxygenSaturation",
+  "oxygen_saturation",
+] as const;
 
 type JunctionSleepStage = JunctionSleepStageValue;
+
+interface BloodOxygenDailyAggregate {
+  dayKey: string;
+  entry: PlainObject;
+  firstSampleAt: string;
+  lastRecordedAt?: string;
+  lastSampleAt: string;
+  maxValue: number;
+  minObservedAt: string;
+  minValue: number;
+  resourceContext: ResourceContext;
+  sampleCount: number;
+  sum: number;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return junctionSnapshotSchema.parse(snapshot);
@@ -430,7 +455,158 @@ function normalizeTimeseries(
         ),
       ),
     );
+
+    if (resource === "blood_oxygen") {
+      pushBloodOxygenDailyObservations(payload, resource, resourceSlug, context);
+    }
   }
+}
+
+function pushBloodOxygenDailyObservations(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  const fallbackArtifactRole = `junction-timeseries-${resourceSlug}`;
+  const aggregates = new Map<string, BloodOxygenDailyAggregate>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole,
+      context,
+    });
+
+    if (!resourceContext) {
+      continue;
+    }
+
+    const value = normalizeBloodOxygenPercent(
+      firstNumberFromPaths(entry, JUNCTION_BLOOD_OXYGEN_VALUE_PATHS),
+    );
+    const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+    const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
+    const dayKey = timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+
+    if (value === undefined || !sampleAt || !dayKey) {
+      continue;
+    }
+
+    const key = [
+      resourceContext.externalRefResourceType,
+      resourceContext.origin.sourceType ?? "",
+      resourceContext.origin.sourceInstanceId ?? "",
+      dayKey,
+    ].join("\u0000");
+    const existing = aggregates.get(key);
+    const recordedAt = timestamp.recordedAt ?? sampleAt;
+    const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+
+    if (!existing) {
+      aggregates.set(key, {
+        dayKey,
+        entry,
+        firstSampleAt: sampleAt,
+        lastRecordedAt: recordedAt,
+        lastSampleAt: sampleAt,
+        maxValue: value,
+        minObservedAt: sampleAt,
+        minValue: value,
+        resourceContext,
+        sampleCount: 1,
+        sum: value,
+        timestamp,
+        timeZone,
+      });
+      continue;
+    }
+
+    existing.sampleCount += 1;
+    existing.sum += value;
+    existing.maxValue = Math.max(existing.maxValue, value);
+
+    if (sampleAt < existing.firstSampleAt) {
+      existing.firstSampleAt = sampleAt;
+    }
+
+    if (sampleAt >= existing.lastSampleAt) {
+      existing.lastSampleAt = sampleAt;
+      existing.lastRecordedAt = recordedAt;
+      existing.timestamp = timestamp;
+    }
+
+    if (value < existing.minValue) {
+      existing.minValue = value;
+      existing.minObservedAt = sampleAt;
+    }
+  }
+
+  for (const aggregate of [...aggregates.values()].sort(compareBloodOxygenDailyAggregates)) {
+    const meanValue = roundBloodOxygenValue(aggregate.sum / aggregate.sampleCount);
+    pushBloodOxygenDailyObservation(context, aggregate, {
+      metric: "spo2",
+      statistic: "mean",
+      title: "Junction blood oxygen average",
+      value: meanValue,
+    });
+    pushBloodOxygenDailyObservation(context, aggregate, {
+      metric: "lowest-spo2",
+      statistic: "min",
+      title: "Junction blood oxygen minimum",
+      value: aggregate.minValue,
+    });
+  }
+}
+
+function pushBloodOxygenDailyObservation(
+  context: NormalizationContext,
+  aggregate: BloodOxygenDailyAggregate,
+  observation: {
+    metric: "spo2" | "lowest-spo2";
+    statistic: "mean" | "min";
+    title: string;
+    value: number;
+  },
+): void {
+  const timestamp = withTimestampOverride(aggregate.timestamp, {
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    observedAtRaw: `${aggregate.dayKey}:blood_oxygen:daily`,
+  });
+
+  context.events.push(stripUndefined({
+    kind: "observation",
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    timeZone: aggregate.timeZone,
+    source: "device",
+    title: observation.title,
+    rawArtifactRoles: aggregate.resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
+    dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
+    fields: stripUndefined({
+      metric: observation.metric,
+      observationGrain: "daily_timeseries_aggregate",
+      aggregationWindow: "day",
+      statistic: observation.statistic,
+      value: roundBloodOxygenValue(observation.value),
+      unit: "%",
+      sampleCount: aggregate.sampleCount,
+      firstSampleAt: aggregate.firstSampleAt,
+      lastSampleAt: aggregate.lastSampleAt,
+      minValue: aggregate.minValue,
+      maxValue: aggregate.maxValue,
+      minObservedAt: observation.statistic === "min" ? aggregate.minObservedAt : undefined,
+    }),
+  }));
 }
 
 function withJunctionTimeseriesMetadata(
@@ -1475,6 +1651,50 @@ function resourceEntries(payload: unknown): JunctionResourceEntry[] {
   return normalized ? expandResourceEntry(normalized) : [];
 }
 
+function timeseriesResourceEntries(payload: unknown): JunctionResourceEntry[] {
+  const groupedEntries = groupedTimeseriesResourceEntries(payload);
+  return groupedEntries.length > 0 ? groupedEntries : resourceEntries(payload);
+}
+
+function groupedTimeseriesResourceEntries(payload: unknown): JunctionResourceEntry[] {
+  const envelope = asPlainObject(payload);
+  const groups = asPlainObject(envelope?.groups);
+
+  if (!groups) {
+    return [];
+  }
+
+  return Object.entries(groups).flatMap(([groupedSourceSlug, groupPayload]) =>
+    asArray(groupPayload).flatMap((groupEntry) => {
+      const groupRecord = asPlainObject(groupEntry);
+      if (!groupRecord) {
+        return [];
+      }
+
+      const originFallback = stripUndefined({
+        ...groupRecord,
+        groupedSourceSlug,
+      });
+      const nestedEntries = readNestedResourceEntries(groupRecord);
+
+      if (!nestedEntries) {
+        return [{
+          entry: {
+            ...groupRecord,
+            groupedSourceSlug,
+          },
+          originFallback,
+        }];
+      }
+
+      return nestedEntries.map((nestedEntry) => ({
+        entry: mergeNestedResourceEntry(groupRecord, nestedEntry),
+        originFallback,
+      }));
+    })
+  );
+}
+
 function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
   return collectSleepStageIntervalEntries(entry);
 }
@@ -1746,6 +1966,30 @@ function normalizePercentRatio(value: unknown): number | undefined {
   }
 
   return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
+}
+
+function normalizeBloodOxygenPercent(value: unknown): number | undefined {
+  const numeric = normalizePercentRatio(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 100) {
+    return undefined;
+  }
+
+  return roundBloodOxygenValue(numeric);
+}
+
+function roundBloodOxygenValue(value: number): number {
+  return Number(value.toFixed(4));
+}
+
+function compareBloodOxygenDailyAggregates(
+  left: BloodOxygenDailyAggregate,
+  right: BloodOxygenDailyAggregate,
+): number {
+  return left.dayKey.localeCompare(right.dayKey)
+    || left.resourceContext.sourceProviderSlug.localeCompare(right.resourceContext.sourceProviderSlug)
+    || (left.resourceContext.origin.sourceType ?? "").localeCompare(right.resourceContext.origin.sourceType ?? "")
+    || (left.resourceContext.origin.sourceInstanceId ?? "").localeCompare(right.resourceContext.origin.sourceInstanceId ?? "");
 }
 
 function firstStringFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | undefined {

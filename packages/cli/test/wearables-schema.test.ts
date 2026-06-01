@@ -31,6 +31,7 @@ test("wearables day schema preserves fallback selection metadata", () => {
         hrv: resolvedMetric(),
         lightMinutes: resolvedMetric(),
         lowestHeartRate: resolvedMetric(),
+        lowestSpo2: resolvedMetric({ metric: "lowestSpo2" }),
         notes: [],
         provider: "oura",
         remMinutes: resolvedMetric(),
@@ -82,6 +83,7 @@ test("wearables day schema preserves fallback selection metadata", () => {
   );
   assert.equal(parsed.summary?.sleep?.sessionMinutes.selection.resolution, "fallback");
   assert.equal(parsed.summary?.sleep?.sessionMinutes.selection.fallbackFromMetric, "totalSleepMinutes");
+  assert.equal(parsed.summary?.sleep?.lowestSpo2.metric, "lowestSpo2");
   assert.equal("vault" in parsed, false);
 });
 

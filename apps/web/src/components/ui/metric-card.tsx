@@ -16,7 +16,7 @@ interface MetricCardProps {
   label: string;
   value: string;
   unit?: string;
-  delta: string;
+  delta?: string;
   direction?: "up" | "down" | "neutral" | null;
   deltaTone?: "directional" | "neutral";
   sentiment?: "positive" | "negative" | "neutral";
@@ -56,9 +56,11 @@ export function MetricCard({
           {value}
         </span>
         {unit && <span className="text-sm text-foreground/50">{unit}</span>}
-        <span className={resolveDeltaClassName(deltaTone, direction, sentiment)}>
-          {arrows[direction ?? "neutral"]} {delta}
-        </span>
+        {delta ? (
+          <span className={resolveDeltaClassName(deltaTone, direction, sentiment)}>
+            {arrows[direction ?? "neutral"]} {delta}
+          </span>
+        ) : null}
       </div>
       {footer ? (
         <span

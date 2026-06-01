@@ -444,6 +444,7 @@ function sleepResolvedMetrics(summary: ProjectedWearableSleepSummary): WearableR
     summary.hrv,
     summary.lightMinutes,
     summary.lowestHeartRate,
+    summary.lowestSpo2,
     summary.remMinutes,
     summary.respiratoryRate,
     summary.sessionMinutes,

@@ -744,7 +744,7 @@ test("Junction normalizer keeps respiratory rate unit aliases in raw timeseries 
   }
 });
 
-test("Junction normalizer keeps blood oxygen unit aliases in raw timeseries evidence", async () => {
+test("Junction normalizer derives display-grade blood oxygen facts from timeseries unit aliases", async () => {
   const bloodOxygenUnits = [
     undefined,
     "spo2",
@@ -783,11 +783,116 @@ test("Junction normalizer keeps blood oxygen unit aliases in raw timeseries evid
       },
     });
 
-    const event = payload.events?.find((entry) => entry.fields?.metric === "spo2");
+    const meanEvent = payload.events?.find((entry) => entry.fields?.metric === "spo2");
+    const minimumEvent = payload.events?.find((entry) => entry.fields?.metric === "lowest-spo2");
+    const rawBloodOxygenArtifact = payload.rawArtifacts?.find((artifact) =>
+      artifact.role === "junction-timeseries-blood-oxygen"
+    );
+    const rawBloodOxygenArtifactText = JSON.stringify(rawBloodOxygenArtifact?.content);
+
     assert.deepEqual(payload.provenance?.timeseriesResources, ["blood_oxygen"]);
     assert.equal(payload.samples?.length ?? 0, 0);
-    assert.equal(event, undefined);
+    assert.equal(meanEvent?.fields?.value, 97.2);
+    assert.equal(meanEvent?.fields?.unit, "%");
+    assert.equal(meanEvent?.fields?.sampleCount, 1);
+    assert.equal(meanEvent?.fields?.observationGrain, "daily_timeseries_aggregate");
+    assert.equal(meanEvent?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.equal(minimumEvent?.fields?.value, 97.2);
+    assert.equal(minimumEvent?.fields?.statistic, "min");
+
+    if (unit === undefined) {
+      assert.doesNotMatch(rawBloodOxygenArtifactText, /"unit":/u);
+    } else {
+      assert.match(rawBloodOxygenArtifactText, new RegExp(`"unit":"${unit}"`, "u"));
+    }
   }
+});
+
+test("Junction normalizer compacts blood oxygen timeseries into daily average and minimum facts", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    timeseries: {
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T07:15:00Z", unit: "percent", value: 97.2 },
+              { timestamp: "2026-04-22T07:45:00Z", unit: "percent", value: 92.5 },
+              { timestamp: "2026-04-22T08:15:00Z", unit: "percent", value: 98.1 },
+              { timestamp: "2026-04-23T07:15:00Z", unit: "percent", value: 96.4 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const events = payload.events ?? [];
+  const dayOneMean = events.find((event) =>
+    event.dayKey === "2026-04-22" && event.fields?.metric === "spo2"
+  );
+  const dayOneMinimum = events.find((event) =>
+    event.dayKey === "2026-04-22" && event.fields?.metric === "lowest-spo2"
+  );
+  const dayTwoMean = events.find((event) =>
+    event.dayKey === "2026-04-23" && event.fields?.metric === "spo2"
+  );
+  const bloodOxygenEvents = events.filter((event) =>
+    event.fields?.metric === "spo2" || event.fields?.metric === "lowest-spo2"
+  );
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(bloodOxygenEvents.length, 4);
+  assert.equal(dayOneMean?.fields?.value, 95.9333);
+  assert.equal(dayOneMean?.fields?.sampleCount, 3);
+  assert.equal(dayOneMean?.fields?.minValue, 92.5);
+  assert.equal(dayOneMean?.fields?.maxValue, 98.1);
+  assert.equal(dayOneMean?.fields?.firstSampleAt, "2026-04-22T07:15:00.000Z");
+  assert.equal(dayOneMean?.fields?.lastSampleAt, "2026-04-22T08:15:00.000Z");
+  assert.equal(dayOneMinimum?.fields?.value, 92.5);
+  assert.equal(dayOneMinimum?.fields?.minObservedAt, "2026-04-22T07:45:00.000Z");
+  assert.equal(dayTwoMean?.fields?.value, 96.4);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
+});
+
+test("Junction normalizer derives blood oxygen aggregates from aliases and skips invalid samples", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    timeseries: {
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T07:15:00Z", spo2: 0.972 },
+              { timestamp: "2026-04-22T07:45:00Z", bloodOxygen: 94.6 },
+              { timestamp: "2026-04-22T08:15:00Z", oxygen_saturation: 120 },
+              { timestamp: "2026-04-22T08:45:00Z", value: 0 },
+            ],
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+          }],
+        },
+      },
+    },
+  });
+
+  const bloodOxygenEvents = payload.events?.filter((event) =>
+    event.fields?.metric === "spo2" || event.fields?.metric === "lowest-spo2"
+  ) ?? [];
+  const meanEvent = bloodOxygenEvents.find((event) => event.fields?.metric === "spo2");
+  const minimumEvent = bloodOxygenEvents.find((event) => event.fields?.metric === "lowest-spo2");
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(bloodOxygenEvents.length, 2);
+  assert.equal(meanEvent?.fields?.value, 95.9);
+  assert.equal(meanEvent?.fields?.sampleCount, 2);
+  assert.equal(meanEvent?.fields?.minValue, 94.6);
+  assert.equal(meanEvent?.fields?.maxValue, 97.2);
+  assert.equal(meanEvent?.dataOrigin?.sourceProviderSlug, "garmin");
+  assert.equal(meanEvent?.dataOrigin?.sourceType, "watch");
+  assert.equal(minimumEvent?.fields?.value, 94.6);
+  assert.equal(minimumEvent?.fields?.minObservedAt, "2026-04-22T07:45:00.000Z");
 });
 
 test("Junction snapshot import minimizes grouped source identifiers in raw receipts", async () => {

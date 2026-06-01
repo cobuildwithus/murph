@@ -1,4 +1,3 @@
-import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
@@ -13,9 +12,9 @@ test("biomarker detail layout hides route tab navigation", () => {
   }
 
   const markup = renderToStaticMarkup(
-    createElement(BiomarkerLayoutClient, {
-      biomarker,
-    }, createElement("div", null, "overview")),
+    <BiomarkerLayoutClient biomarker={biomarker}>
+      <div>overview</div>
+    </BiomarkerLayoutClient>,
   );
 
   expect(markup).toContain("overview");

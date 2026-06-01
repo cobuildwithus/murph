@@ -132,6 +132,7 @@ const wearableSleepSummarySchema = z.object({
   hrv: wearableResolvedMetricSchema,
   lightMinutes: wearableResolvedMetricSchema,
   lowestHeartRate: wearableResolvedMetricSchema,
+  lowestSpo2: wearableResolvedMetricSchema,
   notes: z.array(z.string()),
   provider: nullableTextSchema,
   remMinutes: wearableResolvedMetricSchema,
