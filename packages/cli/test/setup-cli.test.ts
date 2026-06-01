@@ -74,7 +74,10 @@ import {
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
-const SETUP_ALIAS_TIMEOUT_MS = 90_000
+const SETUP_ALIAS_COMMAND_TIMEOUT_MS = 30_000
+// Five alias subprocesses run serially here; keep the test budget above the
+// sum of the per-command budgets so failures come from the child timeout.
+const SETUP_ALIAS_TIMEOUT_MS = SETUP_ALIAS_COMMAND_TIMEOUT_MS * 6
 const SETUP_ONBOARD_TIMEOUT_MS = 90_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
@@ -859,6 +862,7 @@ async function runSetupAliasRaw(
         ...process.env,
         ...options?.env,
       }),
+      timeout: SETUP_ALIAS_COMMAND_TIMEOUT_MS,
     }
 
     try {
@@ -3423,13 +3427,11 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
 })
 
 test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
-  const [help, onboardHelp, useHelp, emptyInvocation, inboxHelp] = await Promise.all([
-    runSetupAliasRaw('murph', ['--help']),
-    runSetupAliasRaw('murph', ['onboard', '--help']),
-    runSetupAliasRaw('murph', ['use', '--help']),
-    runSetupAliasRaw('murph', []),
-    runSetupAliasRaw('murph', ['inbox', 'doctor', '--help']),
-  ])
+  const help = await runSetupAliasRaw('murph', ['--help'])
+  const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
+  const useHelp = await runSetupAliasRaw('murph', ['use', '--help'])
+  const emptyInvocation = await runSetupAliasRaw('murph', [])
+  const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
 
   assert.match(help, /Murph local machine onboarding helpers\./u)
   assert.match(

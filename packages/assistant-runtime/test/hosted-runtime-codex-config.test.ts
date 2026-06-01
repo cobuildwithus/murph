@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -45,6 +45,9 @@ import {
   buildHostedCodexConfigToml,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV,
+} from "../src/hosted-runtime/codex-e2e-app-server-stub.ts";
 
 const temporaryPaths: string[] = [];
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
@@ -489,6 +492,138 @@ test("hosted Codex runtime local E2E app-server stub preserves ordinary JSON res
         notificationDecision,
         "directive text",
       ],
+    );
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
+test("hosted Codex runtime local E2E app-server stub runs vault-cli directives through the package CLI", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const trustedCliRoot = await createTemporaryDirectory();
+  const shadowCwdRoot = await createTemporaryDirectory();
+  const trustedCliPackageRoot = path.join(trustedCliRoot, "packages", "cli");
+  const shadowCliPackageRoot = path.join(shadowCwdRoot, "packages", "cli");
+  const shadowCliNodeModulesScope = path.join(shadowCwdRoot, "node_modules", "@murphai");
+  const trustedCliDistDir = path.join(trustedCliPackageRoot, "dist");
+  const shadowCliDistDir = path.join(shadowCliPackageRoot, "dist");
+  const trustedCliArgsPath = path.join(trustedCliRoot, "vault-cli-args.json");
+  const shadowCliArgsPath = path.join(shadowCwdRoot, "shadow-vault-cli-args.json");
+  await mkdir(trustedCliDistDir, { recursive: true });
+  await mkdir(shadowCliDistDir, { recursive: true });
+  await mkdir(shadowCliNodeModulesScope, { recursive: true });
+  await symlink("../../packages/cli", path.join(shadowCliNodeModulesScope, "murph"));
+  await writeFile(
+    path.join(trustedCliPackageRoot, "package.json"),
+    JSON.stringify({
+      main: "./dist/index.js",
+      name: "@murphai/murph",
+    }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(shadowCliPackageRoot, "package.json"),
+    JSON.stringify({
+      main: "./dist/index.js",
+      name: "@murphai/murph",
+    }),
+    "utf8",
+  );
+  await writeFile(path.join(trustedCliDistDir, "index.js"), "", "utf8");
+  await writeFile(path.join(shadowCliDistDir, "index.js"), "", "utf8");
+  await writeFile(
+    path.join(trustedCliDistDir, "bin.js"),
+    [
+      `#!${process.execPath}`,
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.env.MURPH_E2E_VAULT_CLI_ARGS_PATH, JSON.stringify(process.argv.slice(2)));",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(shadowCliDistDir, "bin.js"),
+    [
+      `#!${process.execPath}`,
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.env.MURPH_E2E_SHADOW_VAULT_CLI_ARGS_PATH, JSON.stringify(process.argv.slice(2)));",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const trustedCliBinPath = path.join(trustedCliDistDir, "bin.js");
+  await chmod(trustedCliBinPath, 0o700);
+  await chmod(path.join(shadowCliDistDir, "bin.js"), 0o700);
+
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseText: JSON.stringify({
+      __murphE2eVaultCliCommands: [
+        {
+          args: [
+            "automation",
+            "save",
+            "Sleep reminder",
+            "--schedule-at",
+            "2026-04-08T03:03:00.000Z",
+          ],
+        },
+      ],
+      text: "directive text",
+    }),
+  });
+
+  try {
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV]:
+          trustedCliBinPath,
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "secret-openai-key",
+      },
+    });
+    const trustedRuntimeCliPath =
+      result.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV];
+    assert.equal(typeof trustedRuntimeCliPath, "string");
+    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
+      cwd: shadowCwdRoot,
+      env: {
+        ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV]: trustedRuntimeCliPath,
+        MURPH_E2E_SHADOW_VAULT_CLI_ARGS_PATH: shadowCliArgsPath,
+        MURPH_E2E_VAULT_CLI_ARGS_PATH: trustedCliArgsPath,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const messages = await runHostedLocalCodexStubTurn(child);
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(
+      JSON.parse(await readFile(trustedCliArgsPath, "utf8")),
+      [
+        "automation",
+        "save",
+        "Sleep reminder",
+        "--schedule-at",
+        "2026-04-08T03:03:00.000Z",
+      ],
+    );
+    await assert.rejects(readFile(shadowCliArgsPath, "utf8"), /ENOENT/u);
+    assert.deepEqual(
+      messages
+        .filter((message) => message.type === "item.completed")
+        .map((message) =>
+          typeof message.item === "object" && message.item !== null && "text" in message.item
+            ? (message.item as { text?: unknown }).text
+            : null
+        ),
+      ["directive text"],
     );
   } finally {
     await closeHttpServer(server);

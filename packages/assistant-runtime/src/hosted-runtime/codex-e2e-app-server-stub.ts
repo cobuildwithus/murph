@@ -1,5 +1,6 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   HostedAssistantConfigurationError,
@@ -17,6 +18,8 @@ import {
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
 const DEFAULT_HOSTED_CODEX_PATH =
   "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+export const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV =
+  "MURPH_E2E_TRUSTED_MURPH_CLI_PATH";
 
 export async function maybeInstallHostedE2ECodexAppServerStub(input: {
   codexHome: string;
@@ -26,6 +29,13 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
 
   if (!assistantProviderBaseUrl) {
     return;
+  }
+
+  const trustedMurphCliPath = await resolveHostedE2ETrustedMurphCliPath(input.runtimeEnv);
+  if (trustedMurphCliPath) {
+    input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV] = trustedMurphCliPath;
+  } else {
+    delete input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV];
   }
 
   await installHostedE2ECodexShim({
@@ -56,6 +66,7 @@ const readline = require("node:readline");
 
 const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
 const expectedThreadStartDynamicTools = ${JSON.stringify(expectedThreadStartDynamicTools)};
+const trustedMurphCliPathEnv = ${JSON.stringify(HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV)};
 const turnDelayMs = ${JSON.stringify(turnDelayMs)};
 const processThreadPrefix = String(process.pid % 1000000).padStart(6, "0");
 let threadCounter = 0;
@@ -542,9 +553,82 @@ function validateE2EVaultCliAutomationSaveArgs(args) {
   }
 }
 
+function resolveE2EVaultCliInvocation(args) {
+  const packageCliPath = resolveE2EMurphPackageCliPath();
+  if (packageCliPath) {
+    return {
+      command: process.execPath,
+      args: [packageCliPath, ...args],
+    };
+  }
+
+  throw new Error("Unable to resolve a trusted E2E vault-cli binary");
+}
+
+function resolveE2EMurphPackageCliPath() {
+  const configuredCliPath = resolveE2ETrustedMurphCliPathFromEnv();
+  if (configuredCliPath) {
+    return configuredCliPath;
+  }
+  return resolveE2EMurphPackageCliPathFromTrustedRoot("/app");
+}
+
+function resolveE2ETrustedMurphCliPathFromEnv() {
+  const configured = process.env[trustedMurphCliPathEnv];
+  if (typeof configured !== "string" || !configured.trim()) {
+    return null;
+  }
+
+  return resolveE2ETrustedMurphCliPath(configured);
+}
+
+function resolveE2ETrustedMurphCliPath(candidate) {
+  try {
+    const cliPath = fs.realpathSync(candidate);
+    if (path.basename(cliPath) !== "bin.js") {
+      return null;
+    }
+    const packageRoot = path.dirname(path.dirname(cliPath));
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+    );
+    if (!packageJson || packageJson.name !== "@murphai/murph") {
+      return null;
+    }
+    if (!isE2EPathWithin(cliPath, packageRoot)) {
+      return null;
+    }
+    return cliPath;
+  } catch {
+    return null;
+  }
+}
+
+function resolveE2EMurphPackageCliPathFromTrustedRoot(root) {
+  try {
+    const trustedRoot = path.resolve(root);
+    const entrypoint = require.resolve("@murphai/murph", {
+      paths: [trustedRoot],
+    });
+    const cliPath = path.join(path.dirname(entrypoint), "bin.js");
+    if (fs.existsSync(cliPath) && isE2EPathWithin(cliPath, trustedRoot)) {
+      return cliPath;
+    }
+  } catch {
+    // Try the next trusted runtime package root.
+  }
+  return null;
+}
+
+function isE2EPathWithin(candidate, root) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 function callVaultCliCommand(command) {
   validateE2EVaultCliAutomationSaveArgs(command.args);
-  const result = childProcess.spawnSync("vault-cli", command.args, {
+  const invocation = resolveE2EVaultCliInvocation(command.args);
+  const result = childProcess.spawnSync(invocation.command, invocation.args, {
     encoding: "utf8",
     env: process.env,
     maxBuffer: 1024 * 1024,
@@ -872,6 +956,50 @@ rl.on("line", (line) => {
 
 const HOSTED_CODEX_DYNAMIC_TOOL_NAME_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})+$/u;
+
+async function resolveHostedE2ETrustedMurphCliPath(
+  runtimeEnv: Record<string, string>,
+): Promise<string | null> {
+  const explicitPath = normalizeHostedE2ETrustedMurphCliPath(
+    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV],
+  );
+  if (explicitPath) {
+    return await validateHostedE2ETrustedMurphCliPath(explicitPath);
+  }
+
+  const localWorkspaceCliPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../cli/dist/bin.js",
+  );
+  return await validateHostedE2ETrustedMurphCliPath(localWorkspaceCliPath);
+}
+
+function normalizeHostedE2ETrustedMurphCliPath(value: string | undefined): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  return path.resolve(value.trim());
+}
+
+async function validateHostedE2ETrustedMurphCliPath(candidate: string): Promise<string | null> {
+  try {
+    const cliPath = await realpath(candidate);
+    if (path.basename(cliPath) !== "bin.js") {
+      return null;
+    }
+    const packageRoot = path.dirname(path.dirname(cliPath));
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, "package.json"), "utf8"),
+    ) as { name?: unknown };
+    if (packageJson.name !== "@murphai/murph") {
+      return null;
+    }
+    await access(cliPath);
+    return cliPath;
+  } catch {
+    return null;
+  }
+}
 
 function readHostedE2ECodexAppServerStubExpectedDynamicTools(
   runtimeEnv: Record<string, string>,

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-05-30
-Updated: 2026-05-31
+Updated: 2026-06-01
 
 ## Goal
 
@@ -95,6 +95,22 @@ Updated: 2026-05-31
 - A no-bundle hosted-local rerun on 2026-05-31 proved the post-send dirty
   checkpoint path: `outbox.delivery_finished` sent one Linq thread message,
   then `idle_shutdown` checkpointed workspace version 3 with no next wake.
+- Keep the strengthened E2E on the normal hosted `member.activated` bootstrap
+  path before the setup conversation. Synthetic checkpoint seeding bypassed
+  ordinary member activation state and could leave the setup turn waiting on a
+  runner child timeout before the assistant-created reminder was exercised.
+- Keep the reminder lead at five minutes in this hosted-local suite. The full
+  E2E run showed the seven-minute variant could reach the due wake close to the
+  project-level Vitest timeout under full-suite contention, leaving retries to
+  report a cron enqueue failure instead of proving the delivery path.
+- Acceptance exposed an unrelated CLI setup-test flake: one test launched five
+  `murph` alias subprocesses concurrently while each helper verified runtime
+  artifacts. Run those alias checks serially and bound each subprocess so the
+  acceptance lane is deterministic under package coverage fanout.
+- Keep the hosted Codex E2E app-server shim test-only and explicit about its
+  trusted package CLI path. The stub no longer derives a package root from the
+  child process working directory; tests pass an already validated local CLI
+  binary, while the container fallback resolves only from `/app`.
 
 ## Verification
 
@@ -118,5 +134,38 @@ Updated: 2026-05-31
 - E2E shim regression added in `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts`.
 - `pnpm --filter @murphai/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts` passed.
 - `pnpm hosted-local e2e --no-bundle linq-scheduled-reminder` passed on
-  2026-05-31 and proved assistant-created reminder setup, natural due wake,
-  Linq send, and final `idle_shutdown` checkpoint.
+  2026-05-31 after the E2E used the normal member activation bootstrap; it
+  proved assistant-created reminder setup, natural due wake, Linq send, and
+  final hosted completion with no next wake.
+- Full `pnpm test:e2e:hosted-local` then narrowed to one scheduled-reminder
+  failure near the suite timeout. The scenario now uses a five-minute reminder
+  lead so the same natural-wake proof has enough end-to-end budget in the full
+  hosted-local suite.
+- Full `pnpm test:e2e:hosted-local` passed after the lead-time reduction:
+  11 files, 26 passed, 1 skipped.
+- `pnpm verify:acceptance` exposed the CLI alias setup-test timeout described
+  above. The test now keeps each child invocation bounded and gives the serial
+  parent test enough budget for all five alias checks.
+- Re-ran `pnpm --dir packages/assistant-runtime test -- test/hosted-runtime-codex-config.test.ts`
+  after the trusted package-CLI shim regression was tightened; it passed.
+- Re-ran `pnpm --dir packages/cli test -- test/setup-cli.test.ts -t "murph alias routes empty and help invocations to onboarding help"`;
+  the package CLI workspace suite passed: 98 files, 852 tests.
+- Re-ran `pnpm --dir apps/web verify` after one transient Google Fonts fetch
+  failure during Next build; the web verify lane passed.
+- `pnpm verify:acceptance` passed after the CLI alias setup-test stabilization.
+- Coverage-write review added final scheduler quiescence proof to the hosted
+  local Linq scheduled-reminder E2E: completion now requires both no pending
+  hosted `nextWakeAt` and no Cloudflare `nextAlarmAt`.
+- Focused security/privacy re-review found no high or medium findings after the
+  trusted CLI path change. Residual assumption: the trusted CLI path environment
+  variable remains controlled by the test harness, not member/user input.
+- Final focused checks passed after the E2E shim hardening:
+  `pnpm --filter @murphai/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts`,
+  `pnpm --filter @murphai/assistant-runtime exec tsc -p tsconfig.typecheck.json --pretty false`,
+  `pnpm hosted-local e2e --no-bundle linq-scheduled-reminder`, `pnpm typecheck`,
+  and `git diff --check`.
+- Final `pnpm test:diff` passed for the active plan, coordination ledger, hosted
+  local reminder E2E, hosted Codex E2E shim, shim regression test, and CLI setup
+  alias test. The selected owners were `apps/cloudflare`,
+  `packages/assistant-runtime`, and `packages/cli`; this included the serialized
+  CLI alias coverage and `apps/cloudflare verify`.

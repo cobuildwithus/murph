@@ -1,24 +1,8 @@
 import { createHmac } from "node:crypto";
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { promisify } from "node:util";
 
-import type {
-  HostedBrowserVaultReplicaRef,
-  HostedExecutionSnapshotRef,
-} from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-} from "@murphai/hosted-execution/contracts";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
-import {
-  seedHostedWorkspaceCheckpointForTest,
-} from "#hosted-web-testing";
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -36,26 +20,25 @@ import {
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const setupReplyText = "Done - I will remind you here in about seven minutes.";
-const setupRequestText = "Remind me here in about seven minutes to go to sleep.";
+const setupReplyText = "Done - I will remind you here in about five minutes.";
+const setupRequestText = "Remind me here in about five minutes to go to sleep.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
-const scheduledReminderLeadMs = 420_000;
+const scheduledReminderLeadMs = 300_000;
 // Keep Temporal's owner recheck after local runner cold-start/bootstrap, while
 // still well before the reminder due time.
 const scheduledReminderIdleCheckpointDelayMs = 60_000;
 const scheduledReminderMinimumRunwayMs = 45_000;
 const scheduledReminderSendWaitMs = 120_000;
 const productionLikeAssistantModel = "gpt-5.5";
-const execFileAsync = promisify(execFile);
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
-const cleanupPaths: string[] = [];
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
@@ -66,12 +49,6 @@ afterAll(async () => {
   scenario = null;
   await linqStub?.stop();
   linqStub = null;
-  await Promise.all(cleanupPaths.splice(0).map((target) =>
-    rm(target, {
-      force: true,
-      recursive: true,
-    })
-  ));
 }, 120_000);
 
 describe("hosted local Linq scheduled reminder e2e", () => {
@@ -87,28 +64,14 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       memberId: userId,
       memberPhone,
     });
+    await requireScenario().runWake(buildActivationWake(userId), userId);
+    const activatedStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(activatedStatus.lastErrorCode ?? null).toBeNull();
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId: scheduledChatId,
       memberId: userId,
       recipientPhone: memberPhone,
     });
-    const snapshot = await createEmptyReminderSnapshot();
-    const checkpoint = await seedHostedWorkspaceCheckpointForTest({
-      browserVaultReplicaRef: createBrowserVaultReplicaRef(snapshot.hash),
-      environment: requireScenario().runtimeEnv,
-      nextWakeAt: null,
-      nextWakeReason: null,
-      redactedStatusJson: {
-        seeded: true,
-      },
-      snapshotRef: createSnapshotBundleRef({
-        hash: snapshot.hash,
-        size: snapshot.bytes.byteLength,
-      }),
-      userId,
-    });
-    expect(checkpoint.status).toBe("updated");
-    await uploadHostedSnapshotArtifact(snapshot);
 
     const unscheduledStatus = await requireScenario().harness.readUserStatus(userId);
     expect(unscheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
@@ -164,11 +127,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    const finalStatus = await waitForHostedCompletionWithoutNextWakeAt({ userId });
     const finalNextWakeAt = finalStatus.workspace?.nextWakeAt;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalNextWakeAt ?? null).toBeNull();
+    expect(finalStatus.nextAlarmAt ?? null).toBeNull();
     // recentLogs is bounded; assert the durable reminder send plus terminal scan/delivery signals.
     expect(finalStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -219,73 +183,6 @@ async function startScenario(): Promise<void> {
   });
 }
 
-async function createEmptyReminderSnapshot(): Promise<{
-  bytes: Uint8Array;
-  hash: string;
-}> {
-  const root = await mkdtemp(path.join(tmpdir(), "murph-hosted-reminder-turn-"));
-  const operatorHomeRoot = path.join(root, "operator-home");
-  const vaultRoot = path.join(root, "vault");
-  cleanupPaths.push(root);
-  await mkdir(operatorHomeRoot, { recursive: true });
-  await initializeSyntheticVault(vaultRoot);
-
-  const snapshot = await snapshotHostedExecutionContext({
-    operatorHomeRoot,
-    vaultRoot,
-  });
-
-  return {
-    bytes: snapshot.bundle,
-    hash: sha256HostedBundleHex(snapshot.bundle),
-  };
-}
-
-async function initializeSyntheticVault(
-  vaultRoot: string,
-): Promise<void> {
-  try {
-    await execFileAsync("pnpm", [
-      "exec",
-      "vault-cli",
-      "init",
-      "--vault",
-      vaultRoot,
-      "--request-id",
-      "hosted-local-reminder-turn-seed",
-      "--timezone",
-      "Asia/Kuala_Lumpur",
-    ], {
-      env: process.env,
-      maxBuffer: 1024 * 1024,
-      timeout: 30_000,
-    });
-  } catch (error) {
-    throw new Error(
-      [
-        "Failed to initialize the hosted reminder E2E vault.",
-        redactSyntheticVaultCliOutput(readExecFileErrorField(error, "stderr"), vaultRoot),
-        redactSyntheticVaultCliOutput(readExecFileErrorField(error, "stdout"), vaultRoot),
-      ].filter(Boolean).join("\n"),
-    );
-  }
-}
-
-function readExecFileErrorField(error: unknown, field: "stderr" | "stdout"): string {
-  if (!error || typeof error !== "object" || !(field in error)) {
-    return "";
-  }
-  const value = (error as Record<typeof field, unknown>)[field];
-  return typeof value === "string" ? value : "";
-}
-
-function redactSyntheticVaultCliOutput(value: string, vaultRoot: string): string {
-  return value
-    .split(vaultRoot).join("<vault-root>")
-    .split(process.cwd()).join("<repo-root>")
-    .slice(-2000);
-}
-
 function buildHostedAssistantAutomationSaveDirectiveResponse(input: {
   dueAtIso: string;
   text: string;
@@ -324,20 +221,17 @@ function buildHostedAssistantAutomationSaveDirectiveResponse(input: {
   });
 }
 
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "PUT",
+function buildActivationWake(memberId: string) {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: `member.activated:local:${memberId}:evt_linq_scheduled_reminder`,
+    memberChannels: {
+      email: false,
+      linq: true,
+      telegram: false,
     },
-  );
+    memberId,
+    occurredAt: new Date().toISOString(),
+  });
 }
 
 async function waitForHostedWorkspaceNextWakeAt(input: {
@@ -378,6 +272,62 @@ async function waitForHostedWorkspaceNextWakeAt(input: {
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
     "Timed out waiting for the hosted workspace to checkpoint the scheduled reminder wake.",
     `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
+    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
+    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
+    latestError ? `latest status read error: ${latestError}` : null,
+  ].filter((line): line is string => Boolean(line))));
+}
+
+async function waitForHostedCompletionWithoutNextWakeAt(input: {
+  timeoutMs?: number;
+  userId: string;
+}): Promise<Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>> {
+  const startedAt = Date.now();
+  const timeoutMs = input.timeoutMs ?? 180_000;
+  let latestNextWakeAt: string | null = null;
+  let latestNextAlarmAt: string | null = null;
+  let latestInFlight: boolean | null = null;
+  let latestMailboxLag: unknown = null;
+  let latestError: string | null = null;
+
+  while ((Date.now() - startedAt) < timeoutMs) {
+    let status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
+    try {
+      status = await requireScenario().harness.readUserStatus(input.userId);
+    } catch (error) {
+      latestError = error instanceof Error ? error.message : String(error);
+      await sleep(1_000);
+      continue;
+    }
+
+    if (status.lastErrorCode) {
+      throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+        "Hosted runner reported an error before clearing the scheduled reminder wake.",
+        `lastErrorCode: ${status.lastErrorCode}`,
+      ]));
+    }
+
+    latestInFlight = status.inFlight;
+    latestMailboxLag = status.mailboxLag;
+    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
+    latestNextAlarmAt = status.nextAlarmAt ?? null;
+    if (
+      !status.inFlight
+      && status.mailboxLag.every((lane) => lane.lag === "0")
+      && status.workspace !== null
+      && latestNextWakeAt === null
+      && latestNextAlarmAt === null
+    ) {
+      return status;
+    }
+
+    await sleep(1_000);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "Timed out waiting for hosted completion to clear the scheduled reminder wake.",
+    `latestInFlight: ${latestInFlight === null ? "unknown" : String(latestInFlight)}`,
+    `latestMailboxLag: ${JSON.stringify(latestMailboxLag)}`,
     `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
     `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
     latestError ? `latest status read error: ${latestError}` : null,
@@ -481,34 +431,6 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function createBrowserVaultReplicaRef(
-  sourceBundleHash: string,
-): HostedBrowserVaultReplicaRef {
-  return {
-    byteLength: 256,
-    dataVersion: `scheduled-reminder-${sourceBundleHash.slice(0, 16)}`,
-    generatedAt: new Date().toISOString(),
-    keyId: "browser-vault-replica:scheduled-reminder",
-    objectKey: `browser-vault/${userId}/scheduled-reminder-replica.json`,
-    replicaSchema: "murph.browser-vault-replica",
-    runtimeRootKeyId: "udrk:runtime:scheduled-reminder",
-    schema: "murph.hosted-browser-vault-replica-ref.v1",
-    sourceBundleHash,
-  };
 }
 
 function requireLinqStub(): HostedLocalLinqStub {
