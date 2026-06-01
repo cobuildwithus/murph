@@ -2476,6 +2476,194 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("keeps latency trace callbacks bound to their event attempt", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const readCurrentLease = vi.fn()
+      .mockReturnValueOnce({
+        attemptId: "attempt_1",
+        leaseGeneration: "7",
+        userId: "member_123",
+        workspaceVersion: "6",
+      })
+      .mockReturnValueOnce({
+        attemptId: "attempt_2",
+        leaseGeneration: "8",
+        userId: "member_123",
+        workspaceVersion: "7",
+      });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease,
+      },
+    });
+
+    const response = await platform.latencyTracePort!.record({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:03.000Z",
+        mailboxItemId: "mailbox_item_1",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+
+    expect(response).toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    expect(readCurrentLease).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "latency trace request");
+    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-runtime/latency");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+  });
+
+  it("skips stale latency trace callbacks without calling web-control", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const readCurrentLease = vi.fn(() => ({
+      attemptId: "attempt_2",
+      leaseGeneration: "8",
+      userId: "member_123",
+      workspaceVersion: "7",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease,
+      },
+    });
+
+    const response = await platform.latencyTracePort!.record({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:03.000Z",
+        mailboxItemId: "mailbox_item_1",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+
+    expect(response).toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    expect(readCurrentLease).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("skips unbound latency trace callbacks without calling web-control", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 0,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const readCurrentLease = vi.fn(() => null);
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease,
+      },
+    });
+
+    const missingAttemptResponse = await platform.latencyTracePort!.record({
+      event: {
+        assistantInputId: "input_1",
+        at: "2026-04-26T00:00:03.000Z",
+        mailboxItemId: "mailbox_item_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+    const inactiveLeaseResponse = await platform.latencyTracePort!.record({
+      event: {
+        assistantInputId: "input_2",
+        at: "2026-04-26T00:00:04.000Z",
+        mailboxItemId: "mailbox_item_2",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_input_staged",
+      },
+    });
+
+    expect(missingAttemptResponse).toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    expect(inactiveLeaseResponse).toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    expect(readCurrentLease).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("overwrites caller-supplied web-control write-fence headers outside latency telemetry", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => ({
+          attemptId: "attempt_current",
+          leaseGeneration: "8",
+          userId: "member_123",
+          workspaceVersion: "7",
+        }),
+      },
+    );
+
+    await hostedFetch("http://web-control.worker/api/internal/hosted-runtime/log", {
+      body: "{}",
+      headers: {
+        "x-hosted-runtime-attempt-id": "attempt_supplied",
+        "x-hosted-runtime-lease-generation": "1",
+        "x-hosted-runtime-workspace-version": "2",
+      },
+      method: "POST",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "web-control log request");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_current");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("8");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("7");
+  });
+
   it("fails closed before issuing internal-host requests when the invocation proxy token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({

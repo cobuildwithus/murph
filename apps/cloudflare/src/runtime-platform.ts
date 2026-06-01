@@ -49,6 +49,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
+  HostedRuntimeLatencyTraceResponse,
   HostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -141,6 +142,11 @@ const HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON =
   "internal_authority_rejected";
 const HOSTED_RUNTIME_CONTROL_PLANE_FETCH_FAILURE_MARKER =
   "hostedRuntimeControlPlaneFetchFailure";
+const HOSTED_RUNTIME_LATENCY_TRACE_SKIPPED_RESPONSE: HostedRuntimeLatencyTraceResponse = {
+  matchedCount: 0,
+  recorded: false,
+  unmatchedCount: 0,
+};
 const HOSTED_RUNTIME_FETCH_CAUSE_NAMES = new Set([
   "AbortError",
   "Error",
@@ -675,6 +681,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             fetchImpl,
             timeoutMs,
             transport: hostedWebControlTransport,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
           mailboxPort: createHostedWebMailboxPort({
             boundUserId: input.boundUserId,
@@ -1019,7 +1026,13 @@ function createCloudflareHostedInternalFetch(
       && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
       && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
       && headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
-    if (!hasSuppliedWorkspaceSnapshotWriteFence) {
+    const hasSuppliedLatencyTraceWriteFence =
+      url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
+      && request.method === "POST"
+      && url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+      && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+      && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+    if (!hasSuppliedWorkspaceSnapshotWriteFence && !hasSuppliedLatencyTraceWriteFence) {
       const lease = await options.readCurrentLease?.() ?? null;
       if (!lease) {
         throw new Error(
@@ -2351,16 +2364,27 @@ function createHostedWebRuntimeLatencyTracePort(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }) {
   return {
     async record(
       request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
     ) {
+      const headers = input.workspaceCheckpointBridge
+        ? await createHostedRuntimeLatencyTraceWriteFenceHeaders({
+          request,
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+        })
+        : undefined;
+      if (headers === null) {
+        return HOSTED_RUNTIME_LATENCY_TRACE_SKIPPED_RESPONSE;
+      }
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
         description: "Hosted runtime latency trace",
         fetchImpl: input.fetchImpl,
+        headers,
         path: HOSTED_RUNTIME_LATENCY_TRACE_PATH,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -2375,6 +2399,25 @@ function createHostedWebRuntimeLatencyTracePort(input: {
       }
     },
   };
+}
+
+async function createHostedRuntimeLatencyTraceWriteFenceHeaders(input: {
+  request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0];
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}): Promise<Headers | null> {
+  const eventRuntimeAttemptId = input.request.event.runtimeAttemptId?.trim() ?? "";
+  if (!eventRuntimeAttemptId) {
+    return null;
+  }
+
+  const lease = await input.workspaceCheckpointBridge.readCurrentLease();
+  if (!lease || lease.attemptId !== eventRuntimeAttemptId) {
+    return null;
+  }
+
+  const headers = new Headers();
+  writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+  return headers;
 }
 
 async function fetchReplaySafeHostedWebControlPlaneJson(input: {
