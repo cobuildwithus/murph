@@ -545,17 +545,20 @@ export async function startHostedLocalDevStack(input: {
         }
       }
 
+      const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
       await cleanupHostedRunnerContainers({
         cwd: repoRoot,
         env: workerProcessEnv ?? workerRuntimeEnv,
-        scope: resolvePreStartHostedRunnerContainerCleanupScope(initialEnv),
+        scope: runnerCleanupScope,
       });
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: resolvePreStartHostedRunnerContainerCleanupScope(initialEnv),
-      });
+      if (shouldCleanupHostedRunnerImagesDuringStackLifecycle(initialEnv)) {
+        await cleanupHostedRunnerImages({
+          cwd: repoRoot,
+          env: workerProcessEnv ?? workerRuntimeEnv,
+          ignoreErrors: true,
+          scope: runnerCleanupScope,
+        });
+      }
       await cleanupHostedRunnerContainerLocalState({
         env: workerProcessEnv ?? workerRuntimeEnv,
         persistDir: workerPersistDir,
@@ -802,11 +805,13 @@ export async function startHostedLocalDevStack(input: {
             env: workerProcessEnv ?? workerRuntimeEnv,
             ignoreErrors: true,
           });
-          await cleanupHostedRunnerImages({
-            cwd: repoRoot,
-            env: workerProcessEnv ?? workerRuntimeEnv,
-            ignoreErrors: true,
-          });
+          if (shouldCleanupHostedRunnerImagesDuringStackLifecycle(workerProcessEnv ?? workerRuntimeEnv)) {
+            await cleanupHostedRunnerImages({
+              cwd: repoRoot,
+              env: workerProcessEnv ?? workerRuntimeEnv,
+              ignoreErrors: true,
+            });
+          }
         }
         if (minioServer !== null) {
           await cleanupHostedLocalMinioContainerBestEffort(
@@ -939,11 +944,13 @@ export async function startHostedLocalDevStack(input: {
         env: workerProcessEnv ?? workerRuntimeEnv,
         ignoreErrors: true,
       }).catch(() => {});
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-      }).catch(() => {});
+      if (shouldCleanupHostedRunnerImagesDuringStackLifecycle(workerProcessEnv ?? workerRuntimeEnv)) {
+        await cleanupHostedRunnerImages({
+          cwd: repoRoot,
+          env: workerProcessEnv ?? workerRuntimeEnv,
+          ignoreErrors: true,
+        }).catch(() => {});
+      }
     }
     if (minioServer !== null) {
       await cleanupHostedLocalMinioContainerBestEffort(
@@ -1292,6 +1299,10 @@ function resolvePreStartHostedRunnerContainerCleanupScope(
   env: NodeJS.ProcessEnv,
 ): HostedRunnerContainerCleanupScope {
   return requiresHostedLocalE2eIsolation(env) ? "current-build" : "all-builds";
+}
+
+function shouldCleanupHostedRunnerImagesDuringStackLifecycle(env: NodeJS.ProcessEnv): boolean {
+  return !requiresHostedLocalE2eIsolation(env);
 }
 
 function shouldUseGlobalCloudflareDevVarsSymlink(env: NodeJS.ProcessEnv): boolean {

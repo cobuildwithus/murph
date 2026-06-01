@@ -13,6 +13,9 @@ import {
   repoRoot,
 } from "./constants.ts";
 import {
+  buildHostedRunnerLocalBuildId,
+} from "./environment.ts";
+import {
   spawnChildProcess,
   terminateChildProcessAndWait,
   waitForHealthyHttpEndpoint,
@@ -34,6 +37,7 @@ const HOSTED_LOCAL_MINIO_ROLE_LABEL_NAME = "murph.hosted-local.role";
 const HOSTED_LOCAL_MINIO_ROLE_LABEL_VALUE = "r2-minio";
 const HOSTED_LOCAL_MINIO_ROLE_LABEL = `${HOSTED_LOCAL_MINIO_ROLE_LABEL_NAME}=${HOSTED_LOCAL_MINIO_ROLE_LABEL_VALUE}`;
 const HOSTED_LOCAL_MINIO_BUILD_ID_LABEL_NAME = "murph.hosted-local.build-id";
+const HOSTED_LOCAL_MINIO_E2E_LABEL = "murph.hosted-local.e2e=1";
 const HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX = "murph-hosted-local-r2-";
 const HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV = "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST";
 
@@ -94,6 +98,9 @@ export async function maybeStartHostedLocalMinio(input: {
     HOSTED_LOCAL_MINIO_ROLE_LABEL,
     "--label",
     `${HOSTED_LOCAL_MINIO_BUILD_ID_LABEL_NAME}=${buildIdLabelValue}`,
+    ...(isHostedLocalE2eProfileOrMarker(input.env)
+      ? ["--label", HOSTED_LOCAL_MINIO_E2E_LABEL]
+      : []),
     ...buildHostedLocalMinioDockerUserArgs(),
     "-p",
     `${publishTarget.publishHost}:${port}:9000`,
@@ -315,6 +322,43 @@ export async function cleanupHostedLocalMinioContainerBestEffort(
     "ps",
     "-aq",
     ...filterArgs,
+  ]);
+  if (!listedContainerIds.trim()) {
+    return;
+  }
+  await runDockerBestEffort(env, [
+    "rm",
+    "-f",
+    ...listedContainerIds.trim().split(/\s+/u),
+  ]);
+}
+
+export async function cleanupHostedLocalMinioBuildContainersBestEffort(
+  env: NodeJS.ProcessEnv,
+  buildId: string,
+): Promise<void> {
+  const buildIdLabelValue = sanitizeHostedLocalMinioNameSegment(
+    buildHostedRunnerLocalBuildId(buildId),
+  );
+  await cleanupHostedLocalMinioContainerBestEffort(
+    env,
+    `${HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX}${buildIdLabelValue}`,
+    {
+      buildId: buildIdLabelValue,
+    },
+  );
+}
+
+export async function cleanupHostedLocalMinioE2eContainersBestEffort(
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const listedContainerIds = await runDockerCaptureBestEffort(env, [
+    "ps",
+    "-aq",
+    "--filter",
+    `label=${HOSTED_LOCAL_MINIO_ROLE_LABEL}`,
+    "--filter",
+    `label=${HOSTED_LOCAL_MINIO_E2E_LABEL}`,
   ]);
   if (!listedContainerIds.trim()) {
     return;

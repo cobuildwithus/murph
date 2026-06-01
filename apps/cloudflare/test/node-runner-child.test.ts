@@ -266,6 +266,76 @@ describe("runHostedExecutionChild", () => {
     expect(debugOutput).not.toContain("fixture-openai-code");
   });
 
+  it("allows provider fetch base URLs from runtime platform env", async () => {
+    const launcherRoot = "/tmp/hosted-runner-platform-env-fetch-test";
+    vi.spyOn(process, "cwd").mockReturnValue(launcherRoot);
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async (
+      _input: HostedAssistantWorkspaceRuntimeJobInput,
+      options: HostedWorkspaceRuntimeJobOptions,
+    ) => {
+      const providerFetch = options.platform.providerFetch;
+      if (!providerFetch) {
+        throw new Error("Expected hosted platform provider fetch.");
+      }
+      const response = await providerFetch(
+        "http://host.docker.internal:4012/bot__cloudflare_injected__/sendMessage",
+        { method: "POST" },
+      );
+      expect(response.status).toBe(204);
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_platform_env_provider_fetch",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_platform_env_provider_fetch",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            platformEnv: {
+              TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
+            },
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const providerRequest = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "platform env provider fetch",
+    );
+    expect(providerRequest.headers.get("x-hosted-runtime-attempt-id"))
+      .toBe("attempt_platform_env_provider_fetch");
+    expect(providerRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(providerRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+    expect(providerRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER))
+      .toBe("u_platform_env_provider_fetch");
+    expect(readChildResult(sendResult.mock.calls[0]?.[0])).toEqual({
+      ok: true,
+      result: {
+        nextWakeAt: null,
+        status: "idle",
+      },
+    });
+  });
+
   it("sends runtime wake readiness and forwards IPC wakes into the workspace runtime", async () => {
     const launcherRoot = "/tmp/hosted-runner-wake-test";
     vi.spyOn(process, "cwd").mockReturnValue(launcherRoot);
@@ -1091,6 +1161,14 @@ function readChildResult(chunk: unknown): HostedExecutionRunnerChildResult {
   }
 
   return chunk as HostedExecutionRunnerChildResult;
+}
+
+function requireFetchRequest(call: readonly unknown[] | undefined, label: string): Request {
+  const request = call?.[0];
+  if (!(request instanceof Request)) {
+    throw new Error(`Expected ${label} to receive a Request.`);
+  }
+  return request;
 }
 
 function createDeferred<T = void>() {

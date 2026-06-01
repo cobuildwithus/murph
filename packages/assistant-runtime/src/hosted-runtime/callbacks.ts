@@ -83,6 +83,8 @@ export async function collectHostedAssistantDeliverySideEffects(
 
   const candidates: AssistantOutboxIntent[] = [];
   for (const intent of intents) {
+    const preparedIdempotentSending =
+      isHostedPreparedIdempotentSendingIntent(intent);
     if (intent.status === "sending") {
       const mirrorState = await readAssistantOutboxIntentMirrorState({
         intentId: intent.intentId,
@@ -90,7 +92,7 @@ export async function collectHostedAssistantDeliverySideEffects(
         sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
         vault: request.vaultRoot,
       });
-      if (!mirrorState.sendingPastGraceWindow) {
+      if (!preparedIdempotentSending && !mirrorState.sendingPastGraceWindow) {
         continue;
       }
       if (!intent.deliveryTransportIdempotent) {
@@ -106,7 +108,10 @@ export async function collectHostedAssistantDeliverySideEffects(
       continue;
     }
 
-    if (!shouldDispatchAssistantOutboxIntent(intent, now)) {
+    if (
+      !preparedIdempotentSending
+      && !shouldDispatchAssistantOutboxIntent(intent, now)
+    ) {
       continue;
     }
 
@@ -246,6 +251,9 @@ function resolveHostedAssistantOutboxIntentWakeAt(
       return new Date(nextAttemptMs).toISOString();
     }
     case "sending": {
+      if (isHostedPreparedIdempotentSendingIntent(intent)) {
+        return now.toISOString();
+      }
       const startedAtMs = intent.lastAttemptAt ? Date.parse(intent.lastAttemptAt) : Number.NaN;
       if (!Number.isFinite(startedAtMs)) {
         return intent.deliveryTransportIdempotent ? now.toISOString() : null;
@@ -262,6 +270,17 @@ function resolveHostedAssistantOutboxIntentWakeAt(
     default:
       return null;
   }
+}
+
+function isHostedPreparedIdempotentSendingIntent(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.status === "sending"
+    && intent.deliveryTransportIdempotent === true
+    && typeof intent.deliveryIdempotencyKey === "string"
+    && intent.deliveryIdempotencyKey.trim().length > 0
+    && !intent.delivery
+    && intent.deliveryConfirmationPending !== true;
 }
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
@@ -479,6 +498,23 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       ...(input.allowPreparedSending ? { allowPreparedSending: true } : {}),
       vault: input.vaultRoot,
     });
+    const resetDispatchResult = await maybeResetHostedPreparedDeliveryAfterPreProviderAbort({
+      assistantDeliveryEffect: input.assistantDeliveryEffect,
+      dispatchResult: dispatched,
+      mirrorState,
+      providerDispatchEntered,
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    });
+    if (resetDispatchResult) {
+      return await buildHostedAssistantDeliveryDispatchResult({
+        assistantDeliveryEffect: input.assistantDeliveryEffect,
+        dispatchResult: resetDispatchResult,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    }
     assertHostedDeliveryLiveness(input.signal);
     return await buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -488,7 +524,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     });
   } catch (error) {
-    if (shouldResetHostedPreparedForegroundDeliveryOnAbort({
+    if (shouldResetHostedPreparedDeliveryOnPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       providerDispatchEntered,
@@ -529,16 +565,52 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   }
 }
 
-function shouldResetHostedPreparedForegroundDeliveryOnAbort(input: {
+async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
+  mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
+  providerDispatchEntered: boolean;
+  signal: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>> | null> {
+  if (!shouldResetHostedPreparedDeliveryOnPreProviderAbort({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    mirrorState: input.mirrorState,
+    providerDispatchEntered: input.providerDispatchEntered,
+    signal: input.signal,
+  })) {
+    return null;
+  }
+
+  const reset = await resetAssistantOutboxPreparedDispatchById({
+    deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
+    deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
+    intentId: input.assistantDeliveryEffect.effectId,
+    preparedAt: input.mirrorState.sendingStartedAt,
+    resetAt: new Date(),
+    vault: input.vaultRoot,
+  });
+  if (!reset) {
+    return null;
+  }
+
+  return {
+    ...input.dispatchResult,
+    deliveryError: reset.lastError ?? input.dispatchResult.deliveryError,
+    intent: reset,
+  };
+}
+
+function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   providerDispatchEntered: boolean;
   signal: AbortSignal | null;
 }): boolean {
   return input.signal?.aborted === true
-    && input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
-    && input.mirrorState.intent?.status === "sending"
     && input.mirrorState.sendingStartedAt !== null
+    && !input.mirrorState.intent?.delivery
+    && input.mirrorState.intent?.deliveryConfirmationPending !== true
     && !input.providerDispatchEntered;
 }
 

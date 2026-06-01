@@ -122,6 +122,7 @@ describe("hosted-local MinIO sidecar", () => {
     expect(volumeArg).toBe(".tmp/hosted-local-minio-test/minio-r2:/data");
     expect(dockerArgs).toContain("murph.hosted-local.role=r2-minio");
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
+    expect(dockerArgs).toContain("murph.hosted-local.e2e=1");
     expect(dockerArgs).toContain("MINIO_REGION_NAME");
     expect(dockerArgs).toContain("minio/minio:RELEASE.2025-09-07T16-13-09Z");
     if (typeof process.getuid === "function" && typeof process.getgid === "function") {
@@ -192,6 +193,7 @@ describe("hosted-local MinIO sidecar", () => {
     );
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
     const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
+    expect(dockerArgs).not.toContain("murph.hosted-local.e2e=1");
     expect(volumeArg).toEqual(
       expect.stringMatching(/[\\/]\.tmp[\\/]hosted-local-minio-r2:\/data$/u),
     );
@@ -322,6 +324,41 @@ describe("hosted-local MinIO sidecar", () => {
     );
     expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
       3,
+      "docker",
+      ["rm", "-f", "container-a", "container-b"],
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+  });
+
+  it("uses E2E labels for hosted-local E2E MinIO cleanup", async () => {
+    childProcessMocks.spawnResponses = [
+      { stdout: "container-a\ncontainer-b\n" },
+      {},
+    ];
+    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("./minio.ts");
+
+    await cleanupHostedLocalMinioE2eContainersBestEffort({
+      DOCKER_CONFIG: ".tmp/docker-config",
+    });
+
+    expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
+      1,
+      "docker",
+      [
+        "ps",
+        "-aq",
+        "--filter",
+        "label=murph.hosted-local.role=r2-minio",
+        "--filter",
+        "label=murph.hosted-local.e2e=1",
+      ],
+      expect.objectContaining({
+        env: { DOCKER_CONFIG: ".tmp/docker-config" },
+        stdio: ["ignore", "pipe", "ignore"],
+      }),
+    );
+    expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
+      2,
       "docker",
       ["rm", "-f", "container-a", "container-b"],
       expect.objectContaining({ stdio: "ignore" }),

@@ -2252,7 +2252,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         cleanupMessages: [],
         cleanupTargetAliases: [],
         deliveryChannel: "telegram",
-        deliveryErrorCode: "outbox.synthetic_failed",
+        deliveryErrorCode: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
         deliveryErrorMessage: "redacted",
         deliveryStatus: "failed_ambiguous",
         effectFingerprint: "fingerprint_synthetic",
@@ -2286,10 +2286,53 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         attempted: 1,
         deliveryErrorCodeSummary: "external_code:1",
+        deliverySafeExternalErrorCodeSummary: "HOSTED_PROVIDER_FETCH_UNAVAILABLE:1",
         failed: 1,
         retryable: 1,
         sent: 0,
         statusSummary: "failed_ambiguous:1",
+      }),
+    }));
+  });
+
+  it("keeps safe delivery error summaries coarse for unsafe external codes", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_ABORTED",
+        effectId: "effect_assistant_delivery",
+      }),
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "provider.raw_tenant_123",
+        effectId: "effect_external_provider",
+      }),
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_TOKEN_REQUIRED",
+        effectId: "effect_linq_safe",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      reason: "alarm",
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: "warn",
+      phase: "outbox",
+      redactedJson: expect.objectContaining({
+        attempted: 3,
+        deliveryErrorCodeSummary: "ASSISTANT_DELIVERY_ABORTED:1,external_code:2",
+        deliverySafeExternalErrorCodeSummary: "external_code:1,LINQ_API_TOKEN_REQUIRED:1",
+        failed: 3,
+        retryable: 3,
+        sent: 0,
       }),
     }));
   });
@@ -3728,6 +3771,30 @@ function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
       transportIdempotent: true,
       turnId: "turn_synthetic",
     },
+  };
+}
+
+function createFailedDeliveryOutcome(input: {
+  deliveryErrorCode: string;
+  effectId: string;
+}): HostedAssistantDeliveryOutcome {
+  return {
+    cleanupMessages: [],
+    cleanupTargetAliases: [],
+    deliveryChannel: "linq",
+    deliveryErrorCode: input.deliveryErrorCode,
+    deliveryErrorMessage: "redacted",
+    deliveryStatus: "failed_ambiguous",
+    effectFingerprint: `fingerprint_${input.effectId}`,
+    effectId: input.effectId,
+    journalMethod: "PUT",
+    journalStatus: "500",
+    providerMessageId: null,
+    providerMessageIds: [],
+    providerThreadId: null,
+    retryable: true,
+    target: null,
+    targetKind: null,
   };
 }
 

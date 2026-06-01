@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -53,9 +53,9 @@ interface BoundedCommandResult {
 }
 
 const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-id";
+// Only clean repo-owned images here. Wrangler's cloudflare-dev/* runner images
+// can be referenced by another live local stack even when Docker labels match.
 const HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES = [
-  "cloudflare-dev/runnercontainer",
-  "cloudflare-dev/deploysmokerunnercontainer",
   "murph-cloudflare-runner",
 ] as const;
 const HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE = 40;
@@ -65,13 +65,14 @@ const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
 const HOSTED_LOCAL_OUTPUT_BUFFER_MAX_CHARS = 2_000_000;
 
 export type HostedLocalWorkerPortMode = "start" | "reuse-existing";
-export type HostedRunnerContainerCleanupScope = "all-builds" | "current-build";
+export type HostedRunnerContainerCleanupScope = "all-builds" | "current-build" | "e2e-builds";
 
 const HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES = [
   "UserRunnerDurableObject",
   "RunnerContainer",
   "DeploySmokeRunnerContainer",
 ] as const;
+const HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-e2e-";
 
 export function redactHostedLocalDiagnosticText(value: string): string {
   return redactHostedLocalPaths(value)
@@ -904,6 +905,47 @@ export async function cleanupHostedRunnerContainerLocalState(input: {
   }
 }
 
+export function cleanupHostedLocalOrphanedWorkerdProcesses(input: {
+  signal?: NodeJS.Signals;
+} = {}): void {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const result = spawnSync("ps", ["-axo", "pid=,ppid=,command="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0 || !result.stdout) {
+    return;
+  }
+
+  const signal = input.signal ?? "SIGTERM";
+  const workerdPathMarker = `${repoRoot}${path.sep}node_modules${path.sep}.pnpm${path.sep}@cloudflare+workerd-`;
+  for (const line of result.stdout.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/u.exec(line);
+    if (!match) {
+      continue;
+    }
+
+    const pid = Number.parseInt(match[1] ?? "", 10);
+    const parentPid = Number.parseInt(match[2] ?? "", 10);
+    const command = match[3] ?? "";
+    if (
+      !Number.isSafeInteger(pid)
+      || parentPid !== 1
+      || !command.includes(workerdPathMarker)
+      || !command.includes("workerd serve")
+      || !command.includes("--socket-addr=entry=127.0.0.1:0")
+      || !command.includes("--external-addr=loopback=127.0.0.1:")
+    ) {
+      continue;
+    }
+
+    terminateProcessId(pid, signal);
+  }
+}
+
 async function listHostedRunnerImageRefs(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
@@ -913,6 +955,18 @@ async function listHostedRunnerImageRefs(input: {
   imageRefs: string[];
   result: BoundedCommandResult;
 }> {
+  if (input.scope === "e2e-builds") {
+    return {
+      imageRefs: [],
+      result: {
+        exitCode: 0,
+        stderr: "",
+        stdout: "",
+        timedOut: false,
+      },
+    };
+  }
+
   const localBuildId = input.scope === "all-builds"
     ? null
     : resolveHostedRunnerCleanupLocalBuildId(input.env);
@@ -965,14 +1019,142 @@ async function listHostedRunnerContainerIds(input: {
   containerIds: string[];
   result: BoundedCommandResult;
 }> {
-  const containerNamePrefix = resolveHostedRunnerContainerNamePrefix(input.env);
+  if (input.scope === "e2e-builds") {
+    const listed = await listHostedRunnerContainersByNamePrefix({
+      cwd: input.cwd,
+      env: input.env,
+      namePrefix: HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX,
+      requireLocalBuildLabel: true,
+      timeoutMs: input.timeoutMs,
+    });
+    if (listed.result.timedOut || listed.result.exitCode !== 0) {
+      return {
+        containerIds: [],
+        result: listed.result,
+      };
+    }
+
+    const containerIds = new Set(listed.containers.map((container) => container.id));
+    const proxyResult = await addHostedRunnerProxyContainerIds({
+      containerIds,
+      containers: listed.containers,
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs: input.timeoutMs,
+    });
+    if (proxyResult !== null) {
+      return {
+        containerIds: [...containerIds],
+        result: proxyResult,
+      };
+    }
+
+    return {
+      containerIds: [...containerIds],
+      result: listed.result,
+    };
+  }
+
+  if (input.scope === "all-builds") {
+    const listed = await listHostedRunnerContainersByNamePrefix({
+      cwd: input.cwd,
+      env: input.env,
+      namePrefix: resolveHostedRunnerContainerNamePrefix(input.env),
+      requireLocalBuildLabel: true,
+      timeoutMs: input.timeoutMs,
+    });
+    if (listed.result.timedOut || listed.result.exitCode !== 0) {
+      return {
+        containerIds: [],
+        result: listed.result,
+      };
+    }
+
+    const containerIds = new Set(listed.containers.map((container) => container.id));
+    const proxyResult = await addHostedRunnerProxyContainerIds({
+      containerIds,
+      containers: listed.containers,
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs: input.timeoutMs,
+    });
+    if (proxyResult !== null) {
+      return {
+        containerIds: [...containerIds],
+        result: proxyResult,
+      };
+    }
+
+    return {
+      containerIds: [...containerIds],
+      result: listed.result,
+    };
+  }
+
+  const localBuildId = resolveHostedRunnerCleanupLocalBuildId(input.env);
+  if (!localBuildId) {
+    return {
+      containerIds: [],
+      result: {
+        exitCode: 0,
+        stderr: "",
+        stdout: "",
+        timedOut: false,
+      },
+    };
+  }
+
+  const labeled = await listHostedRunnerContainersByLocalBuildId({
+    cwd: input.cwd,
+    env: input.env,
+    localBuildId,
+    timeoutMs: input.timeoutMs,
+  });
+  if (labeled.result.timedOut || labeled.result.exitCode !== 0) {
+    return {
+      containerIds: [],
+      result: labeled.result,
+    };
+  }
+  const containerIds = new Set(labeled.containers.map((container) => container.id));
+  const proxyResult = await addHostedRunnerProxyContainerIds({
+    containerIds,
+    containers: labeled.containers,
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+  if (proxyResult !== null) {
+    return {
+      containerIds: [...containerIds],
+      result: proxyResult,
+    };
+  }
+  return {
+    containerIds: [...containerIds],
+    result: labeled.result,
+  };
+}
+
+async function listHostedRunnerContainersByNamePrefix(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  namePrefix: string;
+  requireLocalBuildLabel: boolean;
+  timeoutMs: number;
+}): Promise<{
+  containers: Array<{ id: string; name: string }>;
+  result: BoundedCommandResult;
+}> {
   const result = await runBoundedCommand({
     args: [
       "ps",
-      "-aq",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
       "--filter",
-      `name=${containerNamePrefix}`,
-      ...(input.scope === "all-builds"
+      `name=${input.namePrefix}`,
+      ...(input.requireLocalBuildLabel
         ? ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]
         : []),
     ],
@@ -983,12 +1165,90 @@ async function listHostedRunnerContainerIds(input: {
   });
 
   return {
-    containerIds: result.stdout
-      .split(/\s+/)
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0),
+    containers: parseHostedRunnerContainerIdNameRows(result.stdout),
     result,
   };
+}
+
+async function listHostedRunnerContainersByLocalBuildId(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  localBuildId: string;
+  timeoutMs: number;
+}): Promise<{
+  containers: Array<{ id: string; name: string }>;
+  result: BoundedCommandResult;
+}> {
+  const result = await runBoundedCommand({
+    args: [
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${input.localBuildId}`,
+    ],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return {
+    containers: parseHostedRunnerContainerIdNameRows(result.stdout),
+    result,
+  };
+}
+
+async function addHostedRunnerProxyContainerIds(input: {
+  containerIds: Set<string>;
+  containers: ReadonlyArray<{ id: string; name: string }>;
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<BoundedCommandResult | null> {
+  for (const container of input.containers) {
+    const proxy = await runBoundedCommand({
+      args: [
+        "ps",
+        "-aq",
+        "--filter",
+        `name=${container.name}-proxy`,
+      ],
+      command: "docker",
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs: input.timeoutMs,
+    });
+    if (proxy.timedOut || proxy.exitCode !== 0) {
+      return proxy;
+    }
+    for (const proxyId of parseWhitespaceSeparatedDockerIds(proxy.stdout)) {
+      input.containerIds.add(proxyId);
+    }
+  }
+
+  return null;
+}
+
+function parseHostedRunnerContainerIdNameRows(
+  output: string,
+): Array<{ id: string; name: string }> {
+  const containers: Array<{ id: string; name: string }> = [];
+  for (const line of output.split("\n")) {
+    const [id, name] = line.trim().split(/\s+/u);
+    if (id && name) {
+      containers.push({ id, name });
+    }
+  }
+  return containers;
+}
+
+function parseWhitespaceSeparatedDockerIds(output: string): string[] {
+  return output
+    .split(/\s+/)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 function isHostedRunnerLocalImageRef(value: string): boolean {

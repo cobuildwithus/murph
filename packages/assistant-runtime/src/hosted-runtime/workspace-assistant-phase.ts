@@ -38,6 +38,9 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
 import {
+  HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
+} from "./provider-fetch.ts";
+import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
 import {
@@ -2668,6 +2671,9 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
         deliveryErrorCodeSummary: summarizeHostedOutboxDeliveryErrorCodes(
           input.outcomes.map((outcome) => outcome.deliveryErrorCode),
         ),
+        deliverySafeExternalErrorCodeSummary: summarizeHostedOutboxDeliverySafeExternalErrorCodes(
+          input.outcomes.map((outcome) => outcome.deliveryErrorCode),
+        ),
         failed,
         journalStatusSummary: summarizeHostedOutboxDeliveryCodes(
           input.outcomes.map((outcome) => outcome.journalStatus),
@@ -2704,6 +2710,20 @@ function summarizeHostedOutboxDeliveryErrorCodes(values: readonly (string | null
   return typeof summary === "string" ? summary : "";
 }
 
+function summarizeHostedOutboxDeliverySafeExternalErrorCodes(
+  values: readonly (string | null)[],
+): string {
+  const externalCodes = values
+    .map(normalizeHostedOutboxDeliverySafeExternalErrorCode)
+    .filter((value): value is string => value !== null);
+  if (externalCodes.length === 0) {
+    return "";
+  }
+
+  const summary = summarizeHostedRuntimeStatusCounts(externalCodes).statusSummary;
+  return typeof summary === "string" ? summary : "";
+}
+
 function normalizeHostedOutboxDeliveryErrorCode(value: string | null): string {
   if (!value) {
     return "none";
@@ -2715,6 +2735,31 @@ function normalizeHostedOutboxDeliveryErrorCode(value: string | null): string {
   return /^ASSISTANT_[A-Z0-9_]*DELIVERY[A-Z0-9_]*$/u.test(code)
     ? code
     : "external_code";
+}
+
+function normalizeHostedOutboxDeliverySafeExternalErrorCode(
+  value: string | null,
+): string | null {
+  if (!value) {
+    return null;
+  }
+  const code = toHostedRuntimeLogCode(value);
+  if (isHostedOutboxDeliverySafeExternalErrorCode(code)) {
+    return code;
+  }
+  return /^ASSISTANT_[A-Z0-9_]*DELIVERY[A-Z0-9_]*$/u.test(code) ? null : "external_code";
+}
+
+function isHostedOutboxDeliverySafeExternalErrorCode(code: string): boolean {
+  return code === HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE
+    || code === "LINQ_API_REQUEST_FAILED"
+    || code === "LINQ_API_TOKEN_REQUIRED"
+    || code === "LINQ_UNAVAILABLE"
+    || code === "ASSISTANT_LINQ_API_TOKEN_REQUIRED"
+    || code === "ASSISTANT_LINQ_CHAT_ID_REQUIRED"
+    || code === "ASSISTANT_LINQ_FROM_PHONE_REQUIRED"
+    || code === "ASSISTANT_CHANNEL_TARGET_REQUIRED"
+    || code === "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED";
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {

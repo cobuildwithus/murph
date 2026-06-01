@@ -11,6 +11,14 @@ const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
+const SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
+const FINAL_RUNNER_CLEANUP_TIMEOUT_MS = 60_000;
+
+interface HostedLocalE2eRunnerCleanupOptions {
+  ignoreRunnerCleanupErrors: boolean;
+  removeRunnerImages: boolean;
+  runnerCleanupTimeoutMs: number;
+}
 
 export type HostedLocalE2eScenarioName =
   | "all"
@@ -224,7 +232,11 @@ export async function runHostedLocalE2eSuite(
     }
   } finally {
     try {
-      await cleanupHostedLocalE2eRunnerArtifacts(suiteEnv);
+      await cleanupHostedLocalE2eRunnerArtifacts(suiteEnv, {
+        ignoreRunnerCleanupErrors: true,
+        removeRunnerImages: true,
+        runnerCleanupTimeoutMs: FINAL_RUNNER_CLEANUP_TIMEOUT_MS,
+      });
       if (terminationSignal) {
         process.exitCode = terminationSignal === "SIGINT" ? 130 : 143;
       }
@@ -311,6 +323,59 @@ async function runHostedLocalVitest(input: {
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
+  if (input.scenarios.length <= 1) {
+    await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
+      ignoreRunnerCleanupErrors: false,
+      removeRunnerImages: false,
+      runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
+    });
+    try {
+      await runHostedLocalVitestForScenarios({
+        env: input.env,
+        label: "Hosted local full-stack e2e suite",
+        scenarios: input.scenarios,
+      });
+    } finally {
+      await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
+        ignoreRunnerCleanupErrors: true,
+        removeRunnerImages: false,
+        runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
+      });
+    }
+    return;
+  }
+
+  for (const [index, scenario] of input.scenarios.entries()) {
+    await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
+      ignoreRunnerCleanupErrors: false,
+      removeRunnerImages: false,
+      runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
+    });
+    try {
+      await runHostedLocalVitestForScenarios({
+        env: input.env,
+        label: [
+          "Hosted local full-stack e2e scenario",
+          `${index + 1}/${input.scenarios.length}`,
+          scenario.name,
+        ].join(" "),
+        scenarios: [scenario],
+      });
+    } finally {
+      await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
+        ignoreRunnerCleanupErrors: true,
+        removeRunnerImages: false,
+        runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
+      });
+    }
+  }
+}
+
+async function runHostedLocalVitestForScenarios(input: {
+  env: NodeJS.ProcessEnv;
+  label: string;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): Promise<void> {
   await runForegroundCommand({
     args: [
       "exec",
@@ -325,7 +390,7 @@ async function runHostedLocalVitest(input: {
     cwd: hostedLocalHarnessRepoRoot,
     env: input.env,
     forwardProcessSignals: ["SIGINT", "SIGTERM"],
-    label: "Hosted local full-stack e2e suite",
+    label: input.label,
   });
 }
 
@@ -352,18 +417,39 @@ function buildHostedLocalE2eSuiteEnv(input: {
 
 async function cleanupHostedLocalE2eRunnerArtifacts(
   env: NodeJS.ProcessEnv,
+  options: HostedLocalE2eRunnerCleanupOptions,
 ): Promise<void> {
-  const { cleanupHostedRunnerContainers, cleanupHostedRunnerImages } =
+  const {
+    cleanupHostedLocalOrphanedWorkerdProcesses,
+    cleanupHostedRunnerContainers,
+    cleanupHostedRunnerImages,
+  } =
     await import("../../../scripts/dev-hosted-local/runtime.ts");
+  const {
+    cleanupHostedLocalMinioBuildContainersBestEffort,
+    cleanupHostedLocalMinioE2eContainersBestEffort,
+  } =
+    await import("../../../scripts/dev-hosted-local/minio.ts");
 
+  cleanupHostedLocalOrphanedWorkerdProcesses();
   await cleanupHostedRunnerContainers({
     cwd: hostedLocalHarnessRepoRoot,
     env,
-    ignoreErrors: true,
+    ignoreErrors: options.ignoreRunnerCleanupErrors,
+    scope: "e2e-builds",
+    timeoutMs: options.runnerCleanupTimeoutMs,
   });
-  await cleanupHostedRunnerImages({
-    cwd: hostedLocalHarnessRepoRoot,
-    env,
-    ignoreErrors: true,
-  });
+  if (options.removeRunnerImages) {
+    await cleanupHostedRunnerImages({
+      cwd: hostedLocalHarnessRepoRoot,
+      env,
+      ignoreErrors: true,
+      timeoutMs: options.runnerCleanupTimeoutMs,
+    });
+  }
+  const buildId = env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim();
+  if (buildId) {
+    await cleanupHostedLocalMinioBuildContainersBestEffort(env, buildId);
+  }
+  await cleanupHostedLocalMinioE2eContainersBestEffort(env);
 }

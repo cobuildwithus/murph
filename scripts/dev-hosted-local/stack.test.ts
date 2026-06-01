@@ -890,10 +890,7 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "current-build",
     }));
-    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      ignoreErrors: true,
-      scope: "current-build",
-    }));
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
     expect(maybeStartHostedLocalMinio).toHaveBeenCalledWith(expect.objectContaining({
       containerHost: expect.any(String),
       tempDir: "/tmp/murph-dev-env-test",

@@ -202,6 +202,7 @@ export async function startHostedLocalFullStackScenario(input: {
       ...hostedAssistantDevEnv,
       ...buildHostedLocalDeviceSyncProviderEnvClearances(),
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "120000",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",

@@ -1580,6 +1580,31 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
   });
 
+  it("can seed a stale unexpired stuck invocation for hosted-local tests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerHarness({
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const stuck = await runner.startStuckInvocationForTest({
+      expiresInMs: 45_000,
+      startedAgoMs: 35_000,
+      userId: TEST_USER_ID,
+    });
+
+    expect(stuck.nextWakeAt).toBe("2026-04-27T00:00:45.000Z");
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_expires_at: "2026-04-27T00:00:45.000Z",
+      active_started_at: "2026-04-26T23:59:25.000Z",
+    });
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
+  });
+
   it("rethrows watchdog alarm maintenance failures so Cloudflare can retry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2376,6 +2401,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
   active_attempt_id: string | null;
   active_expires_at: string | null;
   active_generation: number;
+  active_started_at: string | null;
   active_workspace_version: string | null;
   backoff_until: string | null;
   failure_count: number;
@@ -2386,6 +2412,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     active_attempt_id: string | null;
     active_expires_at: string | null;
     active_generation: number;
+    active_started_at: string | null;
     active_workspace_version: string | null;
     backoff_until: string | null;
     failure_count: number;
@@ -2395,6 +2422,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     `SELECT active_attempt_id,
             active_expires_at,
             active_generation,
+            active_started_at,
             active_workspace_version,
             backoff_until,
             failure_count,

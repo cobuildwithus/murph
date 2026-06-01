@@ -54,6 +54,7 @@ export interface HostedLocalDevHarness {
   startStuckInvocationForTest(userId: string, input?: {
     expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
+    startedAgoMs?: number;
   }): Promise<{
     attemptId: string;
     nextWakeAt: string | null;
@@ -199,6 +200,7 @@ export async function startHostedLocalDevHarness(input: {
         stuckInput?: {
           expiresInMs?: number;
           reason?: HostedWorkspaceInvocationReason;
+          startedAgoMs?: number;
         },
       ): Promise<{
         attemptId: string;
@@ -211,6 +213,9 @@ export async function startHostedLocalDevHarness(input: {
         }
         if (stuckInput?.reason) {
           searchParams.set("reason", stuckInput.reason);
+        }
+        if (typeof stuckInput?.startedAgoMs === "number") {
+          searchParams.set("startedAgoMs", String(stuckInput.startedAgoMs));
         }
         const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
         return await requestJsonForRuntime<{

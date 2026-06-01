@@ -1648,6 +1648,7 @@ export class HostedUserRunner {
   async startStuckInvocationForTest(input: {
     expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
+    startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
@@ -1659,7 +1660,12 @@ export class HostedUserRunner {
       reason: input.reason ?? "manual",
       userId: input.userId,
     });
-    const record = await this.stateStore.readState();
+    const record = typeof input.startedAgoMs === "number"
+      ? await this.stateStore.ageActiveInvocationForTest({
+          expiresAt: token.expiresAt,
+          startedAt: new Date(Date.now() - input.startedAgoMs).toISOString(),
+        })
+      : await this.stateStore.readState();
     await this.syncWatchdogAlarm(record);
 
     return {

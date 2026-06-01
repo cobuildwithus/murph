@@ -470,7 +470,9 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async startStuckInvocationForTest(input: {
+    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
+    startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.runner.bindUser(input.userId);
@@ -1183,6 +1185,7 @@ async function handleTestStartStuckInvocationRoute(
     startStuckInvocationForTest(input: {
       expiresInMs?: number;
       reason?: HostedWorkspaceInvocationReason;
+      startedAgoMs?: number;
       userId: string;
     }): Promise<HostedRunnerStuckInvocationTestResult>;
   };
@@ -1196,9 +1199,16 @@ async function handleTestStartStuckInvocationRoute(
   if (expiresInMs === "invalid") {
     return json({ error: "Unsupported test stuck invocation expiry." }, 400);
   }
+  const startedAgoMs = parseTestPositiveInteger(
+    context.url.searchParams.get("startedAgoMs"),
+  );
+  if (startedAgoMs === "invalid") {
+    return json({ error: "Unsupported test stuck invocation age." }, 400);
+  }
   return json(await stub.startStuckInvocationForTest({
     ...(expiresInMs === null ? {} : { expiresInMs }),
     ...(reason ? { reason } : {}),
+    ...(startedAgoMs === null ? {} : { startedAgoMs }),
     userId,
   }));
 }

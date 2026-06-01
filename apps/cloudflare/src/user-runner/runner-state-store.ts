@@ -207,6 +207,7 @@ export class RunnerStateStore {
   }
 
   async ageActiveInvocationForTest(input: {
+    expiresAt?: string;
     startedAt: string;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
@@ -214,7 +215,7 @@ export class RunnerStateStore {
       throw new Error("Hosted runner has no write fence to age for test.");
     }
     meta.active_started_at = normalizeIsoDate(input.startedAt);
-    meta.active_expires_at = normalizeIsoDate(input.startedAt);
+    meta.active_expires_at = normalizeIsoDate(input.expiresAt ?? input.startedAt);
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }

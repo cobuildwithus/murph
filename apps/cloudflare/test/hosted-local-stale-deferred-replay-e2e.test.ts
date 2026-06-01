@@ -99,8 +99,9 @@ describe("hosted local stale deferred invocation recovery", () => {
       const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(
         userId,
         {
-          expiresInMs: 30_000,
+          expiresInMs: 45_000,
           reason: "manual",
+          startedAgoMs: 35_000,
         },
       );
       expect(stuckInvocation.ok).toBe(true);
@@ -121,7 +122,7 @@ describe("hosted local stale deferred invocation recovery", () => {
 
       const importedBeforeLeaseExpiry = await waitForConversationImportAtLeast(
         conversationSeq,
-        { timeoutMs: 6_000 },
+        { timeoutMs: 25_000 },
       );
 
       if (importedBeforeLeaseExpiry === null) {

@@ -23,6 +23,7 @@ import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   isHostedRuntimeInternalAuthorityRejectedError,
+  readCloudflareHostedProviderFetchBaseUrls,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
   readHostedWorkspaceSnapshotRestoreStep,
 } from "./runtime-platform.js";
@@ -348,9 +349,15 @@ async function runWorkspaceChildJob(input: {
   let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
   const boundUserId = readHostedExecutionRunnerJobUserId(input.job);
   input.noteRuntimeStage("bridge.platform");
+  const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls({
+    ...process.env,
+    ...(input.job.runtime?.forwardedEnv ?? {}),
+    ...(input.job.runtime?.platformEnv ?? {}),
+  });
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId,
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
+    providerFetchBaseUrls,
     proxyBoundUserIdHeader: true,
     workspaceCheckpointBridge: {
       readCurrentLease: () => currentLease,

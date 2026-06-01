@@ -66,6 +66,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
 import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
+  resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
@@ -505,6 +506,110 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects).toEqual([]);
   });
 
+  it("collects prepared idempotent sending intents without waiting for stale-send timeout", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_linq",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_linq",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_linq",
+        lastAttemptAt: "2026-04-08T00:00:01.000Z",
+        lastError: null,
+        message: "hello linq",
+        nextAttemptAt: null,
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "sending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_linq",
+      },
+    ]);
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryConfirmationPending: false,
+          deliveryIdempotencyKey: "assistant-outbox:intent_linq",
+          deliveryTransportIdempotent: true,
+          intentId: "intent_linq",
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingPastGraceWindow: false,
+          sendingStartedAt: "2026-04-08T00:00:01.000Z",
+        },
+      ),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(false);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]).toEqual(expect.objectContaining({
+      deliveryPhase: "background_retry",
+      effectId: "intent_linq",
+      payload: expect.objectContaining({
+        channel: "linq",
+        idempotencyKey: "assistant-outbox:intent_linq",
+        transportIdempotent: true,
+      }),
+    }));
+  });
+
+  it("schedules prepared idempotent sending intents for an immediate hosted wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:10.000Z"));
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_linq",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_linq",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_linq",
+        lastAttemptAt: "2026-04-08T00:00:01.000Z",
+        lastError: null,
+        message: "hello linq",
+        nextAttemptAt: null,
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "sending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_linq",
+      },
+    ]);
+
+    const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(wakeAt).toBe("2026-04-08T00:00:10.000Z");
+    vi.useRealTimers();
+  });
+
   it("returns sent without re-dispatching when the outbox mirror already has a sent record", async () => {
     const effect = createEffect();
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
@@ -586,20 +691,29 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("resets a foreground prepared sending intent when abort happens before provider dispatch", async () => {
-    const abortController = new AbortController();
+  it("resets a prepared sending intent to immediate pending when abort happens before provider dispatch", async () => {
+    const abortReason = new Error("lease expired before provider dispatch");
+    let signalAborted = false;
+    const signal = {
+      get aborted() {
+        return signalAborted;
+      },
+      get reason() {
+        return abortReason;
+      },
+    } as AbortSignal;
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_123",
-      deliveryPhase: "foreground_current_turn",
+      deliveryPhase: "background_retry",
       effectId: "intent_123",
-      payload: createPayload(),
+      payload: createPayload({ transportIdempotent: true }),
     });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState(
         {
           delivery: null,
           deliveryIdempotencyKey: "assistant-outbox:intent_123",
-          deliveryTransportIdempotent: false,
+          deliveryTransportIdempotent: true,
           intentId: effect.effectId,
           lastError: null,
           status: "sending",
@@ -610,31 +724,31 @@ describe("hosted runtime callbacks", () => {
       ),
     );
     const effectsPort = createHostedRuntimeEffectsPortStub();
+    mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValueOnce({
+      delivery: null,
+      intentId: "intent_123",
+      lastError: null,
+      status: "pending",
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
-      abortController.abort(new Error("lease expired before provider dispatch"));
-      try {
-        await request.dependencies.sendTelegram({
-          idempotencyKey: "assistant-outbox:intent_123",
-          message: "hello from hosted",
-          replyToMessageId: null,
-          target: "chat_123",
-        });
-      } catch {
-        return createDispatchResult(
-          {
-            lastError: {
-              code: "ASSISTANT_DELIVERY_ABORTED",
-              message: "lease expired before provider dispatch",
-            },
-            status: "retryable",
-          },
-          {
+      expect(request).toEqual(expect.objectContaining({
+        allowPreparedSending: true,
+        intentId: "intent_123",
+      }));
+      signalAborted = true;
+      return createDispatchResult(
+        {
+          lastError: {
             code: "ASSISTANT_DELIVERY_ABORTED",
             message: "lease expired before provider dispatch",
           },
-        );
-      }
-      throw new Error("expected pre-provider abort");
+          status: "retryable",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_ABORTED",
+          message: "lease expired before provider dispatch",
+        },
+      );
     });
 
     await expect(
@@ -643,7 +757,7 @@ describe("hosted runtime callbacks", () => {
         assistantDeliveryEffects: [effect],
         effectsPort,
         providerFetch: vi.fn<typeof fetch>(),
-        signal: abortController.signal,
+        signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
         wake: HOSTED_WAKE.wake,
       }),
@@ -652,7 +766,79 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
     expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
-      deliveryTransportIdempotent: false,
+      deliveryTransportIdempotent: true,
+      intentId: "intent_123",
+      preparedAt: "2026-04-08T00:00:05.000Z",
+      resetAt: expect.any(Date),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
+  it("throws after pre-provider abort when prepared reset is a no-op", async () => {
+    const abortReason = new Error("lease expired before no-op reset");
+    let signalAborted = false;
+    const signal = {
+      get aborted() {
+        return signalAborted;
+      },
+      get reason() {
+        return abortReason;
+      },
+    } as AbortSignal;
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_123",
+      deliveryPhase: "background_retry",
+      effectId: "intent_123",
+      payload: createPayload({ transportIdempotent: true }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_123",
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async () => {
+      signalAborted = true;
+      return createDispatchResult(
+        {
+          lastError: {
+            code: "ASSISTANT_DELIVERY_ABORTED",
+            message: "lease expired before no-op reset",
+          },
+          status: "retryable",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_ABORTED",
+          message: "lease expired before no-op reset",
+        },
+      );
+    });
+
+    await expect(
+      drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        providerFetch: vi.fn<typeof fetch>(),
+        signal,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      }),
+    ).rejects.toThrow("lease expired before no-op reset");
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
       intentId: "intent_123",
       preparedAt: "2026-04-08T00:00:05.000Z",
       resetAt: expect.any(Date),

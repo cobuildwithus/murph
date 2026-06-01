@@ -71,6 +71,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   startStuckInvocationForTest?(input: {
     expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
+    startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;
   runnerStatus(input?: { logLimit?: number }): Promise<HostedRunnerStatusResponse>;

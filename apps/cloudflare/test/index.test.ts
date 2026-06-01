@@ -1081,6 +1081,40 @@ describe("cloudflare worker routes", () => {
     expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({ userId: "member_123" });
   });
 
+  it("starts a stale hosted-local stuck invocation test route for correctly bound callers", async () => {
+    const stub = createUserRunnerStub({
+      startStuckInvocationForTest: vi.fn(async () => ({
+        attemptId: "workspace-invocation-test",
+        nextWakeAt: "2026-05-09T00:00:00.000Z",
+        ok: true as const,
+      })),
+    });
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/stuck-invocation?expiresInMs=45000&reason=manual&startedAgoMs=35000",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
+      expiresInMs: 45000,
+      reason: "manual",
+      startedAgoMs: 35000,
+      userId: "member_123",
+    });
+  });
+
   it("runs the hosted-local checkpoint artifact write-fence regression route for correctly bound callers", async () => {
     const artifactText = "checkpoint artifact payload";
     const artifactSha256 = createHash("sha256").update(artifactText).digest("hex");
