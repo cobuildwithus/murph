@@ -1,16 +1,18 @@
 import type { VaultReadModel } from "../read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import {
-  summarizeWearableActivity,
-  summarizeWearableBodyState,
-  summarizeWearableRecovery,
-  summarizeWearableSleep,
+  buildWearableSummaryBundle,
+  summarizeWearableActivityFromBundle,
+  summarizeWearableBodyStateFromBundle,
+  summarizeWearableRecoveryFromBundle,
+  summarizeWearableSleepFromBundle,
   type WearableActivitySummary,
   type WearableBodyStateSummary,
   type WearableConfidenceLevel,
   type WearableRecoverySummary,
   type WearableResolvedMetric,
   type WearableSleepSummary,
+  type WearableSummaryBundle,
 } from "../wearables.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
@@ -27,9 +29,18 @@ export interface MetricProjection {
   wearableMetricRows: MetricRowEvidence[];
 }
 
-export function buildMetricProjection(vault: VaultReadModel): MetricProjection {
+export interface BuildMetricProjectionOptions {
+  wearableMetricRows?: readonly MetricRowEvidence[];
+}
+
+export function buildMetricProjection(
+  vault: VaultReadModel,
+  options: BuildMetricProjectionOptions = {},
+): MetricProjection {
   const dailySampleSummaries = summarizeDailySamples(vault);
-  const wearableMetricRows = buildWearableMetricEvidence(vault);
+  const wearableMetricRows = options.wearableMetricRows
+    ? [...options.wearableMetricRows]
+    : buildWearableMetricEvidence(vault);
   return {
     dailySampleSummaries,
     metricPoints: extractMetricPoints({
@@ -42,10 +53,14 @@ export function buildMetricProjection(vault: VaultReadModel): MetricProjection {
 }
 
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
-  const sleepSummaries = summarizeWearableSleep(vault, { limit: METRIC_PROJECTION_LIMIT });
-  const recoverySummaries = summarizeWearableRecovery(vault, { limit: METRIC_PROJECTION_LIMIT });
-  const activitySummaries = summarizeWearableActivity(vault, { limit: METRIC_PROJECTION_LIMIT });
-  const bodyStateSummaries = summarizeWearableBodyState(vault, { limit: METRIC_PROJECTION_LIMIT });
+  return buildWearableMetricEvidenceFromBundle(buildWearableSummaryBundle(vault));
+}
+
+export function buildWearableMetricEvidenceFromBundle(bundle: WearableSummaryBundle): MetricRowEvidence[] {
+  const sleepSummaries = summarizeWearableSleepFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
+  const recoverySummaries = summarizeWearableRecoveryFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
+  const activitySummaries = summarizeWearableActivityFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
+  const bodyStateSummaries = summarizeWearableBodyStateFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
 
   return [
     ...sleepSummaries.flatMap(sleepMetricEvidence),

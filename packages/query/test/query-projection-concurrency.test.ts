@@ -69,6 +69,41 @@ test("concurrent stale projection readers share one rebuild", async () => {
   }
 });
 
+test("projection rebuild shares one wearable dataset collection", async () => {
+  vi.resetModules();
+
+  let collectWearableDatasetCallCount = 0;
+
+  vi.doMock("../src/wearables/candidates.ts", async () => {
+    const actual = await vi.importActual<typeof import("../src/wearables/candidates.ts")>(
+      "../src/wearables/candidates.ts",
+    );
+
+    return {
+      ...actual,
+      collectWearableDataset: (
+        ...args: Parameters<typeof actual.collectWearableDataset>
+      ): ReturnType<typeof actual.collectWearableDataset> => {
+        collectWearableDatasetCallCount += 1;
+        return actual.collectWearableDataset(...args);
+      },
+    };
+  });
+
+  try {
+    const vaultRoot = await createTempVaultRoot();
+    await writeMinimalVault(vaultRoot);
+
+    const { rebuildQueryProjection } = await import("../src/query-projection.ts");
+    await rebuildQueryProjection(vaultRoot);
+
+    assert.equal(collectWearableDatasetCallCount, 1);
+  } finally {
+    vi.doUnmock("../src/wearables/candidates.ts");
+    vi.resetModules();
+  }
+});
+
 async function createTempVaultRoot(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-projection-concurrency-"));
   tempRoots.push(vaultRoot);

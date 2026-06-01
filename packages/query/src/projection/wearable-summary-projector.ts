@@ -27,6 +27,10 @@ import type {
 
 export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWearableSummaryRow[] {
   const dataset = collectWearableDataset(vault, {});
+  return buildWearableSummaryProjectionFromDataset(dataset);
+}
+
+export function buildWearableSummaryProjectionFromDataset(dataset: WearableDataset): QueryWearableSummaryRow[] {
   const datasetsByProvider = groupWearableDatasetByPublicProvider(dataset);
   const providers = normalizeWearableProviders([...datasetsByProvider.keys()]);
 

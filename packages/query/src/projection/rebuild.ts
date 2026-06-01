@@ -6,12 +6,17 @@ import {
   materializeSampleSummarySearchDocuments as materializeSummaryDocuments,
   materializeSearchDocuments,
 } from "../search-shared.ts";
-import { buildMetricProjection } from "../metrics/projection.ts";
+import {
+  buildMetricProjection,
+  buildWearableMetricEvidenceFromBundle,
+} from "../metrics/projection.ts";
 import {
   readVaultSourceStrict,
   type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "../vault-source.ts";
+import { buildWearableSummaryBundleFromDataset } from "../wearables.ts";
+import { collectWearableDataset } from "../wearables/candidates.ts";
 import type { RebuildQueryProjectionResult } from "../query-projection-types.ts";
 import { insertQueryEntities } from "./entity-store.ts";
 import { resetUnsupportedQueryProjection } from "./freshness.ts";
@@ -31,7 +36,7 @@ import {
   type QueryProjectionLocation,
 } from "./schema.ts";
 import {
-  buildWearableSummaryProjection,
+  buildWearableSummaryProjectionFromDataset,
 } from "./wearable-summary-projector.ts";
 import {
   insertWearableSummaryRows,
@@ -51,11 +56,15 @@ export async function rebuildQueryProjectionWithManifest(
     vaultRoot,
     entities: snapshot.entities,
   });
-  const metricProjection = buildMetricProjection(snapshotReadModel);
+  const wearableDataset = collectWearableDataset(snapshotReadModel, {});
+  const wearableSummaryBundle = buildWearableSummaryBundleFromDataset(wearableDataset);
+  const metricProjection = buildMetricProjection(snapshotReadModel, {
+    wearableMetricRows: buildWearableMetricEvidenceFromBundle(wearableSummaryBundle),
+  });
   const dailySampleSummaries = metricProjection.dailySampleSummaries;
   const metricPoints = metricProjection.metricPoints;
   const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
-  const wearableSummaries = buildWearableSummaryProjection(snapshotReadModel);
+  const wearableSummaries = buildWearableSummaryProjectionFromDataset(wearableDataset);
   const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
   const searchDocuments = [
     ...materializeSearchDocuments(searchableEntities),
