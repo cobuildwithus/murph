@@ -127,6 +127,7 @@ interface JunctionWindowFetchOptions {
 
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
+  "stress_level",
   "sleep",
   "sleep_cycle",
   "workouts",
@@ -183,6 +184,17 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "floors_ascended",
     "activityScore",
     "activity_score",
+    "score",
+  ],
+  stress_level: [
+    "stressLevel",
+    "stress_level",
+    "averageStressLevel",
+    "average_stress_level",
+    "stress.average",
+    "stressLevelValue",
+    "stress_level_value",
+    "value",
     "score",
   ],
   body: [

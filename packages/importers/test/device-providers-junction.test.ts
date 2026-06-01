@@ -157,6 +157,11 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
             steps: 7100,
           },
         ],
+        stress_level: [{
+          connectionId: "source-oura",
+          observedAt: "2026-04-22T12:00:00Z",
+          stressLevel: 18,
+        }],
         sleep: [{
           connectionId: "source-oura",
           id: "sleep-a",
@@ -247,6 +252,32 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.equal(floatingSample, undefined);
 
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
+});
+
+test("Junction snapshot adapter normalizes stress level summaries", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      stress_level: [{
+        id: "stress-level-1",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        observedAt: "2026-04-22T12:00:00Z",
+        stressLevel: 18,
+      }],
+    },
+  });
+
+  assert.deepEqual(payload.provenance?.summaryResources, ["stress_level"]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-stress-level"));
+
+  const stressEvent = payload.events?.find((event) => event.fields?.metric === "stress-level");
+  assert.ok(stressEvent);
+  assert.equal(stressEvent.dataOrigin?.sourceProviderSlug, "garmin");
+  assert.equal(stressEvent.fields?.observationGrain, "summary");
+  assert.equal(stressEvent.fields?.unit, "score");
+  assert.equal(stressEvent.fields?.value, 18);
 });
 
 test("Junction snapshot adapter keeps glucose timeseries unsupported", () => {
@@ -1118,6 +1149,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual([...JUNCTION_DEFAULT_SUMMARY_RESOURCES], [
     "profile",
     "activity",
+    "stress_level",
     "sleep",
     "sleep_cycle",
     "workouts",
@@ -1167,6 +1199,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("glucose"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-stress-level"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));

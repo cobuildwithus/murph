@@ -201,6 +201,25 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
 
+const STRESS_LEVEL_METRICS: readonly MetricDescriptor[] = [
+  {
+    metric: "stress-level",
+    unit: "score",
+    title: "Junction stress level",
+    paths: [
+      "stressLevel",
+      "stress_level",
+      "averageStressLevel",
+      "average_stress_level",
+      "stress.average",
+      "stressLevelValue",
+      "stress_level_value",
+      "value",
+      "score",
+    ],
+  },
+];
+
 const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
@@ -371,6 +390,9 @@ function normalizeSummaries(
       switch (resource) {
         case "activity":
           pushObservationMetrics(entry, resourceContext, context, ACTIVITY_METRICS);
+          break;
+        case "stress_level":
+          pushObservationMetrics(entry, resourceContext, context, STRESS_LEVEL_METRICS);
           break;
         case "body":
           pushObservationMetrics(entry, resourceContext, context, BODY_METRICS);

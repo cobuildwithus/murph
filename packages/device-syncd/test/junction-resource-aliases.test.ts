@@ -138,6 +138,7 @@ test("Junction webhooks canonicalize resource aliases before category inference"
   const cases = [
     ["daily.data.heart_rate.created", "heartrate", "timeseries"],
     ["daily.data.body_weight.created", "weight", "timeseries"],
+    ["daily.data.stress_level.created", "stress_level", "summary"],
     ["daily.data.sleep_cycle.created", "sleep_cycle", "summary"],
     ["daily.data.hypnogram.created", "sleep_cycle", "summary"],
     ["daily.data.calories_active.updated", "calories_active", "timeseries"],
@@ -172,6 +173,64 @@ test("Junction webhooks canonicalize resource aliases before category inference"
     assert.equal(payload.resource, resource);
     assert.equal(payload.resourceCategory, resourceCategory);
   }
+});
+
+test("Junction stress level webhooks import direct summary payloads", async () => {
+  const provider = createProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+  const webhookHandler = provider.webhookHandler;
+  const executor = provider.jobExecutor;
+  assert.ok(webhookHandler);
+  assert.ok(executor);
+
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.stress_level.created",
+      user_id: "junction-user-1",
+      data: {
+        id: "stress-level-1",
+        stressLevel: 18,
+        observedAt: "2026-04-02T12:00:00.000Z",
+        source: {
+          provider: "garmin",
+          type: "watch",
+        },
+      },
+    },
+    messageId: "msg_stress_level_direct",
+  });
+
+  const parsed = await webhookHandler.verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const jobInput = parsed.jobs[0];
+  assert.ok(jobInput);
+  const jobPayload = jobInput.payload;
+  assert.ok(jobPayload);
+  assert.equal(parsed.resourceCategory, "summary");
+  assert.equal(jobInput.kind, "resource");
+  assert.equal(jobPayload.resource, "stress_level");
+  assert.equal(jobPayload.resourceCategory, "summary");
+  assert.equal(typeof jobPayload.webhookDataJson, "string");
+
+  const importedSnapshots: unknown[] = [];
+  await executor.executeJob(
+    createJobContext(importedSnapshots),
+    createJob(jobInput.kind, jobPayload),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.timeseries && Object.keys(snapshot.timeseries).length, 0);
+  assert.equal(snapshot.summaries?.stress_level?.length, 1);
+  assert.equal(snapshot.summaries?.stress_level?.[0]?.stressLevel, 18);
+  assert.equal(snapshot.summaries?.stress_level?.[0]?.sourceProviderSlug, "garmin");
 });
 
 test("Junction REST diagnostics canonicalize resource aliases before allowlist checks", async () => {

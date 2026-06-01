@@ -363,6 +363,7 @@ const JUNCTION_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   sleepScore: 55,
   spo2: 55,
   steps: 55,
+  stressLevel: 55,
   totalCalories: 55,
   totalSleepMinutes: 55,
   weightKg: 55,
@@ -584,7 +585,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
     supportsTokenRefresh: false,
   },
   normalization: {
-    metricFamilies: ["activity", "sleep", "cardio", "respiration", "blood_oxygen", "body", "session"],
+    metricFamilies: ["activity", "sleep", "recovery", "cardio", "respiration", "blood_oxygen", "body", "session"],
     snapshotParser: "schema",
   },
   sourcePriorityHints: {
@@ -592,6 +593,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
     metricFamilies: {
       activity: 55,
       sleep: 55,
+      recovery: 55,
       cardio: 55,
       respiration: 55,
       blood_oxygen: 55,

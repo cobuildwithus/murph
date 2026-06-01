@@ -1,6 +1,7 @@
 export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "profile",
   "activity",
+  "stress_level",
   "sleep",
   "sleep_cycle",
   "workouts",
@@ -464,6 +465,9 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
       return "heartrate";
     case "meals":
       return "meal";
+    case "stress":
+    case "stresslevel":
+      return "stress_level";
     case "body_weight":
       return "weight";
     case "sleep_cycle":
