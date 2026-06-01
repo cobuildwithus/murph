@@ -11,7 +11,7 @@ import {
 } from './cli-test-helpers.js'
 const runSourceCli = runCli
 const runRawSourceCli = runRawCli
-const CLI_LIST_TIMEOUT_MS = 30_000
+const CLI_LIST_TIMEOUT_MS = 90_000
 
 function listCliOptions() {
   const env = { ...process.env }

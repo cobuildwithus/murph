@@ -61,12 +61,8 @@ import {
 } from '@murphai/operator-config/setup-runtime-env'
 import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
-import { loadCliEnvFiles } from '../src/cli-entry.ts'
+import { loadCliEnvFiles, runMurphCliAction } from '../src/cli-entry.ts'
 import {
-  commandOutputFromError,
-  ensureCliRuntimeArtifacts,
-  ensureCliRuntimeArtifactsWithOptions,
-  isRetryableCliRuntimeArtifactError,
   repoRoot,
   requireData,
   type CliEnvelope,
@@ -74,10 +70,7 @@ import {
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
-const SETUP_ALIAS_COMMAND_TIMEOUT_MS = 30_000
-// Five alias subprocesses run serially here; keep the test budget above the
-// sum of the per-command budgets so failures come from the child timeout.
-const SETUP_ALIAS_TIMEOUT_MS = SETUP_ALIAS_COMMAND_TIMEOUT_MS * 6
+const SETUP_ALIAS_TIMEOUT_MS = 90_000
 const SETUP_ONBOARD_TIMEOUT_MS = 90_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
@@ -825,71 +818,62 @@ async function runSetupCli<TData>(
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
-async function runSetupAliasRaw(
-  aliasName: string,
+async function runMurphAliasActionRaw(
   args: string[],
   options?: {
     cwd?: string
     env?: NodeJS.ProcessEnv
   },
 ): Promise<string> {
-  await ensureCliRuntimeArtifacts()
-
-  const aliasRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-alias-'))
-  const aliasPath = path.join(aliasRoot, aliasName)
-  const builtBinPath = JSON.stringify(path.join(repoRoot, 'packages/cli/dist/bin.js'))
+  const output: string[] = []
+  const errors: string[] = []
+  const previousCwd = process.cwd()
+  const previousEnv = { ...process.env }
+  const previousExitCode = process.exitCode
+  const previousStdoutWrite = process.stdout.write
+  const previousStderrWrite = process.stderr.write
+  let exitCode: number | undefined
+  const captureStdout = ((chunk: string | Uint8Array) => {
+    output.push(String(chunk))
+    return true
+  }) as typeof process.stdout.write
+  const captureStderr = ((chunk: string | Uint8Array) => {
+    errors.push(String(chunk))
+    return true
+  }) as typeof process.stderr.write
 
   try {
-    await writeFile(
-      aliasPath,
-      `#!/usr/bin/env node
-;(async () => {
-  const { pathToFileURL } = await import('node:url')
-  await import(pathToFileURL(${builtBinPath}).href)
-})().catch((error) => {
-  console.error(error)
-  process.exitCode = 1
-})
-`,
-      'utf8',
-    )
-    await chmod(aliasPath, 0o755)
+    replaceProcessEnvForSetupCliTest({
+      ...process.env,
+      ...options?.env,
+    })
+    if (options?.cwd !== undefined) {
+      process.chdir(options.cwd)
+    }
+    process.stdout.write = captureStdout
+    process.stderr.write = captureStderr
 
-    const execOptions = {
-      cwd: options?.cwd ?? repoRoot,
-      encoding: 'utf8' as const,
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        ...options?.env,
-      }),
-      timeout: SETUP_ALIAS_COMMAND_TIMEOUT_MS,
+    await runMurphCliAction(args, {
+      argv0: '/usr/local/bin/murph',
+      exit(code) {
+        exitCode = code
+      },
+    })
+
+    if (exitCode !== undefined && exitCode !== 0) {
+      throw new Error([
+        `murph alias action exited with code ${exitCode}`,
+        errors.join('').trim(),
+      ].filter(Boolean).join('\n'))
     }
 
-    try {
-      const { stdout } = await execFileAsync(
-        process.execPath,
-        [aliasPath, ...args],
-        execOptions,
-      )
-      return stdout.trim()
-    } catch (error) {
-      const output = commandOutputFromError(error)
-      const shouldRetry = isRetryableCliRuntimeArtifactError(output)
-
-      if (!shouldRetry) {
-        throw error
-      }
-
-      await ensureCliRuntimeArtifactsWithOptions({ forceReverify: true })
-      const { stdout } = await execFileAsync(
-        process.execPath,
-        [aliasPath, ...args],
-        execOptions,
-      )
-      return stdout.trim()
-    }
+    return output.join('').trim()
   } finally {
-    await rm(aliasRoot, { recursive: true, force: true })
+    process.stdout.write = previousStdoutWrite
+    process.stderr.write = previousStderrWrite
+    process.exitCode = previousExitCode
+    process.chdir(previousCwd)
+    replaceProcessEnvForSetupCliTest(previousEnv)
   }
 }
 
@@ -3427,11 +3411,11 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
 })
 
 test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
-  const help = await runSetupAliasRaw('murph', ['--help'])
-  const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
-  const useHelp = await runSetupAliasRaw('murph', ['use', '--help'])
-  const emptyInvocation = await runSetupAliasRaw('murph', [])
-  const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
+  const help = await runMurphAliasActionRaw(['--help'])
+  const onboardHelp = await runMurphAliasActionRaw(['onboard', '--help'])
+  const useHelp = await runMurphAliasActionRaw(['use', '--help'])
+  const emptyInvocation = await runMurphAliasActionRaw([])
+  const inboxHelp = await runMurphAliasActionRaw(['inbox', 'doctor', '--help'])
 
   assert.match(help, /Murph local machine onboarding helpers\./u)
   assert.match(
