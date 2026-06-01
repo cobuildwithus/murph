@@ -74,13 +74,11 @@ const HOSTED_LINQ_LOCAL_ATTACHMENT_CDN_HOSTNAMES = new Set([
 
 export function createHostedLinqAttachmentDownloadDriver(
   options: {
-    allowAmbientFetchForLocalRuntime?: boolean;
-    platform?: HostedLinqAttachmentDownloadPlatform | null;
-  } = {},
+    platform: HostedLinqAttachmentDownloadPlatform | null;
+  },
 ): HostedLinqAttachmentDownloadDriver | null {
-  const platform = options.platform ?? null;
+  const platform = options.platform;
   const fetchImplementation = resolveHostedLinqAttachmentFetchImplementation({
-    allowAmbientFetchForLocalRuntime: options.allowAmbientFetchForLocalRuntime === true,
     platform,
   });
   const downloadFetch = fetchImplementation?.downloadFetch ?? null;
@@ -595,21 +593,17 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
 }
 
 function resolveHostedLinqAttachmentFetchImplementation(input: {
-  allowAmbientFetchForLocalRuntime: boolean;
   platform: HostedLinqAttachmentDownloadPlatform | null;
 }): {
   downloadFetch: typeof fetch | null;
   metadataFetch: typeof fetch | null;
 } | null {
-  const ambientFetch = input.allowAmbientFetchForLocalRuntime && typeof globalThis.fetch === "function"
-    ? globalThis.fetch.bind(globalThis) as typeof fetch
-    : null;
   const metadataFetch = typeof input.platform?.providerFetch === "function"
     ? input.platform.providerFetch
-    : ambientFetch;
+    : null;
   const downloadFetch = typeof input.platform?.publicInternetFetch === "function"
     ? input.platform.publicInternetFetch
-    : ambientFetch;
+    : null;
 
   if (!downloadFetch && !metadataFetch) {
     return null;

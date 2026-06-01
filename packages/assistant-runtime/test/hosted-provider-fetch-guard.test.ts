@@ -56,16 +56,21 @@ describe("hosted provider fetch guard", () => {
     }
   });
 
-  it("keeps ambient fetch fallback behind explicit local-runtime opt-in", async () => {
+  it("keeps hosted attachment drivers from accepting ambient fetch fallback", async () => {
     for (const relativePath of [
       "../src/hosted-runtime/events/linq.ts",
       "../src/hosted-runtime/events/telegram.ts",
     ] as const) {
       const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
       assert.equal(
-        source.includes("allowAmbientFetchForLocalRuntime && typeof globalThis.fetch"),
-        true,
-        `${relativePath} must gate ambient fetch fallback behind explicit local opt-in`,
+        source.includes("allowAmbientFetchForLocalRuntime"),
+        false,
+        `${relativePath} must not expose an ambient fetch opt-in`,
+      );
+      assert.equal(
+        source.includes("globalThis.fetch"),
+        false,
+        `${relativePath} must not use ambient global fetch as a provider fallback`,
       );
     }
   });

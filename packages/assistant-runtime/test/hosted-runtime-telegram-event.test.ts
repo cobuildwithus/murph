@@ -7,26 +7,9 @@ import {
   createHostedTelegramEffectsAttachmentDownloadDriver,
 } from "../src/hosted-runtime/events/telegram.ts";
 
-const originalFetch = globalThis.fetch;
 const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
 const originalTelegramApiBaseUrl = process.env.TELEGRAM_API_BASE_URL;
 const originalTelegramFileBaseUrl = process.env.TELEGRAM_FILE_BASE_URL;
-
-function restoreFetch() {
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: originalFetch,
-    writable: true,
-  });
-}
-
-function setFetch(value: typeof globalThis.fetch | undefined) {
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value,
-    writable: true,
-  });
-}
 
 function restoreTelegramEnv() {
   if (originalTelegramBotToken === undefined) {
@@ -48,28 +31,23 @@ function restoreTelegramEnv() {
   }
 }
 
-function createAmbientFetchTelegramDriver(
-  options: Parameters<typeof createHostedTelegramAttachmentDownloadDriver>[0] = {},
-) {
-  return createHostedTelegramAttachmentDownloadDriver({
-    ...options,
-    allowAmbientFetchForLocalRuntime: true,
-  });
-}
-
 afterEach(() => {
-  restoreFetch();
   restoreTelegramEnv();
 });
 
 describe("createHostedTelegramAttachmentDownloadDriver", () => {
   it("returns null when the token is missing or the configured base url is invalid", () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
     delete process.env.TELEGRAM_BOT_TOKEN;
-    assert.equal(createAmbientFetchTelegramDriver(), null);
+    assert.equal(createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation,
+    }), null);
 
     process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
     process.env.TELEGRAM_API_BASE_URL = "not a url";
-    assert.equal(createAmbientFetchTelegramDriver(), null);
+    assert.equal(createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation,
+    }), null);
   });
 
   it("gets Telegram file metadata with normalized base urls and trimmed tokens", async () => {
@@ -96,9 +74,9 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
         status: 200,
       });
     });
-    setFetch(fetchMock as typeof globalThis.fetch);
-
-    const driver = createAmbientFetchTelegramDriver();
+    const driver = createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation: fetchMock as typeof fetch,
+    });
     assert.ok(driver);
 
     await expect(driver.getFile("file_123", undefined)).resolves.toEqual({
@@ -119,9 +97,9 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
       },
       status: 200,
     }));
-    setFetch(fetchMock as typeof globalThis.fetch);
-
-    const driver = createAmbientFetchTelegramDriver();
+    const driver = createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation: fetchMock as typeof fetch,
+    });
     assert.ok(driver);
 
     await expect(driver.getFile("file_123", undefined)).rejects.toThrow(
@@ -130,13 +108,6 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
   });
 
   it("uses the provided fetch implementation for metadata and attachment downloads", async () => {
-    const rawGlobalFetch = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => {
-      throw new Error("raw global fetch should not be used");
-    });
-    setFetch(rawGlobalFetch as typeof globalThis.fetch);
-
     const fetchImplementation = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/getFile?file_id=file_123")) {
@@ -183,7 +154,6 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
       Uint8Array.from([7, 8, 9]),
     );
 
-    expect(rawGlobalFetch).not.toHaveBeenCalled();
     expect(fetchImplementation.mock.calls.map(([input]) => String(input))).toEqual([
       "https://api.telegram.example/bottelegram-token/getFile?file_id=file_123",
       "https://files.telegram.example/bottelegram-token/photos/cat.jpg",
@@ -191,36 +161,39 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
   });
 
   it("fails closed when provider fetch is explicitly unavailable", () => {
-    const rawGlobalFetch = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => {
-      throw new Error("raw global fetch should not be used");
-    });
-    setFetch(rawGlobalFetch as typeof globalThis.fetch);
-
     assert.equal(createHostedTelegramAttachmentDownloadDriver({
       env: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
       fetchImplementation: null,
     }), null);
-    expect(rawGlobalFetch).not.toHaveBeenCalled();
   });
 
-  it("does not fall back to ambient fetch unless local ambient fetch is explicit", () => {
-    const rawGlobalFetch = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => {
+  it("does not fall back to ambient fetch when provider fetch is omitted at runtime", () => {
+    const originalFetch = globalThis.fetch;
+    const rawGlobalFetch = vi.fn<typeof fetch>(async () => {
       throw new Error("raw global fetch should not be used");
     });
-    setFetch(rawGlobalFetch as typeof globalThis.fetch);
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: rawGlobalFetch,
+      writable: true,
+    });
 
-    assert.equal(createHostedTelegramAttachmentDownloadDriver({
-      env: {
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    }), null);
-    expect(rawGlobalFetch).not.toHaveBeenCalled();
+    try {
+      assert.equal(Reflect.apply(createHostedTelegramAttachmentDownloadDriver, undefined, [{
+        env: {
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+        },
+      }]), null);
+      expect(rawGlobalFetch).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        value: originalFetch,
+        writable: true,
+      });
+    }
   });
 
   it("downloads attachment bytes, strips leading slashes, and fails closed on bad responses", async () => {
@@ -239,9 +212,9 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
         statusText: "Bad Gateway",
       });
     });
-    setFetch(fetchMock as typeof globalThis.fetch);
-
-    const driver = createAmbientFetchTelegramDriver();
+    const driver = createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation: fetchMock as typeof fetch,
+    });
     assert.ok(driver);
 
     await expect(driver.downloadFile("/photos/cat.jpg", undefined)).resolves.toEqual(
