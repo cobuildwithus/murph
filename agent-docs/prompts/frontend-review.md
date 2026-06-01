@@ -37,3 +37,8 @@ Output requirements:
 Response format:
 - Return a normal text review, not patch attachments and not follow-on prompts for more agents.
 - Keep the focus on concrete design-system, UX, and product-alignment findings rather than subjective preference.
+
+Thoroughness bias:
+- Assume there is at least one real frontend, design-system, UX, or product-alignment issue in scope until you have tried hard to disprove it.
+- Hunt for all such issues, not the first one; for every credible issue, give the exact fix the parent should make.
+- If you still return no findings, explain why the changed surfaces are actually safe and polished, not merely familiar.

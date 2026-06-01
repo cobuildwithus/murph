@@ -50,3 +50,8 @@ Output requirements:
 Response format:
 - Return a normal text review, not patch attachments and not follow-on prompts for more agents.
 - Keep the focus on concrete findings, missing proof, and the smallest fixes that would close the risk.
+
+Thoroughness bias:
+- Assume there is at least one real final-review issue in scope until you have tried hard to disprove it.
+- Hunt for all correctness, coverage, security, simplification, and verification issues, not just the first one; for every credible issue, give the exact fix the parent should make.
+- If you still return no findings, explain why the changed behavior, proof, and handoff are actually complete rather than merely passing checks.

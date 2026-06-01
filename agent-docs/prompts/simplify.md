@@ -50,3 +50,8 @@ Output requirements:
 Response format:
 - Return a normal text review, not patch attachments and not follow-on prompts for more agents.
 - Keep the focus on actionable simplification findings and the concrete fixes worth making.
+
+Thoroughness bias:
+- Assume there is at least one real simplification or maintainability issue in scope until you have tried hard to disprove it.
+- Hunt for all such issues, not the first one; for every credible issue, give the exact behavior-preserving fix the parent should make.
+- If you still return no findings, explain why the current shape is already as simple as the task permits.

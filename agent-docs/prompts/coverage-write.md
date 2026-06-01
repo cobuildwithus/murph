@@ -49,3 +49,8 @@ Output requirements:
 - Report the coverage command(s) you ran and the final outcome.
 - If you made changes, summarize the files changed and the behavior covered.
 - If you found no worthwhile additions, say so explicitly and explain the remaining residual risk or blocker briefly.
+
+Thoroughness bias:
+- Assume there is at least one real coverage or direct-proof gap in scope until you have tried hard to disprove it.
+- Identify every meaningful in-scope proof gap and fix all of them with the smallest tests, fixtures, or proof scaffolding allowed by this prompt.
+- If no changes are warranted, explain what you checked and why no meaningful proof gap remains.
