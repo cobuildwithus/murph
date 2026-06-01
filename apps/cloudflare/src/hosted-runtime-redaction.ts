@@ -1,6 +1,14 @@
 export function redactHostedRuntimeDiagnosticText(value: string): string {
   return value
     .replace(
+      /\busers\/[^/\s)"'<>]+\/workspace-snapshots\/[^\s)"'<>]+/gu,
+      "users/<redacted>/workspace-snapshots/<redacted>",
+    )
+    .replace(/\bhsn_[A-Za-z0-9_:-]+\b/gu, "<redacted-hosted-namespace>")
+    .replace(/\bmember_[A-Za-z0-9_:-]+\b/gu, "<redacted-user-id>")
+    .replace(/\bsnapshot_[A-Za-z0-9_:-]+\b/gu, "<redacted-snapshot-id>")
+    .replace(/\b(?:root_key|wrapped_data_key)[A-Za-z0-9_:-]*\b/gu, "<redacted-key-id>")
+    .replace(
       /file:\/\/\/(?:Users|home|root|tmp|var|private\/var)\/[^\s)"']+/gu,
       "file://<redacted-path>",
     )
@@ -35,6 +43,42 @@ export function redactHostedRuntimeDiagnosticText(value: string): string {
       /\b((?:HOSTED_ASSISTANT_)?(?:BASE_URL|PROVIDER|MODEL)|base_url|env_key|model_provider|wire_api)\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/giu,
       "$1=<redacted>",
     );
+}
+
+export function readHostedRuntimeSafeErrorText(error: unknown): string | null {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+
+  while (current && !seen.has(current) && messages.length < 4) {
+    seen.add(current);
+    const message = readHostedRuntimeErrorMessage(current);
+    if (message && !messages.includes(message)) {
+      messages.push(message);
+    }
+    current = typeof current === "object" && "cause" in current
+      ? (current as { cause?: unknown }).cause
+      : null;
+  }
+
+  return messages.length > 0 ? messages.join(" | ") : null;
+}
+
+function readHostedRuntimeErrorMessage(error: unknown): string | null {
+  const raw = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : null;
+  if (!raw?.trim()) {
+    return null;
+  }
+
+  const redacted = redactHostedRuntimeDiagnosticText(
+    raw.replace(/\bhttps?:\/\/[^\s)"'<>]+/giu, "<redacted-url>"),
+  )
+    .trim();
+  return redacted ? redacted.slice(0, 1_000) : null;
 }
 
 export function redactHostedRuntimeDiagnosticDetails(

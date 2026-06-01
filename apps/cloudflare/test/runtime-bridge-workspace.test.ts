@@ -910,7 +910,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         onWorkspaceSnapshotDirectPut: () => {
-          throw new Error("Hosted workspace snapshot direct R2 upload failed.");
+          throw new Error("Hosted workspace snapshot direct R2 upload failed.", {
+            cause: new Error(
+              "fetch failed for https://r2.example.test/users/hsn_live/workspace-snapshots/snapshot_live.snapshot.enc?X-Amz-Signature=secret via /tmp/local-scratch",
+            ),
+          });
         },
         putArtifact,
         readWorkspace: async () => createWorkspaceReadResponse({
@@ -958,6 +962,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       eventCode: "checkpoint.snapshot_failed",
       redactedJson: expect.objectContaining({
         encryptedByteSize: expect.any(Number),
+        safeErrorCause:
+          "Hosted workspace snapshot direct R2 upload failed. | fetch failed for <redacted-url> via <redacted-path>",
         safeErrorDetail: "Hosted workspace snapshot direct R2 upload failed.",
         snapshotArchiveBuildElapsedMs: expect.any(Number),
         snapshotDirectR2UploadElapsedMs: expect.any(Number),
@@ -968,7 +974,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       }),
     }));
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("snapshot_test_");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("hsn_live");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("snapshot_live");
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("workspace-snapshots");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("X-Amz-Signature=secret");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("/tmp/local-scratch");
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("encryptedObjectSha256");
   });
 

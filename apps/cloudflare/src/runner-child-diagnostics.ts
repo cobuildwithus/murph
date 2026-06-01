@@ -93,6 +93,7 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KINDS = [
   "workspace_snapshot_encrypted_digest_mismatch",
   "workspace_snapshot_encrypted_object_too_small",
   "workspace_snapshot_encrypted_size_mismatch",
+  "workspace_snapshot_direct_r2_upload_request_failure",
   "workspace_snapshot_fetch_body_unavailable",
   "workspace_snapshot_fetch_byte_count_mismatch",
   "workspace_snapshot_fetch_content_length_mismatch",
@@ -484,6 +485,10 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_KIND_PATTERNS:
     {
       kind: "workspace_snapshot_fetch_request_failure",
       pattern: /^Hosted workspace snapshot fetch(?: response body read)? request failed(?:\.|:)/u,
+    },
+    {
+      kind: "workspace_snapshot_direct_r2_upload_request_failure",
+      pattern: /^Hosted workspace snapshot direct R2 upload request failed(?:\.|:)/u,
     },
     {
       kind: "workspace_snapshot_zstd_command_failed",

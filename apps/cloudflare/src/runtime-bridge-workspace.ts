@@ -65,6 +65,7 @@ import {
   readHostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
 import {
+  readHostedRuntimeSafeErrorText,
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.ts";
 import {
@@ -827,6 +828,10 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
   if (safeDiagnosticDetail) {
     redactedJson.safeErrorDetail = safeDiagnosticDetail;
+  }
+  const safeErrorCause = readHostedRuntimeSafeErrorText(error);
+  if (safeErrorCause && safeErrorCause !== safeDiagnosticDetail) {
+    redactedJson.safeErrorCause = safeErrorCause;
   }
 
   const bundleValidation = readHostedBundleArchiveValidationErrorDetails(error);

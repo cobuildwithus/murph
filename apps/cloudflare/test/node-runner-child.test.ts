@@ -871,6 +871,51 @@ describe("runHostedExecutionChild", () => {
     });
   });
 
+  it("classifies direct R2 snapshot upload request failures without free-form details", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = new Error(
+      "Hosted workspace snapshot direct R2 upload request failed: fetch failed for <redacted-url>",
+    );
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_snapshot_upload_failed",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorMessageKind:
+        "workspace_snapshot_direct_r2_upload_request_failure",
+      childRuntimeHttpOperation: "workspace_snapshot_direct_r2_upload",
+      childRuntimeStage: "runtime.in-process",
+    });
+    expect(payload.error?.details?.childRuntimeErrorMessageKind)
+      .not.toContain("redacted-url");
+  });
+
   it("classifies fixed workspace snapshot restore error messages without free-form details", async () => {
     const sendResult = vi.fn();
     const setExitCode = vi.fn();

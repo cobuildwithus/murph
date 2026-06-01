@@ -37,11 +37,15 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  buildHostedExecutionStructuredLogRecord,
+} from "@murphai/hosted-execution";
+import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
   HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,
+  readCloudflareHostedProviderFetchBaseUrls,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
   readHostedWorkspaceSnapshotRestoreStep,
 } from "../src/runtime-platform.ts";
@@ -97,7 +101,7 @@ async function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<voi
   });
 }
 
-function readWorkspaceSnapshotDiagnosticLogs(): Array<{
+function readHostedExecutionStructuredLogs(): Array<{
   component?: unknown;
   details?: Record<string, unknown>;
   message?: unknown;
@@ -114,8 +118,17 @@ function readWorkspaceSnapshotDiagnosticLogs(): Array<{
       Boolean(input)
       && typeof input === "object"
       && !Array.isArray(input)
-      && (input as { component?: unknown }).component === "hosted.runtime.workspace-snapshot"
     );
+}
+
+function readWorkspaceSnapshotDiagnosticLogs(): Array<{
+  component?: unknown;
+  details?: Record<string, unknown>;
+  message?: unknown;
+  userId?: unknown;
+}> {
+  return readHostedExecutionStructuredLogs()
+    .filter((input) => input.component === "hosted.runtime.workspace-snapshot");
 }
 
 function createAssistantUsageRecord(): AssistantUsageRecord {
@@ -404,6 +417,78 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-amz-meta-encryptedsha256")).toBe("c".repeat(64));
       expect(request.headers.get("x-amz-meta-schema")).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
       expect(request.headers.get("x-amz-meta-snapshotid")).toBe("snapshot_runner_platform");
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("logs redacted direct R2 transport failure text without presigned URL material", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-secret`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot platform fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        throw new TypeError(
+          `fetch failed for ${putUrl} with local scratch ${tempRoot}`,
+        );
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      })).rejects.toThrow(
+        "Hosted workspace snapshot direct R2 upload request failed.",
+      );
+
+      const logs = readHostedExecutionStructuredLogs();
+      const failureLog = logs.find((log) =>
+        log.message === "Hosted runtime upstream request failed."
+        && log.details?.description === "Hosted workspace snapshot direct R2 upload");
+      expect(failureLog?.details).toMatchObject({
+        description: "Hosted workspace snapshot direct R2 upload",
+        method: "PUT",
+        path: "/workspace-snapshot-object",
+        responseOrigin: "workspace_snapshot_object",
+        safeErrorText:
+          "Hosted workspace snapshot direct R2 upload request failed. | fetch failed for <redacted-url> with local scratch <redacted-path>",
+      });
+      const serializedLogs = JSON.stringify(logs);
+      expect(serializedLogs).not.toContain(objectKey);
+      expect(serializedLogs).not.toContain("fixture-secret");
+      expect(serializedLogs).not.toContain(tempRoot);
+      expect(serializedLogs).not.toContain(putUrl);
     } finally {
       await rm(tempRoot, {
         force: true,
@@ -941,7 +1026,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
       expect(serializedLogs).not.toContain(getUrl);
-      expect(serializedLogs).not.toContain("hidden retry detail");
+      expect(serializedLogs).toContain("hidden retry detail");
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
     } finally {
@@ -1330,7 +1415,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain("/bundles/");
       expect(serializedLogs).not.toContain("X-Amz");
       expect(serializedLogs).not.toContain("fixture-get");
-      expect(serializedLogs).not.toContain("hidden transport detail");
+      expect(serializedLogs).toContain("hidden transport detail");
       expect(serializedLogs).not.toContain("member_123");
       expect(serializedLogs).not.toContain("root_key_test");
       expect(serializedLogs).not.toContain("wrapped_data_key_test");
@@ -1510,7 +1595,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
-  it("attaches safe artifact fetch cause metadata without logging raw transport detail", async () => {
+  it("attaches raw redacted artifact fetch cause metadata", async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError("fetch failed with hidden artifact transport detail");
     });
@@ -1582,7 +1667,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         input?.component === "hosted.runtime.artifact-store"
       ),
     );
-    expect(serializedLogs).not.toContain("hidden artifact transport detail");
+    expect(serializedLogs).toContain("hidden artifact transport detail");
     expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
@@ -1781,7 +1866,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
-  it("logs direct control-plane fetch failures without raw error detail", async () => {
+  it("logs direct control-plane fetch failures with raw redacted error detail", async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError("network failure with hidden request detail");
     });
@@ -1825,7 +1910,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }),
     );
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
-      .not.toContain("hidden request detail");
+      .toContain("hidden request detail");
   });
 
   it("logs invalid control-plane JSON without response body text", async () => {
@@ -2027,6 +2112,68 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
+  it("logs external provider transport failures with redacted underlying error text", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError(
+        "provider fetch failed for https://api.linqapp.com/v1/messages"
+          + "?token=secret-token and user member_123",
+      );
+    });
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    await expect(hostedFetch("https://api.linqapp.com/v1/messages")).rejects.toThrow(
+      "provider fetch failed",
+    );
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: expect.objectContaining({
+          host: "api.linqapp.com",
+          method: "GET",
+          operation: "provider_fetch",
+          safeErrorText:
+            "provider fetch failed for <redacted-url> and user <redacted-user-id>",
+        }),
+        level: "warn",
+        message: "Hosted provider fetch failed before response.",
+        phase: "outbox",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("secret-token");
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain("/v1/messages");
+
+    const providerFailureLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input?.message === "Hosted provider fetch failed before response.");
+    if (!providerFailureLog) {
+      throw new Error("Expected provider fetch failure log.");
+    }
+    const productionRecord =
+      buildHostedExecutionStructuredLogRecord(providerFailureLog);
+    const serializedRecord = JSON.stringify(productionRecord);
+    expect(serializedRecord).toContain(
+      "provider fetch failed for <redacted-url> and user <redacted-user-id>",
+    );
+    expect(serializedRecord).not.toContain("secret-token");
+    expect(serializedRecord).not.toContain("member_123");
+    expect(serializedRecord).not.toContain("/v1/messages");
+  });
+
   it("preserves Request init overrides and authority-binds external provider fetches", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const hostedFetch = createCloudflareHostedProviderFetch(
@@ -2089,6 +2236,71 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "Hosted provider request for example.test is not routed through the hosted provider egress boundary.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("authority-binds configured local provider base URLs", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        providerFetchBaseUrls: ["http://host.docker.internal:4011/api/partner/v3"],
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    const response = await hostedFetch("http://host.docker.internal:4011/api/partner/v3/chats", {
+      body: "{}",
+      method: "POST",
+    });
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "configured provider fetch");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+  });
+
+  it("rejects configured local provider fetches outside the configured base path", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        providerFetchBaseUrls: ["http://host.docker.internal:4011/api/partner/v3"],
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    await expect(hostedFetch("http://host.docker.internal:4011/api/partner/v30/chats"))
+      .rejects
+      .toThrow(
+        "Hosted provider request for host.docker.internal is not routed through the hosted provider egress boundary.",
+      );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads configured provider fetch base URLs from safe runner env keys", () => {
+    expect(readCloudflareHostedProviderFetchBaseUrls({
+      LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
+      TELEGRAM_API_BASE_URL: "http://telegram.example.com/bot",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example/",
+    })).toEqual([
+      "http://host.docker.internal:4011/",
+      "https://files.telegram.example/",
+    ]);
   });
 
   it("rejects external provider fetches when the runtime write-fence lease is missing", async () => {

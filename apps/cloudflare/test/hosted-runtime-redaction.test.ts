@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  readHostedRuntimeSafeErrorText,
   redactHostedRuntimeDiagnosticDetails,
   redactHostedRuntimeDiagnosticText,
 } from "../src/hosted-runtime-redaction.ts";
@@ -38,5 +39,58 @@ describe("hosted runtime diagnostic redaction", () => {
           "https://example.r2.cloudflarestorage.com/bucket/object?X-Amz-Signature=<redacted>",
       },
     });
+  });
+
+  it("extracts redacted messages from an error cause chain", () => {
+    const cause = new TypeError(
+      "fetch failed for https://example.r2.cloudflarestorage.com/bucket/object"
+        + "?X-Amz-Signature=abcdef1234567890"
+        + " with local scratch /tmp/hosted-runtime/snapshot.enc"
+        + " and TOKEN=secret-token",
+    );
+    const error = new Error("Hosted provider request failed.", { cause });
+
+    expect(readHostedRuntimeSafeErrorText(error)).toBe(
+      "Hosted provider request failed."
+        + " | fetch failed for <redacted-url> with local scratch <redacted-path>"
+        + " and TOKEN=<redacted>",
+    );
+  });
+
+  it("redacts hosted workspace and user identifiers in safe error text", () => {
+    const error = new Error(
+      "failed for snapshot_runner_platform "
+        + "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc "
+        + "hsn_0123456789abcdef01234567 member_123 root_key_test wrapped_data_key_test",
+    );
+
+    expect(readHostedRuntimeSafeErrorText(error)).toBe(
+      "failed for <redacted-snapshot-id> "
+        + "users/<redacted>/workspace-snapshots/<redacted> "
+        + "<redacted-hosted-namespace> <redacted-user-id> <redacted-key-id> <redacted-key-id>",
+    );
+  });
+
+  it("walks nested causes while redacting hosted snapshot identifiers and secrets", () => {
+    const rootCause = new TypeError(
+      "fetch failed for https://r2.example.test/bundles/object?X-Amz-Signature=fixture-secret"
+        + " and API_KEY=hidden-provider-key",
+    );
+    const midCause = new Error(
+      "direct upload object users/hsn_0123456789abcdef01234567"
+        + "/workspace-snapshots/snapshot_runner_platform.snapshot.enc"
+        + " for member_123 root_key_test",
+      { cause: rootCause },
+    );
+    const error = new Error("Hosted workspace snapshot direct R2 upload request failed.", {
+      cause: midCause,
+    });
+
+    expect(readHostedRuntimeSafeErrorText(error)).toBe(
+      "Hosted workspace snapshot direct R2 upload request failed."
+        + " | direct upload object users/<redacted>/workspace-snapshots/<redacted>"
+        + " for <redacted-user-id> <redacted-key-id>"
+        + " | fetch failed for <redacted-url> and API_KEY=<redacted>",
+    );
   });
 });

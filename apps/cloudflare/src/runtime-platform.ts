@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import {
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
@@ -116,6 +117,7 @@ import {
   readHostedRunnerWebControlRoute,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
+  readHostedRuntimeSafeErrorText,
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.ts";
 import {
@@ -282,6 +284,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  providerFetchBaseUrls?: readonly string[] | null;
   proxyBoundUserIdHeader?: boolean | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
@@ -359,7 +362,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           ...logDetails,
           durationMs: Date.now() - startedAt,
           headerDurationMs: Date.now() - headerStartedAt,
-          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+          ...buildHostedRuntimeSafeErrorMetadata(error),
         },
         level: "warn",
         message: "Hosted runtime artifact upload authority headers failed.",
@@ -403,7 +406,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         details: {
           ...logDetails,
           durationMs: Date.now() - startedAt,
-          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+          ...buildHostedRuntimeSafeErrorMetadata(error),
         },
         level: "warn",
         message: "Hosted runtime artifact upload failed before response.",
@@ -530,7 +533,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
                 ...attemptLogDetails,
                 durationMs: Date.now() - startedAt,
                 retrying,
-                ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+                ...buildHostedRuntimeSafeErrorMetadata(error),
               },
               level: "warn",
               message: retrying
@@ -606,7 +609,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
                 durationMs: Date.now() - startedAt,
                 responseStatus: response.status,
                 retrying,
-                ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
+                ...buildHostedRuntimeSafeErrorMetadata(wrappedError),
               },
               level: "warn",
               message: retrying
@@ -662,6 +665,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             input.fetchImpl ?? fetch,
             {
               injectBoundUserIdHeader: true,
+              providerFetchBaseUrls: input.providerFetchBaseUrls ?? undefined,
               readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
             },
           ),
@@ -1137,6 +1141,7 @@ export function createCloudflareHostedProviderFetch(
   fetchImpl: typeof fetch,
   options: {
     injectBoundUserIdHeader?: boolean;
+    providerFetchBaseUrls?: readonly string[];
     readCurrentLease: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   },
 ): typeof fetch {
@@ -1147,7 +1152,7 @@ export function createCloudflareHostedProviderFetch(
     if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
       return await internalFetch(request);
     }
-    assertCloudflareHostedProviderFetchHost(url);
+    assertCloudflareHostedProviderFetchUrl(url, options.providerFetchBaseUrls ?? []);
 
     const headers = new Headers(request.headers);
     const lease = await options.readCurrentLease();
@@ -1159,9 +1164,35 @@ export function createCloudflareHostedProviderFetch(
     writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
 
-    return await fetchImpl(new Request(request, { headers }));
+    const providerRequest = new Request(request, { headers });
+    try {
+      return await fetchImpl(providerRequest);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          host: normalizeCloudflareHostedFetchHostname(url.hostname),
+          method: readHostedRunnerDiagnosticMethod(providerRequest.method),
+          operation: "provider_fetch",
+          ...buildHostedRuntimeSafeErrorMetadata(error),
+        },
+        level: "warn",
+        message: "Hosted provider fetch failed before response.",
+        phase: "outbox",
+        userId: null,
+      });
+      throw error;
+    }
   }) as typeof fetch;
 }
+
+const CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS = [
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+  "LINQ_API_BASE_URL",
+  "TELEGRAM_API_BASE_URL",
+  "TELEGRAM_FILE_BASE_URL",
+  "WHATSAPP_API_BASE_URL",
+] as const;
 
 const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
   "api.linqapp.com",
@@ -1171,14 +1202,89 @@ const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
   "graph.facebook.com",
 ]);
 
-function assertCloudflareHostedProviderFetchHost(url: URL): void {
+export function readCloudflareHostedProviderFetchBaseUrls(
+  source: Readonly<Record<string, unknown>>,
+): string[] {
+  const values: string[] = [];
+
+  for (const key of CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS) {
+    const value = typeof source[key] === "string" ? source[key].trim() : "";
+    if (!value || !parseAllowedCloudflareHostedProviderFetchBaseUrl(value)) {
+      continue;
+    }
+    values.push(value);
+  }
+
+  return values;
+}
+
+function assertCloudflareHostedProviderFetchUrl(
+  url: URL,
+  providerFetchBaseUrls: readonly string[],
+): void {
   if (CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES.has(normalizeCloudflareHostedFetchHostname(url.hostname))) {
+    return;
+  }
+  if (isConfiguredCloudflareHostedProviderFetchUrl(url, providerFetchBaseUrls)) {
     return;
   }
 
   throw new Error(
     `Hosted provider request for ${url.hostname} is not routed through the hosted provider egress boundary.`,
   );
+}
+
+function isConfiguredCloudflareHostedProviderFetchUrl(
+  url: URL,
+  providerFetchBaseUrls: readonly string[],
+): boolean {
+  for (const value of providerFetchBaseUrls) {
+    const baseUrl = parseAllowedCloudflareHostedProviderFetchBaseUrl(value);
+    if (!baseUrl || url.origin !== baseUrl.origin) {
+      continue;
+    }
+    if (isCloudflareHostedProviderFetchPathWithinBase(url, baseUrl)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function parseAllowedCloudflareHostedProviderFetchBaseUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return isAllowedCloudflareHostedProviderFetchBaseUrl(url) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedCloudflareHostedProviderFetchBaseUrl(url: URL): boolean {
+  return url.protocol === "https:"
+    || (url.protocol === "http:" && isLocalOrTestCloudflareHostedProviderFetchHost(url.hostname));
+}
+
+function isLocalOrTestCloudflareHostedProviderFetchHost(hostname: string): boolean {
+  const normalized = normalizeCloudflareHostedFetchHostname(hostname);
+  return normalized === "localhost"
+    || normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "[::1]"
+    || normalized === "host.docker.internal"
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".test");
+}
+
+function isCloudflareHostedProviderFetchPathWithinBase(url: URL, baseUrl: URL): boolean {
+  const basePath = normalizeCloudflareHostedProviderFetchBasePath(baseUrl);
+  return !basePath
+    || url.pathname === basePath
+    || url.pathname.startsWith(`${basePath}/`);
+}
+
+function normalizeCloudflareHostedProviderFetchBasePath(url: URL): string {
+  return url.pathname.replace(/\/+$/u, "");
 }
 
 function createCloudflareHostedPublicInternetFetch(fetchImpl: typeof fetch): typeof fetch {
@@ -1653,31 +1759,33 @@ function createCloudflareWorkspaceSnapshotPort(input: {
       if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
         throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
       }
+      const putTimeoutMs = Math.max(1, expiresAtMs - Date.now());
       const body = Readable.toWeb(createReadStream(request.sourceFilePath)) as BodyInit;
       const checksumSha256Base64 = encodeHostedWorkspaceSnapshotSha256Base64(
         request.encryptedObjectSha256,
       );
       const putStartedAt = Date.now();
+      const putHeaders = {
+        "content-length": String(request.encryptedByteSize),
+        "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+        "if-none-match": "*",
+        "x-amz-checksum-sha256": checksumSha256Base64,
+        "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
+        "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+        "x-amz-meta-snapshotid": request.snapshotId,
+      };
       const response = await fetchHostedResponse({
         description: "Hosted workspace snapshot direct R2 upload",
         fetchImpl: input.fetchImpl,
         init: {
           body,
           duplex: "half",
-          headers: {
-            "content-length": String(request.encryptedByteSize),
-            "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-            "if-none-match": "*",
-            "x-amz-checksum-sha256": checksumSha256Base64,
-            "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
-            "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
-            "x-amz-meta-snapshotid": request.snapshotId,
-          },
+          headers: putHeaders,
           method: "PUT",
         } as RequestInit & { duplex: "half" },
         redactedLogPath: "/workspace-snapshot-object",
         redactedResponseOrigin: "workspace_snapshot_object",
-        timeoutMs: Math.max(1, expiresAtMs - Date.now()),
+        timeoutMs: putTimeoutMs,
         url: new URL(presignedPut.putUrl),
       });
       timings.snapshotDirectR2PutElapsedMs =
@@ -1878,7 +1986,7 @@ async function runHostedWorkspaceSnapshotRestoreReplaySafeReadStep<T>(input: {
           ...attemptDetails,
           retrying,
           workspaceSnapshotRestoreStep: input.step,
-          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+          ...buildHostedRuntimeSafeErrorMetadata(error),
         },
         level: "warn",
         message: "Hosted workspace snapshot restore read step failed; retrying.",
@@ -1931,7 +2039,7 @@ async function runHostedWorkspaceSnapshotRestoreStep<T>(input: {
         ...input.details,
         durationMs: Date.now() - startedAt,
         workspaceSnapshotRestoreStep: input.step,
-        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        ...buildHostedRuntimeSafeErrorMetadata(error),
       },
       level: "warn",
       message: "Hosted workspace snapshot restore step failed.",
@@ -2564,7 +2672,7 @@ async function fetchHostedWebControlPlaneJson(input: {
       details: {
         ...requestLogDetails,
         durationMs: Date.now() - requestStartedAt,
-        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(loggedError),
+        ...buildHostedRuntimeSafeErrorMetadata(loggedError),
       },
       level: "warn",
       message: "Hosted runtime control-plane request failed before response.",
@@ -2647,7 +2755,9 @@ async function fetchHostedWebControlPlaneJson(input: {
       details: {
         ...requestLogDetails,
         durationMs: Date.now() - requestStartedAt,
-        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        ...buildHostedRuntimeSafeErrorMetadata(error, {
+          includeSafeErrorText: false,
+        }),
         responseBodyBytes: new TextEncoder().encode(text).byteLength,
         responseStatus: response.status,
       },
@@ -2660,8 +2770,11 @@ async function fetchHostedWebControlPlaneJson(input: {
   }
 }
 
-function buildHostedRuntimeControlPlaneSafeErrorMetadata(
+function buildHostedRuntimeSafeErrorMetadata(
   error: unknown,
+  options: {
+    includeSafeErrorText?: boolean;
+  } = {},
 ): HostedExecutionStructuredLogDetails {
   const fetchFailureDiagnostics =
     readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
@@ -2669,13 +2782,16 @@ function buildHostedRuntimeControlPlaneSafeErrorMetadata(
     readHostedWorkspaceSnapshotRestoreStep(error);
   const workspaceSnapshotProcessFailure =
     readHostedWorkspaceSnapshotProcessFailureDiagnostics(error);
+  const safeErrorText = options.includeSafeErrorText === false
+    ? null
+    : readHostedRuntimeSafeErrorText(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
   return {
     errorCode: fetchFailureDiagnostics?.fetchCauseCode
       ?? deriveHostedExecutionErrorCode(error),
     errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
-    ...(readHostedExecutionSafeErrorName(error)
-      ? { errorName: readHostedExecutionSafeErrorName(error) }
-      : {}),
+    ...(safeErrorText ? { safeErrorText } : {}),
+    ...(errorName ? { errorName } : {}),
     ...(fetchFailureDiagnostics
       ? {
           fetchCallerSignalAborted:
@@ -3095,7 +3211,7 @@ async function fetchHostedResponse(input: {
         method: input.init?.method ?? "GET",
         path: input.redactedLogPath ?? input.url.pathname,
         responseOrigin: input.redactedResponseOrigin ?? input.url.origin,
-        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
+        ...buildHostedRuntimeSafeErrorMetadata(wrappedError),
       },
       level: "warn",
       message: "Hosted runtime upstream request failed.",
@@ -3426,6 +3542,7 @@ function assertHostedOk(response: Response, description: string): void {
     details: {
       description,
       responseStatus: response.status,
+      ...buildHostedRuntimeSafeErrorMetadata(error),
     },
     error,
     level: "warn",
