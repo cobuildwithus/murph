@@ -24,7 +24,7 @@ export function BiomarkerOverview({ biomarker }: { biomarker: BiomarkerOverviewP
         <section className="flex flex-col gap-6">
           <div className="flex flex-col gap-3">
             <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
-              Experiments that may move your {biomarker.shortName}
+              Experiments
             </h2>
             <p className="max-w-3xl text-sm/6 text-muted-foreground text-pretty">
               Ranked by evidence, biomarker relevance, and how cleanly it can be measured at home.

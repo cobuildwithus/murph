@@ -2,16 +2,11 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
 
 import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
 import { PageHeader } from "@/src/components/ui/page-header";
-import { RouteTabs } from "@/src/components/ui/route-tabs";
 import type { BiomarkerShellProjection } from "@/src/lib/health-commons/biomarker-projections";
-
-type BiomarkerDetailTab = "overview" | "research";
 
 export function BiomarkerLayoutClient({
   biomarker,
@@ -20,26 +15,6 @@ export function BiomarkerLayoutClient({
   biomarker: BiomarkerShellProjection;
   children: ReactNode;
 }) {
-  const pathname = usePathname();
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const [isTabsSticky, setIsTabsSticky] = useState(false);
-
-  useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      ([entry]) => setIsTabsSticky(!entry.isIntersecting),
-      { rootMargin: "0px 0px 0px 0px", threshold: 0 },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
-  const basePath = `/biomarkers/${biomarker.routeId}`;
-  const currentTab: BiomarkerDetailTab = pathname === `${basePath}/research`
-    ? "research"
-    : "overview";
-
   const eyebrowParts = [
     biomarker.categories[0] ? formatCategoryEyebrow(biomarker.categories[0]) : null,
     biomarker.unit,
@@ -70,32 +45,7 @@ export function BiomarkerLayoutClient({
 
       <BiomarkerAboutGrid biomarker={biomarker} />
 
-      <div className="w-full">
-        <div ref={sentinelRef} aria-hidden="true" className="h-px" />
-        <div className="sticky top-0 z-20 -mx-4 bg-background/95 px-4 backdrop-blur-md md:-mx-14 md:px-14">
-          <div className="flex items-center gap-4 border-b border-border">
-            <RouteTabs
-              ariaLabel="Biomarker tabs"
-              currentValue={currentTab}
-              tabs={[
-                { value: "overview", label: "Overview", href: basePath },
-                { value: "research", label: "Research", href: `${basePath}/research` },
-              ]}
-            />
-            <span
-              aria-hidden={!isTabsSticky}
-              className="ml-auto hidden min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:block md:text-base/6"
-              style={{
-                opacity: isTabsSticky ? 1 : 0,
-                pointerEvents: isTabsSticky ? "auto" : "none",
-              }}
-            >
-              {biomarker.title}
-            </span>
-          </div>
-        </div>
-        <div className="pt-6">{children}</div>
-      </div>
+      <div className="pt-4">{children}</div>
     </div>
   );
 }

@@ -185,7 +185,7 @@ describe("BiomarkerPage", () => {
     }));
   });
 
-  it("redirects the short SpO₂ research route to the canonical research subpath, preserving the tab", async () => {
+  it("redirects the short SpO₂ research route to the canonical research subpath", async () => {
     const { default: BiomarkerResearchPage } = await import(
       "../app/(dashboard)/biomarkers/[biomarkerId]/research/page"
     );

@@ -73,6 +73,27 @@ test("the biomarker overview mounts the browser-vault private card", () => {
   assert.doesNotMatch(source, /BiomarkerTrendDetail/u);
 });
 
+test("the biomarker overview uses a concise experiments section heading", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  assert.ok(biomarker);
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "empty",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerOverview, { biomarker }),
+  );
+
+  assert.match(markup, />Experiments</u);
+  assert.doesNotMatch(markup, /Experiments that may move your/u);
+});
+
 test("the biomarker overview lets the metric catalog decide private trend support", () => {
   const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
