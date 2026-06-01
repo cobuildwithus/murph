@@ -1,6 +1,6 @@
 # Hosted local reminder delivery investigation
 
-Status: active
+Status: completed
 Created: 2026-05-30
 Updated: 2026-06-01
 
@@ -169,3 +169,4 @@ Updated: 2026-06-01
   alias test. The selected owners were `apps/cloudflare`,
   `packages/assistant-runtime`, and `packages/cli`; this included the serialized
   CLI alias coverage and `apps/cloudflare verify`.
+Completed: 2026-06-01
