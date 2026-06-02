@@ -257,22 +257,18 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
         routePlanningCliBootstrapElapsedMs:
           input.routePlanningDiagnostics.cliBootstrapElapsedMs,
-        routePlanningMemoryOverviewElapsedMs:
-          input.routePlanningDiagnostics.vaultOverviewElapsedMs,
-        routePlanningVaultOverviewElapsedMs:
-          input.routePlanningDiagnostics.vaultOverviewElapsedMs,
-        routePlanningActiveExperimentContextElapsedMs:
-          input.routePlanningDiagnostics.activeExperimentContextElapsedMs,
+        routePlanningMemoryOverviewElapsedMs: null,
+        routePlanningVaultOverviewElapsedMs: null,
+        routePlanningActiveExperimentContextElapsedMs: null,
+        routePlanningAssistantContextSnapshotElapsedMs:
+          input.routePlanningDiagnostics.assistantContextSnapshotElapsedMs,
         routePlanningAnyBootstrapContextPrepared:
           input.routePlanningDiagnostics.shouldPrepareAnyBootstrapContext,
         routePlanningBootstrapContextPrepared:
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
-        routePlanningFreshThreadFallbackPrepared:
-          input.routePlanningDiagnostics.shouldPrepareFreshThreadFallback,
-        routePlanningFallbackInstructionsElapsedMs:
-          input.routePlanningDiagnostics.freshThreadFallbackPromptElapsedMs,
-        routePlanningFreshThreadFallbackPromptElapsedMs:
-          input.routePlanningDiagnostics.freshThreadFallbackPromptElapsedMs,
+        routePlanningFreshThreadFallbackPrepared: false,
+        routePlanningFallbackInstructionsElapsedMs: null,
+        routePlanningFreshThreadFallbackPromptElapsedMs: null,
         routePlanningMeasuredElapsedMs:
           input.routePlanningDiagnostics.routePlanningMeasuredElapsedMs,
         routePlanningPrimaryInstructionsElapsedMs:
@@ -430,6 +426,8 @@ async function executeAssistantCodexAttempt(input: {
           }
         : undefined,
       freshThreadFallback: attemptPlan.routePlan.freshThreadFallback,
+      prepareFreshThreadFallback:
+        attemptPlan.routePlan.prepareFreshThreadFallback,
       resumeCodexThreadId: attemptPlan.routePlan.resumeCodexThreadId,
       refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
       codexCommand:

@@ -1,4 +1,7 @@
 import {
+  existsSync,
+} from "node:fs";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
 import {
@@ -14,7 +17,11 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   conversationRefFromAssistantInputConversation,
+  isAssistantContextSnapshotRefreshPending,
+  listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
+  markAssistantContextSnapshotDirty,
   notifyAssistantActiveTurnInputAvailable,
+  resolveAssistantContextSnapshotPath,
   readAssistantInputEvent,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
@@ -417,10 +424,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     shouldYieldBackgroundMaintenance: () => foregroundConversationInputImported,
     workspace: input.workspace,
   };
+  let assistantContextSnapshotDirty = false;
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     initialMailboxImport,
     input,
+    onAssistantContextSnapshotDirty: () => {
+      assistantContextSnapshotDirty = true;
+    },
   });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   try {
@@ -428,6 +439,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
+    if (
+      assistantContextSnapshotDirty
+      || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
+    ) {
+      mergeAssistantContextSnapshotRefreshWake({
+        now: input.now,
+        result: assistantPhaseResult,
+      });
+    }
     await checkpointHostedWorkspaceAssistantPhase({
       assistantPhaseResult,
       checkpointRequestBuilder: checkpointRequestSession,
@@ -468,6 +488,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           assistantPhaseResult,
           postCheckpoint,
         });
+        if (await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)) {
+          mergeAssistantContextSnapshotRefreshWake({
+            now: input.now,
+            result: assistantPhaseResult,
+          });
+        }
         appendHostedWorkspaceDurableCheckpointEffect({
           effects: afterDurableCheckpoint,
           postCheckpoint,
@@ -896,10 +922,29 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
+  onAssistantContextSnapshotDirty?: (() => void) | null;
 }): HostedCanonicalWritePort {
   return {
-    async persistCanonicalWrite() {
+    async persistCanonicalWrite(writeInput) {
       input.checkpointRequestBuilder.markRuntimeStateDirty();
+      const snapshotDirtyDomains =
+        listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
+          writeInput.receipt,
+        );
+      if (snapshotDirtyDomains.length > 0) {
+        try {
+          await markAssistantContextSnapshotDirty({
+            domains: snapshotDirtyDomains,
+            vaultRoot: input.input.vaultRoot,
+          });
+          input.onAssistantContextSnapshotDirty?.();
+        } catch (error) {
+          warnAssistantBestEffortFailure({
+            error,
+            operation: "mark assistant context snapshot dirty",
+          });
+        }
+      }
       await writeHostedForegroundCheckpointDeferredLog({
         checkpointPhase: "canonical_write",
         now: input.input.now,
@@ -909,6 +954,52 @@ function createHostedWorkspaceCanonicalWritePort(input: {
       });
     },
   };
+}
+
+function mergeAssistantContextSnapshotRefreshWake(input: {
+  now?: (() => string) | null;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+}): void {
+  if (input.result.progressed !== true) {
+    return;
+  }
+
+  const wakeAt = resolveHostedWorkspaceRunnerNowIso(input.now);
+  const wakeMs = Date.parse(wakeAt);
+  const existingWakeMs = input.result.nextWakeAt
+    ? Date.parse(input.result.nextWakeAt)
+    : NaN;
+  if (Number.isFinite(existingWakeMs) && existingWakeMs <= wakeMs) {
+    return;
+  }
+
+  input.result.nextWakeAt = wakeAt;
+  input.result.nextWakeReason = "assistant";
+}
+
+async function isAssistantContextSnapshotRefreshPendingBestEffort(
+  vaultRoot: string,
+): Promise<boolean> {
+  if (!existsSync(resolveAssistantContextSnapshotPath(vaultRoot))) {
+    return false;
+  }
+  try {
+    return await isAssistantContextSnapshotRefreshPending({ vaultRoot });
+  } catch {
+    return false;
+  }
+}
+
+function resolveHostedWorkspaceRunnerNowIso(
+  now: (() => string) | null | undefined,
+): string {
+  const fallback = new Date().toISOString();
+  if (!now) {
+    return fallback;
+  }
+
+  const value = now();
+  return Number.isFinite(Date.parse(value)) ? value : fallback;
 }
 
 async function checkpointHostedWorkspacePostAssistantPhase(input: {

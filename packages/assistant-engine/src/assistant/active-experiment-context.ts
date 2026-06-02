@@ -1,4 +1,6 @@
+import { readFile } from 'node:fs/promises'
 import {
+  type ContractSchema,
   experimentFrontmatterSchema,
   safeParseContract,
   type CommonsProtocolRef,
@@ -6,23 +8,33 @@ import {
   type ExperimentFrontmatter,
   type ExperimentRunPlan,
 } from '@murphai/contracts'
-import { readVault, type CanonicalEntity } from '@murphai/query'
+import {
+  parseFrontmatterDocument,
+  resolveVaultPath,
+  VAULT_LAYOUT,
+  walkVaultFilesInterruptible,
+} from '@murphai/core'
 
 const DEFAULT_ACTIVE_EXPERIMENT_CONTEXT_LIMIT = 3
+const MAX_ACTIVE_EXPERIMENT_FRONTMATTER_FILES = 200
 const MAX_PROMPT_FIELD_LENGTH = 120
 
 export interface AssistantActiveExperimentContextOptions {
   limit?: number
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal | null
 }
 
 export async function buildAssistantActiveExperimentContextBlock(
   vaultRoot: string,
   options: AssistantActiveExperimentContextOptions = {},
 ): Promise<string | null> {
-  const vault = await readVault(vaultRoot)
   const limit = normalizeLimit(options.limit)
-  const activeExperiments = vault.experiments
-    .map(readExperimentFrontmatter)
+  assertAssistantActiveExperimentContextCanContinue(options)
+  const activeExperiments = (await listAssistantExperimentFrontmatter(
+    vaultRoot,
+    options,
+  ))
     .filter((experiment): experiment is ExperimentFrontmatter =>
       experiment !== null && experiment.status === 'active',
     )
@@ -57,6 +69,18 @@ export async function buildAssistantActiveExperimentContextBlock(
   return lines.join('\n')
 }
 
+export async function listAssistantExperimentFrontmatter(
+  vaultRoot: string,
+  options: AssistantActiveExperimentContextOptions = {},
+): Promise<ExperimentFrontmatter[]> {
+  return await listAssistantFrontmatterRecords(
+    vaultRoot,
+    VAULT_LAYOUT.experimentsDirectory,
+    experimentFrontmatterSchema,
+    options,
+  )
+}
+
 function normalizeLimit(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) {
     return DEFAULT_ACTIVE_EXPERIMENT_CONTEXT_LIMIT
@@ -65,11 +89,88 @@ function normalizeLimit(value: number | undefined): number {
   return Math.max(1, Math.floor(value))
 }
 
-function readExperimentFrontmatter(
-  entity: CanonicalEntity,
-): ExperimentFrontmatter | null {
-  const result = safeParseContract(experimentFrontmatterSchema, entity.attributes)
-  return result.success ? result.data : null
+async function listAssistantFrontmatterRecords<TRecord>(
+  vaultRoot: string,
+  relativeDirectory: string,
+  schema: ContractSchema<TRecord>,
+  options: AssistantActiveExperimentContextOptions,
+): Promise<TRecord[]> {
+  assertAssistantActiveExperimentContextCanContinue(options)
+  const { relativePaths } = await walkVaultFilesInterruptible(
+    vaultRoot,
+    relativeDirectory,
+    {
+      extension: '.md',
+      maxMatches: MAX_ACTIVE_EXPERIMENT_FRONTMATTER_FILES,
+      shouldContinue: () => {
+        assertAssistantActiveExperimentContextCanContinue(options)
+        return true
+      },
+    },
+  )
+  const records: TRecord[] = []
+
+  for (const relativePath of relativePaths) {
+    assertAssistantActiveExperimentContextCanContinue(options)
+    const record = await readAssistantFrontmatterRecord(
+      vaultRoot,
+      relativePath,
+      schema,
+      options,
+    )
+    if (record) {
+      records.push(record)
+    }
+  }
+
+  return records
+}
+
+async function readAssistantFrontmatterRecord<TRecord>(
+  vaultRoot: string,
+  relativePath: string,
+  schema: ContractSchema<TRecord>,
+  options: AssistantActiveExperimentContextOptions,
+): Promise<TRecord | null> {
+  try {
+    const resolved = resolveVaultPath(vaultRoot, relativePath)
+    const document = parseFrontmatterDocument(
+      await readFile(resolved.absolutePath, 'utf8'),
+    )
+    assertAssistantActiveExperimentContextCanContinue(options)
+    const result = safeParseContract(schema, document.attributes)
+    return result.success ? result.data : null
+  } catch (error) {
+    if (isAssistantActiveExperimentContextPreemptionError(error)) {
+      throw error
+    }
+    return null
+  }
+}
+
+function assertAssistantActiveExperimentContextCanContinue(
+  options: AssistantActiveExperimentContextOptions,
+): void {
+  if (options.signal?.aborted) {
+    throw options.signal.reason instanceof Error
+      ? options.signal.reason
+      : new DOMException('Assistant active experiment context aborted.', 'AbortError')
+  }
+  if (options.shouldYield?.() === true) {
+    throw new DOMException(
+      'Assistant active experiment context yielded to foreground input.',
+      'AbortError',
+    )
+  }
+}
+
+function isAssistantActiveExperimentContextPreemptionError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'name' in error
+    && error.name === 'AbortError',
+  )
 }
 
 function compareActiveExperiments(

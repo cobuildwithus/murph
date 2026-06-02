@@ -24,8 +24,8 @@ import {
 } from "./execution-context.js";
 
 export interface AssistantSystemPromptInput {
-  activeExperimentContext?: string | null;
   assistantCliContract: string | null;
+  assistantContextSnapshotPrompt?: string | null;
   allowSensitiveHealthContext: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
@@ -41,7 +41,6 @@ export interface AssistantSystemPromptInput {
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
-  vaultOverview?: string | null;
 }
 
 export interface AssistantSupportedExperimentProtocol {
@@ -51,7 +50,7 @@ export interface AssistantSupportedExperimentProtocol {
 }
 
 export interface AssistantNotificationDecisionSystemPromptInput {
-  activeExperimentContext?: string | null;
+  assistantContextSnapshotPrompt?: string | null;
   allowSensitiveHealthContext: boolean;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
@@ -59,7 +58,6 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
-  vaultOverview?: string | null;
 }
 
 export interface AssistantSystemPromptLayers {
@@ -213,8 +211,7 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
       currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
       currentTimeZone: input.currentTimeZone,
     }),
-    input.vaultOverview ?? null,
-    input.activeExperimentContext ?? null,
+    resolveAssistantContextSnapshotPromptForPrompt(input),
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantImplicitLoggingGuidanceText(),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
@@ -269,8 +266,7 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
         currentMurphProductBaseUrl: null,
         currentTimeZone: input.currentTimeZone,
       }),
-      input.vaultOverview ?? null,
-      input.activeExperimentContext ?? null,
+      resolveAssistantContextSnapshotPromptForPrompt(input),
       buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
       buildAssistantNotificationDecisionGuidanceText(input.channel)
     ),
@@ -289,6 +285,15 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
     stableRouteCapabilityPrompt,
     staticCacheableCorePrompt,
   };
+}
+
+function resolveAssistantContextSnapshotPromptForPrompt(input: {
+  allowSensitiveHealthContext: boolean
+  assistantContextSnapshotPrompt?: string | null
+}): string | null {
+  return input.allowSensitiveHealthContext
+    ? input.assistantContextSnapshotPrompt ?? null
+    : null
 }
 
 function buildAssistantPromptCacheMetadata(

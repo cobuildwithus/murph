@@ -10,8 +10,9 @@ import type {
   HostedRuntimeRedactedObject,
   HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  AssistantExecutionContext,
+import {
+  refreshAssistantContextSnapshotBestEffort,
+  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
   compareAssistantInputCursors,
@@ -137,6 +138,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexActionSlowKinds",
   "codexActionToolSummaries",
   "routePlanningActiveExperimentContextElapsedMs",
+  "routePlanningAssistantContextSnapshotElapsedMs",
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
   "routePlanningCliBootstrapElapsedMs",
@@ -1296,6 +1298,18 @@ async function runSystemMailboxMaintenancePhase(input: {
         }),
       };
     }
+    const contextSnapshotRefresh =
+      await runAssistantContextSnapshotIdleRefreshBestEffort({
+        phaseInput,
+      });
+    if (contextSnapshotRefresh) {
+      return {
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        result: contextSnapshotRefresh,
+      };
+    }
 
     return {
       continueAssistantLane: false,
@@ -1452,6 +1466,47 @@ async function runSystemMailboxMaintenancePhase(input: {
     },
     deviceSyncMaintenanceRan:
       systemMailboxDeviceSyncRan || dirtyDeviceSyncMetrics !== null,
+  };
+}
+
+async function runAssistantContextSnapshotIdleRefreshBestEffort(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (input.phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
+    return null;
+  }
+
+  const refresh = await refreshAssistantContextSnapshotBestEffort({
+    now: () => new Date(resolveHostedAssistantPhaseNowMs(input.phaseInput)).toISOString(),
+    shouldYield: input.phaseInput.shouldYieldBackgroundMaintenance ?? null,
+    signal: input.phaseInput.signal ?? null,
+    vaultRoot: input.phaseInput.restored.vaultRoot,
+  });
+  if (refresh.skipped) {
+    return null;
+  }
+
+  const nextWakeAt = refresh.pendingDirtyDomains.length > 0
+    ? new Date(resolveHostedAssistantPhaseNowMs(input.phaseInput)).toISOString()
+    : null;
+  return {
+    checkpointReason: "assistant_runtime_commit",
+    ...(nextWakeAt ? { nextWakeAt, nextWakeReason: "assistant" } : {}),
+    progressed: true,
+    redactedStatus: {
+      ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
+        deliveryEffectCount: 0,
+        nextWakeAt,
+        outboxTerminalizedSendingCount: 0,
+        progressed: true,
+        systemMailboxPrepared: 0,
+        systemMailboxRetryableFailed: 0,
+      }),
+      assistantContextSnapshotPendingDirtyDomainCount:
+        refresh.pendingDirtyDomains.length,
+      assistantContextSnapshotRefreshAttempted: true,
+      assistantContextSnapshotRefreshed: refresh.refreshed,
+    },
   };
 }
 

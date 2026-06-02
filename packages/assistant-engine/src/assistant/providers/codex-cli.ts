@@ -165,12 +165,6 @@ export async function executeCodexAssistantTurnAttempt(
       'Codex app-server execution requires a Codex provider config.',
     )
   }
-  if (input.resumeCodexThreadId && !input.freshThreadFallback) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
-      'Codex stale-resume fallback requires a prepared fresh-thread fallback plan.',
-    )
-  }
   const modelProviderResolution = resolveStrictAssistantCodexModelProvider(
     providerConfig.target.modelProvider,
   )
@@ -244,10 +238,31 @@ export async function executeCodexAssistantTurnAttempt(
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let codexContinuation
+  let preparedFreshThreadFallback = input.freshThreadFallback ?? null
+  const resolveFreshThreadFallback = async () => {
+    if (preparedFreshThreadFallback) {
+      return preparedFreshThreadFallback
+    }
+
+    preparedFreshThreadFallback =
+      (await input.prepareFreshThreadFallback?.()) ?? null
+
+    if (!preparedFreshThreadFallback) {
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
+        'Codex stale-resume fallback requires a prepared fresh-thread fallback plan.',
+      )
+    }
+
+    return preparedFreshThreadFallback
+  }
   const runFreshThreadFallback = async () => {
+    const freshThreadFallback = await resolveFreshThreadFallback()
     const fallbackInput = {
       ...input,
-      ...(input.freshThreadFallback ?? {}),
+      ...freshThreadFallback,
+      freshThreadFallback,
+      prepareFreshThreadFallback: undefined,
       resumeCodexThreadId: null,
     }
     const prompt = resolveAssistantProviderPrompt(fallbackInput)

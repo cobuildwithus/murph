@@ -831,6 +831,7 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
 
   for (const key of [
     "routePlanningActiveExperimentContextElapsedMs",
+    "routePlanningAssistantContextSnapshotElapsedMs",
     "routePlanningCliBootstrapElapsedMs",
     "routePlanningElapsedMs",
     "routePlanningFallbackInstructionsElapsedMs",

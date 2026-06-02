@@ -36,7 +36,9 @@ interface WalkVaultFilesOptions {
 }
 
 interface WalkVaultFilesInterruptibleOptions extends WalkVaultFilesOptions {
+  maxMatches?: number | null;
   shouldContinue?: () => boolean;
+  sortOrder?: "ascending" | "descending";
 }
 
 interface WalkVaultFilesResult {
@@ -239,8 +241,17 @@ export async function walkVaultFilesInterruptible(
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const resolved = resolveVaultPath(vaultRoot, relativeDirectory);
   const extension = options.extension ?? null;
+  const maxMatches = normalizeWalkVaultFilesMaxMatches(options.maxMatches);
+  const sortDirection = options.sortOrder === "descending" ? -1 : 1;
   const matches: string[] = [];
   let interrupted = false;
+
+  if (maxMatches === 0) {
+    return {
+      interrupted: false,
+      relativePaths: matches,
+    };
+  }
 
   if (!(await pathExists(resolved.absolutePath))) {
     return {
@@ -252,15 +263,21 @@ export async function walkVaultFilesInterruptible(
   await assertPathWithinVaultOnDisk(absoluteRoot, resolved.absolutePath);
 
   async function walk(currentAbsolutePath: string): Promise<void> {
+    if (matches.length >= maxMatches) {
+      return;
+    }
     if (options.shouldContinue?.() === false) {
       interrupted = true;
       return;
     }
 
     const entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
-    entries.sort((left, right) => left.name.localeCompare(right.name));
+    entries.sort((left, right) => sortDirection * left.name.localeCompare(right.name));
 
     for (const entry of entries) {
+      if (matches.length >= maxMatches) {
+        return;
+      }
       if (interrupted || options.shouldContinue?.() === false) {
         interrupted = true;
         return;
@@ -291,4 +308,14 @@ export async function walkVaultFilesInterruptible(
     interrupted,
     relativePaths: matches,
   };
+}
+
+function normalizeWalkVaultFilesMaxMatches(value: number | null | undefined): number {
+  if (value === null || value === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (!Number.isFinite(value)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, Math.floor(value));
 }

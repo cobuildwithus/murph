@@ -1,7 +1,9 @@
 import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
@@ -107,6 +109,13 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
 }));
 
+import {
+  initializeVault,
+} from "@murphai/core";
+import {
+  markAssistantContextSnapshotDirty,
+  readAssistantContextSnapshotState,
+} from "@murphai/assistant-engine";
 import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
@@ -290,6 +299,35 @@ function expectAssistantLaneCallWithoutDeviceSyncOptions(
   expect(call).not.toHaveProperty("shouldYieldDeviceSync");
   expect(call).not.toHaveProperty("skipDirtyPendingFetch");
   expect(call).not.toHaveProperty("stagedDirtyAcks");
+}
+
+async function writeHostedPhaseExperimentSource(vaultRoot: string): Promise<void> {
+  await mkdir(path.join(vaultRoot, "bank/experiments"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(vaultRoot, "bank/experiments/hosted-phase-sleep.md"),
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.experiment.v1",
+      "docType: experiment",
+      "experimentId: exp_01JNV4458HYPP53JDQCBP1QJFM",
+      "slug: hosted-phase-sleep",
+      "status: active",
+      "title: Hosted phase sleep consistency",
+      "startedOn: 2026-04-20",
+      "runPlan:",
+      "  baselineStart: 2026-04-20",
+      "  baselineEnd: 2026-04-26",
+      "  interventionStart: 2026-04-27",
+      "  interventionEnd: 2026-05-10",
+      "  modality: sleep",
+      "---",
+      "# Hosted phase sleep consistency",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
 }
 
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
@@ -525,6 +563,161 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(JSON.stringify(logRequests)).not.toContain("synthetic idle device sync failure");
     expect(JSON.stringify(logRequests)).not.toContain("synthetic-whoop-secret");
+  });
+
+  it("refreshes dirty assistant context snapshots during idle hosted work", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      await writeHostedPhaseExperimentSource(vaultRoot);
+      await markAssistantContextSnapshotDirty({
+        domains: ["experiments"],
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      }));
+
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          assistantContextSnapshotPendingDirtyDomainCount: 0,
+          assistantContextSnapshotRefreshAttempted: true,
+          assistantContextSnapshotRefreshed: true,
+        }),
+      }));
+      expect("nextWakeAt" in result).toBe(false);
+      await expect(readAssistantContextSnapshotState(vaultRoot)).resolves.toMatchObject({
+        lastCompleted: {
+          promptBlock: expect.stringContaining("Hosted phase sleep consistency"),
+        },
+        pendingDirtyDomains: [],
+      });
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("preserves dirty assistant context snapshots and requests an immediate wake after preemption", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    let yieldChecks = 0;
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      await markAssistantContextSnapshotDirty({
+        domains: ["experiments"],
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        shouldYieldBackgroundMaintenance: () => {
+          yieldChecks += 1;
+          return yieldChecks > 3;
+        },
+        vaultRoot,
+      }));
+
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          assistantContextSnapshotPendingDirtyDomainCount: 1,
+          assistantContextSnapshotRefreshAttempted: true,
+          assistantContextSnapshotRefreshed: false,
+        }),
+      }));
+      await expect(readAssistantContextSnapshotState(vaultRoot)).resolves.toMatchObject({
+        lastCompleted: null,
+        pendingDirtyDomains: ["experiments"],
+      });
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("preserves dirty assistant context snapshots and requests an immediate wake after refresh failure", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      await rm(path.join(vaultRoot, "bank/experiments"), {
+        force: true,
+        recursive: true,
+      });
+      await mkdir(path.join(vaultRoot, "bank"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(vaultRoot, "bank/experiments"),
+        "not a directory\n",
+        "utf8",
+      );
+      await markAssistantContextSnapshotDirty({
+        domains: ["experiments"],
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      }));
+
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+        nextWakeReason: "assistant",
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          assistantContextSnapshotPendingDirtyDomainCount: 1,
+          assistantContextSnapshotRefreshAttempted: true,
+          assistantContextSnapshotRefreshed: false,
+        }),
+      }));
+      await expect(readAssistantContextSnapshotState(vaultRoot)).resolves.toMatchObject({
+        lastRefreshAttempt: {
+          errorCode: expect.any(String),
+          status: "failed",
+        },
+        pendingDirtyDomains: ["experiments"],
+      });
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
   });
 
   it("keeps background recovery device-sync deferred when foreground input is fresh", async () => {
@@ -3588,6 +3781,7 @@ function createPhaseInput(input: {
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
+  vaultRoot?: string;
   workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
   const assistantInputIds = input.assistantInputIds
@@ -3663,7 +3857,7 @@ function createPhaseInput(input: {
     restored: {
       assistantStateRoot: "/tmp/murph-assistant-state",
       operatorHomeRoot: "/tmp/murph-operator-home",
-      vaultRoot: "/tmp/murph-vault",
+      vaultRoot: input.vaultRoot ?? "/tmp/murph-vault",
     },
     runtime: {
       commitTimeoutMs: null,

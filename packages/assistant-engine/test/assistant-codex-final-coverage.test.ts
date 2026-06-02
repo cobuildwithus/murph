@@ -154,10 +154,9 @@ function createRoute(input?: {
 
 function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagnostics'] {
   return {
-    activeExperimentContextElapsedMs: null,
     allowSensitiveHealthContext: false,
+    assistantContextSnapshotElapsedMs: null,
     cliBootstrapElapsedMs: null,
-    freshThreadFallbackPromptElapsedMs: null,
     primarySystemPromptElapsedMs: null,
     routePlanningElapsedMs: 0,
     routePlanningMeasuredElapsedMs: 0,
@@ -168,9 +167,7 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     routeTargetCapabilitiesElapsedMs: null,
     shouldPrepareAnyBootstrapContext: false,
     shouldPrepareBootstrapContext: false,
-    shouldPrepareFreshThreadFallback: false,
     supportedExperimentProtocolsElapsedMs: null,
-    vaultOverviewElapsedMs: null,
   }
 }
 

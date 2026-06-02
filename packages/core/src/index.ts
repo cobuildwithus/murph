@@ -26,7 +26,7 @@ export {
   resolveVaultPath,
   resolveVaultPathOnDisk,
 } from "./path-safety.ts";
-export { walkVaultFiles } from "./fs.ts";
+export { walkVaultFiles, walkVaultFilesInterruptible } from "./fs.ts";
 export {
   hashWearableRawPayload,
   stableStringifyWearableRawPayload,

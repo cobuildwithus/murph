@@ -163,6 +163,18 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
   return contractSnapshot.contract
 }
 
+export async function readAssistantCliSurfaceBootstrapContext(input: {
+  sessionId: string
+  vault: string
+}): Promise<string | null> {
+  const prebuiltContract = await readPrebuiltAssistantCliSurfaceContract()
+  if (prebuiltContract !== null) {
+    return prebuiltContract.contract
+  }
+
+  return await readPersistedAssistantCliSurfaceBootstrapContext(input)
+}
+
 export async function readPrebuiltAssistantCliSurfaceContract(input: {
   artifactPath?: string | null
 } = {}): Promise<AssistantCliSurfaceContractSnapshot | null> {

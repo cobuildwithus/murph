@@ -16,8 +16,10 @@ const runtimeMocks = vi.hoisted(() => ({
 }))
 
 const planningMocks = vi.hoisted(() => ({
-  resolveAssistantCliSurfaceBootstrapContext: vi.fn(async () => 'bootstrap contract'),
-  resolveAssistantVaultOverviewBlock: vi.fn(async () => null),
+  readAssistantCliSurfaceBootstrapContext:
+    vi.fn(async (): Promise<string | null> => 'bootstrap contract'),
+  readAssistantContextSnapshotPrompt:
+    vi.fn(async (): Promise<string | null> => null),
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
     supportsNativeResume: false,
   })),
@@ -29,8 +31,8 @@ vi.mock('@murphai/health-commons/runtime', () => ({
 }))
 
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
-  resolveAssistantCliSurfaceBootstrapContext:
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext,
+  readAssistantCliSurfaceBootstrapContext:
+    planningMocks.readAssistantCliSurfaceBootstrapContext,
 }))
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
@@ -38,9 +40,9 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
     planningMocks.resolveCodexAssistantTargetCapabilities,
 }))
 
-vi.mock('../src/assistant/vault-overview.js', () => ({
-  resolveAssistantVaultOverviewBlock:
-    planningMocks.resolveAssistantVaultOverviewBlock,
+vi.mock('../src/assistant/context-snapshot.js', () => ({
+  readAssistantContextSnapshotPrompt:
+    planningMocks.readAssistantContextSnapshotPrompt,
 }))
 
 import {
@@ -59,15 +61,15 @@ import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js
 
 afterEach(() => {
   runtimeMocks.listGeneratedAssistantProtocolIndexEntries.mockReset()
-  planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockReset()
-  planningMocks.resolveAssistantVaultOverviewBlock.mockReset()
+  planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
+  planningMocks.readAssistantContextSnapshotPrompt.mockReset()
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
 })
 
 describe('assistant protocol index planning', () => {
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -107,8 +109,8 @@ describe('assistant protocol index planning', () => {
   })
 
   it('injects conversation onboarding skill activation through route planning', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -148,8 +150,8 @@ describe('assistant protocol index planning', () => {
   })
 
   it('resumes Codex threads without refreshing bootstrap developer instructions', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
@@ -175,8 +177,8 @@ describe('assistant protocol index planning', () => {
 
     expect(initialPlan.refreshThreadInstructions).toBe(true)
     expect(initialPlan.developerInstructions).toContain('bootstrap contract')
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockClear()
-    planningMocks.resolveAssistantVaultOverviewBlock.mockClear()
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockClear()
+    planningMocks.readAssistantContextSnapshotPrompt.mockClear()
 
     const resumedSession = createSession({
       resumeState: {
@@ -201,20 +203,91 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.refreshThreadInstructions).toBe(false)
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
-    expect(resumedPlan.freshThreadFallback?.developerInstructions).toContain(
+    expect(resumedPlan.freshThreadFallback).toBeUndefined()
+    expect(resumedPlan.prepareFreshThreadFallback).toEqual(expect.any(Function))
+    expect(resumedPlan.planningDiagnostics).toMatchObject({
+      cliBootstrapElapsedMs: null,
+      shouldPrepareAnyBootstrapContext: false,
+      shouldPrepareBootstrapContext: false,
+    })
+    expect(
+      planningMocks.readAssistantCliSurfaceBootstrapContext,
+    ).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+
+    const fallback = await resumedPlan.prepareFreshThreadFallback?.()
+
+    expect(fallback?.developerInstructions).toContain(
       'bootstrap contract',
     )
-    expect(resumedPlan.freshThreadFallback?.sessionContext).toEqual({
+    expect(fallback?.sessionContext).toEqual({
       binding: resumedSession.binding,
     })
     expect(
-      planningMocks.resolveAssistantCliSurfaceBootstrapContext,
+      planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+  })
+
+  it('reads only the cached assistant context snapshot on sensitive native resume', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Cached assistant context snapshot.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const route = createRoute()
+    const resumedSession = createSession({
+      resumeState: {
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        threadId: 'thread-sensitive-resume',
+      },
+    })
+
+    const resumedPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: resumedSession,
+      sharedPlan: createSharedPlan({
+        allowSensitiveHealthContext: true,
+      }),
+    })
+
+    expect(resumedPlan.resumeCodexThreadId).toBe('thread-sensitive-resume')
+    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.turnContextPrompt).toContain(
+      'Cached assistant context snapshot.',
+    )
+    expect(
+      planningMocks.readAssistantCliSurfaceBootstrapContext,
+    ).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
+
+    planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+    const fallback = await resumedPlan.prepareFreshThreadFallback?.()
+
+    expect(fallback?.developerInstructions).toContain('bootstrap contract')
+    expect(
+      planningMocks.readAssistantCliSurfaceBootstrapContext,
+    ).toHaveBeenCalledTimes(1)
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
 
   it('plans native resume while keeping active-turn history available for fallback', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
@@ -284,11 +357,13 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.codexContinuation).toEqual({
       kind: 'provider-state-optimization',
     })
+    expect(resumedPlan.freshThreadFallback).toBeUndefined()
+    expect(resumedPlan.prepareFreshThreadFallback).toEqual(expect.any(Function))
   })
 
   it('does not replay committed transcript messages when provider-native resume is unavailable', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -346,8 +421,8 @@ describe('assistant protocol index planning', () => {
   })
 
   it('does not replay committed transcript messages for isolated fresh threads', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -397,8 +472,8 @@ describe('assistant protocol index planning', () => {
   })
 
   it('starts a fresh thread with bootstrap developer instructions when the route fingerprint changed', async () => {
-    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
@@ -431,7 +506,7 @@ describe('assistant protocol index planning', () => {
     expect(plan.refreshThreadInstructions).toBe(true)
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(
-      planningMocks.resolveAssistantCliSurfaceBootstrapContext,
+      planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
   })
 })

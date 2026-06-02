@@ -14,10 +14,12 @@ import {
 import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
-import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
 import {
-  resolveAssistantCliSurfaceBootstrapContext,
+  readAssistantCliSurfaceBootstrapContext,
 } from '../cli-surface-bootstrap.js'
+import {
+  readAssistantContextSnapshotPrompt,
+} from '../context-snapshot.js'
 import {
   normalizeAssistantExecutionContext,
   type AssistantHostedDeviceConnectProvider,
@@ -57,7 +59,6 @@ import {
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
-import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
 import {
   type AssistantActiveTurnProviderHistory,
   type AssistantActiveTurnProviderHistoryMessage,
@@ -74,6 +75,7 @@ export interface AssistantRouteTurnPlan {
   activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
+  prepareFreshThreadFallback?: () => Promise<AssistantRouteFreshThreadFallbackPlan | null>
   onboardingGuidanceInjected: boolean
   codexContinuation: AssistantCodexContinuation
   planningDiagnostics: AssistantRoutePlanningDiagnostics
@@ -89,8 +91,8 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantRoutePlanningDiagnostics {
-  activeExperimentContextElapsedMs: number | null
   allowSensitiveHealthContext: boolean
+  assistantContextSnapshotElapsedMs: number | null
   cliBootstrapElapsedMs: number | null
   primarySystemPromptElapsedMs: number | null
   routePlanningElapsedMs: number
@@ -102,31 +104,24 @@ export interface AssistantRoutePlanningDiagnostics {
   routeTargetCapabilitiesElapsedMs: number | null
   shouldPrepareAnyBootstrapContext: boolean
   shouldPrepareBootstrapContext: boolean
-  shouldPrepareFreshThreadFallback: boolean
   supportedExperimentProtocolsElapsedMs: number | null
-  freshThreadFallbackPromptElapsedMs: number | null
-  vaultOverviewElapsedMs: number | null
 }
 
 type AssistantRoutePlanningSpanKey =
-  | 'activeExperimentContextElapsedMs'
+  | 'assistantContextSnapshotElapsedMs'
   | 'cliBootstrapElapsedMs'
-  | 'freshThreadFallbackPromptElapsedMs'
   | 'primarySystemPromptElapsedMs'
   | 'routeResumeBindingElapsedMs'
   | 'routeTargetCapabilitiesElapsedMs'
   | 'supportedExperimentProtocolsElapsedMs'
-  | 'vaultOverviewElapsedMs'
 
 type AssistantRoutePlanningSpanMetrics = Partial<
   Record<AssistantRoutePlanningSpanKey, number>
 >
 
 export type AssistantRoutePlanningStage =
-  | 'active_experiment_context'
+  | 'assistant_context_snapshot'
   | 'cli_bootstrap'
-  | 'fallback_instructions'
-  | 'memory_overview'
   | 'primary_instructions'
   | 'resume_binding'
   | 'supported_experiment_protocols'
@@ -137,16 +132,12 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   stage: AssistantRoutePlanningStage
 }[] = [
   {
-    key: 'activeExperimentContextElapsedMs',
-    stage: 'active_experiment_context',
+    key: 'assistantContextSnapshotElapsedMs',
+    stage: 'assistant_context_snapshot',
   },
   {
     key: 'cliBootstrapElapsedMs',
     stage: 'cli_bootstrap',
-  },
-  {
-    key: 'freshThreadFallbackPromptElapsedMs',
-    stage: 'fallback_instructions',
   },
   {
     key: 'primarySystemPromptElapsedMs',
@@ -163,10 +154,6 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   {
     key: 'supportedExperimentProtocolsElapsedMs',
     stage: 'supported_experiment_protocols',
-  },
-  {
-    key: 'vaultOverviewElapsedMs',
-    stage: 'memory_overview',
   },
 ]
 
@@ -427,9 +414,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const resumeCodexThreadId = threadPlan.resumeCodexThreadId
   const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const shouldPrepareFreshThreadFallback = resumeCodexThreadId !== null
-  const shouldPrepareAnyBootstrapContext =
-    shouldPrepareBootstrapContext || shouldPrepareFreshThreadFallback
+  const shouldPrepareAnyBootstrapContext = shouldPrepareBootstrapContext
+  const shouldResolveFreshThreadFallback = resumeCodexThreadId !== null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
@@ -442,18 +428,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     executionContext: input.executionContext,
   })
   const shouldPrepareConversationThreadInstructions =
-    shouldPrepareAnyBootstrapContext && input.profile.promptProfile === 'conversation'
+    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
   let cliBootstrapElapsedMs: number | null = null
-  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
-    ? await measureRoutePlanningAsync(
-        routePlanningSpans,
-        'cliBootstrapElapsedMs',
-        () => resolveAssistantCliSurfaceBootstrapContext({
-          cliEnv: input.sharedPlan.cliAccess.env,
-          executionContext: input.input.executionContext,
+ const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
+   ? await measureRoutePlanningAsync(
+       routePlanningSpans,
+       'cliBootstrapElapsedMs',
+        () => readAssistantCliSurfaceBootstrapContext({
           sessionId: input.session.sessionId,
           vault: input.input.vault,
-          workingDirectory,
         }),
         (elapsedMs) => {
           cliBootstrapElapsedMs = elapsedMs
@@ -468,28 +451,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
           () => resolveAssistantSupportedExperimentProtocols(),
         )
       : []
-  let vaultOverviewElapsedMs: number | null = null
-  const bootstrapVaultOverview = shouldPrepareAnyBootstrapContext
-    ? await measureRoutePlanningAsync(
-        routePlanningSpans,
-        'vaultOverviewElapsedMs',
-        () => resolveAssistantVaultOverviewBlock(input.input.vault),
-        (elapsedMs) => {
-          vaultOverviewElapsedMs = elapsedMs
-        },
-      )
-    : null
-  let activeExperimentContextElapsedMs: number | null = null
-  const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
-    ? await measureRoutePlanningAsync(
-        routePlanningSpans,
-        'activeExperimentContextElapsedMs',
-        () => resolveAssistantActiveExperimentContextBlock(input.input.vault),
-        (elapsedMs) => {
-          activeExperimentContextElapsedMs = elapsedMs
-        },
-      )
-    : null
+  let assistantContextSnapshotElapsedMs: number | null = null
+  const assistantContextSnapshotPrompt =
+    input.sharedPlan.allowSensitiveHealthContext
+      ? await measureRoutePlanningAsync(
+          routePlanningSpans,
+          'assistantContextSnapshotElapsedMs',
+          () => readAssistantContextSnapshotPrompt({
+            allowSensitiveHealthContext:
+              input.sharedPlan.allowSensitiveHealthContext,
+            vaultRoot: input.input.vault,
+          }),
+          (elapsedMs) => {
+            assistantContextSnapshotElapsedMs = elapsedMs
+          },
+        )
+      : null
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
@@ -497,12 +474,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
     assistantModelProgressUpdatesAvailable: boolean
-    injectBootstrapContext: boolean
     injectOnboardingGuidance: boolean
   }) =>
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
-            activeExperimentContext,
+            assistantContextSnapshotPrompt,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
             assistantHostedDeviceConnectAvailable:
@@ -513,15 +489,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
-            vaultOverview: options.injectBootstrapContext
-              ? bootstrapVaultOverview
-              : null,
           }, {
             toolSchemaHash,
           })
       : buildAssistantSystemPromptWithCacheMetadata({
-            activeExperimentContext,
             assistantCliContract: options.assistantCliContract,
+            assistantContextSnapshotPrompt,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
             assistantHostedDeviceConnectAvailable:
@@ -544,9 +517,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
             onboardingGuidance: options.injectOnboardingGuidance,
             modelBehaviorProfile,
             turnTrigger: input.input.turnTrigger ?? null,
-            vaultOverview: options.injectBootstrapContext
-              ? bootstrapVaultOverview
-              : null,
           }, {
             toolSchemaHash,
           })
@@ -564,6 +534,36 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const actualAssistantCliContract = shouldPrepareBootstrapContext
     ? bootstrapAssistantCliContract
     : null
+  const buildFreshThreadFallbackPlan = async () => {
+    const fallbackAssistantCliContract =
+      input.profile.promptProfile === 'conversation'
+        ? await readAssistantCliSurfaceBootstrapContext({
+            sessionId: input.session.sessionId,
+            vault: input.input.vault,
+          })
+        : null
+    const fallbackPromptResult = buildRouteSystemPromptResult({
+      assistantCliContract: fallbackAssistantCliContract,
+      assistantModelProgressUpdatesAvailable:
+        input.modelProgressUpdatesEnabled === true,
+      injectOnboardingGuidance: shouldInjectOnboardingGuidance,
+    })
+
+    return {
+      developerInstructions: normalizeNullableString(
+        buildDeveloperInstructions(fallbackPromptResult),
+      ),
+      sessionContext: {
+        binding: input.session.binding,
+      },
+      turnContextPrompt: normalizeNullableString(
+        fallbackPromptResult.layers.dynamicTurnContextPrompt,
+      ),
+    }
+  }
+  const prepareFreshThreadFallback = shouldResolveFreshThreadFallback
+    ? buildFreshThreadFallbackPlan
+    : undefined
   const systemPromptResult = measureRoutePlanningSync(
     routePlanningSpans,
     'primarySystemPromptElapsedMs',
@@ -571,23 +571,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantCliContract: actualAssistantCliContract,
       assistantModelProgressUpdatesAvailable:
         input.modelProgressUpdatesEnabled === true,
-      injectBootstrapContext: shouldPrepareBootstrapContext,
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     }),
   )
-  const freshThreadFallbackPromptResult = shouldPrepareFreshThreadFallback
-    ? measureRoutePlanningSync(
-        routePlanningSpans,
-        'freshThreadFallbackPromptElapsedMs',
-        () => buildRouteSystemPromptResult({
-          assistantCliContract: bootstrapAssistantCliContract,
-          assistantModelProgressUpdatesAvailable:
-            input.modelProgressUpdatesEnabled === true,
-          injectBootstrapContext: true,
-          injectOnboardingGuidance: shouldInjectOnboardingGuidance,
-        }),
-      )
-    : null
   const refreshThreadInstructions = resumeCodexThreadId === null
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions =
@@ -597,19 +583,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const turnContextPrompt = normalizeNullableString(
     systemPromptResult.layers.dynamicTurnContextPrompt,
   )
-  const freshThreadFallback = freshThreadFallbackPromptResult
-    ? {
-        developerInstructions: normalizeNullableString(
-          buildDeveloperInstructions(freshThreadFallbackPromptResult),
-        ),
-        sessionContext: {
-          binding: input.session.binding,
-        },
-        turnContextPrompt: normalizeNullableString(
-          freshThreadFallbackPromptResult.layers.dynamicTurnContextPrompt,
-        ),
-      }
-    : undefined
   const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
   const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
     routePlanningSpans,
@@ -627,14 +600,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     developerInstructions: normalizeNullableString(developerInstructions),
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     diagnosticsPolicy,
-    freshThreadFallback,
+    ...(prepareFreshThreadFallback ? { prepareFreshThreadFallback } : {}),
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     codexContinuation: resolveAssistantCodexContinuation({
       resumeCodexThreadId,
     }),
     planningDiagnostics: {
-      activeExperimentContextElapsedMs,
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+      assistantContextSnapshotElapsedMs,
       cliBootstrapElapsedMs,
       primarySystemPromptElapsedMs:
         routePlanningSpans.primarySystemPromptElapsedMs ?? null,
@@ -650,12 +623,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
       shouldPrepareAnyBootstrapContext,
       shouldPrepareBootstrapContext,
-      shouldPrepareFreshThreadFallback,
       supportedExperimentProtocolsElapsedMs:
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
-      freshThreadFallbackPromptElapsedMs:
-        routePlanningSpans.freshThreadFallbackPromptElapsedMs ?? null,
-      vaultOverviewElapsedMs,
     },
     refreshThreadInstructions,
     resumeCodexThreadId,
@@ -772,26 +741,6 @@ export async function resolveAssistantPromptTimeContext(
   return {
     currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
     currentTimeZone,
-  }
-}
-
-export async function resolveAssistantVaultOverviewBlock(
-  vaultRoot: string,
-): Promise<string | null> {
-  try {
-    return await buildAssistantVaultOverviewBlock(vaultRoot)
-  } catch {
-    return null
-  }
-}
-
-export async function resolveAssistantActiveExperimentContextBlock(
-  vaultRoot: string,
-): Promise<string | null> {
-  try {
-    return await buildAssistantActiveExperimentContextBlock(vaultRoot)
-  } catch {
-    return null
   }
 }
 

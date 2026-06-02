@@ -22,7 +22,7 @@ type SpawnedChildForTest = EventEmitter & {
 interface CleanupInputForTest {
   cwd: string;
   env: NodeJS.ProcessEnv;
-  ignoreErrors: true;
+  ignoreErrors: boolean;
 }
 
 const spawnMock = vi.hoisted(() => vi.fn<SpawnForTest>());
@@ -39,6 +39,28 @@ const cleanupHostedRunnerContainersMock = vi.hoisted(() =>
 const cleanupHostedRunnerImagesMock = vi.hoisted(() =>
   vi.fn<(input: CleanupInputForTest) => Promise<void>>(async () => {}),
 );
+const cleanupHostedLocalOrphanedWorkerdProcessesMock = vi.hoisted(() =>
+  vi.fn<() => void>(),
+);
+const cleanupHostedLocalMinioBuildContainersBestEffortMock = vi.hoisted(() =>
+  vi.fn<(env: NodeJS.ProcessEnv, buildId: string) => Promise<void>>(async () => {}),
+);
+const cleanupHostedLocalMinioE2eContainersBestEffortMock = vi.hoisted(() =>
+  vi.fn<(env: NodeJS.ProcessEnv) => Promise<void>>(async () => {}),
+);
+const expectedScenarioFiles = [
+  "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
+  "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
+] as const;
 const controlledEnvKeys = [
   "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
   "MURPH_HEALTH_COMMONS_GENERATED_PREPARED",
@@ -58,8 +80,17 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("../../../scripts/dev-hosted-local/runtime.ts", () => ({
+  cleanupHostedLocalOrphanedWorkerdProcesses:
+    cleanupHostedLocalOrphanedWorkerdProcessesMock,
   cleanupHostedRunnerContainers: cleanupHostedRunnerContainersMock,
   cleanupHostedRunnerImages: cleanupHostedRunnerImagesMock,
+}));
+
+vi.mock("../../../scripts/dev-hosted-local/minio.ts", () => ({
+  cleanupHostedLocalMinioBuildContainersBestEffort:
+    cleanupHostedLocalMinioBuildContainersBestEffortMock,
+  cleanupHostedLocalMinioE2eContainersBestEffort:
+    cleanupHostedLocalMinioE2eContainersBestEffortMock,
 }));
 
 describe("run-hosted-local-e2e", () => {
@@ -96,6 +127,9 @@ describe("run-hosted-local-e2e", () => {
 
     spawnMock.mockReset();
     spawnSyncMock.mockClear();
+    cleanupHostedLocalOrphanedWorkerdProcessesMock.mockClear();
+    cleanupHostedLocalMinioBuildContainersBestEffortMock.mockReset();
+    cleanupHostedLocalMinioE2eContainersBestEffortMock.mockReset();
     cleanupHostedRunnerContainersMock.mockReset();
     cleanupHostedRunnerImagesMock.mockReset();
     vi.resetModules();
@@ -110,13 +144,13 @@ describe("run-hosted-local-e2e", () => {
     restoreControlledEnv();
   });
 
-  it("runs the full-stack hosted-local files in one vitest process and cleans up once", async () => {
+  it("runs the full-stack hosted-local scenarios and cleans up runner state", async () => {
     spawnMock.mockImplementation(() => createExitingChild(0));
 
     await import("../scripts/run-hosted-local-e2e.ts");
 
-    expectVitestSpawnCall();
-    expectSingleCleanupCall();
+    expectVitestSpawnCalls(expectedScenarioFiles.length);
+    expectCleanupCalls(2 * expectedScenarioFiles.length + 1);
   });
 
   it("cleans up when the hosted-local vitest process fails", async () => {
@@ -128,10 +162,10 @@ describe("run-hosted-local-e2e", () => {
 
     await expect(import("../scripts/run-hosted-local-e2e.ts"))
       .rejects
-      .toThrow("Hosted local full-stack e2e suite exited with code 1.");
+      .toThrow("Hosted local full-stack e2e scenario 1/11 checkpoint-baseline exited with code 1.");
 
-    expectVitestSpawnCall();
-    expectSingleCleanupCall();
+    expectVitestSpawnCalls(1);
+    expectCleanupCalls(3);
   });
 
   it("cleans up and preserves interrupt exit code when SIGINT stops hosted-local vitest", async () => {
@@ -175,8 +209,8 @@ describe("run-hosted-local-e2e", () => {
     await expect(runPromise).resolves.toBeDefined();
     expect(interruptedChild.kill).toHaveBeenCalledWith("SIGINT");
     expect(process.exitCode).toBe(130);
-    expectVitestSpawnCall();
-    expectSingleCleanupCall();
+    expectVitestSpawnCalls(1);
+    expectCleanupCalls(3);
   });
 });
 
@@ -216,8 +250,8 @@ async function waitForSpawnCalls(count: number): Promise<void> {
   expect(spawnMock).toHaveBeenCalledTimes(count);
 }
 
-function expectVitestSpawnCall(): void {
-  expect(spawnMock).toHaveBeenCalledTimes(4);
+function expectVitestSpawnCalls(scenarioCount: number): void {
+  expect(spawnMock).toHaveBeenCalledTimes(3 + scenarioCount);
   const [baseCommand, baseArgs, baseOptions] = spawnMock.mock.calls[0] ?? [];
   expect(baseCommand).toBe("pnpm");
   expect(baseArgs).toEqual(["--dir", "apps/cloudflare", "runner:docker:base"]);
@@ -234,27 +268,21 @@ function expectVitestSpawnCall(): void {
   expect(healthCommonsArgs).toEqual(["health-commons:generate"]);
   expect(healthCommonsOptions?.stdio).toBe("inherit");
 
-  const [command, args, options] = spawnMock.mock.calls[3] ?? [];
-  expect(command).toBe("pnpm");
-  expect(args).toEqual([
-    "exec",
-    "vitest",
-    "run",
-    "--config",
-    "apps/cloudflare/vitest.e2e.config.ts",
-    "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
-    "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
-    "--no-coverage",
-  ]);
+  for (let index = 0; index < scenarioCount; index += 1) {
+    const [command, args] = spawnMock.mock.calls[3 + index] ?? [];
+    expect(command).toBe("pnpm");
+    expect(args).toEqual([
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "apps/cloudflare/vitest.e2e.config.ts",
+      expectedScenarioFiles[index],
+      "--no-coverage",
+    ]);
+  }
+
+  const [, , options] = spawnMock.mock.calls[3] ?? [];
   expect(typeof options?.cwd).toBe("string");
   expect(options?.env === process.env).toBe(false);
   expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
@@ -291,11 +319,25 @@ function restoreControlledEnv(): void {
   originalEnv.clear();
 }
 
-function expectSingleCleanupCall(): void {
-  expect(cleanupHostedRunnerContainersMock).toHaveBeenCalledTimes(1);
+function expectCleanupCalls(expectedRunnerCleanupCalls: number): void {
+  expect(cleanupHostedLocalOrphanedWorkerdProcessesMock)
+    .toHaveBeenCalledTimes(expectedRunnerCleanupCalls);
+  expect(cleanupHostedRunnerContainersMock).toHaveBeenCalledTimes(
+    expectedRunnerCleanupCalls,
+  );
   expect(cleanupHostedRunnerImagesMock).toHaveBeenCalledTimes(1);
-  const [cleanupInput] = cleanupHostedRunnerContainersMock.mock.calls[0] ?? [];
+  expect(cleanupHostedLocalMinioBuildContainersBestEffortMock).toHaveBeenCalledTimes(
+    expectedRunnerCleanupCalls,
+  );
+  expect(cleanupHostedLocalMinioE2eContainersBestEffortMock).toHaveBeenCalledTimes(
+    expectedRunnerCleanupCalls,
+  );
+  const [cleanupInput] = cleanupHostedRunnerContainersMock.mock.calls.at(-1) ?? [];
   const [imageCleanupInput] = cleanupHostedRunnerImagesMock.mock.calls[0] ?? [];
+  const [minioBuildCleanupEnv, minioBuildCleanupId] =
+    cleanupHostedLocalMinioBuildContainersBestEffortMock.mock.calls.at(-1) ?? [];
+  const [minioE2eCleanupEnv] =
+    cleanupHostedLocalMinioE2eContainersBestEffortMock.mock.calls.at(-1) ?? [];
   const [, , spawnOptions] = spawnMock.mock.calls[3] ?? [];
   expect(typeof cleanupInput?.cwd).toBe("string");
   expect(cleanupInput?.env).toBe(spawnOptions?.env);
@@ -303,4 +345,7 @@ function expectSingleCleanupCall(): void {
   expect(imageCleanupInput?.cwd).toBe(cleanupInput?.cwd);
   expect(imageCleanupInput?.env).toBe(spawnOptions?.env);
   expect(imageCleanupInput?.ignoreErrors).toBe(true);
+  expect(minioBuildCleanupEnv).toBe(spawnOptions?.env);
+  expect(minioBuildCleanupId).toBe(spawnOptions?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID);
+  expect(minioE2eCleanupEnv).toBe(spawnOptions?.env);
 }

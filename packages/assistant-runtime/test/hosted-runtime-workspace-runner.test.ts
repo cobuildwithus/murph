@@ -13,6 +13,8 @@ import {
   createAssistantActiveTurnInputController,
   createAssistantOutboxIntent,
   createStoreBackedAssistantInputSource,
+  markAssistantContextSnapshotDirty,
+  readAssistantContextSnapshotState,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import type {
@@ -38,6 +40,7 @@ import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  applyCanonicalWriteBatch,
   initializeVault,
 } from "@murphai/core";
 import { describe, test, vi } from "vitest";
@@ -821,6 +824,217 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("requests an immediate idle wake after assistant context snapshot source writes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Snapshot Dirty Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_snapshot_dirty",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import should have no items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_snapshot_dirty",
+        async runAssistantPhase() {
+          await applyCanonicalWriteBatch({
+            audit: {
+              action: "experiment_update",
+              commandName: "test.snapshotDirty",
+              summary: "Synthetic experiment update.",
+            },
+            operationType: "snapshot_dirty_test",
+            summary: "Synthetic experiment update",
+            textWrites: [
+              {
+                content: "Synthetic experiment update\n",
+                overwrite: true,
+                relativePath: "bank/experiments/snapshot-dirty.md",
+              },
+            ],
+            vaultRoot,
+          });
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(result.runtimeStateDirty, true);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.deepEqual(
+        (await readAssistantContextSnapshotState(vaultRoot))?.pendingDirtyDomains,
+        ["experiments"],
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("keeps an immediate assistant wake when a prior context snapshot dirty marker is still pending", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Snapshot Pending Test Vault",
+      vaultRoot,
+    });
+    await markAssistantContextSnapshotDirty({
+      domains: ["experiments"],
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_snapshot_pending",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import was already provided.");
+        },
+        initialMailboxImport: createDeferredMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_snapshot_pending",
+        async runAssistantPhase() {
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            nextWakeAt: "2026-04-27T00:10:00.000Z",
+            nextWakeReason: "assistant",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.deepEqual(
+        (await readAssistantContextSnapshotState(vaultRoot))?.pendingDirtyDomains,
+        ["experiments"],
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("does not request assistant context snapshot wake for audit-only writes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Snapshot Audit Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_snapshot_audit_only",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import should have no items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_snapshot_audit_only",
+        async runAssistantPhase() {
+          await applyCanonicalWriteBatch({
+            audit: {
+              action: "jsonl_append",
+              commandName: "test.auditOnly",
+              summary: "Synthetic audit append.",
+            },
+            jsonlAppends: [
+              {
+                record: {
+                  synthetic: true,
+                },
+                relativePath: "audit/2026/2026-04.jsonl",
+              },
+            ],
+            operationType: "snapshot_audit_only_test",
+            summary: "Synthetic audit append",
+            vaultRoot,
+          });
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.nextWakeAt ?? null, null);
+      assert.equal(result.runtimeStateDirty, true);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.equal(await readAssistantContextSnapshotState(vaultRoot), null);
     } finally {
       await rm(vaultRoot, {
         force: true,

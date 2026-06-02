@@ -86,6 +86,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/automation-state.json",
     "Assistant runtime automation execution state that must move with hosted continuity.",
   ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/context-snapshot.json",
+    "Assistant private context snapshot that moves with hosted continuity.",
+  ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/auto-reply",
     "Assistant auto-reply terminal handling evidence that must move with hosted reply replay and cleanup continuity.",

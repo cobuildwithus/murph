@@ -70,7 +70,7 @@ describe('assistant GPT-5 execution prompt overlay', () => {
       onboardingGuidance: false,
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
-      vaultOverview: null,
+      assistantContextSnapshotPrompt: null,
     })
 
     expect(prompt).toContain('Execution style:')
@@ -422,25 +422,25 @@ describe('assistant system prompt cache stability', () => {
     }
     const promptA = buildAssistantSystemPromptWithCacheMetadata(
       createCommonCodexPromptInput({
-        activeExperimentContext: 'Active experiment context for user A.',
         allowSensitiveHealthContext: true,
+        assistantContextSnapshotPrompt:
+          'Vault overview for user A.\n\nActive experiment context for user A.',
         channel: 'telegram',
         currentLocalDate: '2026-04-15',
         currentTimeZone: 'Asia/Kuala_Lumpur',
         murphProductBaseUrl: 'http://localhost:3000',
-        vaultOverview: 'Vault overview for user A.',
       }),
       cacheInput,
     )
     const promptB = buildAssistantSystemPromptWithCacheMetadata(
       createCommonCodexPromptInput({
-        activeExperimentContext: 'Active experiment context for user B.',
         allowSensitiveHealthContext: false,
+        assistantContextSnapshotPrompt:
+          'Vault overview for user B.\n\nActive experiment context for user B.',
         channel: 'sms',
         currentLocalDate: '2026-04-16',
         currentTimeZone: 'America/Los_Angeles',
         murphProductBaseUrl: 'https://withmurph.ai',
-        vaultOverview: 'Vault overview for user B.',
       }),
       cacheInput,
     )
@@ -477,6 +477,9 @@ describe('assistant system prompt cache stability', () => {
     expect(stablePrefix).not.toContain('Active experiment context for user A.')
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
+    expect(dynamicSuffix).toContain('Vault overview for user A.')
+    expect(promptB.prompt).not.toContain('Vault overview for user B.')
+    expect(promptB.prompt).not.toContain('Active experiment context for user B.')
     expect(dynamicSuffix).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
@@ -555,23 +558,23 @@ describe('assistant system prompt cache stability', () => {
     }
     const promptA = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
-        activeExperimentContext: 'Notification active experiment for user A.',
         allowSensitiveHealthContext: true,
+        assistantContextSnapshotPrompt:
+          'Notification vault overview for user A.\n\nNotification active experiment for user A.',
         channel: 'telegram',
         currentLocalDate: '2026-04-15',
         currentTimeZone: 'Asia/Kuala_Lumpur',
-        vaultOverview: 'Notification vault overview for user A.',
       }),
       cacheInput,
     )
     const promptB = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
-        activeExperimentContext: 'Notification active experiment for user B.',
         allowSensitiveHealthContext: false,
+        assistantContextSnapshotPrompt:
+          'Notification vault overview for user B.\n\nNotification active experiment for user B.',
         channel: 'sms',
         currentLocalDate: '2026-04-16',
         currentTimeZone: 'America/Los_Angeles',
-        vaultOverview: 'Notification vault overview for user B.',
       }),
       cacheInput,
     )
@@ -611,6 +614,11 @@ describe('assistant system prompt cache stability', () => {
     )
     expect(dynamicSuffix).toContain('Notification execution rules:')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
+    expect(dynamicSuffix).toContain('Notification vault overview for user A.')
+    expect(promptB.prompt).not.toContain('Notification vault overview for user B.')
+    expect(promptB.prompt).not.toContain(
+      'Notification active experiment for user B.',
+    )
   })
 })
 
@@ -710,7 +718,8 @@ describe('assistant notification decision guidance', () => {
   it('carves first-session prep automations out of deterministic followup due checks', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
-        activeExperimentContext: 'Experiment first-session prep reminder is due.',
+        assistantContextSnapshotPrompt:
+          'Experiment first-session prep reminder is due.',
       }),
     ).prompt
 
@@ -756,7 +765,7 @@ describe('assistant conversation onboarding guidance', () => {
       onboardingGuidance: true,
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
-      vaultOverview: null,
+      assistantContextSnapshotPrompt: null,
     })
 
     expect(prompt).toContain('Conversation onboarding:')
@@ -826,7 +835,7 @@ function createCommonCodexPromptInput(
     onboardingGuidance: true,
     modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
-    vaultOverview: null,
+    assistantContextSnapshotPrompt: null,
     ...overrides,
   }
 }
@@ -844,7 +853,7 @@ function createCommonNotificationPromptInput(
     channel: 'telegram',
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
-    vaultOverview: null,
+    assistantContextSnapshotPrompt: null,
     ...overrides,
   }
 }

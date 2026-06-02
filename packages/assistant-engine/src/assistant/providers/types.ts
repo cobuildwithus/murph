@@ -81,6 +81,7 @@ export interface AssistantProviderTurnInput {
   refreshThreadInstructions?: boolean
   resumeCodexThreadId?: string | null
   freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
+  prepareFreshThreadFallback?: AssistantProviderFreshThreadFallbackResolver | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -103,6 +104,9 @@ export interface AssistantProviderFreshThreadFallbackInput {
   turnContextPrompt?: string | null
 }
 
+export type AssistantProviderFreshThreadFallbackResolver =
+  () => Promise<AssistantProviderFreshThreadFallbackInput | null>
+
 export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
@@ -122,6 +126,7 @@ export interface AssistantProviderTurnExecutionInput {
   refreshThreadInstructions?: boolean
   resumeCodexThreadId?: string | null
   freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
+  prepareFreshThreadFallback?: AssistantProviderFreshThreadFallbackResolver | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
