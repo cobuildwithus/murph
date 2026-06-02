@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -44,11 +44,25 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
     DeviceBatchImportPayload & { snapshot: unknown }
   >
 >;
+type CoreDeviceImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>;
+type CoreDeviceImportEvent = CoreDeviceImportResult["events"][number];
 
 interface RawArtifactProvenanceEntry {
   role: string;
   relativePath: string;
   metadata: unknown;
+}
+
+interface DeviceProviderCoreContractFixture {
+  expectedEventKinds?: readonly string[];
+  expectedObservationMetrics?: readonly string[];
+  expectedWorkoutMetrics?: readonly {
+    metric: keyof WorkoutSessionMetrics;
+    value: number;
+  }[];
+  label: string;
+  provider: string;
+  snapshot: Record<string, unknown>;
 }
 
 function makeTestDeviceProviderAdapter<TSnapshot>(
@@ -89,6 +103,18 @@ function workoutMetricsFromEvent(
   return result.data.metrics;
 }
 
+function workoutMetricsFromCoreEvent(
+  event: CoreDeviceImportEvent | undefined,
+): WorkoutSessionMetrics | undefined {
+  const workout = event && "workout" in event ? event.workout : undefined;
+  const result = workoutSessionSchema.safeParse(workout);
+  if (!result.success) {
+    assert.fail(`core workout contract paths: ${result.error.issues.map((issue) => issue.path.join(".")).join(", ")}`);
+  }
+
+  return result.data.metrics;
+}
+
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
 }
@@ -119,6 +145,14 @@ function readRawArtifactProvenanceEntries(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasCoreEventKind(events: readonly CoreDeviceImportEvent[], kind: string): boolean {
+  return events.some((event) => event.kind === kind);
+}
+
+function hasCoreObservationMetric(events: readonly CoreDeviceImportEvent[], metric: string): boolean {
+  return events.some((event) => event.kind === "observation" && event.metric === metric);
 }
 
 test("makeNormalizedDeviceBatch preserves the canonical device payload shape and hardcodes device source", () => {
@@ -155,6 +189,192 @@ test("makeNormalizedDeviceBatch preserves the canonical device payload shape and
     ...options,
     source: "device",
   });
+});
+
+test("default provider contract fixtures round-trip canonical records through real core", async () => {
+  const fixtures: readonly DeviceProviderCoreContractFixture[] = [
+    {
+      label: "whoop-recovery",
+      provider: "whoop",
+      snapshot: {
+        accountId: "whoop-contract-user",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        recoveries: [
+          {
+            sleep_id: "sleep-contract-1",
+            updated_at: "2026-04-22T08:00:00.000Z",
+            score: {
+              recovery_score: 72,
+              resting_heart_rate: 54,
+            },
+          },
+        ],
+      },
+      expectedObservationMetrics: ["recovery-score", "resting-heart-rate"],
+    },
+    {
+      label: "oura-readiness",
+      provider: "oura",
+      snapshot: {
+        accountId: "oura-contract-user",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        dailyActivity: [
+          {
+            day: "2026-04-22",
+            steps: 4321,
+          },
+        ],
+        dailyReadiness: [
+          {
+            day: "2026-04-22",
+            score: 81,
+          },
+        ],
+      },
+      expectedObservationMetrics: ["daily-steps", "readiness-score"],
+    },
+    {
+      label: "garmin-daily-summary",
+      provider: "garmin",
+      snapshot: {
+        accountId: "garmin-contract-user",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        dailySummaries: [
+          {
+            calendarDate: "2026-04-22",
+            averageStressLevel: 29,
+            steps: 5432,
+          },
+        ],
+      },
+      expectedObservationMetrics: ["daily-steps", "stress-level"],
+    },
+    {
+      label: "junction-timeseries-aggregate",
+      provider: "junction",
+      snapshot: {
+        accountId: "junction-contract-user",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        timeseries: {
+          blood_oxygen: {
+            groups: {
+              garmin: [
+                {
+                  data: [
+                    { timestamp: "2026-04-22T07:15:00.000Z", unit: "percent", value: 97 },
+                    { timestamp: "2026-04-22T07:45:00.000Z", unit: "percent", value: 93 },
+                  ],
+                  source: { provider: "garmin", type: "watch" },
+                },
+              ],
+            },
+          },
+          stress_level: {
+            groups: {
+              garmin: [
+                {
+                  data: [
+                    { timestamp: "2026-04-22T08:00:00.000Z", value: 25 },
+                    { timestamp: "2026-04-22T16:00:00.000Z", value: 55 },
+                  ],
+                  source: { provider: "garmin", type: "watch" },
+                },
+              ],
+            },
+          },
+        },
+      },
+      expectedObservationMetrics: ["lowest-spo2", "spo2", "stress-level"],
+    },
+    {
+      label: "strava-activity",
+      provider: "strava",
+      snapshot: {
+        accountId: "strava-contract-user",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        activities: [
+          {
+            id: "strava-activity-1",
+            name: "Morning run",
+            sport_type: "Run",
+            start_date: "2026-04-22T11:00:00.000Z",
+            moving_time: 1800,
+            distance: 5200,
+            calories: 340,
+            average_heartrate: 150,
+            max_heartrate: 165,
+            total_elevation_gain: 42,
+            average_speed: 2.87,
+            max_speed: 4.1,
+          },
+        ],
+      },
+      expectedEventKinds: ["activity_session"],
+      expectedWorkoutMetrics: [
+        { metric: "activeCalories", value: 340 },
+        { metric: "averageHeartRate", value: 150 },
+        { metric: "maxHeartRate", value: 165 },
+        { metric: "totalElevationGainMeters", value: 42 },
+        { metric: "averageSpeedMps", value: 2.87 },
+        { metric: "maxSpeedMps", value: 4.1 },
+      ],
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const vaultRoot = await makeTempDirectory(`murph-provider-contract-${fixture.label}`);
+    try {
+      await coreRuntime.initializeVault({
+        vaultRoot,
+        createdAt: "2026-04-22T00:00:00.000Z",
+        timezone: "UTC",
+      });
+
+      const result = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+        {
+          provider: fixture.provider,
+          vaultRoot,
+          snapshot: fixture.snapshot,
+        },
+        {
+          corePort: coreRuntime,
+        },
+      );
+
+      assert.ok(result.events.length > 0, `${fixture.label} should write at least one canonical event`);
+      assert.equal(result.samples.length, 0, `${fixture.label} should not write generic sample telemetry`);
+      assert.ok(result.rawArtifacts.length > 0, `${fixture.label} should retain raw evidence`);
+
+      for (const eventKind of fixture.expectedEventKinds ?? []) {
+        assert.ok(
+          hasCoreEventKind(result.events, eventKind),
+          `${fixture.label} should write a canonical ${eventKind} event`,
+        );
+      }
+
+      for (const metric of fixture.expectedObservationMetrics ?? []) {
+        assert.ok(
+          hasCoreObservationMetric(result.events, metric),
+          `${fixture.label} should write a canonical ${metric} observation`,
+        );
+      }
+
+      if ((fixture.expectedWorkoutMetrics ?? []).length > 0) {
+        const activityEvent = result.events.find((event) => event.kind === "activity_session");
+        const workoutMetrics = workoutMetricsFromCoreEvent(activityEvent);
+
+        for (const { metric, value } of fixture.expectedWorkoutMetrics ?? []) {
+          assert.equal(
+            workoutMetrics?.[metric],
+            value,
+            `${fixture.label} should retain canonical workout metric ${metric}`,
+          );
+        }
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
 });
 
 test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canonical device payloads", async () => {

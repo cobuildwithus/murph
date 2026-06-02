@@ -234,6 +234,18 @@ After the provider and adapter exist, wire them into the normal repo seams.
 - extend importer tests for parsing, evidence retention, and canonical mapping
 - extend `packages/importers/test/provider-descriptors.test.ts` when the provider should prove descriptor alignment
 
+Any provider change that emits or reshapes canonical events or samples must
+also prove at least one representative snapshot through the real
+`importDeviceProviderSnapshot(..., { corePort: coreRuntime })` path. Adapter or
+normalizer-only assertions are useful, but they are not enough: the fixture must
+round-trip through `core.importDeviceBatch` so invalid observation grains,
+unsupported fields, dense sample leakage, and other core-contract drift fail in
+tests. Keep high-frequency timeseries as raw evidence unless an explicit compact
+summary or derived fact already fits the canonical device contract.
+Committed provider fixtures and assertions must stay synthetic or fully
+redacted; never commit real provider tokens, account identifiers, raw private
+payload details, local paths, or direct user identifiers to satisfy this proof.
+
 Do not add a second bespoke registry. Both packages already share the keyed registry helper from `provider-descriptors.ts`.
 
 ### 6. Decide whether hosted or onboarding surfaces need the provider now

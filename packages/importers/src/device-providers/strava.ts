@@ -102,28 +102,6 @@ function firstIso(...values: readonly unknown[]): string | undefined {
   return undefined;
 }
 
-function normalizeBooleanLike(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    return value !== 0;
-  }
-
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1") {
-      return true;
-    }
-    if (normalized === "false" || normalized === "0") {
-      return false;
-    }
-  }
-
-  return undefined;
-}
-
 function firstDayKey(...values: readonly unknown[]): string | undefined {
   for (const value of values) {
     const candidate = typeof value === "string" ? value : toIso(value);
@@ -266,6 +244,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
     const durationMinutes = durationSeconds !== undefined
       ? Math.max(1, Math.round(durationSeconds / 60))
       : undefined;
+    const movingTimeMinutes = movingSeconds !== undefined ? movingSeconds / 60 : undefined;
     const startAt = firstIso(activity.start_date, activity.startDate) ?? occurredAt;
     const endAt = addSecondsToIso(startAt, durationSeconds);
     const dayKey = firstDayKey(activity.start_date_local, activity.start_date, occurredAt, recordedAt);
@@ -275,13 +254,6 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
     const activityType = slugify(sportName, "activity");
     const distanceMeters = firstNumber(activity.distance, activity.distance_meter, activity.distanceMeter);
     const distanceKm = distanceMeters !== undefined ? distanceMeters / 1000 : undefined;
-    const totalElevationGainMeters = firstNumber(
-      activity.total_elevation_gain,
-      activity.totalElevationGain,
-    );
-    const averageSpeedMps = firstNumber(activity.average_speed, activity.averageSpeed);
-    const maxSpeedMps = firstNumber(activity.max_speed, activity.maxSpeed);
-    const deviceName = firstString(activity.device_name, activity.deviceName);
     const title = firstString(activity.name)
       ? `Strava ${firstString(activity.name)}`
       : `Strava ${sportName}`;
@@ -303,25 +275,18 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
             activityType,
             distanceKm,
             durationMinutes,
-            elapsedSeconds,
-            movingSeconds,
-            totalElevationGainMeters,
-            averageSpeedMps,
-            maxSpeedMps,
-            trainer: normalizeBooleanLike(activity.trainer),
-            commute: normalizeBooleanLike(activity.commute),
-            manual: normalizeBooleanLike(activity.manual),
-            private: normalizeBooleanLike(activity.private),
-            deviceName,
-            workout: {
+            workout: stripUndefined({
               sourceApp: "strava",
               sourceWorkoutId: activityId,
+              sport: activityType,
+              sportName,
               startedAt: startAt,
               endedAt: endAt,
+              movingTimeMinutes,
               sessionNote: trimToLength(title, 160),
               metrics: buildStravaActivityMetrics(activity),
               exercises: [],
-            },
+            }),
           }),
         }),
       );

@@ -60,6 +60,9 @@ describe("Strava importer adapter", () => {
       ]),
     );
     expect(payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:"))).toBe(true);
+    expect(payload.rawArtifacts?.find((artifact) => artifact.role === "activity:1001")?.content).toMatchObject({
+      device_name: "Garmin Forerunner",
+    });
 
     const sessionEvent = payload.events?.find((event) => event.kind === "activity_session");
     expect(sessionEvent).toMatchObject({
@@ -74,8 +77,12 @@ describe("Strava importer adapter", () => {
         activityType: "run",
         distanceKm: 5,
         durationMinutes: 30,
-        deviceName: "Garmin Forerunner",
         workout: expect.objectContaining({
+          movingTimeMinutes: 29,
+          sourceApp: "strava",
+          sourceWorkoutId: "1001",
+          sport: "run",
+          sportName: "Run",
           metrics: {
             activeCalories: 360,
             totalCalories: 360,
@@ -88,6 +95,7 @@ describe("Strava importer adapter", () => {
         }),
       },
     });
+    expect(sessionEvent?.fields).not.toHaveProperty("deviceName");
 
     expect(
       payload.events?.filter(
@@ -162,11 +170,11 @@ describe("Strava importer adapter", () => {
             totalElevationGain: 12,
             averageSpeed: 3.5,
             maxSpeed: 5.1,
-        calories: 220,
-        kilojoules: "920.48",
-        trainer: 1,
-        commute: "false",
-        manual: "true",
+            calories: 220,
+            kilojoules: "920.48",
+            trainer: 1,
+            commute: "false",
+            manual: "true",
             private: 0,
           },
         ],
@@ -186,17 +194,24 @@ describe("Strava importer adapter", () => {
       resourceId: "activity-42",
       resourceType: "activity",
     });
+    expect(payload.rawArtifacts?.find((artifact) => artifact.role === "activity:activity-1")?.content).toMatchObject({
+      commute: "false",
+      manual: "true",
+      private: 0,
+      trainer: 1,
+    });
 
     const sessionEvent = payload.events?.find((event) => event.kind === "activity_session");
     expect(sessionEvent).toMatchObject({
       title: "Strava Ride",
       fields: expect.objectContaining({
-        trainer: true,
-        commute: false,
-        manual: true,
-        private: false,
-        totalElevationGainMeters: 12,
+        activityType: "ride",
+        distanceKm: 0.25,
+        durationMinutes: 1,
         workout: expect.objectContaining({
+          movingTimeMinutes: 0.5,
+          sport: "ride",
+          sportName: "Ride",
           metrics: {
             activeCalories: 220,
             totalCalories: 220,
@@ -207,6 +222,11 @@ describe("Strava importer adapter", () => {
         }),
       }),
     });
+    expect(sessionEvent?.fields).not.toHaveProperty("commute");
+    expect(sessionEvent?.fields).not.toHaveProperty("manual");
+    expect(sessionEvent?.fields).not.toHaveProperty("private");
+    expect(sessionEvent?.fields).not.toHaveProperty("trainer");
+    expect(sessionEvent?.fields).not.toHaveProperty("totalElevationGainMeters");
 
     const deletionEvent = payload.events?.find(
       (event) => event.kind === "observation" && event.fields?.metric === "external-resource-deleted",
