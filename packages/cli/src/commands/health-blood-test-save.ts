@@ -2,7 +2,6 @@ import { VaultError, appendBloodTest, upsertEvent } from "@murphai/core";
 import {
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_CATEGORY,
-  BLOOD_TEST_RESULT_FLAGS,
   EVENT_SOURCES,
   TEST_RESULT_STATUSES,
   bloodTestResultSchema,
@@ -38,7 +37,7 @@ const resultStatusSchema = z.enum(TEST_RESULT_STATUSES);
 const sourceSchema = z.enum(EVENT_SOURCES);
 const fastingStatusSchema = z.enum(BLOOD_TEST_FASTING_STATUSES);
 const resultFormatHint =
-  "Use one JSON object per --result for structured values that contain semicolons, or escape compact semicolons as \\;.";
+  "Use one JSON object per --result; repeat --result for multiple analytes.";
 const specimenTypeSchema = z
   .string()
   .min(1)
@@ -50,7 +49,7 @@ const resultSpecSchema = z
   .string()
   .min(1)
   .describe(
-    `Blood-test result as either one JSON object or semicolon-separated key=value fields. Repeat --result for multiple analytes. Supported keys: analyte, slug, value, textValue, comparator, unit, flag, biomarkerSlug, referenceRange.low, referenceRange.high, referenceRange.text, note. ${resultFormatHint}`,
+    `Blood-test result as one JSON object. Supported fields include analyte, slug, value, textValue, comparator, unit, flag, biomarkerSlug, referenceRange, and note. ${resultFormatHint}`,
   );
 const compactLinkSchema = z
   .string()
@@ -77,23 +76,8 @@ export const bloodTestSaveResultSchema = z.object({
   created: z.boolean(),
 });
 
-function parseNumberField(value: string, fieldName: string): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    throw new VaultCliError(
-      "invalid_option",
-      `Expected ${fieldName} to be a finite number.`,
-    );
-  }
-
-  return parsed;
-}
-
 function keyValueSpecFormatMessage(optionName: string): string {
-  const base = `Expected --${optionName} entries to use key=value fields.`;
-  return optionName === "result"
-    ? `${base} ${resultFormatHint}`
-    : `${base} Escape literal semicolons as \\;.`;
+  return `Expected --${optionName} entries to use key=value fields. Escape literal semicolons as \\;.`;
 }
 
 function splitEscaped(value: string, separator: string): string[] {
@@ -197,81 +181,6 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
   return parsed.data;
 }
 
-function parseCompactBloodTestResult(spec: string): BloodTestResult {
-  const fields = parseKeyValueSpec(spec, "result");
-  const allowedFields = new Set([
-    "analyte",
-    "slug",
-    "value",
-    "textValue",
-    "comparator",
-    "unit",
-    "flag",
-    "biomarkerSlug",
-    "referenceRange.low",
-    "referenceRange.high",
-    "referenceRange.text",
-    "refLow",
-    "refHigh",
-    "refText",
-    "note",
-  ]);
-  const unknownFields = [...fields.keys()].filter((field) => !allowedFields.has(field));
-  if (unknownFields.length > 0) {
-    throw new VaultCliError(
-      "invalid_option",
-      `Unsupported --result field${unknownFields.length === 1 ? "" : "s"}: ${unknownFields.join(", ")}.`,
-    );
-  }
-
-  const referenceRange = {
-    low: fields.has("referenceRange.low")
-      ? parseNumberField(fields.get("referenceRange.low") ?? "", "referenceRange.low")
-      : fields.has("refLow")
-        ? parseNumberField(fields.get("refLow") ?? "", "refLow")
-        : undefined,
-    high: fields.has("referenceRange.high")
-      ? parseNumberField(fields.get("referenceRange.high") ?? "", "referenceRange.high")
-      : fields.has("refHigh")
-        ? parseNumberField(fields.get("refHigh") ?? "", "refHigh")
-        : undefined,
-    text: fields.get("referenceRange.text") ?? fields.get("refText"),
-  };
-
-  const candidate = {
-    analyte: fields.get("analyte"),
-    slug: fields.get("slug"),
-    value: fields.has("value")
-      ? parseNumberField(fields.get("value") ?? "", "value")
-      : undefined,
-    textValue: fields.get("textValue"),
-    comparator: fields.get("comparator"),
-    unit: fields.get("unit"),
-    flag: fields.get("flag"),
-    biomarkerSlug: fields.get("biomarkerSlug"),
-    referenceRange:
-      referenceRange.low !== undefined ||
-      referenceRange.high !== undefined ||
-      referenceRange.text !== undefined
-        ? referenceRange
-        : undefined,
-    note: fields.get("note"),
-  };
-
-  const parsed = bloodTestResultSchema.safeParse(candidate);
-  if (!parsed.success) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Invalid --result blood-test analyte payload.",
-      {
-        issues: parsed.error.issues,
-      },
-    );
-  }
-
-  return parsed.data;
-}
-
 function parseBloodTestResult(spec: string): BloodTestResult {
   const trimmed = spec.trim();
   if (trimmed.startsWith("{")) {
@@ -285,7 +194,10 @@ function parseBloodTestResult(spec: string): BloodTestResult {
     );
   }
 
-  return parseCompactBloodTestResult(trimmed);
+  throw new VaultCliError(
+    "invalid_option",
+    "Expected --result to be a JSON object. Example: --result '{\"analyte\":\"Glucose\",\"value\":92,\"unit\":\"mg/dL\"}'. Repeat --result for multiple analytes or use blood-test import-json for a full payload.",
+  );
 }
 
 function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
@@ -643,7 +555,7 @@ export function registerBloodTestCommands(
         .array(resultSpecSchema)
         .min(1)
         .max(500)
-        .describe(`Blood-test result. Repeat --result for each analyte. ${resultFormatHint}`),
+        .describe(`Blood-test result JSON object. ${resultFormatHint}`),
     }),
     output: bloodTestSaveResultSchema,
     async run(context) {

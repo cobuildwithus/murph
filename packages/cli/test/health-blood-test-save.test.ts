@@ -137,6 +137,10 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+function resultArg(result: Record<string, unknown>): string {
+  return JSON.stringify(result);
+}
+
 test("blood-test save schema exposes typed fields while blood-test import-json remains the JSON fallback", async () => {
   const cli = createBloodTestCli();
 
@@ -171,6 +175,10 @@ test("blood-test save schema exposes typed fields while blood-test import-json r
   assert.match(
     JSON.stringify(saveSchema.options.properties.result),
     /JSON object/u,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(saveSchema.options.properties.result),
+    /key=value|semicolon-separated|compact/u,
   );
 
   const importJsonSchema = await readCommandSchema(cli, ["blood-test", "import-json"]);
@@ -232,9 +240,30 @@ test("blood-test save maps typed fields and can revise a saved event id", async 
       "--fasting-status",
       "fasting",
       "--result",
-      "analyte=Apolipoprotein B;slug=apob;value=87;unit=mg/dL;flag=normal;biomarkerSlug=apolipoprotein-b;referenceRange.text=<90;note=Target range",
+      resultArg({
+        analyte: "Apolipoprotein B",
+        slug: "apob",
+        value: 87,
+        unit: "mg/dL",
+        flag: "normal",
+        biomarkerSlug: "apolipoprotein-b",
+        referenceRange: {
+          text: "<90",
+        },
+        note: "Target range",
+      }),
       "--result",
-      "analyte=LDL Cholesterol;value=134;comparator=>;unit=mg/dL;flag=high;referenceRange.low=0;referenceRange.high=99",
+      resultArg({
+        analyte: "LDL Cholesterol",
+        value: 134,
+        comparator: ">",
+        unit: "mg/dL",
+        flag: "high",
+        referenceRange: {
+          low: 0,
+          high: 99,
+        },
+      }),
       "--vault",
       vaultRoot,
     ]);
@@ -307,7 +336,11 @@ test("blood-test save maps typed fields and can revise a saved event id", async 
       "--test-name",
       "functional_health_panel",
       "--result",
-      "analyte=Ferritin;textValue=not tested;flag=unknown",
+      resultArg({
+        analyte: "Ferritin",
+        textValue: "not tested",
+        flag: "unknown",
+      }),
       "--vault",
       vaultRoot,
     ]);
@@ -418,7 +451,10 @@ test("blood-test save rejects rewriting a non-blood-test event id", async () => 
       "--test-name",
       "functional_health_panel",
       "--result",
-      "analyte=Ferritin;textValue=not tested",
+      resultArg({
+        analyte: "Ferritin",
+        textValue: "not tested",
+      }),
       "--vault",
       vaultRoot,
     ]);
@@ -479,6 +515,48 @@ test("blood-test save rejects malformed JSON result without echoing payload text
   }
 });
 
+test("blood-test save rejects JSON objects that are not analyte records without writing an event", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-invalid-json-object-result-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Invalid analyte panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "invalid_analyte_panel",
+      "--result",
+      JSON.stringify({
+        note: "Ferritin; private marker",
+      }),
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.match(result.envelope.error.message ?? "", /analyte payload/u);
+    assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("blood-test save rejects JSON result arrays with repeat-result guidance", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-json-result-array-",
@@ -520,9 +598,9 @@ test("blood-test save rejects JSON result arrays with repeat-result guidance", a
   }
 });
 
-test("blood-test save rejects malformed typed results without writing an event", async () => {
+test("blood-test save rejects old compact result syntax without writing an event", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-blood-test-save-invalid-",
+    "murph-cli-blood-test-save-compact-result-",
   );
 
   try {
@@ -538,7 +616,7 @@ test("blood-test save rejects malformed typed results without writing an event",
       "--test-name",
       "malformed_panel",
       "--result",
-      "analyte=Ferritin;unit=ng/mL",
+      "analyte=Ferritin;value=45;unit=ng/mL",
       "--vault",
       vaultRoot,
     ]);
@@ -546,7 +624,9 @@ test("blood-test save rejects malformed typed results without writing an event",
     assert.equal(result.exitCode, 1);
     assert.equal(result.envelope.ok, false);
     assert.equal(result.envelope.error.code, "invalid_option");
-    assert.match(result.envelope.error.message ?? "", /Invalid --result/u);
+    assert.match(result.envelope.error.message ?? "", /JSON object/u);
+    assert.match(result.envelope.error.message ?? "", /blood-test import-json/u);
+    assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin/u);
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
       false,
@@ -579,7 +659,11 @@ test("blood-test save rejects non-vault raw refs before writing an event", async
       "--raw-ref",
       "/tmp/lab.pdf",
       "--result",
-      "analyte=Ferritin;value=45;unit=ng/mL",
+      resultArg({
+        analyte: "Ferritin",
+        value: 45,
+        unit: "ng/mL",
+      }),
       "--vault",
       vaultRoot,
     ]);
@@ -620,7 +704,11 @@ test("blood-test save rejects raw refs with traversal segments before writing an
       "--raw-ref",
       "raw/../lab.pdf",
       "--result",
-      "analyte=Ferritin;value=45;unit=ng/mL",
+      resultArg({
+        analyte: "Ferritin",
+        value: 45,
+        unit: "ng/mL",
+      }),
       "--vault",
       vaultRoot,
     ]);
