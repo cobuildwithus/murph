@@ -690,7 +690,6 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
 test('descriptor direct service bindings resolve against the declared service surfaces', () => {
   const descriptorBindings = collectVaultCliDirectServiceBindings()
   const vaultServices = createUnwiredCliVaultServices(createUnwiredVaultServices())
-  const inboxServices = createIntegratedInboxServices()
 
   for (const descriptor of vaultCliCommandDescriptors) {
     if (descriptor.bindingMode !== 'direct') {
@@ -701,15 +700,10 @@ test('descriptor direct service bindings resolve against the declared service su
       'directVaultServiceBindings' in descriptor
         ? descriptor.directVaultServiceBindings
         : undefined
-    const directInboxServiceBindings =
-      'directInboxServiceBindings' in descriptor
-        ? descriptor.directInboxServiceBindings
-        : undefined
     const hasVaultBindings = Object.keys(directVaultServiceBindings ?? {}).length > 0
-    const hasInboxBindings = (directInboxServiceBindings?.length ?? 0) > 0
 
     assert.equal(
-      hasVaultBindings || hasInboxBindings,
+      hasVaultBindings,
       true,
       `expected direct descriptor ${descriptor.id} to declare at least one service binding`,
     )
@@ -729,13 +723,6 @@ test('descriptor direct service bindings resolve against the declared service su
     }
   }
 
-  for (const methodName of descriptorBindings.inbox) {
-    assert.equal(
-      typeof inboxServices[methodName],
-      'function',
-      `expected inbox service binding ${methodName} to exist`,
-    )
-  }
 })
 
 test('root and group schema json requests return command indexes', async () => {
@@ -747,24 +734,12 @@ test('root and group schema json requests return command indexes', async () => {
     kind: string
     version: string
   }
-  const inboxIndex = JSON.parse(
-    await runSourceCliRaw(['inbox', '--schema', '--format', 'json']),
-  ) as {
-    command: string | null
-    commands: Array<{ name?: string }>
-    kind: string
-    version: string
-  }
 
   assert.equal(rootIndex.version, 'murph.schema-index.v1')
   assert.equal(rootIndex.kind, 'root')
   assert.equal(rootIndex.command, null)
   assert.equal(rootIndex.commands.some((command) => command.name === 'vault show'), true)
-
-  assert.equal(inboxIndex.version, 'murph.schema-index.v1')
-  assert.equal(inboxIndex.kind, 'group')
-  assert.equal(inboxIndex.command, 'inbox')
-  assert.equal(inboxIndex.commands.some((command) => command.name === 'inbox bootstrap'), true)
+  assert.equal(rootIndex.commands.some((command) => command.name?.startsWith('inbox')), false)
 })
 
 test('read-only vault commands reject uninitialized vault roots before query reads', async () => {
@@ -1663,58 +1638,12 @@ test('food help exposes schedule and no longer exposes add-daily', async () => {
   assert.doesNotMatch(help, /add-daily/u)
 })
 
-test('inbox attachment help exposes read-only inspect and status commands', async () => {
-  const help = await runSourceCliRaw(['inbox', 'attachment', '--help'])
-  const inspectHelp = await runSourceCliRaw(['inbox', 'attachment', 'inspect', '--help'])
-  const statusHelp = await runSourceCliRaw(['inbox', 'attachment', 'status', '--help'])
+test('inbox command group is not exposed', async () => {
+  const help = await runSourceCliRaw(['--help'])
+  const output = await runSourceCliRaw(['inbox', '--format', 'json', '--full-output'])
 
-  assert.match(help, /inspect\s+Inspect one stored inbox attachment/u)
-  assert.match(help, /status\s+Show the current runtime transcription status/u)
-  assert.doesNotMatch(help, /(?:^|\n)\s*decode\s+/u)
-  assert.doesNotMatch(help, /(?:^|\n)\s*parse\s+/u)
-  assert.doesNotMatch(help, /(?:^|\n)\s*reparse\s+/u)
-  assert.match(
-    inspectHelp,
-    /Use `inspect` first when you want stored attachment details, raw paths, and any available audio\/video transcript evidence/u,
-  )
-  assert.match(
-    statusHelp,
-    /Use `status` when you want the current audio\/video parser state/u,
-  )
-})
-
-test('inbox source list schema exposes the list limit option', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['inbox', 'source', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('limit' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required ?? [], [])
-})
-
-test('inbox attachment list schema exposes the list limit option', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['inbox', 'attachment', 'list', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('captureId' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['captureId'])
-  assert.equal('limit' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required ?? [], [])
+  assert.doesNotMatch(help, /(?:^|\n)\s*inbox\s+/u)
+  assert.match(output, /command_not_found|COMMAND_NOT_FOUND/iu)
 })
 
 test('goal show help exposes only the global format flag', async () => {

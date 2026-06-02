@@ -67,7 +67,6 @@ import {
   geneticsSaveResultSchema,
   registerGeneticsCommands,
 } from './commands/health-genetics-save.js'
-import { registerInboxCommands } from './commands/inbox.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
@@ -137,7 +136,6 @@ type VaultServiceGroups = {
   devices: DeviceSyncServices
 }
 type VaultServiceGroupName = Extract<keyof VaultServiceGroups, string>
-type InboxServiceMethodName = Extract<keyof InboxServices, string>
 type CommandExample = Readonly<Record<string, unknown>>
 type DirectVaultServiceBindings = {
   [TGroupName in VaultServiceGroupName]?: ReadonlyArray<
@@ -167,7 +165,6 @@ interface BaseVaultCliCommandDescriptor {
 interface DirectBindingCommandDescriptor extends BaseVaultCliCommandDescriptor {
   bindingMode: 'direct'
   directVaultServiceBindings?: DirectVaultServiceBindings
-  directInboxServiceBindings?: readonly InboxServiceMethodName[]
 }
 
 interface NonDirectBindingCommandDescriptor extends BaseVaultCliCommandDescriptor {
@@ -179,7 +176,6 @@ export type VaultCliCommandDescriptor =
   | NonDirectBindingCommandDescriptor
 
 export interface CollectedVaultCliDirectServiceBindings {
-  inbox: readonly InboxServiceMethodName[]
   vault: {
     [TGroupName in VaultServiceGroupName]: ReadonlyArray<
       Extract<keyof VaultServiceGroups[TGroupName], string>
@@ -1438,39 +1434,6 @@ export const vaultCliCommandDescriptors = [
       registerIntakeCommands(cli, services)
     },
   },
-  {
-    id: 'inbox',
-    bindingMode: 'direct',
-    rootCommandNames: ['inbox'],
-    directInboxServiceBindings: [
-      'init',
-      'bootstrap',
-      'setup',
-      'sourceAdd',
-      'sourceList',
-      'sourceRemove',
-      'doctor',
-      'parse',
-      'requeue',
-      'backfill',
-      'run',
-      'status',
-      'stop',
-      'list',
-      'show',
-      'search',
-      'listAttachments',
-      'showAttachment',
-      'showAttachmentStatus',
-      'promoteMeal',
-      'promoteDocument',
-      'promoteJournal',
-      'promoteExperimentNote',
-    ],
-    register({ cli, services, inboxServices }) {
-      registerInboxCommands(cli, inboxServices, services)
-    },
-  },
   ...genericHealthCommandDescriptors,
   {
     id: 'supplement',
@@ -1612,14 +1575,9 @@ function assertValidVaultCliCommandManifest(
       'directVaultServiceBindings' in descriptor
         ? descriptor.directVaultServiceBindings
         : undefined
-    const directInboxServiceBindings =
-      'directInboxServiceBindings' in descriptor
-        ? descriptor.directInboxServiceBindings
-        : undefined
     const hasVaultBindings = Object.keys(directVaultServiceBindings ?? {}).length > 0
-    const hasInboxBindings = (directInboxServiceBindings?.length ?? 0) > 0
 
-    if (!hasVaultBindings && !hasInboxBindings) {
+    if (!hasVaultBindings) {
       throw new Error(
         `Descriptor "${descriptor.id}" is marked direct but declares no direct service bindings.`,
       )
@@ -1665,7 +1623,6 @@ export function collectVaultCliDirectServiceBindings(): CollectedVaultCliDirectS
     query: [],
     devices: [],
   }
-  const inboxBindings: InboxServiceMethodName[] = []
 
   for (const descriptor of vaultCliCommandDescriptors) {
     if (descriptor.bindingMode !== 'direct') {
@@ -1684,18 +1641,9 @@ export function collectVaultCliDirectServiceBindings(): CollectedVaultCliDirectS
         ...methodNames,
       ])
     }
-
-    const directInboxServiceBindings =
-      'directInboxServiceBindings' in descriptor
-        ? descriptor.directInboxServiceBindings
-        : undefined
-    if (directInboxServiceBindings) {
-      inboxBindings.push(...directInboxServiceBindings)
-    }
   }
 
   return {
-    inbox: orderedUniqueStrings(inboxBindings),
     vault: {
       core: vaultBindings.core as Array<Extract<keyof VaultServiceGroups['core'], string>>,
       importers:

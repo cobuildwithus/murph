@@ -136,32 +136,6 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
-      'inbox attachment inspect': { args: { attachmentId: string }; options: { requestId?: string } }
-      'inbox attachment list': { args: { captureId: string }; options: { requestId?: string; limit?: number } }
-      'inbox attachment show': { args: { attachmentId: string }; options: { requestId?: string } }
-      'inbox attachment show-status': { args: { attachmentId: string }; options: { requestId?: string } }
-      'inbox attachment status': { args: { attachmentId: string }; options: { requestId?: string } }
-      'inbox backfill': { args: {}; options: { requestId?: string; source: string; limit?: number; parse?: boolean } }
-      'inbox bootstrap': { args: {}; options: { requestId?: string; rebuild?: boolean; ffmpegCommand?: string; whisperCommand?: string; whisperModelPath?: string; strict?: boolean } }
-      'inbox doctor': { args: { sourceId?: string }; options: { requestId?: string } }
-      'inbox init': { args: {}; options: { requestId?: string; rebuild?: boolean } }
-      'inbox list': { args: {}; options: { requestId?: string; source?: string; limit: number } }
-      'inbox model bundle': { args: { captureId: string }; options: { requestId?: string; sensitive?: boolean } }
-      'inbox parse': { args: {}; options: { requestId?: string; captureId?: string; limit?: number } }
-      'inbox promote document': { args: { captureId: string }; options: { requestId?: string } }
-      'inbox promote experiment-note': { args: { captureId: string }; options: { requestId?: string } }
-      'inbox promote journal': { args: { captureId: string }; options: { requestId?: string } }
-      'inbox promote meal': { args: { captureId: string }; options: { requestId?: string } }
-      'inbox requeue': { args: {}; options: { requestId?: string; captureId?: string; attachmentId?: string; state: "failed" | "running" } }
-      'inbox run': { args: {}; options: { requestId?: string } }
-      'inbox search': { args: {}; options: { requestId?: string; text: string; source?: string; limit: number } }
-      'inbox setup': { args: {}; options: { requestId?: string; ffmpegCommand?: string; whisperCommand?: string; whisperModelPath?: string } }
-      'inbox show': { args: { captureId: string }; options: { requestId?: string } }
-      'inbox source add': { args: { source: "telegram" | "email" }; options: { requestId?: string; id: string; account?: string; address?: string; backfillLimit: number; provision?: boolean; emailDisplayName?: string; emailUsername?: string; emailDomain?: string; emailClientId?: string; enableAutoReply?: boolean } }
-      'inbox source list': { args: {}; options: { requestId?: string; limit?: number } }
-      'inbox source remove': { args: { id: string }; options: { requestId?: string } }
-      'inbox status': { args: {}; options: { requestId?: string } }
-      'inbox stop': { args: {}; options: { requestId?: string } }
       'init': { args: {}; options: { requestId?: string; timezone?: string } }
       'intake import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived" } }
       'intake list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }

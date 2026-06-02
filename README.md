@@ -17,7 +17,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - provider-backed local assistant chat and automation, with runtime state under `vault/.runtime/operations/assistant/**`
 - a public Health Commons in `packages/health-commons` for protocol pages, biomarker pages, source pages, exact revisions, and generated outcome summaries
 - a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
-- inbox capture, indexing, and parser-driven attachment extraction
+- inbox capture, assistant attachment evidence, and parser-driven audio/video transcription
 - local wearable/device sync through the workspace-private `packages/device-syncd` runtime bundled into `@murphai/murph`
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
@@ -88,7 +88,6 @@ murph use ./vault
 murph model
 murph chat
 murph run
-vault-cli inbox doctor
 ```
 
 Use `murph model` any time after onboarding to reopen the assistant model/provider picker and switch the saved default model without rerunning the full setup flow.
@@ -174,7 +173,6 @@ The root CLI is no longer just a vault editor. The built command surface include
 
 - health-vault operations such as `init`, `show`, `list`, `timeline`, `journal`, `document`, `meal`, `samples`, `audit`, `vault`, and the health registry commands
 - `assistant` for local chat, status, outbox, cron, automation, and provider-backed runtime control
-- `inbox` for inbox runtime setup, review, and daemon operations
 - `device` for local wearable/device auth, status, and daemon control
 - env-gated route estimation through `vault-cli route estimate`, which uses temporary Mapbox geocoding and Search Box lookups for distance, duration, hiking POIs, and optional approximate elevation between two points without persisting the route payload in Murph state
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`

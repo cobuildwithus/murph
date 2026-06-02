@@ -188,21 +188,9 @@ vault-cli supplement list --vault <path> [--status <status>] [--limit <n>] [--re
 vault-cli supplement stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
 vault-cli supplement compound list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
-vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--request-id <id>]
-vault-cli inbox source list --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli inbox attachment list <captureId> --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli inbox attachment inspect <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox attachment show <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox attachment status <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox attachment show-status <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox promote meal <captureId> --vault <path> [--request-id <id>]
-vault-cli inbox promote document <captureId> --vault <path> [--request-id <id>]
-vault-cli inbox promote journal <captureId> --vault <path> [--request-id <id>]
-vault-cli inbox promote experiment-note <captureId> --vault <path> [--request-id <id>]
-vault-cli inbox model bundle <captureId> --vault <path> [--sensitive] [--request-id <id>]
 ```
 
-`vault-cli inbox attachment inspect` is the first-class attachment-content inspection surface. It exposes stored attachment metadata, raw inbox paths, and any audio/video transcript evidence produced by normal parser ingestion. PDFs, CSVs, documents, images, and other inspectable files stay path-first for the assistant and local tools instead of going through an attachment-level decode command. `vault-cli inbox model bundle` remains an audit-only helper that materializes a normalized capture bundle plus image eligibility metadata under `derived/inbox/**/assistant/*.json`; `inbox model route` is not exposed in this hard cut.
+No `vault-cli inbox` command family is exposed. Inbox projection and audio/video parsing are programmatic runtime services; assistant turns receive prompt-ready attachment descriptors and raw local paths, then use local tools for inspectable files such as PDFs, CSVs, and documents.
 
 Patch-style edit commands (`event`, `document`, `meal`, `workout`, `intervention`, `provider`, `food`, `recipe`) are typed surfaces. They do not expose `edit --input`, `edit --set`, or `edit --clear`; advanced whole-record JSON import remains on the explicit `import-json` commands where present.
 
@@ -252,7 +240,6 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `vault` exposes `show | stats | repair | update`.
 - `export` exposes `create | show | list | materialize | prune`.
 - `audit` exposes `show | list | tail`.
-- `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and the audit-only normalized model bundle helper.
 - `assistant` is a Codex App Server-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
 - `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
@@ -263,7 +250,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `murph stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
 - `device` is a local control-plane noun backed by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault.
 
-These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
+These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
 Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
 
@@ -693,8 +680,6 @@ The `plan.operations` values are internal core plan operation names, not public 
 - `provider show`, `food show`, `recipe show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
 - `provider list`, `food list`, `recipe list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
 - `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
-- `inbox attachment list|inspect|show|status|show-status` expose runtime attachment inspection over `.runtime`, raw inbox paths, and any `derived/inbox/**` transcript evidence. Attachment-level `decode|parse|reparse` commands are not exposed; normal inbox/parser runtime paths own audio/video transcription.
-
 ### `show`
 
 `entity.id` is the surfaced canonical read identity for the record. For meal/document events, that identity is the stable family id.
@@ -895,6 +880,6 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
 - `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment start|edit|checkpoint|stop`, `experiment session log`, `experiment context log`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
-- `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
+- Inbox ingestion, projection, audio/video transcription, and promotion helpers are owned by `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives. They are programmatic runtime services, not a `vault-cli inbox` command namespace.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
 - The default CLI service layer is expected to delegate to the real `core`, `importers`, and `query` package exports. If the local TypeScript or `incur` toolchain is unavailable, that is an environment blocker, not a contract excuse to return placeholder payloads.

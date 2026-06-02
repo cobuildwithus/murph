@@ -774,7 +774,7 @@ function makeSetupResult(
       },
       {
         detail:
-          'Wrote parser toolchain config under .runtime/operations/parsers/toolchain.json and completed inbox doctor checks.',
+          'Wrote parser toolchain config under .runtime/operations/parsers/toolchain.json and completed local runtime checks.',
         id: 'inbox-bootstrap',
         kind: 'configure',
         status: 'completed',
@@ -1173,11 +1173,7 @@ test.sequential('onboard CLI keeps post-setup CTAs usable when invoked as murph'
   )
   assert.equal(
     result.meta.cta?.commands[1]?.command,
-    'murph inbox doctor',
-  )
-  assert.equal(
-    result.meta.cta?.commands[2]?.command,
-    'murph inbox source add telegram --id telegram:bot --account bot',
+    'murph automation scaffold',
   )
 })
 
@@ -3415,7 +3411,6 @@ test.sequential('murph alias routes empty and help invocations to onboarding hel
   const onboardHelp = await runMurphAliasActionRaw(['onboard', '--help'])
   const useHelp = await runMurphAliasActionRaw(['use', '--help'])
   const emptyInvocation = await runMurphAliasActionRaw([])
-  const inboxHelp = await runMurphAliasActionRaw(['inbox', 'doctor', '--help'])
 
   assert.match(help, /Murph local machine onboarding helpers\./u)
   assert.match(
@@ -3437,8 +3432,6 @@ test.sequential('murph alias routes empty and help invocations to onboarding hel
   )
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Murph local machine onboarding helpers\./u)
-  assert.doesNotMatch(inboxHelp, /Murph local machine onboarding helpers\./u)
-  assert.match(inboxHelp, /murph inbox doctor/u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
 test.sequential('murph use saves an existing vault as the active default vault', async () => {

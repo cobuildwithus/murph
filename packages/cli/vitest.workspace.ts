@@ -147,11 +147,6 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
   },
   {
     fileParallelism: false,
-    name: "cli-inbox-incur-smoke",
-    patterns: ["inbox-incur-smoke.test.ts"],
-  },
-  {
-    fileParallelism: false,
     name: "cli-schemas-smoke",
     includeRemaining: true,
     patterns: [
@@ -180,10 +175,9 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
     patterns: ["cli-expansion-*.test.ts"],
   },
   {
-    name: "cli-inbox-setup",
+    name: "cli-host-setup",
     fileParallelism: false,
     patterns: [
-      "cli-expansion-inbox-attachments.test.ts",
       "device-daemon.test.ts",
       "device-sync-client.test.ts",
       "gateway-*.test.ts",

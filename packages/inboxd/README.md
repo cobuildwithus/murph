@@ -36,8 +36,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata
-- runtime list, show, and search helpers for future CLI/agent surfaces
-- `vault-cli inbox ...` is the intended human/operator surface layered on top of this package
+- runtime list, show, and search helpers for future agent/runtime surfaces
 
 ## Parser-facing runtime operations
 
@@ -50,6 +49,6 @@ The inbox runtime exposes attachment-job primitives that stay safely outside can
 
 These methods mutate only inbox-local projection state such as `.runtime/projections/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
 
-When combined with `@murphai/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
+When combined with `@murphai/parsers`, runtime consumers can drain those queues without mixing parser state into canonical health records.
 
 `@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers `createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the parser package stays focused on parser contracts, registry/toolchain discovery, and parse execution rather than on inbox runtime orchestration.

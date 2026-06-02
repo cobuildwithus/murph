@@ -1084,7 +1084,7 @@ main() {
   echo "Next useful commands:"
   echo "  murph assistant chat"
   echo "  murph assistant run"
-  echo "  vault-cli inbox doctor"
+  echo "  murph assistant doctor"
 }
 
 main "$@"

@@ -524,27 +524,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command: 'assistant chat',
       description: 'Open the local assistant chat against the default vault.',
     },
-    {
-      command: 'inbox doctor',
-      description: 'Verify the local runtime after setup.',
-    },
   )
-
-  if (!result.channels.some((channel) => channel.channel === 'telegram' && channel.configured)) {
-    commands.push({
-      command: 'inbox source add telegram --id telegram:bot --account bot',
-      description:
-        'Add the Telegram poll connector after setting TELEGRAM_BOT_TOKEN in the shell or local `.env`.',
-    })
-  }
-
-  if (!result.channels.some((channel) => channel.channel === 'email' && channel.configured)) {
-    commands.push({
-      command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Murph"',
-      description:
-        'Reuse an existing AgentMail inbox or provision a new one after setting AGENTMAIL_API_KEY in the shell or local `.env`. Use `--account <inbox_id>` when the API key is scoped to an existing inbox.',
-    })
-  }
 
   for (const wearable of listSetupReadyWearables(result)) {
     commands.push({

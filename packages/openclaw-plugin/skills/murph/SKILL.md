@@ -26,7 +26,7 @@ Discovery order:
 4. Use `vault-cli --llms` or `vault-cli --llms-full` only for broad discovery.
 
 Schema notes:
-- `vault-cli --schema --format json` and group requests such as `vault-cli inbox --schema --format json` return a `murph.schema-index.v1` command index, not one leaf payload schema.
+- `vault-cli --schema --format json` and group requests such as `vault-cli device --schema --format json` return a `murph.schema-index.v1` command index, not one leaf payload schema.
 - For commands that use `--input @file.json|-`, run the matching `scaffold` command to get a payload template before writing.
 - JSON error envelopes include `error.code` and `error.retryable`; use the code for recovery decisions. Common setup codes include `missing_vault`, `invalid_vault`, `memory_not_found`, and `knowledge_body_required`.
 

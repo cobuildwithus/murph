@@ -411,7 +411,7 @@ export function createInboxRuntimeOps(
       if (existingState.running && existingState.pid !== env.getPid()) {
         throw new VaultCliError(
           'INBOX_ALREADY_RUNNING',
-          'Inbox daemon state already reports a running process. If a prior foreground run was suspended with Ctrl+Z, resume it with `fg` and stop it with Ctrl+C, or run `murph inbox stop`.',
+          'Inbox daemon state already reports a running process. If a prior foreground run was suspended with Ctrl+Z, resume it with `fg` and stop it with Ctrl+C.',
           { pid: existingState.pid },
         )
       }

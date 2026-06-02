@@ -275,30 +275,6 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
         name: 'assistant onboarding complete',
       },
       {
-        description: 'Runtime attachment plumbing',
-        name: 'inbox attachment list',
-      },
-      {
-        description: 'Runtime parser plumbing',
-        name: 'inbox parse',
-      },
-      {
-        description: 'Runtime source plumbing',
-        name: 'inbox source list',
-      },
-      {
-        description: 'Runtime daemon status',
-        name: 'inbox status',
-      },
-      {
-        description: 'Inbox model audit bundle',
-        name: 'inbox model bundle',
-      },
-      {
-        description: 'User-facing inbox search',
-        name: 'inbox search',
-      },
-      {
         description: 'Import a document into the vault',
         name: 'document import',
       },
@@ -331,7 +307,6 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.match(contract, /search:/u)
   assert.match(contract, /root:/u)
   assert.match(contract, /assistant:/u)
-  assert.match(contract, /inbox:/u)
   assert.match(contract, /document:/u)
   assert.doesNotMatch(contract, /^age:/mu)
   assert.match(
@@ -340,9 +315,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   )
   assert.match(contract, /- `search`: Root command help\./u)
   assert.match(contract, /- `assistant onboarding complete`: Mark onboarding complete\./u)
-  assert.match(contract, /- `inbox search`\./u)
   assert.match(contract, /- `document import`\./u)
-  assert.doesNotMatch(contract, /User-facing inbox search/u)
   assert.doesNotMatch(contract, /Import a document into the vault/u)
   assert.doesNotMatch(contract, /requestId/u)
   assert.doesNotMatch(contract, /--limit/u)
@@ -358,11 +331,6 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.doesNotMatch(contract, /`assistant onboarding status`/u)
   assert.doesNotMatch(contract, /`age inputs`/u)
   assert.doesNotMatch(contract, /`age report`/u)
-  assert.doesNotMatch(contract, /`inbox attachment list`/u)
-  assert.doesNotMatch(contract, /`inbox parse`/u)
-  assert.doesNotMatch(contract, /`inbox source list`/u)
-  assert.doesNotMatch(contract, /`inbox status`/u)
-  assert.doesNotMatch(contract, /`inbox model bundle`/u)
   assert.doesNotMatch(contract, /`status`/u)
   assert.doesNotMatch(contract, /`doctor`/u)
   assert.doesNotMatch(contract, /`model`/u)
@@ -585,7 +553,6 @@ test('buildAssistantCliSurfaceContract renders low-frequency families as bare co
     'export',
     'family',
     'genetics',
-    'inbox',
     'intake',
     'protocol',
     'provider',
@@ -841,8 +808,8 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy c
         name: 'age report',
       },
       {
-        description: 'Inbox search should be name-only',
-        name: 'inbox search',
+        description: 'Provider search should be name-only',
+        name: 'provider search',
       },
       {
         description: 'Event inspect should stay described',
@@ -856,8 +823,8 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy c
     'age:',
     '- `age report`: Old age report route.',
     '',
-    'inbox:',
-    '- `inbox search`: Old described inbox route.',
+    'provider:',
+    '- `provider search`: Old described provider route.',
   ].join('\n')
   await writeFile(
     docPath,
@@ -887,8 +854,8 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy c
   assert.notEqual(contract, legacyContract)
   assert.doesNotMatch(contract, /^age:/mu)
   assert.doesNotMatch(contract, /`age report`/u)
-  assert.match(contract, /- `inbox search`\./u)
-  assert.doesNotMatch(contract, /Inbox search should be name-only/u)
+  assert.match(contract, /- `provider search`\./u)
+  assert.doesNotMatch(contract, /Provider search should be name-only/u)
   assert.match(contract, /- `event inspect`: Event inspect should stay described\./u)
   assert.match(contract, /Bare command-name entries are low-frequency routes/u)
 

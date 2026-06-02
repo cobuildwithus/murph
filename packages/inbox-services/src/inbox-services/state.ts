@@ -43,7 +43,7 @@ export async function ensureInitializedWithInbox(
   if (!(await hasLocalStatePath({ currentPath: paths.inboxConfigPath }))) {
     throw new VaultCliError(
       'INBOX_NOT_INITIALIZED',
-      'Inbox runtime is not initialized. Run `vault-cli inbox init` first.',
+      'Inbox runtime is not initialized. Run Murph onboarding/setup first.',
     )
   }
 

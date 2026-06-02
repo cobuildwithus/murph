@@ -248,7 +248,7 @@ export function createSetupServices(
       steps.push(
         createStep({
           detail:
-            'Would bootstrap the inbox runtime, parser toolchain config, and post-setup doctor checks.',
+            'Would bootstrap the local message runtime and parser toolchain config.',
           id: 'inbox-bootstrap',
           kind: 'configure',
           status: 'planned',
@@ -286,7 +286,7 @@ export function createSetupServices(
       steps.push(
         createStep({
           detail:
-            'Wrote parser toolchain config under .runtime/operations/parsers/toolchain.json and completed inbox doctor checks.',
+            'Wrote parser toolchain config under .runtime/operations/parsers/toolchain.json and completed local runtime checks.',
           id: 'inbox-bootstrap',
           kind: 'configure',
           status: 'completed',

@@ -747,8 +747,6 @@ Updated: 2026-04-24
     expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
     expect(cliWorkspace).toContain('name: "cli-incur-smoke"')
     expect(cliWorkspace).toContain('patterns: ["incur-smoke.test.ts"]')
-    expect(cliWorkspace).toContain('name: "cli-inbox-incur-smoke"')
-    expect(cliWorkspace).toContain('patterns: ["inbox-incur-smoke.test.ts"]')
     expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
       cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
     )

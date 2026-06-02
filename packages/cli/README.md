@@ -36,7 +36,6 @@ Once setup is complete, the main commands are:
 murph chat
 murph run
 murph status
-vault-cli inbox doctor
 ```
 
 `vault-cli` is still available as a secondary alias for the operator surface, but `murph` is the primary command this package installs.
@@ -95,7 +94,7 @@ vault-cli knowledge lint
 - a file-native health vault with canonical writes owned by `@murphai/core`
 - local assistant chat, runtime automation, status, outbox, canonical memory, and canonical automation commands
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
-- inbox capture, review, backfill, and parser-driven attachment extraction
+- inbox capture, assistant attachment evidence, and parser-driven audio/video transcription through runtime services
 - optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
 - optional local assistant daemon support through the bundled workspace-private `packages/assistantd` daemon
 
@@ -172,7 +171,7 @@ Current repo-local package responsibilities include:
 
 - the published command graph and install surface
 - CLI-owned command routing, onboarding entry, and built binary launchers
-- inbox and device command surfaces that delegate to headless owner packages
+- device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
 
 Programmatic assistant, setup, and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.

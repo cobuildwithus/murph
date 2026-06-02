@@ -68,8 +68,6 @@
     "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
     "onboard": "bash scripts/setup-host.sh",
     "chat": "pnpm exec tsx packages/cli/src/bin.ts assistant chat",
-    "setup:inbox": "bash scripts/setup-inbox-local.sh",
-    "doctor:inbox": "node packages/cli/dist/bin.js inbox doctor",
     "zip:src": "bash scripts/package-audit-context.sh --zip",
     "zip:src:full": "bash scripts/package-audit-context-full.sh --zip",
     "verify:repo": "pnpm verify:acceptance",

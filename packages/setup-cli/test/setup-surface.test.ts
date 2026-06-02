@@ -278,8 +278,6 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
       'murph assistant run',
       'murph automation list',
       'murph assistant chat',
-      'murph inbox doctor',
-      'murph inbox source add telegram --id telegram:bot --account bot',
       'murph device connect oura --open',
       'murph export AGENTMAIL_API_KEY=...',
       'murph export OURA_CLIENT_ID=...',

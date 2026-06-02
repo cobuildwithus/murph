@@ -44,6 +44,7 @@ describe('Codex-only assistant hard-cut contracts', () => {
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'providers', 'legacy-provider.ts'),
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'providers', 'registry.ts'),
       path.join('packages', 'assistant-engine', 'src', 'inbox-model-harness.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'inbox-multimodal.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'model-spec.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'responses-policy.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'tool-catalog.ts'),
@@ -72,9 +73,14 @@ describe('Codex-only assistant hard-cut contracts', () => {
   })
 
   it('removes inbox model route contracts and model-route residue', async () => {
+    const deletedCliContractPath = path.join(
+      'packages',
+      'cli',
+      'src',
+      'inbox-model-contracts.ts',
+    )
     const contractPaths = [
       path.join('packages', 'assistant-engine', 'src', 'inbox-model-contracts.ts'),
-      path.join('packages', 'cli', 'src', 'inbox-model-contracts.ts'),
     ]
     const removedContractSymbols = [
       'assistantToolSpecSchema',
@@ -86,6 +92,7 @@ describe('Codex-only assistant hard-cut contracts', () => {
       'providerMode',
     ]
 
+    expect(existsSync(resolveRepoPath(deletedCliContractPath))).toBe(false)
     for (const contractPath of contractPaths) {
       const source = await readFile(resolveRepoPath(contractPath), 'utf8')
       for (const symbol of removedContractSymbols) {
