@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { JUNCTION_DEFAULT_SUMMARY_RESOURCES } from "@murphai/importers/device-providers/junction-resources";
 import { test } from "vitest";
 
 import { DeviceSyncError } from "../src/errors.ts";
@@ -201,6 +202,79 @@ function createEmptyJunctionBackfillProvider() {
     throw new Error(`Unexpected request: ${url}`);
   });
 }
+
+test("Junction provider defaults do not fetch opt-in profile summaries", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: Object.fromEntries([
+                ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+                "profile",
+              ].map((resource) => [resource, true])),
+            },
+          ],
+        });
+      }
+
+      const summaryResource = new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1];
+      if (summaryResource) {
+        assert.notEqual(summaryResource, "profile");
+        assert.ok(
+          (JUNCTION_DEFAULT_SUMMARY_RESOURCES as readonly string[]).includes(summaryResource),
+          `Unexpected default summary resource: ${summaryResource}`,
+        );
+        return createJsonResponse({
+          data: summaryResource === "activity"
+            ? [{ id: "activity-1", observedAt: "2026-04-02T12:00:00.000Z", steps: 1200 }]
+            : [],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const summaryResources = requests
+    .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
+    .filter((resource): resource is string => Boolean(resource));
+
+  assert.equal(summaryResources.includes("profile"), false);
+  assert.deepEqual(summaryResources, [...JUNCTION_DEFAULT_SUMMARY_RESOURCES]);
+  assert.equal(importedSnapshots.length, 1);
+});
 
 function buildExpectedJunctionDedupeKey(
   kind: "backfill" | "reconcile",

@@ -1,5 +1,4 @@
 export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
-  "profile",
   "activity",
   "sleep",
   "sleep_cycle",
@@ -38,6 +37,10 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
 
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 
+export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([
+  "profile",
+] as const);
+
 export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([
   "meal",
   "menstrual_cycle",
@@ -45,6 +48,7 @@ export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([
 
 export const JUNCTION_ALLOWED_SUMMARY_RESOURCES = Object.freeze([
   ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   ...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
 ] as const);
 

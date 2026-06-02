@@ -11,6 +11,7 @@ import {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   importDeviceProviderSnapshot,
@@ -241,7 +242,10 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
 
   assert.equal(payload.provider, "junction");
   assert.equal(payload.accountId, "junction-account-hash-1");
-  assert.deepEqual(payload.provenance?.summaryResources, JUNCTION_DEFAULT_SUMMARY_RESOURCES);
+  assert.deepEqual(payload.provenance?.summaryResources, [
+    ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
+    ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  ]);
   assert.deepEqual(payload.provenance?.timeseriesResources, [
     "heartrate",
     "blood_oxygen",
@@ -1459,7 +1463,6 @@ test("Junction normalizer unwraps object-valued data envelopes into usable recor
 
 test("Junction normalizer defaults to the documented resource allowlist", () => {
   assert.deepEqual([...JUNCTION_DEFAULT_SUMMARY_RESOURCES], [
-    "profile",
     "activity",
     "sleep",
     "sleep_cycle",
@@ -1477,10 +1480,12 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "stress_level",
     "weight",
   ]);
+  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], ["profile"]);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], ["meal", "menstrual_cycle"]);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+    ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
     "meal",
     "menstrual_cycle",
   ]);
@@ -1510,7 +1515,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual(payload.provenance?.summaryResources, JUNCTION_DEFAULT_SUMMARY_RESOURCES);
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("glucose"), false);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.equal(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-stress-level"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
@@ -1519,6 +1524,20 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "active-calories"), false);
   assert.equal(payload.events?.some((event) => event.fields?.metric === "distance"), false);
   assert.equal(payload.samples?.length ?? 0, 0);
+
+  const optInProfilePayload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        sourceProviderSlug: "oura",
+        displayName: "profile display name should not be retained",
+      },
+    },
+  });
+
+  assert.deepEqual(optInProfilePayload.provenance?.summaryResources, ["profile"]);
+  assert.ok(optInProfilePayload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
+  assert.equal(optInProfilePayload.events?.length ?? 0, 0);
 });
 
 test("Junction normalizer keeps configured raw-only summaries as sanitized evidence", () => {
