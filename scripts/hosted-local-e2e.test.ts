@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { ForegroundCommandInput } from "../packages/hosted-local-harness/src/process.ts";
 
 const runForegroundCommand = vi.hoisted(() =>
-  vi.fn(async (_input: { args: string[]; command: string }) => {})
+  vi.fn(async (_input: ForegroundCommandInput) => {})
 );
 const cleanupHostedLocalOrphanedWorkerdProcesses = vi.hoisted(() => vi.fn());
 const cleanupHostedRunnerContainers = vi.hoisted(() => vi.fn(async () => {}));
