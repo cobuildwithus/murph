@@ -332,11 +332,8 @@ type JunctionSleepStage = JunctionSleepStageValue;
 interface JunctionDailyTimeseriesAggregate {
   dayKey: string;
   entry: PlainObject;
-  firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
-  maxValue: number;
-  minObservedAt: string;
   minValue: number;
   resourceContext: ResourceContext;
   sampleCount: number;
@@ -490,13 +487,11 @@ function pushBloodOxygenDailyObservations(
     const meanValue = roundBloodOxygenValue(aggregate.sum / aggregate.sampleCount);
     pushBloodOxygenDailyObservation(context, aggregate, {
       metric: "spo2",
-      statistic: "mean",
       title: "Junction blood oxygen average",
       value: meanValue,
     });
     pushBloodOxygenDailyObservation(context, aggregate, {
       metric: "lowest-spo2",
-      statistic: "min",
       title: "Junction blood oxygen minimum",
       value: aggregate.minValue,
     });
@@ -573,11 +568,8 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       aggregates.set(key, {
         dayKey,
         entry,
-        firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
-        maxValue: value,
-        minObservedAt: sampleAt,
         minValue: value,
         resourceContext,
         sampleCount: 1,
@@ -590,11 +582,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     existing.sampleCount += 1;
     existing.sum += value;
-    existing.maxValue = Math.max(existing.maxValue, value);
-
-    if (sampleAt < existing.firstSampleAt) {
-      existing.firstSampleAt = sampleAt;
-    }
 
     if (sampleAt >= existing.lastSampleAt) {
       existing.lastSampleAt = sampleAt;
@@ -604,7 +591,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     if (value < existing.minValue) {
       existing.minValue = value;
-      existing.minObservedAt = sampleAt;
     }
   }
 
@@ -616,7 +602,6 @@ function pushBloodOxygenDailyObservation(
   aggregate: JunctionDailyTimeseriesAggregate,
   observation: {
     metric: "spo2" | "lowest-spo2";
-    statistic: "mean" | "min";
     title: string;
     value: number;
   },
@@ -639,20 +624,12 @@ function pushBloodOxygenDailyObservation(
     rawArtifactRoles: aggregate.resourceContext.rawArtifactRoles,
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
-    fields: stripUndefined({
+    fields: {
       metric: observation.metric,
-      observationGrain: "daily_timeseries_aggregate",
-      aggregationWindow: "day",
-      statistic: observation.statistic,
+      observationGrain: "summary",
       value: roundBloodOxygenValue(observation.value),
       unit: "%",
-      sampleCount: aggregate.sampleCount,
-      firstSampleAt: aggregate.firstSampleAt,
-      lastSampleAt: aggregate.lastSampleAt,
-      minValue: aggregate.minValue,
-      maxValue: aggregate.maxValue,
-      minObservedAt: observation.statistic === "min" ? aggregate.minObservedAt : undefined,
-    }),
+    },
   }));
 }
 
@@ -681,19 +658,12 @@ function pushStressLevelDailyObservation(
     rawArtifactRoles: aggregate.resourceContext.rawArtifactRoles,
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, "stress-level"),
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
-    fields: stripUndefined({
+    fields: {
       metric: "stress-level",
-      observationGrain: "daily_timeseries_aggregate",
-      aggregationWindow: "day",
-      statistic: "mean",
+      observationGrain: "summary",
       value: roundStressLevelValue(observation.value),
       unit: "score",
-      sampleCount: aggregate.sampleCount,
-      firstSampleAt: aggregate.firstSampleAt,
-      lastSampleAt: aggregate.lastSampleAt,
-      minValue: roundStressLevelValue(aggregate.minValue),
-      maxValue: roundStressLevelValue(aggregate.maxValue),
-    }),
+    },
   }));
 }
 

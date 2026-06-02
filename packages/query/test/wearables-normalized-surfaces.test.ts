@@ -309,9 +309,22 @@ test("latest surface sees Junction Garmin object data envelopes as usable summar
         },
       },
     },
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-05-20T13:00:00Z", unit: "%", value: 36 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
   });
 
   const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
+  const stressLevel = summarizeWearableMetricLatest(vault, "stress-level", { providers: ["garmin"], windowDays: 1 });
 
   assert.equal(latest?.latestDate, "2026-05-20");
   assert.equal(latest?.activity?.steps.selection.value, 7200);
@@ -323,6 +336,9 @@ test("latest surface sees Junction Garmin object data envelopes as usable summar
   assert.equal(latest?.sleep?.totalSleepMinutes.selection.value, 420);
   assert.equal(latest?.sleep?.sleepEfficiency.selection.value, 97);
   assert.equal(latest?.recovery?.recoveryScore.selection.value, 74);
+  assert.equal(latest?.recovery?.stressLevel.selection.value, 36);
+  assert.equal(stressLevel?.metric, "stressLevel");
+  assert.equal(stressLevel?.value, 36);
   assert.deepEqual(latest?.providers, ["garmin"]);
 });
 

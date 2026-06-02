@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { workoutSessionSchema } from "@murphai/contracts";
+import * as coreRuntime from "@murphai/core";
 import { test } from "vitest";
 
 import {
@@ -9,6 +13,7 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
@@ -43,6 +48,27 @@ function assertJsonOmits(value: unknown, forbiddenValues: readonly string[]): vo
   const text = typeof value === "string" ? value : JSON.stringify(value);
   for (const forbidden of forbiddenValues) {
     assert.equal(text.includes(forbidden), false, `unexpected raw value retained: ${forbidden}`);
+  }
+}
+
+async function makeTempDirectory(name: string): Promise<string> {
+  return mkdtemp(join(tmpdir(), `${name}-`));
+}
+
+function assertCompactSummaryObservationFields(fields: Record<string, unknown> | undefined): void {
+  assert.ok(fields);
+  assert.equal(fields.observationGrain, "summary");
+  for (const key of [
+    "aggregationWindow",
+    "statistic",
+    "sampleCount",
+    "firstSampleAt",
+    "lastSampleAt",
+    "minValue",
+    "maxValue",
+    "minObservedAt",
+  ]) {
+    assert.equal(Object.hasOwn(fields, key), false, `${key} should stay out of canonical observation fields`);
   }
 }
 
@@ -253,7 +279,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.equal(floatingSample, undefined);
   const stressEvent = observations.find((event) => event.fields?.metric === "stress-level");
   assert.equal(stressEvent?.dataOrigin?.sourceProviderSlug, "oura");
-  assert.equal(stressEvent?.fields?.observationGrain, "daily_timeseries_aggregate");
+  assertCompactSummaryObservationFields(stressEvent?.fields);
   assert.equal(stressEvent?.fields?.value, 18);
 
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
@@ -291,18 +317,63 @@ test("Junction normalizer compacts stress level timeseries into daily average fa
   assert.equal(stressEvents.length, 2);
   assert.equal(dayOne?.dataOrigin?.sourceProviderSlug, "garmin");
   assert.equal(dayOne?.dataOrigin?.sourceType, "watch");
-  assert.equal(dayOne?.fields?.observationGrain, "daily_timeseries_aggregate");
-  assert.equal(dayOne?.fields?.aggregationWindow, "day");
-  assert.equal(dayOne?.fields?.statistic, "mean");
+  assertCompactSummaryObservationFields(dayOne?.fields);
   assert.equal(dayOne?.fields?.unit, "score");
   assert.equal(dayOne?.fields?.value, 40);
-  assert.equal(dayOne?.fields?.sampleCount, 3);
-  assert.equal(dayOne?.fields?.minValue, 18);
-  assert.equal(dayOne?.fields?.maxValue, 60);
-  assert.equal(dayOne?.fields?.firstSampleAt, "2026-04-22T08:00:00.000Z");
-  assert.equal(dayOne?.fields?.lastSampleAt, "2026-04-22T20:00:00.000Z");
+  assertCompactSummaryObservationFields(dayTwo?.fields);
   assert.equal(dayTwo?.fields?.value, 21);
-  assert.equal(dayTwo?.fields?.sampleCount, 1);
+});
+
+test("Junction stress level aggregates pass the canonical device import contract", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-stress-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-04-22T12:00:00.000Z",
+      timeseries: {
+        stress_level: {
+          groups: {
+            garmin: [{
+              data: [
+                { timestamp: "2026-04-22T08:00:00Z", value: 25 },
+                { timestamp: "2026-04-22T16:00:00Z", value: 55 },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    };
+    const payload = normalizeJunctionSnapshot(snapshot);
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const stressEvent = result.events.find((event) => event.kind === "observation");
+
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(stressEvent?.kind, "observation");
+    assert.equal(stressEvent?.metric, "stress-level");
+    assert.equal(stressEvent?.observationGrain, "summary");
+    assert.equal(stressEvent?.value, 40);
+    assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-stress-level"));
+    assert.ok(result.rawArtifacts.length >= 1);
+    assert.notEqual(result.manifestPath, "");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction normalizer buckets stress level aggregates by provider local offset when present", () => {
@@ -361,7 +432,7 @@ test("Junction normalizer keeps floating stress timestamps on their raw day desp
 
   assert.equal(stressEvents.length, 1);
   assert.equal(rawDayEvent?.fields?.value, 50);
-  assert.equal(rawDayEvent?.fields?.sampleCount, 2);
+  assertCompactSummaryObservationFields(rawDayEvent?.fields);
   assert.equal(rawDayEvent?.occurredAt, "2026-04-23T06:30:00.000Z");
   assert.equal(rawDayEvent?.dataOrigin?.timeZoneOffsetMinutes, -420);
   assert.equal(rawDayEvent?.dataOrigin?.timestampSemantics, "floating");
@@ -882,11 +953,10 @@ test("Junction normalizer derives display-grade blood oxygen facts from timeseri
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.equal(meanEvent?.fields?.value, 97.2);
     assert.equal(meanEvent?.fields?.unit, "%");
-    assert.equal(meanEvent?.fields?.sampleCount, 1);
-    assert.equal(meanEvent?.fields?.observationGrain, "daily_timeseries_aggregate");
+    assertCompactSummaryObservationFields(meanEvent?.fields);
     assert.equal(meanEvent?.dataOrigin?.sourceProviderSlug, "garmin");
     assert.equal(minimumEvent?.fields?.value, 97.2);
-    assert.equal(minimumEvent?.fields?.statistic, "min");
+    assertCompactSummaryObservationFields(minimumEvent?.fields);
 
     if (unit === undefined) {
       assert.doesNotMatch(rawBloodOxygenArtifactText, /"unit":/u);
@@ -933,15 +1003,66 @@ test("Junction normalizer compacts blood oxygen timeseries into daily average an
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(bloodOxygenEvents.length, 4);
   assert.equal(dayOneMean?.fields?.value, 95.9333);
-  assert.equal(dayOneMean?.fields?.sampleCount, 3);
-  assert.equal(dayOneMean?.fields?.minValue, 92.5);
-  assert.equal(dayOneMean?.fields?.maxValue, 98.1);
-  assert.equal(dayOneMean?.fields?.firstSampleAt, "2026-04-22T07:15:00.000Z");
-  assert.equal(dayOneMean?.fields?.lastSampleAt, "2026-04-22T08:15:00.000Z");
+  assertCompactSummaryObservationFields(dayOneMean?.fields);
   assert.equal(dayOneMinimum?.fields?.value, 92.5);
-  assert.equal(dayOneMinimum?.fields?.minObservedAt, "2026-04-22T07:45:00.000Z");
+  assertCompactSummaryObservationFields(dayOneMinimum?.fields);
   assert.equal(dayTwoMean?.fields?.value, 96.4);
+  assertCompactSummaryObservationFields(dayTwoMean?.fields);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
+});
+
+test("Junction blood oxygen aggregates pass the canonical device import contract", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-blood-oxygen-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-04-22T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: {
+          groups: {
+            garmin: [{
+              data: [
+                { timestamp: "2026-04-22T07:15:00Z", unit: "percent", value: 97 },
+                { timestamp: "2026-04-22T07:45:00Z", unit: "percent", value: 93 },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    };
+    const payload = normalizeJunctionSnapshot(snapshot);
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const observationEvents = result.events.filter((event) => event.kind === "observation");
+    const spo2Event = observationEvents.find((event) => event.metric === "spo2");
+    const lowestSpo2Event = observationEvents.find((event) => event.metric === "lowest-spo2");
+
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(spo2Event?.observationGrain, "summary");
+    assert.equal(spo2Event?.value, 95);
+    assert.equal(lowestSpo2Event?.observationGrain, "summary");
+    assert.equal(lowestSpo2Event?.value, 93);
+    assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
+    assert.ok(result.rawArtifacts.length >= 1);
+    assert.notEqual(result.manifestPath, "");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction normalizer derives blood oxygen aggregates from aliases and skips invalid samples", () => {
@@ -974,13 +1095,11 @@ test("Junction normalizer derives blood oxygen aggregates from aliases and skips
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(bloodOxygenEvents.length, 2);
   assert.equal(meanEvent?.fields?.value, 95.9);
-  assert.equal(meanEvent?.fields?.sampleCount, 2);
-  assert.equal(meanEvent?.fields?.minValue, 94.6);
-  assert.equal(meanEvent?.fields?.maxValue, 97.2);
+  assertCompactSummaryObservationFields(meanEvent?.fields);
   assert.equal(meanEvent?.dataOrigin?.sourceProviderSlug, "garmin");
   assert.equal(meanEvent?.dataOrigin?.sourceType, "watch");
   assert.equal(minimumEvent?.fields?.value, 94.6);
-  assert.equal(minimumEvent?.fields?.minObservedAt, "2026-04-22T07:45:00.000Z");
+  assertCompactSummaryObservationFields(minimumEvent?.fields);
 });
 
 test("Junction snapshot import minimizes grouped source identifiers in raw receipts", async () => {
