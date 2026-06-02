@@ -1284,7 +1284,6 @@ async function startLinqScenario(
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
         "murph.send_progress_update",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
-      MURPH_DEV_TEMPORAL: "disabled",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
