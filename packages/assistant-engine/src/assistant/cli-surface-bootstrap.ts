@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   readAssistantCliLlmsManifest,
   type AssistantCliLlmsManifest,
@@ -13,11 +14,15 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v3'
+  'murph.assistant-cli-surface-bootstrap.v4'
+export const assistantCliSurfacePrebuiltSchemaVersion =
+  'murph.assistant-cli-surface-prebuilt.v2'
 const assistantCliSurfaceBootstrapRenderPolicyVersion =
   'murph.assistant-cli-surface-render-policy.v1'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
 const assistantCliSurfaceBootstrapDetailedModeCommandLimit = 120
+export const assistantCliSurfacePrebuiltArtifactFileName =
+  'cli-surface-contract.generated.json'
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',
@@ -91,11 +96,19 @@ const cachedAssistantCliSurfaceContractPromises = new Map<
   string,
   Promise<AssistantCliSurfaceContractSnapshot | null>
 >()
+let cachedPrebuiltAssistantCliSurfaceContractPromise:
+  | Promise<AssistantCliSurfaceContractSnapshot | null>
+  | null = null
 
 type AssistantCliSurfaceContractSnapshot = {
   contract: string
   manifestFingerprint: string
-  sourceDetail: 'compact' | 'full'
+}
+
+export type AssistantCliSurfacePrebuiltArtifact = {
+  contract: string
+  manifestFingerprint: string
+  schemaVersion: typeof assistantCliSurfacePrebuiltSchemaVersion
 }
 
 export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): string {
@@ -109,6 +122,11 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
+  const prebuiltContract = await readPrebuiltAssistantCliSurfaceContract()
+  if (prebuiltContract !== null) {
+    return prebuiltContract.contract
+  }
+
   const docId = buildAssistantCliSurfaceBootstrapDocId(input.sessionId)
   const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
   const documentPath = resolveAssistantStateDocumentPath(
@@ -140,10 +158,37 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
     generatedAt: new Date().toISOString(),
     manifestFingerprint: contractSnapshot.manifestFingerprint,
     schemaVersion: assistantCliSurfaceBootstrapSchemaVersion,
-    sourceDetail: contractSnapshot.sourceDetail,
   })
 
   return contractSnapshot.contract
+}
+
+export async function readPrebuiltAssistantCliSurfaceContract(input: {
+  artifactPath?: string | null
+} = {}): Promise<AssistantCliSurfaceContractSnapshot | null> {
+  if (input.artifactPath) {
+    return await readPrebuiltAssistantCliSurfaceContractFromPath(input.artifactPath)
+  }
+
+  if (cachedPrebuiltAssistantCliSurfaceContractPromise !== null) {
+    return await cachedPrebuiltAssistantCliSurfaceContractPromise
+  }
+
+  const prebuiltArtifactPath = resolveAssistantCliSurfacePrebuiltArtifactPath()
+  cachedPrebuiltAssistantCliSurfaceContractPromise =
+    readPrebuiltAssistantCliSurfaceContractFromPath(prebuiltArtifactPath)
+
+  try {
+    const contract = await cachedPrebuiltAssistantCliSurfaceContractPromise
+    if (contract === null) {
+      cachedPrebuiltAssistantCliSurfaceContractPromise = null
+    }
+
+    return contract
+  } catch (error) {
+    cachedPrebuiltAssistantCliSurfaceContractPromise = null
+    throw error
+  }
 }
 
 export async function readPersistedAssistantCliSurfaceBootstrapContext(input: {
@@ -164,15 +209,11 @@ export async function readPersistedAssistantCliSurfaceBootstrapContext(input: {
 
 export function buildAssistantCliSurfaceContract(
   manifest: AssistantCliLlmsManifest,
-  input?: {
-    sourceDetail?: 'compact' | 'full'
-  },
 ): string | null {
   const commands = normalizeAssistantCliManifestCommands(manifest)
   if (commands.length === 0) {
     return null
   }
-  const sourceDetail = input?.sourceDetail ?? 'full'
 
   const fallbackModes: readonly AssistantCliContractRenderMode[] =
     commands.length > assistantCliSurfaceBootstrapDetailedModeCommandLimit
@@ -180,7 +221,7 @@ export function buildAssistantCliSurfaceContract(
       : ['required-only', 'description-only']
 
   for (const mode of fallbackModes) {
-    const contract = renderAssistantCliSurfaceContract(commands, mode, sourceDetail)
+    const contract = renderAssistantCliSurfaceContract(commands, mode)
     if (contract.length <= assistantCliSurfaceBootstrapContractCharBudget) {
       return contract
     }
@@ -189,7 +230,6 @@ export function buildAssistantCliSurfaceContract(
   const minimalContract = renderAssistantCliSurfaceContract(
     commands,
     'description-only',
-    sourceDetail,
   )
   return minimalContract.slice(0, assistantCliSurfaceBootstrapContractCharBudget).trimEnd()
 }
@@ -205,13 +245,12 @@ async function readPersistedAssistantCliSurfaceContract(
     const value = JSON.parse(raw) as Record<string, unknown>
     const contract = value.contract
     const manifestFingerprint = value.manifestFingerprint
-    const sourceDetail = value.sourceDetail
     if (
       value.schemaVersion !== assistantCliSurfaceBootstrapSchemaVersion ||
       typeof contract !== 'string' ||
       typeof manifestFingerprint !== 'string' ||
       !/^[a-f0-9]{64}$/u.test(manifestFingerprint) ||
-      (sourceDetail !== 'compact' && sourceDetail !== 'full')
+      value.sourceDetail !== undefined
     ) {
       return null
     }
@@ -236,6 +275,82 @@ async function readPersistedAssistantCliSurfaceContract(
 
     return null
   }
+}
+
+async function readPrebuiltAssistantCliSurfaceContractFromPath(
+  artifactPath: string,
+): Promise<AssistantCliSurfaceContractSnapshot | null> {
+  try {
+    const raw = await readFile(artifactPath, 'utf8')
+    let value: unknown
+    try {
+      value = JSON.parse(raw)
+    } catch (error) {
+      throw createInvalidAssistantCliSurfacePrebuiltArtifactError(error)
+    }
+    if (!value || typeof value !== 'object') {
+      throw createInvalidAssistantCliSurfacePrebuiltArtifactError()
+    }
+    const parsed = parseAssistantCliSurfacePrebuiltArtifact(
+      value as Record<string, unknown>,
+    )
+    if (parsed === null) {
+      throw createInvalidAssistantCliSurfacePrebuiltArtifactError()
+    }
+
+    return parsed
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+function parseAssistantCliSurfacePrebuiltArtifact(
+  value: Record<string, unknown>,
+): AssistantCliSurfaceContractSnapshot | null {
+  const contract = value.contract
+  const manifestFingerprint = value.manifestFingerprint
+  if (
+    value.schemaVersion !== assistantCliSurfacePrebuiltSchemaVersion ||
+    typeof contract !== 'string' ||
+    typeof manifestFingerprint !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(manifestFingerprint) ||
+    value.sourceDetail !== undefined
+  ) {
+    return null
+  }
+
+  const normalizedContract = contract.trim()
+  if (
+    normalizedContract.length === 0 ||
+    normalizedContract.length > assistantCliSurfaceBootstrapContractCharBudget ||
+    !normalizedContract.startsWith('Murph CLI Contract:')
+  ) {
+    return null
+  }
+
+  return {
+    contract: normalizedContract,
+    manifestFingerprint,
+  }
+}
+
+function createInvalidAssistantCliSurfacePrebuiltArtifactError(
+  cause?: unknown,
+): Error {
+  return new Error('Generated assistant CLI surface contract artifact is invalid.', {
+    cause,
+  })
+}
+
+function resolveAssistantCliSurfacePrebuiltArtifactPath(): string {
+  return path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    assistantCliSurfacePrebuiltArtifactFileName,
+  )
 }
 
 async function loadAssistantCliSurfaceContract(input: {
@@ -302,59 +417,27 @@ async function generateAssistantCliSurfaceContract(input: {
   vault: string
   workingDirectory?: string | null
 }): Promise<AssistantCliSurfaceContractSnapshot | null> {
-  try {
-    const manifest = await readAssistantCliLlmsManifest({
-      cliEnv: input.cliEnv,
-      detail: 'full',
-      executionContext: input.executionContext,
-      workingDirectory: input.workingDirectory,
-    })
-    const contract = buildAssistantCliSurfaceContract(manifest, {
-      sourceDetail: 'full',
-    })
-    return contract
-      ? {
-          contract,
-          manifestFingerprint: hashAssistantCliSurfaceManifest({
-            manifest,
-            sourceDetail: 'full',
-          }),
-          sourceDetail: 'full',
-        }
-      : null
-  } catch {
-    const manifest = await readAssistantCliLlmsManifest({
-      cliEnv: input.cliEnv,
-      detail: 'compact',
-      executionContext: input.executionContext,
-      workingDirectory: input.workingDirectory,
-    })
-    const contract = buildAssistantCliSurfaceContract(manifest, {
-      sourceDetail: 'compact',
-    })
-    return contract
-      ? {
-          contract,
-          manifestFingerprint: hashAssistantCliSurfaceManifest({
-            manifest,
-            sourceDetail: 'compact',
-          }),
-          sourceDetail: 'compact',
-        }
-      : null
-  }
+  const manifest = await readAssistantCliLlmsManifest({
+    cliEnv: input.cliEnv,
+    executionContext: input.executionContext,
+    workingDirectory: input.workingDirectory,
+  })
+  const contract = buildAssistantCliSurfaceContract(manifest)
+  return contract
+    ? {
+        contract,
+        manifestFingerprint: hashAssistantCliSurfaceManifest(manifest),
+      }
+    : null
 }
 
-function hashAssistantCliSurfaceManifest(input: {
-  manifest: AssistantCliLlmsManifest
-  sourceDetail: 'compact' | 'full'
-}): string {
+export function hashAssistantCliSurfaceManifest(
+  manifest: AssistantCliLlmsManifest,
+): string {
   return createHash('sha256')
     .update(assistantCliSurfaceBootstrapRenderPolicyVersion)
     .update('\0')
-    .update(input.sourceDetail)
-    .update('\0')
-    .update(JSON.stringify(input.manifest))
+    .update(JSON.stringify(manifest))
     .digest('hex')
 }
 
@@ -407,15 +490,12 @@ type AssistantCliCommandGroup = {
 function renderAssistantCliSurfaceContract(
   commands: readonly AssistantCliLlmsManifestCommand[],
   mode: AssistantCliContractRenderMode,
-  sourceDetail: 'compact' | 'full',
 ): string {
   const groupedCommands = groupAssistantCliManifestCommands(commands)
   const lines = [
     'Murph CLI Contract:',
     'Use `vault-cli` directly from the current runtime process. Command names below are the tokens after `vault-cli`.',
-    sourceDetail === 'full'
-      ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
-      : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',
+    'This block is compiled automatically from `vault-cli --llms --format json`.',
     'Use this contract first. Only fall back to `--schema --format json` or `--help` when a needed detail is missing here.',
     'Bare command-name entries are low-frequency routes; inspect `vault-cli <command> --schema --format json` or `vault-cli <command> --help` before executing one.',
   ]

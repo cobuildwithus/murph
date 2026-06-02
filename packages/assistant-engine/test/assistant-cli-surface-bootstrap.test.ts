@@ -63,8 +63,7 @@ test('readPersistedAssistantCliSurfaceBootstrapContext returns a valid persisted
     JSON.stringify({
       contract: persistedContract,
       manifestFingerprint: '1'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-      sourceDetail: 'full',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
     }),
     'utf8',
   )
@@ -86,6 +85,68 @@ test('readPersistedAssistantCliSurfaceBootstrapContext returns a valid persisted
 
   assert.equal(contract, persistedContract)
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
+})
+
+test('readPrebuiltAssistantCliSurfaceContract accepts a generated artifact payload', async () => {
+  const { parentRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-prebuilt-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const artifactPath = path.join(parentRoot, 'cli-surface-contract.generated.json')
+  const prebuiltContract = 'Murph CLI Contract:\nPrebuilt assistant cli contract'
+  await writeFile(
+    artifactPath,
+    JSON.stringify({
+      contract: prebuiltContract,
+      manifestFingerprint: '4'.repeat(64),
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+    }),
+    'utf8',
+  )
+
+  const {
+    readPrebuiltAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const artifact = await readPrebuiltAssistantCliSurfaceContract({
+    artifactPath,
+  })
+
+  assert.deepEqual(artifact, {
+    contract: prebuiltContract,
+    manifestFingerprint: '4'.repeat(64),
+  })
+})
+
+test('readPrebuiltAssistantCliSurfaceContract rejects malformed generated artifacts', async () => {
+  const { parentRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-invalid-prebuilt-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const artifactPath = path.join(parentRoot, 'cli-surface-contract.generated.json')
+  await writeFile(
+    artifactPath,
+    JSON.stringify({
+      contract: 'Murph CLI Contract:\nPrebuilt assistant cli contract',
+      manifestFingerprint: '4'.repeat(64),
+      schemaVersion: 'murph.assistant-cli-surface-prebuilt.v2',
+      sourceDetail: 'compact',
+    }),
+    'utf8',
+  )
+
+  const {
+    readPrebuiltAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  await assert.rejects(
+    () => readPrebuiltAssistantCliSurfaceContract({
+      artifactPath,
+    }),
+    /Generated assistant CLI surface contract artifact is invalid/u,
+  )
 })
 
 test('buildAssistantCliSurfaceContract normalizes commands and renders family, args, and required option summaries', async () => {
@@ -486,18 +547,14 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
       },
     ],
   }
-  const manifestFingerprint = createAssistantCliSurfaceManifestFingerprint({
-    manifest,
-    sourceDetail: 'full',
-  })
+  const manifestFingerprint = createAssistantCliSurfaceManifestFingerprint(manifest)
   const persistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
   await writeFile(
     docPath,
     JSON.stringify({
       contract: persistedContract,
       manifestFingerprint,
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-      sourceDetail: 'full',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
     }),
     'utf8',
   )
@@ -541,8 +598,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites stale persisted contra
     JSON.stringify({
       contract: 'Murph CLI Contract:\nStale assistant cli contract',
       manifestFingerprint: '0'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-      sourceDetail: 'full',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
     }),
     'utf8',
   )
@@ -611,10 +667,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy c
       },
     ],
   }
-  const legacyManifestFingerprint = createLegacyAssistantCliSurfaceManifestFingerprint({
-    manifest,
-    sourceDetail: 'full',
-  })
+  const legacyManifestFingerprint = '5'.repeat(64)
   const legacyContract = [
     'Murph CLI Contract:',
     'age:',
@@ -629,7 +682,6 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy c
       contract: legacyContract,
       manifestFingerprint: legacyManifestFingerprint,
       schemaVersion: 'murph.assistant-cli-surface-bootstrap.v2',
-      sourceDetail: 'full',
     }),
     'utf8',
   )
@@ -663,7 +715,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rewrites legacy render-policy c
     schemaVersion: string
   }
   assert.equal(persisted.contract, contract)
-  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v3')
+  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v4')
   assert.notEqual(persisted.manifestFingerprint, legacyManifestFingerprint)
 })
 
@@ -729,7 +781,6 @@ test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only 
     [
       {
         cliEnv: undefined,
-        detail: 'full',
         executionContext: undefined,
         workingDirectory: undefined,
       },
@@ -744,27 +795,24 @@ test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only 
   }
   assert.equal(persisted.contract, generatedContract)
   assert.match(persisted.manifestFingerprint, /^[a-f0-9]{64}$/u)
-  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v3')
+  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v4')
   assert.match(persisted.generatedAt, /^\d{4}-\d{2}-\d{2}T/u)
 })
 
-test('resolveAssistantCliSurfaceBootstrapContext falls back from full to compact manifests', async () => {
+test('resolveAssistantCliSurfaceBootstrapContext uses compact manifests when no prebuilt artifact is available', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-cli-surface-contract-fallback-',
   )
   cleanupPaths.push(parentRoot)
 
-  const readAssistantCliLlmsManifest = vi
-    .fn()
-    .mockRejectedValueOnce(new Error('full manifest unavailable'))
-    .mockResolvedValueOnce({
-      commands: [
-        {
-          description: 'Compact manifest command',
-          name: 'search docs',
-        },
-      ],
-    })
+  const readAssistantCliLlmsManifest = vi.fn().mockResolvedValueOnce({
+    commands: [
+      {
+        description: 'Compact manifest command',
+        name: 'search docs',
+      },
+    ],
+  })
 
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
@@ -784,8 +832,16 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back from full to compact
     /compiled automatically from `vault-cli --llms --format json`/u,
   )
   assert.deepEqual(
-    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
-    ['full', 'compact'],
+    readAssistantCliLlmsManifest.mock.calls,
+    [
+      [
+        {
+          cliEnv: undefined,
+          executionContext: undefined,
+          workingDirectory: undefined,
+        },
+      ],
+    ],
   )
 })
 
@@ -812,15 +868,13 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses persisted contract when 
       contract: persistedContract,
       generatedAt: '2026-01-01T00:00:00.000Z',
       manifestFingerprint: '1'.repeat(64),
-      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-      sourceDetail: 'full',
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
     }),
     'utf8',
   )
 
   const readAssistantCliLlmsManifest = vi
     .fn()
-    .mockRejectedValueOnce(new Error('full manifest unavailable'))
     .mockRejectedValueOnce(new Error('compact manifest unavailable'))
 
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
@@ -837,20 +891,16 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses persisted contract when 
   })
 
   assert.equal(contract, persistedContract)
-  assert.deepEqual(
-    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
-    ['full', 'compact'],
-  )
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 1)
   assert.deepEqual(JSON.parse(await readFile(docPath, 'utf8')), {
     contract: persistedContract,
     generatedAt: '2026-01-01T00:00:00.000Z',
     manifestFingerprint: '1'.repeat(64),
-    schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-    sourceDetail: 'full',
+    schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
   })
 })
 
-test('resolveAssistantCliSurfaceBootstrapContext reuses compact persisted contracts when manifest generation fails', async () => {
+test('resolveAssistantCliSurfaceBootstrapContext ignores legacy mode-bearing persisted contracts when manifest generation fails', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-cli-surface-contract-generation-failed-compact-',
   )
@@ -881,7 +931,6 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses compact persisted contra
 
   const readAssistantCliLlmsManifest = vi
     .fn()
-    .mockRejectedValueOnce(new Error('full manifest unavailable'))
     .mockRejectedValueOnce(new Error('compact manifest unavailable'))
 
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
@@ -897,11 +946,8 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses compact persisted contra
     vault: vaultRoot,
   })
 
-  assert.equal(contract, persistedContract)
-  assert.deepEqual(
-    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
-    ['full', 'compact'],
-  )
+  assert.equal(contract, null)
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 1)
 })
 
 test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contracts when manifest generation fails', async () => {
@@ -923,7 +969,6 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
         contract: validPersistedContract,
         manifestFingerprint: validManifestFingerprint,
         schemaVersion: 'test',
-        sourceDetail: 'full',
       },
     },
     {
@@ -932,24 +977,22 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
         contract: validPersistedContract,
         manifestFingerprint: validManifestFingerprint,
         schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
-        sourceDetail: 'full',
       },
     },
     {
       sessionId: 'missing-fingerprint',
       document: {
         contract: validPersistedContract,
-        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-        sourceDetail: 'full',
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
       },
     },
     {
-      sessionId: 'invalid-source-detail',
+      sessionId: 'legacy-source-detail',
       document: {
         contract: validPersistedContract,
         manifestFingerprint: validManifestFingerprint,
-        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-        sourceDetail: 'summary',
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
+        sourceDetail: 'compact',
       },
     },
     {
@@ -957,8 +1000,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
       document: {
         contract: 'Persisted assistant cli contract',
         manifestFingerprint: validManifestFingerprint,
-        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v3',
-        sourceDetail: 'full',
+        schemaVersion: 'murph.assistant-cli-surface-bootstrap.v4',
       },
     },
   ]
@@ -976,11 +1018,9 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
     await writeFile(docPath, JSON.stringify(entry.document), 'utf8')
   }
 
-  const readAssistantCliLlmsManifest = vi.fn(
-    async (_input: { detail: 'compact' | 'full' }) => {
-      throw new Error('manifest unavailable')
-    },
-  )
+  const readAssistantCliLlmsManifest = vi.fn(async () => {
+    throw new Error('manifest unavailable')
+  })
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
     buildAssistantCliProcessEnv: () => ({}),
@@ -1000,10 +1040,7 @@ test('resolveAssistantCliSurfaceBootstrapContext rejects invalid persisted contr
     )
   }
 
-  assert.deepEqual(
-    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
-    cases.flatMap(() => ['full', 'compact']),
-  )
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, cases.length)
 })
 
 test('resolveAssistantCliSurfaceBootstrapContext clears the cached promise after null or failed manifest generation', async () => {
@@ -1019,7 +1056,6 @@ test('resolveAssistantCliSurfaceBootstrapContext clears the cached promise after
     .mockResolvedValueOnce({
       commands: [],
     })
-    .mockRejectedValueOnce(new Error('full manifest unavailable again'))
     .mockRejectedValueOnce(new Error('compact manifest unavailable again'))
     .mockResolvedValueOnce({
       commands: [
@@ -1059,10 +1095,7 @@ test('resolveAssistantCliSurfaceBootstrapContext clears the cached promise after
   assert.ok(recoveredContract)
   assert.match(recoveredContract, /Recovered manifest command/u)
 
-  assert.deepEqual(
-    readAssistantCliLlmsManifest.mock.calls.map(([input]) => input.detail),
-    ['full', 'full', 'compact', 'full'],
-  )
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 3)
 })
 
 test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by manifest context', async () => {
@@ -1075,7 +1108,6 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
 
   const readAssistantCliLlmsManifest = vi.fn(async (input: {
     cliEnv?: NodeJS.ProcessEnv
-    detail: 'compact' | 'full'
   }) => ({
     commands: [
       {
@@ -1114,26 +1146,10 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 2)
 })
 
-function createAssistantCliSurfaceManifestFingerprint(input: {
-  manifest: unknown
-  sourceDetail: 'compact' | 'full'
-}): string {
+function createAssistantCliSurfaceManifestFingerprint(manifest: unknown): string {
   return createHash('sha256')
     .update('murph.assistant-cli-surface-render-policy.v1')
     .update('\0')
-    .update(input.sourceDetail)
-    .update('\0')
-    .update(JSON.stringify(input.manifest))
-    .digest('hex')
-}
-
-function createLegacyAssistantCliSurfaceManifestFingerprint(input: {
-  manifest: unknown
-  sourceDetail: 'compact' | 'full'
-}): string {
-  return createHash('sha256')
-    .update(input.sourceDetail)
-    .update('\0')
-    .update(JSON.stringify(input.manifest))
+    .update(JSON.stringify(manifest))
     .digest('hex')
 }

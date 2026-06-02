@@ -82,13 +82,11 @@ const assistantCliManifestAllowedEnvKeys = new Set<string>([
 
 export async function readAssistantCliLlmsManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
-  detail?: 'compact' | 'full'
   executionContext?: AssistantExecutionContext | null
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
-  const detail = input.detail ?? 'compact'
   const result = await executeAssistantCliManifestCommand({
-    args: [detail === 'full' ? '--llms-full' : '--llms', '--format', 'json'],
+    args: ['--llms', '--format', 'json'],
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
     workingDirectory: input.workingDirectory,
@@ -97,7 +95,7 @@ export async function readAssistantCliLlmsManifest(input: {
   if (!isAssistantCliLlmsManifest(result.json)) {
     throw new VaultCliError(
       'ASSISTANT_CLI_COMMAND_FAILED',
-      `vault-cli ${detail === 'full' ? '--llms-full' : '--llms'} --format json returned an unexpected manifest shape.`,
+      'vault-cli --llms --format json returned an unexpected manifest shape.',
       {
         argv: result.argv,
       },
