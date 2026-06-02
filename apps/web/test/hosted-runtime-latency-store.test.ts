@@ -1,10 +1,14 @@
 import {
+  recordHostedIngressAcceptedFromMailboxItem,
+  recordHostedIngressAssistantInputStaged,
+  recordHostedIngressProviderStarted,
+  recordHostedIngressTemporalSignalAccepted,
   readHostedIngressLatencyDashboard,
   type HostedIngressLatencyDashboardInput,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { describe, expect, it, vi } from "vitest";
 
-type DashboardPrisma = NonNullable<HostedIngressLatencyDashboardInput["prisma"]>;
+type LatencyPrisma = NonNullable<HostedIngressLatencyDashboardInput["prisma"]>;
 type LatencyDashboardRow = {
   acceptedAt: Date;
   assistantInputStagedAt: Date | null;
@@ -78,19 +82,198 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.stageLatencyMs.acceptedToTemporalSignalP50).toBeNull();
     expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
   });
+
+  it("stores mailbox accepted timestamps as real instants when DB-local wall time differs from UTC", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T18:36:52.229Z")),
+    });
+
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+    });
+    await recordHostedIngressTemporalSignalAccepted({
+      at: instant("2026-06-02T18:36:53.229Z"),
+      expectedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+    });
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_latency_1",
+      at: instant("2026-06-02T18:36:54.229Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+    await recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_latency_1"],
+      at: instant("2026-06-02T18:36:55.229Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    const trace = prisma.readTrace();
+    expect(trace?.acceptedAt.toISOString()).toBe("2026-06-02T18:36:52.229Z");
+    expect(trace?.temporalSignalAcceptedAt?.toISOString()).toBe("2026-06-02T18:36:53.229Z");
+    expect(trace?.assistantInputStagedAt?.toISOString()).toBe("2026-06-02T18:36:54.229Z");
+    expect(trace?.providerStartAt?.toISOString()).toBe("2026-06-02T18:36:55.229Z");
+    expect(prisma.readMailboxQuerySql()).toContain(
+      "EXTRACT(EPOCH FROM (created_at AT TIME ZONE current_setting('TimeZone')))",
+    );
+    expect(prisma.readMailboxQuerySql()).toContain('AS "acceptedAtEpochMs"');
+    expect(prisma.readMailboxQuerySql()).not.toContain('AS "acceptedAt"');
+    expect(prisma.readMailboxQueryValues()).toEqual([
+      ["mailbox_latency_1"],
+      ["mailbox_latency_1", "member_latency_1"],
+      ["mailbox_latency_1", "member_latency_1"],
+    ]);
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-06-02T18:40:00.000Z"),
+      prisma,
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.completedCount).toBe(1);
+    expect(dashboard.invalidNegativeLatencyCount).toBe(0);
+    expect(dashboard.percentileMs.p50).toBe(3_000);
+    expect(dashboard.stageLatencyMs.acceptedToTemporalSignalP50).toBe(1_000);
+    expect(dashboard.stageLatencyMs.acceptedToStagedP50).toBe(2_000);
+    expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
+  });
 });
 
-function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): DashboardPrisma {
+function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {
   return {
+    $queryRaw: vi.fn(),
     hostedIngressLatencyTrace: {
       findMany: vi.fn(async () => rows),
     },
-    hostedMailboxItem: {
-      findFirst: vi.fn(),
+  } as unknown as LatencyPrisma;
+}
+
+function createLatencyWritePrisma(input: {
+  mailboxAcceptedAtEpochMs: bigint | number | string;
+}): LatencyPrisma & {
+  readMailboxQuerySql: () => string;
+  readMailboxQueryValues: () => readonly (readonly unknown[])[];
+  readTrace: () => MutableLatencyTrace | null;
+} {
+  let trace: MutableLatencyTrace | null = null;
+  let mailboxQueryTemplate: TemplateStringsArray | null = null;
+  const mailboxQueryValues: unknown[][] = [];
+  const queryRaw = vi.fn(
+    async (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+      mailboxQueryTemplate = strings;
+      mailboxQueryValues.push([...values]);
+      return [
+        {
+          acceptedAtEpochMs: input.mailboxAcceptedAtEpochMs,
+          id: "mailbox_latency_1",
+          lane: "conversation",
+          laneSeq: 1n,
+          userId: "member_latency_1",
+        },
+      ];
     },
-  } as unknown as DashboardPrisma;
+  );
+  const findMany = vi.fn(async () => trace ? [trace] : []);
+  const upsert = vi.fn(async (args: LatencyTraceUpsertInput) => {
+    if (!trace) {
+      trace = {
+        ...args.create,
+        assistantInputId: null,
+        assistantInputStagedAt: null,
+        createdAt: instant("2026-06-02T12:00:00.000Z"),
+        providerRequestOrdinal: null,
+        providerStartAt: null,
+        runtimeAttemptId: null,
+        temporalSignalAcceptedAt: null,
+        updatedAt: instant("2026-06-02T12:00:00.000Z"),
+      };
+    }
+    return trace;
+  });
+  const update = vi.fn(async (args: LatencyTraceUpdateInput) => {
+    if (!trace) {
+      throw new Error("Trace update called before upsert.");
+    }
+    trace = {
+      ...trace,
+      ...args.data,
+      updatedAt: instant("2026-06-02T12:00:00.000Z"),
+    };
+    return trace;
+  });
+  const prisma = {
+    $queryRaw: queryRaw,
+    hostedIngressLatencyTrace: {
+      findMany,
+      upsert,
+      update,
+    },
+    readMailboxQuerySql: () => {
+      if (!mailboxQueryTemplate) {
+        return "";
+      }
+      return mailboxQueryTemplate.join("");
+    },
+    readMailboxQueryValues: () => mailboxQueryValues,
+    readTrace: () => trace,
+  };
+
+  return prisma as unknown as LatencyPrisma & {
+    readMailboxQuerySql: () => string;
+    readMailboxQueryValues: () => readonly (readonly unknown[])[];
+    readTrace: () => MutableLatencyTrace | null;
+  };
 }
 
 function instant(value: string): Date {
   return new Date(value);
 }
+
+type MutableLatencyTrace = LatencyTraceCreateInput & {
+  assistantInputId: string | null;
+  assistantInputStagedAt: Date | null;
+  createdAt: Date;
+  providerRequestOrdinal: number | null;
+  providerStartAt: Date | null;
+  runtimeAttemptId: string | null;
+  temporalSignalAcceptedAt: Date | null;
+  updatedAt: Date;
+};
+
+type LatencyTraceCreateInput = {
+  acceptedAt: Date;
+  id: string;
+  mailboxItemId: string;
+  mailboxLane: string;
+  mailboxLaneSeq: bigint;
+  source: string;
+  userId: string;
+};
+
+type LatencyTraceUpdateInput = {
+  data: Partial<Omit<MutableLatencyTrace, "id">>;
+  where: {
+    id: string;
+  };
+};
+
+type LatencyTraceUpsertInput = {
+  create: LatencyTraceCreateInput;
+  update: Record<string, never>;
+  where: {
+    mailboxItemId: string;
+  };
+};

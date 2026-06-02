@@ -13,7 +13,7 @@ import { getPrisma } from "../prisma";
 
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
-  "hostedIngressLatencyTrace" | "hostedMailboxItem"
+  "$queryRaw" | "hostedIngressLatencyTrace"
 >;
 
 type HostedIngressLatencyTraceRow = Awaited<
@@ -446,29 +446,69 @@ async function readTraceMailboxItem(
     mailboxItemId: string;
   },
 ) {
-  return await prisma.hostedMailboxItem.findFirst({
-    select: {
-      createdAt: true,
-      id: true,
-      lane: true,
-      laneSeq: true,
-      userId: true,
-    },
-    where: {
-      id: requireSafeLatencyIdentifier(
-        input.mailboxItemId,
-        "Hosted ingress latency mailboxItemId",
-      ),
-      ...(input.expectedUserId
-        ? {
-            userId: requireSafeLatencyIdentifier(
-              input.expectedUserId,
-              "Hosted ingress latency userId",
-            ),
-          }
-        : {}),
-    },
-  });
+  const mailboxItemId = requireSafeLatencyIdentifier(
+    input.mailboxItemId,
+    "Hosted ingress latency mailboxItemId",
+  );
+
+  if (input.expectedUserId) {
+    const expectedUserId = requireSafeLatencyIdentifier(
+      input.expectedUserId,
+      "Hosted ingress latency userId",
+    );
+    const rows = await prisma.$queryRaw<TraceMailboxItem[]>`
+      SELECT
+        id,
+        user_id AS "userId",
+        lane,
+        lane_seq AS "laneSeq",
+        (EXTRACT(EPOCH FROM (created_at AT TIME ZONE current_setting('TimeZone'))) * 1000)::bigint AS "acceptedAtEpochMs"
+      FROM hosted_mailbox_item
+      WHERE id = ${mailboxItemId}
+        AND user_id = ${expectedUserId}
+      LIMIT 1
+    `;
+    return parseTraceMailboxItem(rows[0]);
+  }
+
+  const rows = await prisma.$queryRaw<TraceMailboxItem[]>`
+    SELECT
+      id,
+      user_id AS "userId",
+      lane,
+      lane_seq AS "laneSeq",
+      (EXTRACT(EPOCH FROM (created_at AT TIME ZONE current_setting('TimeZone'))) * 1000)::bigint AS "acceptedAtEpochMs"
+    FROM hosted_mailbox_item
+    WHERE id = ${mailboxItemId}
+    LIMIT 1
+  `;
+  return parseTraceMailboxItem(rows[0]);
+}
+
+type TraceMailboxItem = {
+  acceptedAtEpochMs: bigint | number | string;
+  id: string;
+  lane: string;
+  laneSeq: bigint;
+  userId: string;
+};
+
+type NormalizedTraceMailboxItem = Omit<TraceMailboxItem, "acceptedAtEpochMs"> & {
+  acceptedAt: Date;
+};
+
+function parseTraceMailboxItem(row: TraceMailboxItem | undefined): NormalizedTraceMailboxItem | null {
+  if (!row) {
+    return null;
+  }
+  const acceptedAtEpochMs = normalizeEpochMs(row.acceptedAtEpochMs);
+  return {
+    acceptedAt: new Date(acceptedAtEpochMs),
+    id: row.id,
+    lane: row.lane,
+    laneSeq: row.laneSeq,
+    userId: row.userId,
+  };
 }
 
 async function upsertHostedIngressLatencyTraceFromMailboxItem(
@@ -480,7 +520,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
 ) {
   return await prisma.hostedIngressLatencyTrace.upsert({
     create: {
-      acceptedAt: input.mailboxItem.createdAt,
+      acceptedAt: input.mailboxItem.acceptedAt,
       id: randomUUID(),
       mailboxItemId: input.mailboxItem.id,
       mailboxLane: input.mailboxItem.lane,
@@ -553,6 +593,14 @@ function normalizeProviderRequestOrdinal(value: number): number {
     throw new TypeError("Hosted ingress latency provider request ordinal is invalid.");
   }
   return value;
+}
+
+function normalizeEpochMs(value: bigint | number | string): number {
+  const epochMs = typeof value === "bigint" ? Number(value) : Number(value);
+  if (!Number.isSafeInteger(epochMs)) {
+    throw new TypeError("Hosted ingress latency mailbox accepted timestamp is invalid.");
+  }
+  return epochMs;
 }
 
 function normalizeDashboardWindowHours(value: number | null | undefined): number {
