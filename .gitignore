@@ -5,6 +5,10 @@ dist/
 .dist-next/
 coverage/
 .DS_Store
+*.swp
+*.swo
+*.swn
+.swp
 .turbo/
 .tmp/
 .runtime/
