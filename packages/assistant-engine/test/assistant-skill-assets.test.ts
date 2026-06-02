@@ -135,7 +135,29 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('one lightweight, bounded experiment at a time')
     expect(raw).toContain('retrospective baseline')
     expect(raw).toContain(
-      'vault-cli assistant onboarding complete --reason <user_answered|user_declined>',
+      'Useful setup answers are persisted canonically when the user shared them',
+    )
+    expect(raw).toContain(
+      'vault-cli memory upsert "<identity memory>" --section Identity --format json',
+    )
+    expect(raw).toContain(
+      'vault-cli memory upsert "<context memory>" --section Context --format json',
+    )
+    expect(raw).toContain(
+      'vault-cli goal save "<goal title>" --status active --horizon ongoing --format json',
+    )
+    expect(raw).toContain('add `--domain <domain>` only when a clear domain exists')
+    expect(raw).toContain(
+      'After required canonical memory/goal writes succeed, mark onboarding complete',
+    )
+    expect(raw).toContain('If a required canonical write fails, do not mark onboarding complete')
+    expect(raw).toContain('On a retry after a failed or interrupted save')
+    expect(raw).toContain(
+      'Inspect existing memory/goals or use the returned record ids from earlier writes',
+    )
+    expect(raw).toContain('write only the missing facts')
+    expect(raw).toContain(
+      'When the user clearly declines onboarding, mark onboarding complete with `vault-cli assistant onboarding complete --reason user_declined` without creating memory or goal records',
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
