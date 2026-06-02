@@ -169,8 +169,27 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         message: "Hosted assistant Codex resume-failure diagnostics captured.",
         phase: "wake.running",
         redacted: {
+          ...Object.fromEntries(
+            Array.from({ length: 48 }, (_, index) => [
+              `genericResumeOverflow${index}Count`,
+              index,
+            ]),
+          ),
+          codexResumeFailureCodexAbortRequested: false,
+          codexResumeFailureCodexExitSignal: "SIGKILL",
           codexResumeFailureCodexFailureStage: "turn_failed",
           codexResumeFailureCodexTurnStatus: "failed",
+          codexResumeFailureCodexJsonEventCount: 3,
+          codexResumeFailureCodexLifecycleStage: "turn_running",
+          codexResumeFailureCodexLiveTurnOpen: true,
+          codexResumeFailureCodexPendingRpcCount: 1,
+          codexResumeFailureCodexPendingRpcMethod: "turn/start",
+          codexResumeFailureCodexProcessGroupPresent: true,
+          codexResumeFailureCodexProcessLifetimeMs: 2041,
+          codexResumeFailureCodexProviderRequestStarted: true,
+          codexResumeFailureCodexShutdownRequested: false,
+          codexResumeFailureCodexStderrBytes: 128,
+          codexResumeFailureCodexTerminationSignalSent: null,
           codexResumeFailureErrorCode: "ASSISTANT_CODEX_FAILED",
           codexResumeFailureErrorKind: "turn-failed",
           codexResumeFailureErrorMessage:
@@ -215,6 +234,19 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
       component: "assistant",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
+        codexResumeFailureCodexAbortRequested: false,
+        codexResumeFailureCodexExitSignal: "SIGKILL",
+        codexResumeFailureCodexJsonEventCount: 3,
+        codexResumeFailureCodexLifecycleStage: "turn_running",
+        codexResumeFailureCodexLiveTurnOpen: true,
+        codexResumeFailureCodexPendingRpcCount: 1,
+        codexResumeFailureCodexPendingRpcMethod: "turn/start",
+        codexResumeFailureCodexProcessGroupPresent: true,
+        codexResumeFailureCodexProcessLifetimeMs: 2041,
+        codexResumeFailureCodexProviderRequestStarted: true,
+        codexResumeFailureCodexShutdownRequested: false,
+        codexResumeFailureCodexStderrBytes: 128,
+        codexResumeFailureCodexTerminationSignalSent: null,
         codexResumeFailureErrorCode: "ASSISTANT_CODEX_FAILED",
         codexResumeFailureErrorKind: "turn-failed",
         codexResumeFailureErrorMessage:
@@ -247,6 +279,11 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
         codexResumeFailureErrorPreview: expect.anything(),
+      }),
+    );
+    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
+      expect.objectContaining({
+        genericResumeOverflow0Count: expect.anything(),
       }),
     );
     expect(JSON.stringify(logRequests)).not.toContain("private text should not persist");

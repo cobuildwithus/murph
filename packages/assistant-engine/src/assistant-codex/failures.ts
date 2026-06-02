@@ -115,6 +115,7 @@ export function buildCodexTurnFailedError(input: {
     parts.join(' '),
     {
       codexFailureDetailPresent: detail !== null,
+      codexDiagnosticsPresent: true,
       codexFailureStage: 'turn_failed',
       codexTurnStatus: input.status,
       providerActionCount: input.providerActionCount,
@@ -127,6 +128,7 @@ export function buildCodexTurnFailedError(input: {
 
 export function buildCodexFailure(input: {
   code: number | null
+  diagnostics?: CodexProcessExitDiagnostics
   fallback: string | null
   providerActionCount: number
   codexThreadId: string | null
@@ -160,10 +162,17 @@ export function buildCodexFailure(input: {
     {
       connectionLost,
       codexFailureDetailPresent: detail !== null,
+      codexDiagnosticsPresent: true,
       codexFailureStage: connectionLost ? 'connection_lost' : 'process_exit',
       codexStderrPresent: stderrTail !== null,
       ...(typeof input.code === 'number' ? { codexExitCode: input.code } : {}),
-      ...(input.signal ? { codexSignalPresent: true } : {}),
+      ...(input.signal
+        ? {
+            codexExitSignal: input.signal,
+            codexSignalPresent: true,
+          }
+        : {}),
+      ...buildCodexProcessExitDiagnosticsContext(input.diagnostics),
       providerActionCount: input.providerActionCount,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       codexThreadIdPresent: input.codexThreadId !== null,
@@ -191,6 +200,7 @@ export function isCodexUsageLimitFailureText(value: string | null): boolean {
 export function buildCodexProcessExitError(input: {
   abortRequested: boolean
   code: number | null
+  diagnostics?: CodexProcessExitDiagnostics
   fallback: string | null
   providerActionCount: number
   codexThreadId: string | null
@@ -201,11 +211,21 @@ export function buildCodexProcessExitError(input: {
     return buildCodexInterruptedError({
       providerActionCount: input.providerActionCount,
       codexThreadId: input.codexThreadId,
+      diagnostics: {
+        ...input.diagnostics,
+        abortRequested: input.abortRequested,
+      },
       signal: input.signal,
     })
   }
 
-  return buildCodexFailure(input)
+  return buildCodexFailure({
+    ...input,
+    diagnostics: {
+      ...input.diagnostics,
+      abortRequested: input.abortRequested,
+    },
+  })
 }
 
 export function buildCodexStdinFailureFallback(input: {
@@ -235,6 +255,7 @@ export function buildCodexStdinFailureFallback(input: {
 export function buildCodexInterruptedError(input: {
   providerActionCount: number
   codexThreadId: string | null
+  diagnostics?: CodexProcessExitDiagnostics
   signal: NodeJS.Signals | null
 }): VaultCliError {
   const parts = ['Codex app-server was interrupted.']
@@ -253,14 +274,36 @@ export function buildCodexInterruptedError(input: {
     'ASSISTANT_CODEX_INTERRUPTED',
     parts.join(' '),
     {
+      codexDiagnosticsPresent: true,
       codexFailureStage: 'interrupted',
-      ...(input.signal ? { codexSignalPresent: true } : {}),
+      ...(input.signal
+        ? {
+            codexExitSignal: input.signal,
+            codexSignalPresent: true,
+          }
+        : {}),
+      ...buildCodexProcessExitDiagnosticsContext(input.diagnostics),
       interrupted: true,
       providerActionCount: input.providerActionCount,
       codexThreadIdPresent: input.codexThreadId !== null,
       retryable: false,
     },
   )
+}
+
+export interface CodexProcessExitDiagnostics {
+  abortRequested?: boolean
+  jsonEventCount?: number
+  lifecycleStage?: string | null
+  liveTurnOpen?: boolean
+  pendingRpcCount?: number
+  pendingRpcMethod?: string | null
+  processGroupPresent?: boolean
+  processLifetimeMs?: number
+  providerRequestStarted?: boolean
+  shutdownRequested?: boolean
+  stderrBytes?: number
+  terminationSignalSent?: NodeJS.Signals | null
 }
 
 export function buildCodexConnectionFailureMessage(input: {
@@ -382,6 +425,115 @@ function tailText(value: string): string | null {
   }
 
   return lines.slice(-3).join(' ')
+}
+
+function buildCodexProcessExitDiagnosticsContext(
+  diagnostics: CodexProcessExitDiagnostics | undefined,
+): Record<string, boolean | number | string> {
+  if (!diagnostics) {
+    return {}
+  }
+
+  const context: Record<string, boolean | number | string> = {}
+  assignDiagnosticBoolean(
+    context,
+    'codexAbortRequested',
+    diagnostics.abortRequested,
+  )
+  assignDiagnosticNumber(
+    context,
+    'codexJsonEventCount',
+    diagnostics.jsonEventCount,
+  )
+  assignDiagnosticToken(
+    context,
+    'codexLifecycleStage',
+    diagnostics.lifecycleStage,
+  )
+  assignDiagnosticBoolean(context, 'codexLiveTurnOpen', diagnostics.liveTurnOpen)
+  assignDiagnosticNumber(
+    context,
+    'codexPendingRpcCount',
+    diagnostics.pendingRpcCount,
+  )
+  assignDiagnosticToken(
+    context,
+    'codexPendingRpcMethod',
+    diagnostics.pendingRpcMethod,
+  )
+  assignDiagnosticBoolean(
+    context,
+    'codexProcessGroupPresent',
+    diagnostics.processGroupPresent,
+  )
+  assignDiagnosticNumber(
+    context,
+    'codexProcessLifetimeMs',
+    diagnostics.processLifetimeMs,
+  )
+  assignDiagnosticBoolean(
+    context,
+    'codexProviderRequestStarted',
+    diagnostics.providerRequestStarted,
+  )
+  assignDiagnosticBoolean(
+    context,
+    'codexShutdownRequested',
+    diagnostics.shutdownRequested,
+  )
+  assignDiagnosticNumber(context, 'codexStderrBytes', diagnostics.stderrBytes)
+  assignDiagnosticToken(
+    context,
+    'codexTerminationSignalSent',
+    diagnostics.terminationSignalSent,
+  )
+
+  return context
+}
+
+function assignDiagnosticBoolean(
+  context: Record<string, boolean | number | string>,
+  key: string,
+  value: boolean | undefined,
+): void {
+  if (typeof value === 'boolean') {
+    context[key] = value
+  }
+}
+
+function assignDiagnosticNumber(
+  context: Record<string, boolean | number | string>,
+  key: string,
+  value: number | undefined,
+): void {
+  if (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    Number.isSafeInteger(value)
+  ) {
+    context[key] = value
+  }
+}
+
+function assignDiagnosticToken(
+  context: Record<string, boolean | number | string>,
+  key: string,
+  value: string | null | undefined,
+): void {
+  const token = normalizeDiagnosticToken(value)
+  if (token) {
+    context[key] = token
+  }
+}
+
+function normalizeDiagnosticToken(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value)
+  if (!normalized || !/^[A-Za-z][A-Za-z0-9_./:-]{0,63}$/u.test(normalized)) {
+    return null
+  }
+
+  return normalized
 }
 
 function readNodeErrorMessage(error: unknown): string | null {

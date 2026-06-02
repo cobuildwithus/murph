@@ -661,6 +661,40 @@ function buildCodexResumeFailureTraceEvent(input: {
       normalizeSafeCodexDiagnosticStructuralToken(
         readDiagnosticString(errorContext, 'codexTurnStatus'),
       ),
+    codexResumeFailureCodexAbortRequested:
+      readDiagnosticBoolean(errorContext, 'codexAbortRequested'),
+    codexResumeFailureCodexExitSignal:
+      normalizeSafeCodexDiagnosticToken(
+        readDiagnosticString(errorContext, 'codexExitSignal'),
+      ),
+    codexResumeFailureCodexJsonEventCount:
+      readDiagnosticNonnegativeNumber(errorContext, 'codexJsonEventCount'),
+    codexResumeFailureCodexLifecycleStage:
+      normalizeSafeCodexDiagnosticToken(
+        readDiagnosticString(errorContext, 'codexLifecycleStage'),
+      ),
+    codexResumeFailureCodexLiveTurnOpen:
+      readDiagnosticBoolean(errorContext, 'codexLiveTurnOpen'),
+    codexResumeFailureCodexPendingRpcCount:
+      readDiagnosticNonnegativeNumber(errorContext, 'codexPendingRpcCount'),
+    codexResumeFailureCodexPendingRpcMethod:
+      normalizeSafeCodexDiagnosticMethod(
+        readDiagnosticString(errorContext, 'codexPendingRpcMethod'),
+      ),
+    codexResumeFailureCodexProcessGroupPresent:
+      readDiagnosticBoolean(errorContext, 'codexProcessGroupPresent'),
+    codexResumeFailureCodexProcessLifetimeMs:
+      readDiagnosticNonnegativeNumber(errorContext, 'codexProcessLifetimeMs'),
+    codexResumeFailureCodexProviderRequestStarted:
+      readDiagnosticBoolean(errorContext, 'codexProviderRequestStarted'),
+    codexResumeFailureCodexShutdownRequested:
+      readDiagnosticBoolean(errorContext, 'codexShutdownRequested'),
+    codexResumeFailureCodexStderrBytes:
+      readDiagnosticNonnegativeNumber(errorContext, 'codexStderrBytes'),
+    codexResumeFailureCodexTerminationSignalSent:
+      normalizeSafeCodexDiagnosticToken(
+        readDiagnosticString(errorContext, 'codexTerminationSignalSent'),
+      ),
     codexResumeFailureErrorCode: readCodexDiagnosticErrorCode(input.error),
     codexResumeFailureErrorKind: classifyCodexResumeFailureErrorKind(input.error),
     codexResumeFailureErrorMessage:
@@ -1251,6 +1285,16 @@ function readDiagnosticBoolean(
 ): boolean | null {
   const value = record?.[key]
   return typeof value === 'boolean' ? value : null
+}
+
+function readDiagnosticNonnegativeNumber(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): number | null {
+  const value = record?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null
 }
 
 function asDiagnosticRecord(value: unknown): Record<string, unknown> | null {

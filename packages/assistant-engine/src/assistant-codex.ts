@@ -67,6 +67,7 @@ import {
   buildCodexProcessExitError,
   buildCodexStdinFailureFallback,
   buildCodexTurnFailedError,
+  type CodexProcessExitDiagnostics,
   extractCodexThreadIdFromResult,
   extractCodexThreadPathFromResult,
   extractCodexTurnErrorMessage,
@@ -504,6 +505,8 @@ async function runCodexAppServerTurn(
   let settled = false
   let normalShutdown = false
   let abortRequested = false
+  let lifecycleStage = 'spawn_start'
+  let terminationSignalSent: NodeJS.Signals | null = null
   let nextRequestId = 1
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
@@ -537,6 +540,26 @@ async function runCodexAppServerTurn(
   })
   void turnCompleted.catch(() => undefined)
   let cleanupAbortListener = () => {}
+
+  const readPendingRpcMethod = (): string | null => {
+    const pending = pendingRequests.values().next().value
+    return pending?.method ?? null
+  }
+
+  const buildProcessExitDiagnostics = (): CodexProcessExitDiagnostics => ({
+    abortRequested,
+    jsonEventCount: jsonEvents.length,
+    lifecycleStage,
+    liveTurnOpen,
+    pendingRpcCount: pendingRequests.size,
+    pendingRpcMethod: readPendingRpcMethod(),
+    processGroupPresent: processGroupPid !== null,
+    processLifetimeMs: Math.max(0, Date.now() - appServerStartedAt),
+    providerRequestStarted: providerRequestStartedNotified,
+    shutdownRequested: normalShutdown,
+    stderrBytes: Buffer.byteLength(stderr, 'utf8'),
+    terminationSignalSent,
+  })
 
   const annotateTurnFailureContext = (error: unknown) => {
     if (!error || typeof error !== 'object') {
@@ -642,6 +665,7 @@ async function runCodexAppServerTurn(
       buildCodexProcessExitError({
         abortRequested,
         code: child.exitCode,
+        diagnostics: buildProcessExitDiagnostics(),
         fallback: buildCodexStdinFailureFallback({
           error,
           lastEventError,
@@ -704,6 +728,7 @@ async function runCodexAppServerTurn(
         })
         nextRequestId += 1
       }
+      terminationSignalSent = 'SIGINT'
       signalCodexAppServerChild({
         child,
         processGroupPid,
@@ -1161,6 +1186,7 @@ async function runCodexAppServerTurn(
       buildCodexProcessExitError({
         abortRequested,
         code,
+        diagnostics: buildProcessExitDiagnostics(),
         fallback: lastEventError,
         providerActionCount,
         codexThreadId,
@@ -1171,7 +1197,9 @@ async function runCodexAppServerTurn(
   })
 
   try {
+    lifecycleStage = 'spawn_wait'
     await waitForCodexSpawn(child)
+    lifecycleStage = 'initialize'
     emitAppServerTimingTrace('spawn-ready')
     await withCodexRpcTimeout(
       sendRequest('initialize', {
@@ -1187,10 +1215,12 @@ async function runCodexAppServerTurn(
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'initialize',
     )
+    lifecycleStage = 'initialized'
     emitAppServerTimingTrace('initialized')
     sendNotification('initialized', {})
 
     const threadTimingStage = codexThreadId ? 'thread-resumed' : 'thread-started'
+    lifecycleStage = codexThreadId ? 'thread_resume' : 'thread_start'
     const threadResult = await withCodexRpcTimeout(
       codexThreadId
         ? sendRequest(
@@ -1211,6 +1241,7 @@ async function runCodexAppServerTurn(
       threadPath: extractCodexThreadPathFromResult(threadResult),
     })
     emitAppServerTimingTrace(threadTimingStage)
+    lifecycleStage = threadTimingStage
     if (!codexThreadId) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_FAILED',
@@ -1218,6 +1249,7 @@ async function runCodexAppServerTurn(
       )
     }
 
+    lifecycleStage = 'turn_start'
     const turnResult = await withCodexRpcTimeout(
       sendRequest(
         'turn/start',
@@ -1231,21 +1263,26 @@ async function runCodexAppServerTurn(
       'turn/start',
     )
     turnId = extractCodexTurnIdFromResult(turnResult) ?? turnId
+    lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
     notifyProviderRequestStarted()
     registerLiveTurn()
 
+    lifecycleStage = 'turn_running'
     await turnCompleted
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
+    lifecycleStage = 'turn_completed'
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
     normalShutdown = true
+    lifecycleStage = 'shutdown'
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,
       processGroupPid,
     })
+    lifecycleStage = 'shutdown_complete'
     emitAppServerTimingTrace('shutdown')
     if (stdinFailure) {
       throw stdinFailure
@@ -1255,6 +1292,7 @@ async function runCodexAppServerTurn(
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true
+    lifecycleStage = 'error_cleanup'
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,

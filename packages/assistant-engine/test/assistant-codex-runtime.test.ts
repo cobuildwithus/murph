@@ -3706,16 +3706,11 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('ignores post-shutdown EPIPE from stdin.end after a normal completion', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-clean-shutdown-')
+  it('attaches metadata-only process diagnostics when the app-server exits with SIGKILL mid-turn', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-sigkill-')
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
-      child.stdin.onEnd = () => {
-        queueMicrotask(() => {
-          child.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
-        })
-      }
 
       queueMicrotask(() => {
         void (async () => {
@@ -3727,7 +3722,7 @@ describe('assistant codex runtime', () => {
               id: 2,
               result: {
                 thread: {
-                  id: 'thread-clean-shutdown',
+                  id: 'thread-sigkill-runtime',
                 },
               },
             }),
@@ -3738,12 +3733,155 @@ describe('assistant codex runtime', () => {
               id: 3,
               result: {
                 turn: {
+                  id: 'turn-sigkill-runtime',
+                },
+              },
+            }),
+          )
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          child.emit('close', null, 'SIGKILL')
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'die during turn',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexAbortRequested: false,
+        codexDiagnosticsPresent: true,
+        codexExitSignal: 'SIGKILL',
+        codexFailureStage: 'process_exit',
+        codexJsonEventCount: 3,
+        codexLifecycleStage: 'turn_running',
+        codexPendingRpcCount: 0,
+        codexProcessLifetimeMs: expect.any(Number),
+        codexProviderRequestStarted: true,
+        codexShutdownRequested: false,
+        codexSignalPresent: true,
+        codexStderrBytes: 0,
+        codexThreadIdPresent: true,
+        providerActionCount: 0,
+        retryable: false,
+      },
+      message: 'Codex app-server failed. signal SIGKILL.',
+    })
+  })
+
+  it('captures pending RPC diagnostics when the app-server exits during turn start', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-pending-rpc-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-pending-rpc',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stderr.write('killed while waiting for turn/start response\n')
+          child.emit('close', null, 'SIGKILL')
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'die while turn start is pending',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexAbortRequested: false,
+        codexDiagnosticsPresent: true,
+        codexExitSignal: 'SIGKILL',
+        codexFailureStage: 'process_exit',
+        codexJsonEventCount: 2,
+        codexLifecycleStage: 'turn_start',
+        codexLiveTurnOpen: false,
+        codexPendingRpcCount: 1,
+        codexPendingRpcMethod: 'turn/start',
+        codexProviderRequestStarted: false,
+        codexShutdownRequested: false,
+        codexSignalPresent: true,
+        codexStderrBytes: 'killed while waiting for turn/start response\n'.length,
+        codexThreadIdPresent: true,
+        providerActionCount: 0,
+        retryable: false,
+      },
+      message: expect.stringContaining('Codex app-server failed. signal SIGKILL.'),
+    })
+  })
+
+  it('ignores post-shutdown EPIPE from stdin.end after a normal completion', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-clean-shutdown-')
+    let child: MockChildProcess | null = null
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      child = spawnedChild
+      vi.mocked(process.kill).mockImplementation((pid, signal) => {
+        if (pid === -spawnedChild.pid && signal === 'SIGTERM') {
+          queueMicrotask(() => {
+            spawnedChild.emit('exit', null, signal)
+            spawnedChild.emit('close', null, signal)
+          })
+        }
+        return true
+      })
+      spawnedChild.stdin.onEnd = () => {
+        queueMicrotask(() => {
+          spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
+        })
+      }
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-clean-shutdown',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
                   id: 'turn-clean-shutdown',
                 },
               },
             }),
           )
-          child.stdout.write(
+          spawnedChild.stdout.write(
             jsonLine({
               method: 'turn/completed',
               params: {
@@ -3757,7 +3895,7 @@ describe('assistant codex runtime', () => {
         })()
       })
 
-      return child
+      return spawnedChild
     })
 
     await expect(
@@ -3768,6 +3906,10 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       sessionId: 'thread-clean-shutdown',
     })
+
+    const spawnedChild = requireMockChildProcess(child)
+    expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGKILL')
   })
 
   it('treats abort-race stdin EPIPE as interrupted, sends turn/interrupt, and signals the child group', async () => {
@@ -3853,6 +3995,10 @@ describe('assistant codex runtime', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
+        codexAbortRequested: true,
+        codexFailureStage: 'interrupted',
+        codexShutdownRequested: false,
+        codexTerminationSignalSent: 'SIGINT',
         interrupted: true,
         codexThreadIdPresent: true,
         retryable: false,
@@ -3870,6 +4016,7 @@ describe('assistant codex runtime', () => {
       },
     })
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGINT')
+    expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGKILL')
     expect(spawnedChild.kill).not.toHaveBeenCalledWith('SIGINT')
   })
 

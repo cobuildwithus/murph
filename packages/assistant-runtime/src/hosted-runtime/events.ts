@@ -150,6 +150,28 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
   "timeout",
   "usage-limit",
 ]);
+const HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES = new Set([
+  "SIGINT",
+  "SIGKILL",
+  "SIGTERM",
+]);
+const HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES = new Set([
+  "error_cleanup",
+  "initialize",
+  "initialized",
+  "shutdown",
+  "shutdown_complete",
+  "spawn_start",
+  "spawn_wait",
+  "thread-resumed",
+  "thread-started",
+  "thread_resume",
+  "thread_start",
+  "turn_completed",
+  "turn_running",
+  "turn_start",
+  "turn_started",
+]);
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "initialized",
   "shutdown",
@@ -168,11 +190,6 @@ const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
-const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_PRESERVED_KEYS = [
-  "codexActionKinds",
-  "codexActionSlowKinds",
-  "codexActionToolSummaries",
-] as const;
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
   "rpc.error",
@@ -257,6 +274,11 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS = [
   "codexInvalidOutputFailureOutputStringLengths",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS = [
+  "codexResumeFailureCodexAbortRequested",
+  "codexResumeFailureCodexLiveTurnOpen",
+  "codexResumeFailureCodexProcessGroupPresent",
+  "codexResumeFailureCodexProviderRequestStarted",
+  "codexResumeFailureCodexShutdownRequested",
   "codexResumeFailureErrorMessagePresent",
   "codexResumeFailureResumeMatchesFailureSession",
   "codexResumeFailureResumeSessionPresent",
@@ -265,6 +287,10 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS = [
   "codexResumeFailureTurnPresent",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS = [
+  "codexResumeFailureCodexJsonEventCount",
+  "codexResumeFailureCodexPendingRpcCount",
+  "codexResumeFailureCodexProcessLifetimeMs",
+  "codexResumeFailureCodexStderrBytes",
   "codexResumeFailureErrorMessageLength",
   "codexResumeFailureEventCount",
   "codexResumeFailureProviderActionCount",
@@ -746,15 +772,19 @@ function readHostedAssistantProviderDiagnosticTrace(
 function sanitizeHostedAssistantProviderDiagnosticDetails(
   details: HostedExecutionStructuredLogDetails,
 ): HostedExecutionStructuredLogDetails {
-  const sanitized = sanitizeHostedExecutionStructuredLogDetails(details) ?? {};
+  const sanitized: HostedExecutionStructuredLogDetails = {};
 
-  for (const key of HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_PRESERVED_KEYS) {
-    if (!(key in details)) {
+  for (const [key, value] of Object.entries(details)) {
+    if (!/^[A-Za-z0-9_.-]{1,64}$/u.test(key)) {
       continue;
     }
-    const sanitizedValue = sanitizeHostedExecutionStructuredLogDetails({
-      [key]: details[key],
-    })?.[key];
+
+    if (value === null) {
+      sanitized[key] = null;
+      continue;
+    }
+
+    const sanitizedValue = sanitizeHostedExecutionStructuredLogDetails({ [key]: value })?.[key];
     if (sanitizedValue !== undefined) {
       sanitized[key] = sanitizedValue;
     }
@@ -1143,6 +1173,42 @@ function readHostedAssistantCodexResumeFailureDiagnosticTrace(
       record,
       "codexResumeFailureCodexTurnStatus",
       HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureCodexExitSignal",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureCodexExitSignal",
+      HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureCodexLifecycleStage",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureCodexLifecycleStage",
+      HOSTED_ASSISTANT_CODEX_PROCESS_LIFECYCLE_STAGE_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureCodexPendingRpcMethod",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureCodexPendingRpcMethod",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureCodexTerminationSignalSent",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureCodexTerminationSignalSent",
+      HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES,
     ),
   );
   for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS) {

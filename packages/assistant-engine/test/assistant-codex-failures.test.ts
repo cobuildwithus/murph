@@ -302,6 +302,7 @@ describe('assistant Codex failure helpers', () => {
         connectionLost: false,
         codexFailureDetailPresent: false,
         codexFailureStage: 'process_exit',
+        codexExitSignal: 'SIGTERM',
         codexSignalPresent: true,
         codexStderrPresent: false,
         providerActionCount: 3,
@@ -310,6 +311,102 @@ describe('assistant Codex failure helpers', () => {
       },
       message: 'Codex app-server failed. signal SIGTERM.',
     })
+
+    expect(
+      buildCodexProcessExitError({
+        abortRequested: false,
+        code: null,
+        diagnostics: {
+          abortRequested: false,
+          jsonEventCount: 3,
+          lifecycleStage: 'turn_running',
+          liveTurnOpen: true,
+          pendingRpcCount: 1,
+          pendingRpcMethod: 'turn/start',
+          processGroupPresent: true,
+          processLifetimeMs: 2_041,
+          providerRequestStarted: true,
+          shutdownRequested: false,
+          stderrBytes: 128,
+          terminationSignalSent: null,
+        },
+        fallback: null,
+        providerActionCount: 0,
+        codexThreadId: 'thread-sigkill-diagnostics',
+        signal: 'SIGKILL',
+        stderr: '',
+      }),
+    ).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexAbortRequested: false,
+        codexExitSignal: 'SIGKILL',
+        codexFailureStage: 'process_exit',
+        codexJsonEventCount: 3,
+        codexLifecycleStage: 'turn_running',
+        codexLiveTurnOpen: true,
+        codexPendingRpcCount: 1,
+        codexPendingRpcMethod: 'turn/start',
+        codexProcessGroupPresent: true,
+        codexProcessLifetimeMs: 2041,
+        codexProviderRequestStarted: true,
+        codexShutdownRequested: false,
+        codexSignalPresent: true,
+        codexStderrBytes: 128,
+        providerActionCount: 0,
+      },
+      message: 'Codex app-server failed. signal SIGKILL.',
+    })
+
+    const interruptedWithDiagnostics = buildCodexProcessExitError({
+      abortRequested: true,
+      code: null,
+      diagnostics: {
+        abortRequested: false,
+        jsonEventCount: Number.POSITIVE_INFINITY,
+        lifecycleStage: 'turn running with details',
+        pendingRpcCount: -1,
+        pendingRpcMethod: 'turn start with details',
+        processLifetimeMs: 3.5,
+        shutdownRequested: true,
+        stderrBytes: 0,
+        terminationSignalSent: 'SIGTERM',
+      },
+      fallback: null,
+      providerActionCount: 0,
+      codexThreadId: null,
+      signal: 'SIGTERM',
+      stderr: '',
+    })
+    expect(interruptedWithDiagnostics).toMatchObject({
+      code: 'ASSISTANT_CODEX_INTERRUPTED',
+      context: {
+        codexAbortRequested: true,
+        codexDiagnosticsPresent: true,
+        codexExitSignal: 'SIGTERM',
+        codexFailureStage: 'interrupted',
+        codexShutdownRequested: true,
+        codexStderrBytes: 0,
+        codexTerminationSignalSent: 'SIGTERM',
+        interrupted: true,
+      },
+      message: 'Codex app-server was interrupted. signal SIGTERM.',
+    })
+    expect(interruptedWithDiagnostics.context).not.toHaveProperty(
+      'codexJsonEventCount',
+    )
+    expect(interruptedWithDiagnostics.context).not.toHaveProperty(
+      'codexLifecycleStage',
+    )
+    expect(interruptedWithDiagnostics.context).not.toHaveProperty(
+      'codexPendingRpcCount',
+    )
+    expect(interruptedWithDiagnostics.context).not.toHaveProperty(
+      'codexPendingRpcMethod',
+    )
+    expect(interruptedWithDiagnostics.context).not.toHaveProperty(
+      'codexProcessLifetimeMs',
+    )
 
     const connectionLoss = buildCodexFailure({
       code: 1,

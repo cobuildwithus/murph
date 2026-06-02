@@ -616,6 +616,57 @@ describe('assistant auto-reply failure observability', () => {
     })
   })
 
+  it('preserves metadata-only Codex process diagnostics for runtime logs', () => {
+    const error = Object.assign(
+      new Error('Codex app-server failed. signal SIGKILL.'),
+      {
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexAbortRequested: false,
+          codexExitSignal: 'SIGKILL',
+          codexJsonEventCount: 3,
+          codexLifecycleStage: 'turn_running',
+          codexLiveTurnOpen: true,
+          codexPendingRpcCount: 1,
+          codexPendingRpcMethod: 'turn/start',
+          codexProcessGroupPresent: true,
+          codexProcessLifetimeMs: 2041,
+          codexProviderRequestStarted: true,
+          codexShutdownRequested: false,
+          codexStderrBytes: 128,
+          codexThreadId: 'raw-thread-id-should-not-persist',
+          codexThreadIdPresent: true,
+          retryable: false,
+        },
+      },
+    )
+
+    const snapshot = describeAssistantAutoReplyFailure(error)
+
+    expect(snapshot).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      kind: 'provider',
+      safeSummary: 'assistant provider failed (ASSISTANT_CODEX_FAILED)',
+    })
+    expect(snapshot.context).toEqual({
+      codexAbortRequested: false,
+      codexExitSignal: 'SIGKILL',
+      codexJsonEventCount: 3,
+      codexLifecycleStage: 'turn_running',
+      codexLiveTurnOpen: true,
+      codexPendingRpcCount: 1,
+      codexPendingRpcMethod: 'turn/start',
+      codexProcessGroupPresent: true,
+      codexProcessLifetimeMs: 2041,
+      codexProviderRequestStarted: true,
+      codexShutdownRequested: false,
+      codexStderrBytes: 128,
+      codexThreadIdPresent: true,
+      retryable: false,
+    })
+    expect(JSON.stringify(snapshot.context)).not.toContain('raw-thread-id')
+  })
+
   it('classifies delivery failures and sanitizes allowed array context values', () => {
     const error = Object.assign(
       new Error('Outbound delivery failed for this reply.'),
