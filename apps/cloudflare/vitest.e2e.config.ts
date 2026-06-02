@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
+import { BaseSequencer, type TestSpecification } from "vitest/node";
 
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
@@ -46,6 +47,12 @@ function shouldIgnoreVitestSourceMapParseError(code: string, error: unknown): bo
     && code.includes('"inlineSourceMap"');
 }
 
+class HostedLocalE2eSequencer extends BaseSequencer {
+  override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
+    return files;
+  }
+}
+
 export default defineConfig({
   resolve: {
     alias: [
@@ -64,6 +71,9 @@ export default defineConfig({
     include: [path.join(cloudflareDir, "test", "*e2e.test.ts")],
     maxWorkers: 1,
     name: "cloudflare-hosted-local-e2e",
+    sequence: {
+      sequencer: HostedLocalE2eSequencer,
+    },
     testTimeout: 600_000,
   },
 });

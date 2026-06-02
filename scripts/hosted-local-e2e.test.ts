@@ -78,26 +78,23 @@ describe("hosted-local E2E suite preparation", () => {
     const vitestCalls = runForegroundCommand.mock.calls
       .map(([call]) => call)
       .filter((call) => call.args.includes("vitest"));
-    expect(vitestCalls.length).toBeGreaterThan(1);
+    expect(vitestCalls).toHaveLength(1);
     expect(vitestCalls[0]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
       ]),
       command: "pnpm",
       env: expect.objectContaining({
         MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+        MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE: "1",
         MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
           expect.stringMatching(/^hosted-local-e2e-/u),
       }),
-      label: expect.stringMatching(
-        /^Hosted local full-stack e2e scenario 1\/\d+ checkpoint-baseline$/u,
-      ),
+      label: "Hosted local full-stack e2e suite",
     }));
-    expect(vitestCalls[0]?.args).not.toContain(
-      "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
-    );
-    expect(cleanupHostedRunnerContainers).toHaveBeenCalled();
+    expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(3);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({
       ignoreErrors: false,
       scope: "e2e-builds",
@@ -140,7 +137,7 @@ describe("hosted-local E2E suite preparation", () => {
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
       ]),
-      label: "Hosted local full-stack e2e suite",
+      label: "Hosted local full-stack e2e scenario 1/1 checkpoint-baseline",
     }));
   });
 });

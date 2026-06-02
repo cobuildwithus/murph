@@ -1,4 +1,4 @@
-import { access, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
 
@@ -70,6 +70,11 @@ const defaultConfig: HostedLocalDevConfig = {
   workerPort: 8787,
   workerProtocol: "http",
 };
+
+const hostedLocalE2eRunnerSmokeOnceEnv =
+  "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE";
+const hostedLocalE2eRunnerSmokeProvedBuildIdEnv =
+  "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID";
 
 const runCommand = vi.fn<(
   command: string,
@@ -217,7 +222,11 @@ vi.mock("node:fs/promises", () => ({
   chmod: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
-  readFile: vi.fn(async () => ""),
+  readFile: vi.fn(async () => {
+    const error = new Error("File not found") as Error & { code: string };
+    error.code = "ENOENT";
+    throw error;
+  }),
   rename: vi.fn(async () => {}),
   rm: vi.fn(async () => {}),
   symlink: vi.fn(async () => {}),
@@ -1501,6 +1510,98 @@ describe("hosted local dev stack", () => {
       "pnpm",
       ["--dir", "apps/cloudflare", "deploy:smoke"],
       expect.any(Object),
+    );
+  });
+
+  it("marks a successful aggregate E2E runner container smoke proof by build id", async () => {
+    vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
+    vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipLinqWebhookRegister: true,
+      skipWeb: true,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    spawnChildProcess.mockReturnValueOnce(
+      createBufferedChild({ exitCode: null, name: "cloudflare", pid: 133 }),
+    );
+
+    const environmentModule = await import("./environment.ts");
+    const expectedBuildId = environmentModule.buildHostedRunnerLocalBuildId(
+      "aggregate-smoke-build",
+    );
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_ARTIFACT_DIR: ".artifacts/hosted-local/test",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "aggregate-smoke-build",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "deploy:smoke"],
+      expect.any(Object),
+    );
+    expect(process.env[hostedLocalE2eRunnerSmokeProvedBuildIdEnv])
+      .toBe(expectedBuildId);
+  });
+
+  it("skips repeated aggregate E2E runner container smoke only for the proved build id", async () => {
+    const environmentModule = await import("./environment.ts");
+    const expectedBuildId = environmentModule.buildHostedRunnerLocalBuildId(
+      "aggregate-smoke-build",
+    );
+    vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
+    vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
+    vi.mocked(readFile).mockResolvedValueOnce(
+      `${JSON.stringify({ buildId: expectedBuildId })}\n`,
+    );
+    const stderrTarget = new CapturingWritable();
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipLinqWebhookRegister: true,
+      skipWeb: true,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    spawnChildProcess.mockReturnValueOnce(
+      createBufferedChild({ exitCode: null, name: "cloudflare", pid: 134 }),
+    );
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_ARTIFACT_DIR: ".artifacts/hosted-local/test",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "aggregate-smoke-build",
+      },
+      stderrTarget,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/cloudflare", "deploy:smoke"],
+      expect.any(Object),
+    );
+    expect(readFile).toHaveBeenCalledWith(
+      expect.stringContaining("runner-smoke-proved.json"),
+      "utf8",
+    );
+    expect(stderrTarget.text()).toContain(
+      "Skipping runner container deploy-smoke; already proved for this hosted-local E2E run.",
     );
   });
 

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, chmod, mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -135,6 +135,12 @@ const STRIPE_WEBHOOK_FORWARD_PATH = "/api/hosted-onboarding/stripe/webhook";
 const STRIPE_LISTENER_SECRET_CAPTURE_TIMEOUT_MS = 15_000;
 const HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV = "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV = "MURPH_DEV_PRESERVE_DOCKER_CONFIG";
+const HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV =
+  "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE";
+const HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV =
+  "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID";
+const HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROOF_FILE =
+  "runner-smoke-proved.json";
 const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
@@ -1490,7 +1496,14 @@ async function maybeRunRunnerContainerSmoke(input: {
   stderrTarget?: NodeJS.WritableStream;
   workerBaseUrl: string;
 }): Promise<void> {
-  if (input.config.skipRunnerSmoke || input.env === null) {
+  if (input.env === null || input.config.skipRunnerSmoke) {
+    return;
+  }
+
+  if (await hasHostedLocalE2eRunnerSmokeProof(input.env)) {
+    input.stderrTarget?.write(
+      "[setup] Skipping runner container deploy-smoke; already proved for this hosted-local E2E run.\n",
+    );
     return;
   }
 
@@ -1508,12 +1521,98 @@ async function maybeRunRunnerContainerSmoke(input: {
       },
       name: "setup",
     });
+    await markHostedLocalE2eRunnerSmokeProved(input.env);
   } catch (error) {
     if (requiresHostedLocalE2eIsolation(input.env)) {
       throw error;
     }
     writeRunnerContainerSmokeWarning(input.stderrTarget, error);
   }
+}
+
+async function hasHostedLocalE2eRunnerSmokeProof(env: NodeJS.ProcessEnv): Promise<boolean> {
+  if (!shouldRunHostedLocalE2eRunnerSmokeOnce(env)) {
+    return false;
+  }
+
+  const buildId = env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim();
+  if (!buildId) {
+    return false;
+  }
+
+  return process.env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV]?.trim() === buildId
+    || env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV]?.trim() === buildId
+    || (await readHostedLocalE2eRunnerSmokeProofBuildId(env)) === buildId;
+}
+
+async function markHostedLocalE2eRunnerSmokeProved(env: NodeJS.ProcessEnv): Promise<void> {
+  if (!shouldRunHostedLocalE2eRunnerSmokeOnce(env)) {
+    return;
+  }
+
+  const buildId = env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim();
+  if (!buildId) {
+    return;
+  }
+
+  env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV] = buildId;
+  process.env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV] = buildId;
+  const proofPath = resolveHostedLocalE2eRunnerSmokeProofPath(env);
+  if (proofPath === null) {
+    return;
+  }
+
+  await writeFile(
+    proofPath,
+    `${JSON.stringify({
+      buildId,
+      provedAt: new Date().toISOString(),
+    })}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+}
+
+function shouldRunHostedLocalE2eRunnerSmokeOnce(env: NodeJS.ProcessEnv): boolean {
+  return env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV] === "1"
+    && requiresHostedLocalE2eIsolation(env);
+}
+
+async function readHostedLocalE2eRunnerSmokeProofBuildId(
+  env: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  const proofPath = resolveHostedLocalE2eRunnerSmokeProofPath(env);
+  if (proofPath === null) {
+    return null;
+  }
+
+  try {
+    const proof = JSON.parse(await readFile(proofPath, "utf8")) as {
+      buildId?: unknown;
+    };
+    return typeof proof.buildId === "string" ? proof.buildId.trim() || null : null;
+  } catch (error) {
+    if (
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function resolveHostedLocalE2eRunnerSmokeProofPath(env: NodeJS.ProcessEnv): string | null {
+  const artifactDir = env.MURPH_HOSTED_LOCAL_ARTIFACT_DIR?.trim();
+  if (!artifactDir) {
+    return null;
+  }
+
+  return path.join(artifactDir, HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROOF_FILE);
 }
 
 function writeRunnerContainerSmokeWarning(

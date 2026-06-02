@@ -64,6 +64,7 @@ const expectedScenarioFiles = [
 const controlledEnvKeys = [
   "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
   "MURPH_HEALTH_COMMONS_GENERATED_PREPARED",
+  "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE",
   "MURPH_DEV_LINQ_WEBHOOK_TUNNEL",
   "MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER",
   "MURPH_DEV_TEMPORAL",
@@ -149,8 +150,8 @@ describe("run-hosted-local-e2e", () => {
 
     await import("../scripts/run-hosted-local-e2e.ts");
 
-    expectVitestSpawnCalls(expectedScenarioFiles.length);
-    expectCleanupCalls(2 * expectedScenarioFiles.length + 1);
+    expectAggregateVitestSpawnCall();
+    expectCleanupCalls(3);
   });
 
   it("cleans up when the hosted-local vitest process fails", async () => {
@@ -162,9 +163,9 @@ describe("run-hosted-local-e2e", () => {
 
     await expect(import("../scripts/run-hosted-local-e2e.ts"))
       .rejects
-      .toThrow("Hosted local full-stack e2e scenario 1/11 checkpoint-baseline exited with code 1.");
+      .toThrow("Hosted local full-stack e2e suite exited with code 1.");
 
-    expectVitestSpawnCalls(1);
+    expectAggregateVitestSpawnCall();
     expectCleanupCalls(3);
   });
 
@@ -209,7 +210,7 @@ describe("run-hosted-local-e2e", () => {
     await expect(runPromise).resolves.toBeDefined();
     expect(interruptedChild.kill).toHaveBeenCalledWith("SIGINT");
     expect(process.exitCode).toBe(130);
-    expectVitestSpawnCalls(1);
+    expectAggregateVitestSpawnCall();
     expectCleanupCalls(3);
   });
 });
@@ -250,8 +251,8 @@ async function waitForSpawnCalls(count: number): Promise<void> {
   expect(spawnMock).toHaveBeenCalledTimes(count);
 }
 
-function expectVitestSpawnCalls(scenarioCount: number): void {
-  expect(spawnMock).toHaveBeenCalledTimes(3 + scenarioCount);
+function expectAggregateVitestSpawnCall(): void {
+  expect(spawnMock).toHaveBeenCalledTimes(4);
   const [baseCommand, baseArgs, baseOptions] = spawnMock.mock.calls[0] ?? [];
   expect(baseCommand).toBe("pnpm");
   expect(baseArgs).toEqual(["--dir", "apps/cloudflare", "runner:docker:base"]);
@@ -268,19 +269,19 @@ function expectVitestSpawnCalls(scenarioCount: number): void {
   expect(healthCommonsArgs).toEqual(["health-commons:generate"]);
   expect(healthCommonsOptions?.stdio).toBe("inherit");
 
-  for (let index = 0; index < scenarioCount; index += 1) {
-    const [command, args] = spawnMock.mock.calls[3 + index] ?? [];
-    expect(command).toBe("pnpm");
-    expect(args).toEqual([
-      "exec",
-      "vitest",
-      "run",
-      "--config",
-      "apps/cloudflare/vitest.e2e.config.ts",
-      expectedScenarioFiles[index],
-      "--no-coverage",
-    ]);
-  }
+  const [command, args] = spawnMock.mock.calls[3] ?? [];
+  expect(command).toBe("pnpm");
+  expect(args).toEqual([
+    "exec",
+    "vitest",
+    "run",
+    "--config",
+    "apps/cloudflare/vitest.e2e.config.ts",
+    ...expectedScenarioFiles,
+    "--bail",
+    "1",
+    "--no-coverage",
+  ]);
 
   const [, , options] = spawnMock.mock.calls[3] ?? [];
   expect(typeof options?.cwd).toBe("string");
@@ -299,6 +300,7 @@ function expectVitestSpawnCalls(scenarioCount: number): void {
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE).toBe("1");
   expect(options?.env.MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED).toBe("1");
   expect(options?.env.MURPH_HEALTH_COMMONS_GENERATED_PREPARED).toBe("1");
+  expect(options?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE).toBe("1");
   expect(options?.env.MURPH_DEV_TEMPORAL).toBe("managed");
   expect(options?.stdio).toBe("inherit");
 }
