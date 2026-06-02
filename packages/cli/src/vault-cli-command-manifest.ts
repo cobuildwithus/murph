@@ -1462,8 +1462,6 @@ export const vaultCliCommandDescriptors = [
       'listAttachments',
       'showAttachment',
       'showAttachmentStatus',
-      'parseAttachment',
-      'reparseAttachment',
       'promoteMeal',
       'promoteDocument',
       'promoteJournal',

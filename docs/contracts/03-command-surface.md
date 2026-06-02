@@ -195,9 +195,6 @@ vault-cli inbox attachment inspect <attachmentId> --vault <path> [--request-id <
 vault-cli inbox attachment show <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment status <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment show-status <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox attachment decode <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox attachment parse <attachmentId> --vault <path> [--request-id <id>]
-vault-cli inbox attachment reparse <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox promote meal <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox promote document <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox promote journal <captureId> --vault <path> [--request-id <id>]
@@ -205,7 +202,7 @@ vault-cli inbox promote experiment-note <captureId> --vault <path> [--request-id
 vault-cli inbox model bundle <captureId> --vault <path> [--sensitive] [--request-id <id>]
 ```
 
-`vault-cli inbox attachment inspect` is the first-class attachment-content inspection surface. Normal inbox parsing already scans parseable image attachments for QR/barcode payloads and stores decoded text there when available. `vault-cli inbox attachment decode` is the explicit parser/decode trigger when existing extracted text is missing or a fresh parse is needed. `vault-cli inbox model bundle` remains an audit-only helper that materializes a normalized capture bundle plus image eligibility metadata under `derived/inbox/**/assistant/*.json`; `inbox model route` is not exposed in this hard cut.
+`vault-cli inbox attachment inspect` is the first-class attachment-content inspection surface. It exposes stored attachment metadata, raw inbox paths, and any audio/video transcript evidence produced by normal parser ingestion. PDFs, CSVs, documents, images, and other inspectable files stay path-first for the assistant and local tools instead of going through an attachment-level decode command. `vault-cli inbox model bundle` remains an audit-only helper that materializes a normalized capture bundle plus image eligibility metadata under `derived/inbox/**/assistant/*.json`; `inbox model route` is not exposed in this hard cut.
 
 Patch-style edit commands (`event`, `document`, `meal`, `workout`, `intervention`, `provider`, `food`, `recipe`) are typed surfaces. They do not expose `edit --input`, `edit --set`, or `edit --clear`; advanced whole-record JSON import remains on the explicit `import-json` commands where present.
 
@@ -696,7 +693,7 @@ The `plan.operations` values are internal core plan operation names, not public 
 - `provider show`, `food show`, `recipe show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
 - `provider list`, `food list`, `recipe list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
 - `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
-- `inbox attachment list|inspect|show|status|show-status` expose runtime attachment inspection over `.runtime` plus `derived/inbox/**`, while `decode|parse|reparse` are explicit parser-control surfaces when current extracted text is missing or needs a fresh run; they do not mutate canonical vault records.
+- `inbox attachment list|inspect|show|status|show-status` expose runtime attachment inspection over `.runtime`, raw inbox paths, and any `derived/inbox/**` transcript evidence. Attachment-level `decode|parse|reparse` commands are not exposed; normal inbox/parser runtime paths own audio/video transcription.
 
 ### `show`
 

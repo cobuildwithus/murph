@@ -114,12 +114,14 @@ test('inbox source list schema exposes an optional limit', async () => {
   assert.equal('limit' in schema.options.properties, true)
 })
 
-test('inbox attachment help surfaces inspect/status/decode wrappers', async () => {
+test('inbox attachment help surfaces read-only wrappers', async () => {
   const help = await runInboxRawCli(['inbox', 'attachment', '--help'])
 
   assert.match(help, /inspect/u)
   assert.match(help, /status/u)
-  assert.match(help, /decode/u)
+  assert.doesNotMatch(help, /(?:^|\n)\s*decode\s+/u)
+  assert.doesNotMatch(help, /(?:^|\n)\s*parse\s+/u)
+  assert.doesNotMatch(help, /(?:^|\n)\s*reparse\s+/u)
 })
 
 test('inbox help surfaces the first-pass operator commands', async () => {
@@ -213,7 +215,7 @@ test('inbox model help exposes bundle only and omits removed route backend optio
   assert.doesNotMatch(removedRouteOutput, /\bheadersJson\b/u)
 })
 
-test('inbox smoke scenarios keep the bundle audit helper and omit the removed route scenario', async () => {
+test('inbox smoke scenarios keep supported helpers and omit removed scenarios', async () => {
   const scenarioDirectory = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '../../../e2e/smoke/scenarios',
@@ -222,6 +224,9 @@ test('inbox smoke scenarios keep the bundle audit helper and omit the removed ro
 
   assert.ok(scenarioFiles.includes('inbox-model-bundle.json'))
   assert.ok(!scenarioFiles.includes('inbox-model-route.json'))
+  assert.ok(!scenarioFiles.includes('inbox-attachment-decode.json'))
+  assert.ok(!scenarioFiles.includes('inbox-attachment-parse.json'))
+  assert.ok(!scenarioFiles.includes('inbox-attachment-reparse.json'))
 })
 
 async function runInboxRawCli(args: string[]): Promise<string> {

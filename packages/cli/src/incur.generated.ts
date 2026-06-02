@@ -136,11 +136,8 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
-      'inbox attachment decode': { args: { attachmentId: string }; options: { requestId?: string } }
       'inbox attachment inspect': { args: { attachmentId: string }; options: { requestId?: string } }
       'inbox attachment list': { args: { captureId: string }; options: { requestId?: string; limit?: number } }
-      'inbox attachment parse': { args: { attachmentId: string }; options: { requestId?: string } }
-      'inbox attachment reparse': { args: { attachmentId: string }; options: { requestId?: string } }
       'inbox attachment show': { args: { attachmentId: string }; options: { requestId?: string } }
       'inbox attachment show-status': { args: { attachmentId: string }; options: { requestId?: string } }
       'inbox attachment status': { args: { attachmentId: string }; options: { requestId?: string } }

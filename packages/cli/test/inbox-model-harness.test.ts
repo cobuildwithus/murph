@@ -101,12 +101,6 @@ function createStubInboxServices(showResult: Awaited<ReturnType<InboxServices['s
     requeue: async () => {
       throw new Error('not implemented')
     },
-    parseAttachment: async () => {
-      throw new Error('not implemented')
-    },
-    reparseAttachment: async () => {
-      throw new Error('not implemented')
-    },
   }
 }
 

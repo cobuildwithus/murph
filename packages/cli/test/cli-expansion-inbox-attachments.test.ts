@@ -101,6 +101,13 @@ async function loadBuiltInboxRuntime() {
         extractedText?: string | null
         transcriptText?: string | null
       }): unknown
+      failAttachmentParseJob(input: {
+        jobId: string
+        attempt: number
+        providerId?: string | null
+        errorCode?: string | null
+        errorMessage: string
+      }): unknown
       }
     >
   }>(builtInboxRuntimeUrl)
@@ -249,7 +256,7 @@ async function captureSingleCapture(input: {
 }
 
 test.sequential(
-  'inbox attachment commands expose stored metadata, parse status, and requeue support',
+  'inbox attachment commands expose stored metadata and parse status',
   async () => {
     const fixture = await makeVaultFixture('murph-inbox-attachments')
     const audioPath = path.join(fixture.vaultRoot, 'voice-note.m4a')
@@ -412,77 +419,165 @@ test.sequential(
       assert.equal(documentStatus.attachmentId, documentAttachmentId)
       assert.equal(documentStatus.parseable, false)
       assert.equal(documentStatus.jobs.length, 0)
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'top-level inbox parse and requeue still control the media parser queue',
+  async () => {
+    const fixture = await makeVaultFixture('murph-inbox-parser-queue')
+    const firstAudioPath = path.join(fixture.vaultRoot, 'first-note.m4a')
+    const secondAudioPath = path.join(fixture.vaultRoot, 'second-note.m4a')
+    const services = createIntegratedInboxServices({
+      enableJournalPromotion: true,
+      loadCoreModule: loadBuiltCoreRuntime as never,
+      loadInboxModule: loadBuiltInboxRuntime as never,
+      loadParsersModule: async () => createFakeParsersModule() as never,
+    })
+
+    try {
+      await writeFile(firstAudioPath, 'audio-one', 'utf8')
+      await writeFile(secondAudioPath, 'audio-two', 'utf8')
+      await initializeInbox({
+        services,
+        vaultRoot: fixture.vaultRoot,
+      })
+      await seedInboxCapture({
+        vaultRoot: fixture.vaultRoot,
+        capture: {
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: 'telegram-parser-queue-1',
+          occurredAt: '2026-03-13T08:00:00.000Z',
+          receivedAt: '2026-03-13T08:00:10.000Z',
+          thread: {
+            id: 'chat-parser-queue',
+            title: 'Voice notes',
+            isDirect: true,
+          },
+          actor: {
+            id: 'telegram:user',
+            displayName: 'Friend',
+            isSelf: false,
+          },
+          text: 'Two voice notes attached',
+          attachments: [
+            {
+              kind: 'audio',
+              fileName: 'first-note.m4a',
+              mime: 'audio/mp4',
+              originalPath: firstAudioPath,
+            },
+            {
+              kind: 'audio',
+              fileName: 'second-note.m4a',
+              mime: 'audio/mp4',
+              originalPath: secondAudioPath,
+            },
+          ],
+          raw: {},
+        },
+      })
+      const capture = await captureSingleCapture({
+        services,
+        vaultRoot: fixture.vaultRoot,
+      })
+      const firstAttachmentId = capture.attachments[0]?.attachmentId
+      const secondAttachmentId = capture.attachments[1]?.attachmentId
+      assert.ok(firstAttachmentId)
+      assert.ok(secondAttachmentId)
 
       const parsed = requireData(
         await runInProcessInboxCli<{
-          attachmentId: string
           attempted: number
           succeeded: number
           failed: number
-          currentState: string | null
-          jobs: Array<{
-            state: string
-          }>
           results: Array<{
             attachmentId: string
-          }>
-        }>(
-          ['inbox', 'attachment', 'decode', attachmentId, '--vault', fixture.vaultRoot],
-          services,
-        ),
-      )
-      assert.equal(parsed.attachmentId, attachmentId)
-      assert.equal(parsed.attempted, 0)
-      assert.equal(parsed.succeeded, 0)
-      assert.equal(parsed.failed, 0)
-      assert.equal(parsed.currentState, 'succeeded')
-      assert.equal(parsed.jobs[0]?.state, 'succeeded')
-      assert.equal(parsed.results.length, 0)
-
-      const reparsed = requireData(
-        await runInProcessInboxCli<{
-          attachmentId: string
-          requeuedJobs: number
-          currentState: string | null
-          jobs: Array<{
-            state: string
-          }>
-        }>(
-          ['inbox', 'attachment', 'reparse', attachmentId, '--vault', fixture.vaultRoot],
-          services,
-        ),
-      )
-      assert.equal(reparsed.attachmentId, attachmentId)
-      assert.equal(reparsed.requeuedJobs, 1)
-      assert.equal(reparsed.currentState, 'pending')
-      assert.equal(reparsed.jobs[0]?.state, 'pending')
-
-      const parsedAfterRequeue = requireData(
-        await runInProcessInboxCli<{
-          attachmentId: string
-          attempted: number
-          succeeded: number
-          failed: number
-          currentState: string | null
-          results: Array<{
             providerId: string | null
             manifestPath: string | null
           }>
         }>(
-          ['inbox', 'attachment', 'parse', attachmentId, '--vault', fixture.vaultRoot],
+          [
+            'inbox',
+            'parse',
+            '--capture-id',
+            capture.captureId,
+            '--limit',
+            '1',
+            '--vault',
+            fixture.vaultRoot,
+          ],
           services,
         ),
       )
-      assert.equal(parsedAfterRequeue.attachmentId, attachmentId)
-      assert.equal(parsedAfterRequeue.attempted, 1)
-      assert.equal(parsedAfterRequeue.succeeded, 1)
-      assert.equal(parsedAfterRequeue.failed, 0)
-      assert.equal(parsedAfterRequeue.currentState, 'succeeded')
-      assert.equal(parsedAfterRequeue.results[0]?.providerId, 'fake-parser')
-      assert.equal(
-        parsedAfterRequeue.results[0]?.manifestPath,
-        'derived/inbox/parse-result.json',
+      assert.equal(parsed.attempted, 1)
+      assert.equal(parsed.succeeded, 1)
+      assert.equal(parsed.failed, 0)
+      assert.equal(parsed.results[0]?.attachmentId, firstAttachmentId)
+      assert.equal(parsed.results[0]?.providerId, 'fake-parser')
+
+      const inboxRuntime = await loadBuiltInboxRuntime()
+      const runtime = await inboxRuntime.openInboxRuntime({
+        vaultRoot: fixture.vaultRoot,
+      })
+      try {
+        const failedJob = runtime.claimNextAttachmentParseJob({
+          attachmentId: secondAttachmentId,
+        })
+        assert.ok(failedJob)
+        runtime.failAttachmentParseJob({
+          jobId: failedJob.jobId,
+          attempt: failedJob.attempts,
+          providerId: 'fake-parser',
+          errorCode: 'TEST_FAILED',
+          errorMessage: 'planned parser failure',
+        })
+      } finally {
+        runtime.close()
+      }
+
+      const requeued = requireData(
+        await runInProcessInboxCli<{
+          count: number
+          filters: {
+            attachmentId?: string
+            state?: string
+          }
+        }>(
+          [
+            'inbox',
+            'requeue',
+            '--attachment-id',
+            secondAttachmentId,
+            '--vault',
+            fixture.vaultRoot,
+          ],
+          services,
+        ),
       )
+      assert.equal(requeued.count, 1)
+      assert.equal(requeued.filters.attachmentId, secondAttachmentId)
+      assert.equal(requeued.filters.state, 'failed')
+
+      const status = requireData(
+        await runInProcessInboxCli<{
+          attachmentId: string
+          currentState: string | null
+          jobs: Array<{
+            state: string
+          }>
+        }>(
+          ['inbox', 'attachment', 'status', secondAttachmentId, '--vault', fixture.vaultRoot],
+          services,
+        ),
+      )
+      assert.equal(status.attachmentId, secondAttachmentId)
+      assert.equal(status.currentState, 'pending')
+      assert.equal(status.jobs[0]?.state, 'pending')
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
     }

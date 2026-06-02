@@ -508,7 +508,7 @@ function createConfig(
   return { connectors }
 }
 
-test('read ops cover list, attachment, parse, reparse, show, and search flows', async () => {
+test('read ops cover list, attachment status, show, and search flows', async () => {
   const paths = await createTempPaths()
   const audioAttachment = createAttachment({
     attachmentId: 'attachment-audio',
@@ -554,21 +554,7 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
     jobs: parseJobs,
     requeueCount: 2,
   })
-  const parserDrain: (
-    input?: { attachmentId?: string; captureId?: string; maxJobs?: number },
-  ) => Promise<ParserRuntimeDrainResult[]> = vi.fn(async () => [
-    {
-      errorCode: undefined,
-      errorMessage: undefined,
-      job: parseJobs[0],
-      manifestPath: path.join(paths.absoluteVaultRoot, 'derived/inbox/job-1.json'),
-      providerId: 'parser-1',
-      status: 'succeeded' as const,
-    },
-  ])
-  const env = createEnv({
-    requireParsers: vi.fn(async () => createParsersModule(parserDrain)),
-  })
+  const env = createEnv()
 
   stateMocks.withInitializedInboxRuntime.mockImplementation(
     async (_loadInbox, _vault, fn) =>
@@ -624,34 +610,14 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
   assert.equal(shownStatus.currentState, null)
   assert.equal(shownStatus.jobs.length, 0)
 
-  const parsed = await ops.parseAttachment({
+  const shownAudioStatus = await ops.showAttachmentStatus({
     attachmentId: 'attachment-audio',
     requestId: null,
     vault: paths.absoluteVaultRoot,
   })
-  assert.equal(parsed.parseable, true)
-  assert.equal(parsed.attempted, 1)
-  assert.equal(parsed.results[0]?.manifestPath, 'derived/inbox/job-1.json')
-
-  const reparsed = await ops.reparseAttachment({
-    attachmentId: 'attachment-audio',
-    requestId: null,
-    vault: paths.absoluteVaultRoot,
-  })
-  assert.equal(reparsed.requeuedJobs, 2)
-  assert.equal(reparsed.currentState, 'pending')
-
-  await assert.rejects(
-    () =>
-      ops.reparseAttachment({
-        attachmentId: 'attachment-other',
-        requestId: null,
-        vault: paths.absoluteVaultRoot,
-      }),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
-  )
+  assert.equal(shownAudioStatus.parseable, true)
+  assert.equal(shownAudioStatus.currentState, 'pending')
+  assert.equal(shownAudioStatus.jobs.length, 1)
 
   const shownCapture = await ops.show({
     captureId: capture.captureId,
@@ -759,7 +725,7 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
   )
 })
 
-test('read ops cover missing source filters, empty promotions, and missing reparse jobs', async () => {
+test('read ops cover missing source filters and empty promotions', async () => {
   const paths = await createTempPaths()
   const parseableAttachment = createAttachment({
     attachmentId: 'attachment-audio',
@@ -825,17 +791,6 @@ test('read ops cover missing source filters, empty promotions, and missing repar
   assert.equal(searched.hits[0]?.threadTitle, null)
   assert.equal(searched.hits[0]?.promotions.length, 0)
 
-  await assert.rejects(
-    () =>
-      ops.reparseAttachment({
-        attachmentId: 'attachment-audio',
-        requestId: null,
-        vault: paths.absoluteVaultRoot,
-      }),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_ATTACHMENT_PARSE_MISSING',
-  )
 })
 
 test('runtime ops parse, requeue, status, and stop stay deterministic', async () => {

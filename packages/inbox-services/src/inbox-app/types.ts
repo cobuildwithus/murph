@@ -21,8 +21,6 @@ import type {
 } from '@murphai/vault-usecases/runtime'
 import type {
   InboxAttachmentListResult,
-  InboxAttachmentParseResult,
-  InboxAttachmentReparseResult,
   InboxAttachmentShowResult,
   InboxAttachmentStatusResult,
   InboxBackfillResult,
@@ -659,12 +657,6 @@ export interface InboxServices {
   showAttachmentStatus(
     input: CommandContext & { attachmentId: string },
   ): Promise<InboxAttachmentStatusResult>
-  parseAttachment(
-    input: CommandContext & { attachmentId: string },
-  ): Promise<InboxAttachmentParseResult>
-  reparseAttachment(
-    input: CommandContext & { attachmentId: string },
-  ): Promise<InboxAttachmentReparseResult>
   show(input: ShowInput): Promise<InboxShowResult>
   search(input: SearchInput): Promise<InboxSearchResult>
   preserveDocumentAttachments(

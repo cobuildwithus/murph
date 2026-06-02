@@ -561,8 +561,6 @@ function createInboxServices(
     listAttachments: unreachable,
     showAttachment: unreachable,
     showAttachmentStatus: unreachable,
-    parseAttachment: unreachable,
-    reparseAttachment: unreachable,
     show: unreachable,
     search: unreachable,
     preserveDocumentAttachments: unreachable,

@@ -1663,18 +1663,16 @@ test('food help exposes schedule and no longer exposes add-daily', async () => {
   assert.doesNotMatch(help, /add-daily/u)
 })
 
-test('inbox attachment help exposes inspect, status, and decode commands', async () => {
+test('inbox attachment help exposes read-only inspect and status commands', async () => {
   const help = await runSourceCliRaw(['inbox', 'attachment', '--help'])
   const inspectHelp = await runSourceCliRaw(['inbox', 'attachment', 'inspect', '--help'])
   const statusHelp = await runSourceCliRaw(['inbox', 'attachment', 'status', '--help'])
-  const decodeHelp = await runSourceCliRaw(['inbox', 'attachment', 'decode', '--help'])
 
   assert.match(help, /inspect\s+Inspect one stored inbox attachment/u)
   assert.match(help, /status\s+Show the current runtime transcription status/u)
-  assert.match(
-    help,
-    /decode\s+Run the audio\/video transcription pipeline now when existing media transcript evidence is missing or needs a fresh parse/u,
-  )
+  assert.doesNotMatch(help, /(?:^|\n)\s*decode\s+/u)
+  assert.doesNotMatch(help, /(?:^|\n)\s*parse\s+/u)
+  assert.doesNotMatch(help, /(?:^|\n)\s*reparse\s+/u)
   assert.match(
     inspectHelp,
     /Use `inspect` first when you want stored attachment details, raw paths, and any available audio\/video transcript evidence/u,
@@ -1682,10 +1680,6 @@ test('inbox attachment help exposes inspect, status, and decode commands', async
   assert.match(
     statusHelp,
     /Use `status` when you want the current audio\/video parser state/u,
-  )
-  assert.match(
-    decodeHelp,
-    /Use `decode` only for audio\/video attachments/u,
   )
 })
 

@@ -1,4 +1,3 @@
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   InboxAppEnvironment,
   InboxServices,
@@ -7,9 +6,7 @@ import type {
 } from './types.js'
 import {
   buildAttachmentParseStatus,
-  createParserServiceContext,
   isParseableAttachment,
-  summarizeParserDrain,
 } from '../inbox-services/parser.js'
 import {
   detailCapture,
@@ -38,8 +35,6 @@ export function createInboxReadOps(
   | 'listAttachments'
   | 'showAttachment'
   | 'showAttachmentStatus'
-  | 'parseAttachment'
-  | 'reparseAttachment'
   | 'show'
   | 'search'
 > {
@@ -100,21 +95,6 @@ export function createInboxReadOps(
     runtime: RuntimeStore,
     captureId: string,
   ) => requireCapture(runtime, captureId)
-
-  const requireParseableInboxAttachmentMatch = (
-    runtime: RuntimeStore,
-    attachmentId: string,
-  ) => {
-    const match = requireInboxAttachmentMatch(runtime, attachmentId)
-    if (!isParseableAttachment(match.attachment)) {
-      throw new VaultCliError(
-        'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
-        `Attachment "${attachmentId}" is not supported by the current runtime parse queue.`,
-      )
-    }
-
-    return match
-  }
 
   const buildInboxAttachmentStatus = (input: {
     runtime: RuntimeStore
@@ -208,88 +188,6 @@ export function createInboxReadOps(
           captureId: match.capture.captureId,
           attachmentId: input.attachmentId,
           parseable: isParseableAttachment(match.attachment),
-          ...status,
-        }
-      })
-    },
-
-    async parseAttachment(input) {
-      return withInboxRuntime(input, async ({ paths, runtime }) => {
-        const listAttachmentParseJobs = runtime.listAttachmentParseJobs
-        const match = requireParseableInboxAttachmentMatch(
-          runtime,
-          input.attachmentId,
-        )
-
-        const parserService = await createParserServiceContext(
-          paths.absoluteVaultRoot,
-          runtime,
-          await env.requireParsers('attachment-level media transcription drains'),
-        )
-        const results = await parserService.drain({
-          attachmentId: input.attachmentId,
-          maxJobs: 1,
-        })
-        const summary = summarizeParserDrain(paths.absoluteVaultRoot, results)
-        const status = buildInboxAttachmentStatus({
-          runtime,
-          attachmentId: input.attachmentId,
-          listAttachmentParseJobs,
-          match,
-        })
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: match.capture.captureId,
-          attachmentId: input.attachmentId,
-          parseable: true,
-          attempted: summary.attempted,
-          succeeded: summary.succeeded,
-          failed: summary.failed,
-          ...status,
-          results: summary.results,
-        }
-      })
-    },
-
-    async reparseAttachment(input) {
-      return withInboxRuntime(input, async ({ paths, runtime }) => {
-        const {
-          listAttachmentParseJobs,
-          requeueAttachmentParseJobs,
-        } = runtime
-        const match = requireParseableInboxAttachmentMatch(
-          runtime,
-          input.attachmentId,
-        )
-
-        const existingJobs = listAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-          limit: 20,
-        })
-        if (existingJobs.length === 0) {
-          throw new VaultCliError(
-            'INBOX_ATTACHMENT_PARSE_MISSING',
-            `Attachment "${input.attachmentId}" does not have a runtime parse job to requeue.`,
-          )
-        }
-
-        const requeuedJobs = requeueAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-        })
-        const status = buildInboxAttachmentStatus({
-          runtime,
-          attachmentId: input.attachmentId,
-          listAttachmentParseJobs,
-          match,
-        })
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: match.capture.captureId,
-          attachmentId: input.attachmentId,
-          parseable: true,
-          requeuedJobs,
           ...status,
         }
       })

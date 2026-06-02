@@ -6,8 +6,6 @@ import {
 } from '@murphai/operator-config/command-helpers'
 import {
   inboxAttachmentListResultSchema,
-  inboxAttachmentParseResultSchema,
-  inboxAttachmentReparseResultSchema,
   inboxAttachmentShowResultSchema,
   inboxAttachmentStatusResultSchema,
   inboxBackfillResultSchema,
@@ -733,57 +731,6 @@ export function registerInboxCommands(
     output: inboxAttachmentStatusResultSchema,
     async run(context) {
       return services.showAttachmentStatus({
-        vault: context.options.vault,
-        requestId: requestIdFromOptions(context.options),
-        attachmentId: context.args.attachmentId,
-      })
-    },
-  })
-
-  attachment.command('decode', {
-    args: z.object({
-      attachmentId: z.string().min(1).describe('Inbox attachment id to parse now.'),
-    }),
-    description:
-      'Run the audio/video transcription pipeline now when existing media transcript evidence is missing or needs a fresh parse.',
-    hint:
-      'Use `decode` only for audio/video attachments. PDFs, documents, CSVs, and images are inspected through their stored raw file paths.',
-    options: withBaseOptions(),
-    output: inboxAttachmentParseResultSchema,
-    async run(context) {
-      return services.parseAttachment({
-        vault: context.options.vault,
-        requestId: requestIdFromOptions(context.options),
-        attachmentId: context.args.attachmentId,
-      })
-    },
-  })
-
-  attachment.command('parse', {
-    args: z.object({
-      attachmentId: z.string().min(1).describe('Inbox attachment id to parse now.'),
-    }),
-    description: 'Drain the current media transcription queue entry for one audio/video inbox attachment.',
-    options: withBaseOptions(),
-    output: inboxAttachmentParseResultSchema,
-    async run(context) {
-      return services.parseAttachment({
-        vault: context.options.vault,
-        requestId: requestIdFromOptions(context.options),
-        attachmentId: context.args.attachmentId,
-      })
-    },
-  })
-
-  attachment.command('reparse', {
-    args: z.object({
-      attachmentId: z.string().min(1).describe('Inbox attachment id to requeue.'),
-    }),
-    description: 'Requeue the current runtime transcription job for one audio/video inbox attachment.',
-    options: withBaseOptions(),
-    output: inboxAttachmentReparseResultSchema,
-    async run(context) {
-      return services.reparseAttachment({
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         attachmentId: context.args.attachmentId,

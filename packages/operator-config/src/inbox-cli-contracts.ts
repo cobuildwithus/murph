@@ -388,29 +388,6 @@ export const inboxAttachmentStatusResultSchema = z.object({
   jobs: z.array(inboxAttachmentParseJobSchema),
 })
 
-export const inboxAttachmentParseResultSchema = z.object({
-  vault: pathSchema,
-  captureId: z.string().min(1),
-  attachmentId: z.string().min(1),
-  parseable: z.boolean(),
-  attempted: z.number().int().nonnegative(),
-  succeeded: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  currentState: z.enum(['pending', 'running', 'succeeded', 'failed']).nullable(),
-  jobs: z.array(inboxAttachmentParseJobSchema),
-  results: z.array(inboxParseJobResultSchema),
-})
-
-export const inboxAttachmentReparseResultSchema = z.object({
-  vault: pathSchema,
-  captureId: z.string().min(1),
-  attachmentId: z.string().min(1),
-  parseable: z.boolean(),
-  requeuedJobs: z.number().int().nonnegative(),
-  currentState: z.enum(['pending', 'running', 'succeeded', 'failed']).nullable(),
-  jobs: z.array(inboxAttachmentParseJobSchema),
-})
-
 export type InboxConnectorConfig = z.infer<typeof inboxConnectorConfigSchema>
 export type InboxRuntimeConfig = z.infer<typeof inboxRuntimeConfigSchema>
 export type InboxSource = (typeof inboxSourceValues)[number]
@@ -492,5 +469,3 @@ export type InboxPromoteExperimentNoteResult = z.infer<
 export type InboxAttachmentListResult = z.infer<typeof inboxAttachmentListResultSchema>
 export type InboxAttachmentShowResult = z.infer<typeof inboxAttachmentShowResultSchema>
 export type InboxAttachmentStatusResult = z.infer<typeof inboxAttachmentStatusResultSchema>
-export type InboxAttachmentParseResult = z.infer<typeof inboxAttachmentParseResultSchema>
-export type InboxAttachmentReparseResult = z.infer<typeof inboxAttachmentReparseResultSchema>
