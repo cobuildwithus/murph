@@ -37,6 +37,8 @@ interface BloodTestLink {
 const resultStatusSchema = z.enum(TEST_RESULT_STATUSES);
 const sourceSchema = z.enum(EVENT_SOURCES);
 const fastingStatusSchema = z.enum(BLOOD_TEST_FASTING_STATUSES);
+const resultFormatHint =
+  "Use one JSON object per --result for structured values that contain semicolons, or escape compact semicolons as \\;.";
 const specimenTypeSchema = z
   .string()
   .min(1)
@@ -44,11 +46,11 @@ const specimenTypeSchema = z
   .describe(
     "Optional specimen type such as blood, whole_blood, serum, plasma, or dried_blood_spot.",
   );
-const compactResultSchema = z
+const resultSpecSchema = z
   .string()
   .min(1)
   .describe(
-    "Blood-test result as semicolon-separated key=value fields. Repeat --result for multiple analytes. Supported keys: analyte, slug, value, textValue, comparator, unit, flag, biomarkerSlug, referenceRange.low, referenceRange.high, referenceRange.text, note.",
+    `Blood-test result as either one JSON object or semicolon-separated key=value fields. Repeat --result for multiple analytes. Supported keys: analyte, slug, value, textValue, comparator, unit, flag, biomarkerSlug, referenceRange.low, referenceRange.high, referenceRange.text, note. ${resultFormatHint}`,
   );
 const compactLinkSchema = z
   .string()
@@ -85,6 +87,13 @@ function parseNumberField(value: string, fieldName: string): number {
   }
 
   return parsed;
+}
+
+function keyValueSpecFormatMessage(optionName: string): string {
+  const base = `Expected --${optionName} entries to use key=value fields.`;
+  return optionName === "result"
+    ? `${base} ${resultFormatHint}`
+    : `${base} Escape literal semicolons as \\;.`;
 }
 
 function splitEscaped(value: string, separator: string): string[] {
@@ -137,7 +146,7 @@ function parseKeyValueSpec(
     if (separatorIndex <= 0) {
       throw new VaultCliError(
         "invalid_option",
-        `Expected --${optionName} entries to use key=value fields.`,
+        keyValueSpecFormatMessage(optionName),
       );
     }
 
@@ -163,7 +172,32 @@ function parseKeyValueSpec(
   return fields;
 }
 
-function parseBloodTestResult(spec: string): BloodTestResult {
+function parseJsonBloodTestResult(spec: string): BloodTestResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(spec) as unknown;
+  } catch {
+    throw new VaultCliError(
+      "invalid_option",
+      "Expected --result JSON object to be valid JSON.",
+    );
+  }
+
+  const parsed = bloodTestResultSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Invalid --result blood-test analyte payload.",
+      {
+        issues: parsed.error.issues,
+      },
+    );
+  }
+
+  return parsed.data;
+}
+
+function parseCompactBloodTestResult(spec: string): BloodTestResult {
   const fields = parseKeyValueSpec(spec, "result");
   const allowedFields = new Set([
     "analyte",
@@ -236,6 +270,22 @@ function parseBloodTestResult(spec: string): BloodTestResult {
   }
 
   return parsed.data;
+}
+
+function parseBloodTestResult(spec: string): BloodTestResult {
+  const trimmed = spec.trim();
+  if (trimmed.startsWith("{")) {
+    return parseJsonBloodTestResult(trimmed);
+  }
+
+  if (trimmed.startsWith("[")) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Expected --result JSON input to be one object per analyte, not an array. Repeat --result for each analyte or use blood-test import-json for a full payload.",
+    );
+  }
+
+  return parseCompactBloodTestResult(trimmed);
 }
 
 function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
@@ -544,7 +594,7 @@ export function registerBloodTestCommands(
           labName: "Function Health",
           fastingStatus: "fasting",
           result: [
-            "analyte=Apolipoprotein B;value=87;unit=mg/dL;flag=normal;referenceRange.text=<90",
+            '{"analyte":"Apolipoprotein B","value":87,"unit":"mg/dL","flag":"normal","referenceRange":{"text":"<90"}}',
           ],
           vault: "./vault",
         },
@@ -590,10 +640,10 @@ export function registerBloodTestCommands(
         .describe("Optional report timestamp with explicit UTC offset."),
       fastingStatus: fastingStatusSchema.optional().describe("Optional fasting status."),
       result: z
-        .array(compactResultSchema)
+        .array(resultSpecSchema)
         .min(1)
         .max(500)
-        .describe("Blood-test result. Repeat --result for each analyte."),
+        .describe(`Blood-test result. Repeat --result for each analyte. ${resultFormatHint}`),
     }),
     output: bloodTestSaveResultSchema,
     async run(context) {

@@ -168,6 +168,10 @@ test("blood-test save schema exposes typed fields while blood-test import-json r
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field);
   }
+  assert.match(
+    JSON.stringify(saveSchema.options.properties.result),
+    /JSON object/u,
+  );
 
   const importJsonSchema = await readCommandSchema(cli, ["blood-test", "import-json"]);
   assert.equal("input" in importJsonSchema.options.properties, true);
@@ -329,6 +333,61 @@ test("blood-test save maps typed fields and can revise a saved event id", async 
   }
 });
 
+test("blood-test save accepts JSON result objects with semicolons in reference text", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-json-result-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const savedResult = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Structured panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "structured_panel",
+      "--result",
+      JSON.stringify({
+        analyte: "Glucose",
+        value: 92,
+        unit: "mg/dL",
+        flag: "normal",
+        referenceRange: {
+          text: "70-99 fasting; <140 non-fasting",
+        },
+        note: "Morning draw; no symptoms noted",
+      }),
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(savedResult.exitCode, null, JSON.stringify(savedResult.envelope));
+    const saved = requireData(savedResult.envelope);
+    const records = await readLedgerRecords(vaultRoot, saved.ledgerFile ?? "");
+    assert.deepEqual(records[0]?.results, [
+      {
+        analyte: "Glucose",
+        value: 92,
+        unit: "mg/dL",
+        flag: "normal",
+        referenceRange: {
+          text: "70-99 fasting; <140 non-fasting",
+        },
+        note: "Morning draw; no symptoms noted",
+      },
+    ]);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("blood-test save rejects rewriting a non-blood-test event id", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-wrong-kind-",
@@ -372,6 +431,87 @@ test("blood-test save rejects rewriting a non-blood-test event id", async () => 
     const records = await readLedgerRecords(vaultRoot, "ledger/events/2026/2026-03.jsonl");
     assert.equal(records.length, 1);
     assert.equal(records[0]?.kind, "note");
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save rejects malformed JSON result without echoing payload text", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-invalid-json-result-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Malformed JSON panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "malformed_json_panel",
+      "--result",
+      '{"analyte":"Glucose","value":92,"referenceRange":{"text":"fasting; non-fasting"}',
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.match(result.envelope.error.message ?? "", /valid JSON/u);
+    assert.doesNotMatch(result.envelope.error.message ?? "", /fasting/u);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save rejects JSON result arrays with repeat-result guidance", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-json-result-array-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Array JSON panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "array_json_panel",
+      "--result",
+      JSON.stringify([{ analyte: "Glucose", value: 92 }]),
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.match(result.envelope.error.message ?? "", /one object per analyte/u);
+    assert.match(result.envelope.error.message ?? "", /Repeat --result/u);
+    assert.match(result.envelope.error.message ?? "", /blood-test import-json/u);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
   } finally {
     await rm(parentRoot, {
       force: true,

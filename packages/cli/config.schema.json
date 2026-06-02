@@ -12664,9 +12664,9 @@
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Blood-test result as semicolon-separated key=value fields. Repeat --result for multiple analytes. Supported keys: analyte, slug, value, textValue, comparator, unit, flag, biomarkerSlug, referenceRange.low, referenceRange.high, referenceRange.text, note."
+                            "description": "Blood-test result as either one JSON object or semicolon-separated key=value fields. Repeat --result for multiple analytes. Supported keys: analyte, slug, value, textValue, comparator, unit, flag, biomarkerSlug, referenceRange.low, referenceRange.high, referenceRange.text, note. Use one JSON object per --result for structured values that contain semicolons, or escape compact semicolons as \\;."
                           },
-                          "description": "Blood-test result. Repeat --result for each analyte."
+                          "description": "Blood-test result. Repeat --result for each analyte. Use one JSON object per --result for structured values that contain semicolons, or escape compact semicolons as \\;."
                         }
                       }
                     }
