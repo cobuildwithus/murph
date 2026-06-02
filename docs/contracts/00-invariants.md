@@ -40,8 +40,8 @@
 ## Observability And Logging
 
 - Log errors at the root failure boundary, where the system first has enough context to classify the failing owner, operation, and cause. Do not scatter patchwork logs across callers, retries, or fallback layers to compensate for an unclear source.
-- When an error is safe to log, preserve the full error chain and structured metadata, then pass it through the shared redaction helper before emission. The shared redactor must remove secrets, keys, credentials, tokens, authorization headers, local paths, and direct identifiers.
-- Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, or caller-local redaction rules.
+- When an error is safe to persist or publish, preserve the full error chain and structured context, then pass it through the shared redaction helper before emission. The shared redactor must remove secrets, keys, credentials, tokens, authorization headers, and user/provider-facing direct identifiers.
+- Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, or caller-local redaction rules. Local-only debugging should keep enough concrete path/id/value evidence to prove root cause, while keeping secrets out.
 
 ## Append-Only Bias
 

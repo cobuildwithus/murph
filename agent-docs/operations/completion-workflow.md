@@ -17,20 +17,20 @@ This completion workflow is standing user approval to spawn the required local C
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips audit subagents unless the user explicitly asks for them
-   - really low-impact `apps/web` copy-only edits may skip audit subagents when they only change static text and do not alter layout, UI state, auth, pricing logic, schemas, runtime behavior, or security/privacy claims; use local readback and focused checks instead
+   - really low-impact `apps/web` copy-only edits may skip audit subagents when they only change static text and do not alter layout, UI state, auth, pricing logic, schemas, runtime behavior, or security claims; use local readback and focused checks instead
    - the tiny repo-internal fast path below replaces the final-review audit subagent with an explicit local final review
-   - changesets that reasonably touch user data, persisted state, auth/session behavior, secrets or credentials, payment/billing state, health data, contact identifiers, observability/logging, external ingress/egress, public APIs/routes, or trust boundaries add the dedicated `security-privacy-review` pass
+   - changesets that materially touch auth/session behavior, secrets or credentials, payment/billing state, external ingress/egress, public APIs/routes, trust boundaries, or persisted/uploaded/user-facing data exposure add the dedicated `security-privacy-review` pass
    - user-facing `apps/web` UI changes add the dedicated `frontend-review` pass
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
    - ordinary repo code/test/config changes then run `task-finish-review`
    - add `simplify` only when the conditions below are met
 5. When `simplify` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below, and run it before coverage or final review. Land only behavior-preserving reductions from that pass.
-6. When `security-privacy-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/security-privacy-review.md` plus the audit handoff packet below, and run it before coverage or final review. If `simplify` also applies, run both passes in parallel after implementation is stable enough for review. Keep this pass review-only and scope it to security plus narrow privacy leakage or unnecessary-exposure risks.
+6. When `security-privacy-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/security-privacy-review.md` plus the audit handoff packet below, and run it before coverage or final review. If `simplify` also applies, run both passes in parallel after implementation is stable enough for review. Keep this pass review-only and scope it to security plus concrete exposure risks.
 7. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it after any simplify/security-privacy pass but before the final completion review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`.
 8. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
 9. When step 8 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.5` with medium reasoning after any simplify/security-privacy pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
 10. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
-11. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any security/privacy-review-driven fixes, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
+11. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any security review-driven fixes, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
 12. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
 13. Treat that final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
 14. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
@@ -61,15 +61,15 @@ It does not skip `coverage-write` when the task's verification lane already incl
 Skip `security-privacy-review`, `frontend-review`, `coverage-write`, and `task-finish-review` subagents for very small `apps/web` copy-only edits when all of the following are true:
 
 1. The diff only changes static user-facing text.
-2. The change does not alter layout, styling, UI state, component structure, auth, billing/pricing logic, schemas, routes, API behavior, runtime code, or security/privacy claims.
+2. The change does not alter layout, styling, UI state, component structure, auth, billing/pricing logic, schemas, routes, API behavior, runtime code, or security claims.
 3. Local readback plus focused checks cover the changed surface.
 
-Use focused component/page tests, typecheck, `git diff --check`, and stale-string searches as appropriate. If the copy change touches claims about security, privacy, billing, medical outcomes, or product guarantees, leave this fast path and use the normal review workflow.
+Use focused component/page tests, typecheck, `git diff --check`, and stale-string searches as appropriate. If the copy change touches claims about security, billing, medical outcomes, or product guarantees, leave this fast path and use the normal review workflow.
 
 ## Audit Worker Rules
 
 - `coverage-write` is the default write-capable audit pass, must run on `gpt-5.5` with medium reasoning, and should stay narrowly scoped to tests or direct-proof scaffolding.
-- `security-privacy-review` is a review-only pass for changes that touch user data/state, auth/session behavior, secrets, payments, health data, contact identifiers, observability/logging, external surfaces, or trust boundaries. It should read `agent-docs/SECURITY.md` and focus on security regressions, authority expansion, fail-closed behavior, leakage risks, and only minimal privacy issues tied to concrete unnecessary exposure.
+- `security-privacy-review` is a review-only pass for changes that materially touch auth/session behavior, secrets, payments, external surfaces, trust boundaries, or persisted/uploaded/user-facing data exposure. It should read `agent-docs/SECURITY.md` and focus on security regressions, authority expansion, fail-closed behavior, leakage risks, and concrete unnecessary exposure.
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It should read `agent-docs/FRONTEND.md` and focus on design-system alignment, product context, UX quality, and unnecessary UI drift.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
@@ -106,11 +106,11 @@ For the required `frontend-review` pass, also provide:
 
 For the required `security-privacy-review` pass, also provide:
 
-- The exact sensitive data, state, auth/session, external surface, logging, or trust-boundary behavior under review.
+- The exact auth/session, secret, external surface, trust-boundary, or concrete exposure behavior under review.
 - An explicit instruction to read `agent-docs/SECURITY.md` before reviewing.
 - The intended authority boundary, including who or what should be able to see, mutate, or infer the affected data.
-- Any exposure-minimization decisions already made, plus known tradeoffs or accepted residual exposure.
-- Any direct security or concrete privacy-leakage scenario proof already gathered, or the exact gap if manual verification still needs to happen.
+- Any exposure decisions already made, plus known tradeoffs or accepted residual exposure.
+- Any direct security or concrete leakage scenario proof already gathered, or the exact gap if manual verification still needs to happen.
 
 For the required `coverage-write` pass, also provide:
 
