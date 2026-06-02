@@ -24,9 +24,9 @@ import { normalizeNullableString } from '../shared.js'
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
 const RAW_ATTACHMENT_FILE_INSTRUCTION =
-  'Raw attachment file is available at the storedPath above. Parser output may be pending, failed, or unsupported. Inspect the local file with tools only if needed; do not claim file contents unless they appear in parsed fragments or you have inspected the file.'
+  'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.'
 const PDF_ATTACHMENT_FILE_INSTRUCTION =
-  'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.'
+  'For PDFs, inspect the storedPath with local PDF tools when needed.'
 
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
@@ -266,7 +266,6 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
       attachments,
       evidenceStatus: input.evidenceStatus ?? null,
     })}`,
-    `- parser output: ${renderAssistantInputParserOutputLifecycleStatus(attachments)}`,
     renderAssistantInputAttachmentLifecycleDetails({
       attachments,
       descriptors: input.descriptors,
@@ -343,22 +342,26 @@ function buildAssistantAutoReplyAttachmentSections(input: {
 function renderAttachmentEvidencePromptSection(
   attachment: AssistantInputAttachmentEvidenceItem,
 ): string | null {
+  const includeParserEvidence = shouldRenderAttachmentParserEvidence(attachment.kind)
   const storedPathLine = renderAttachmentEvidencePromptStoredPath(attachment)
-  const derivedManifestPath = normalizeNullableString(
-    attachment.derived?.manifestPath ?? null,
-  )
+  const derivedManifestPath = includeParserEvidence
+    ? normalizeNullableString(attachment.derived?.manifestPath ?? null)
+    : null
   const metadataLines = [
     attachment.fileName ? `fileName: ${attachment.fileName}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     storedPathLine,
     derivedManifestPath ? `derivedManifestPath: ${derivedManifestPath}` : null,
-    attachment.parseState ? `parseState: ${attachment.parseState}` : null,
+    includeParserEvidence && attachment.parseState
+      ? `parseState: ${attachment.parseState}`
+      : null,
   ].filter((line): line is string => line !== null)
   const chunks: string[] = []
   const omittedKinds: string[] = []
+  const inlineFragments = includeParserEvidence ? attachment.inlineFragments : []
 
-  for (const fragment of attachment.inlineFragments) {
+  for (const fragment of inlineFragments) {
     const title = renderInlineAttachmentFragmentTitle(fragment.kind)
     if (fragment.text.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
       chunks.push(`${title}:\n${fragment.text}`)
@@ -374,8 +377,10 @@ function renderAttachmentEvidencePromptSection(
     )
   }
 
-  if (attachment.inlineFragments.length === 0) {
-    const status = renderAttachmentParserStatus(attachment.parseState ?? null)
+  if (inlineFragments.length === 0) {
+    const status = includeParserEvidence
+      ? renderAttachmentParserStatus(attachment.parseState ?? null)
+      : null
     if (status !== null) {
       chunks.push(status)
     }
@@ -437,7 +442,7 @@ function normalizePromptRawAttachmentPath(
 function hasPdfAttachmentEvidencePath(
   attachment: AssistantInputAttachmentEvidenceItem,
 ): boolean {
-  const rawPath = normalizeNullableString(attachment.raw?.path ?? null)
+  const rawPath = normalizePromptRawAttachmentPath(attachment.raw?.path ?? null)
   const mime = normalizeNullableString(
     attachment.mime ?? attachment.raw?.mediaType ?? null,
   )?.toLowerCase() ?? null
@@ -514,32 +519,37 @@ function buildAssistantAutoReplyPromptText(
 function renderPreparedAttachmentPromptSection(
   attachment: AssistantInputAttachmentModelBundle,
 ): string | null {
-  const hasTextFragments = attachment.fragments.some(
-    (fragment) => fragment.kind !== 'attachment_metadata',
-  )
+  const includeParserEvidence = shouldRenderAttachmentParserEvidence(attachment.kind)
+  const textFragments = includeParserEvidence
+    ? attachment.fragments.filter((fragment) => fragment.kind !== 'attachment_metadata')
+    : []
+  const hasTextFragments = textFragments.length > 0
   const richEvidenceCandidate =
     hasAssistantInputAttachmentEvidenceCandidate(attachment)
   const hasRawStoredPath = hasRawAttachmentStoredPath(attachment.storedPath)
-  const hasRawMissingMetadata = hasAttachmentMetadataLine(
-    attachment,
-    'storedPath: missing',
-  )
-  const hasDerivedEvidence = attachment.fragments.some(isDerivedAttachmentFragment)
   const storedPdfMetadata = hasStoredPdfAttachmentPath(attachment)
-  const status = renderAttachmentParserStatus(attachment.parseState ?? null)
+  const status = includeParserEvidence
+    ? renderAttachmentParserStatus(attachment.parseState ?? null)
+    : null
+  const metadataLines = renderPreparedAttachmentMetadataLines({
+    attachment,
+    includeParserEvidence,
+  })
   if (
+    metadataLines.length === 0 &&
     !hasTextFragments &&
     !hasRawStoredPath &&
     !richEvidenceCandidate &&
-    !hasRawMissingMetadata &&
-    !hasDerivedEvidence &&
     !storedPdfMetadata &&
     status === null
   ) {
     return null
   }
 
-  const sections = attachment.combinedText.length > 0 ? [attachment.combinedText] : []
+  const sections = metadataLines.length > 0 ? [metadataLines.join('\n')] : []
+  for (const fragment of textFragments) {
+    sections.push(`[${fragment.label}]\n${fragment.text}`)
+  }
   if (status && !hasTextFragments) {
     sections.push(status)
   }
@@ -551,12 +561,33 @@ function renderPreparedAttachmentPromptSection(
       'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
     )
   }
-  if (storedPdfMetadata && !hasTextFragments) {
+  if (storedPdfMetadata && hasRawStoredPath && !hasTextFragments) {
     sections.push(PDF_ATTACHMENT_FILE_INSTRUCTION)
   }
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
   return `${label}\n${sections.join('\n\n')}`
+}
+
+function renderPreparedAttachmentMetadataLines(input: {
+  attachment: AssistantInputAttachmentModelBundle
+  includeParserEvidence: boolean
+}): string[] {
+  const attachment = input.attachment
+  const storedPath = normalizePromptRawAttachmentPath(attachment.storedPath)
+  return [
+    `ordinal: ${attachment.ordinal}`,
+    `kind: ${attachment.kind}`,
+    `fileName: ${attachment.fileName ?? 'unknown'}`,
+    `mime: ${attachment.mime ?? 'unknown'}`,
+    `byteSize: ${typeof attachment.byteSize === 'number' ? attachment.byteSize : 'unknown'}`,
+    `storedPath: ${storedPath ?? 'missing'}`,
+    input.includeParserEvidence && attachment.parseState
+      ? `parseState: ${attachment.parseState}`
+      : null,
+    `routingImageEligible: ${String(attachment.routingImage.eligible)}`,
+    `routingImageReason: ${attachment.routingImage.reason}`,
+  ].filter((line): line is string => line !== null)
 }
 
 function buildPreparedAttachmentSources(
@@ -652,30 +683,6 @@ function renderAssistantInputRawEvidenceLifecycleStatus(input: {
   return 'not_attempted'
 }
 
-function renderAssistantInputParserOutputLifecycleStatus(
-  attachments: readonly AssistantInputAttachmentEvidenceItem[],
-): string {
-  if (attachments.length === 0) {
-    return 'unknown'
-  }
-
-  const priority = [
-    'failed',
-    'running',
-    'pending',
-    'unsupported',
-    'succeeded',
-    'unknown',
-  ] as const
-  const states = new Set(
-    attachments.map((attachment) => attachment.parseState ?? 'unknown'),
-  )
-  const sortedStates = priority.filter((state) => states.has(state))
-  return sortedStates.length === 1
-    ? sortedStates[0]
-    : `mixed(${sortedStates.join(', ')})`
-}
-
 function renderAssistantInputAttachmentLifecycleDetails(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
   descriptors: readonly AssistantInputAttachmentDescriptor[]
@@ -708,7 +715,7 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
   ordinal: number
 }): string[] {
   if (input.attachment) {
-    const rawPath = normalizeNullableString(input.attachment.raw?.path ?? null)
+    const rawPath = normalizePromptRawAttachmentPath(input.attachment.raw?.path ?? null)
     return [
       '',
       `Attachment ${input.ordinal}`,
@@ -717,7 +724,9 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
       `mime: ${normalizeNullableString(input.attachment.mime) ?? 'unknown'}`,
       `byteSize: ${typeof input.attachment.byteSize === 'number' ? input.attachment.byteSize : 'unknown'}`,
       `rawPath: ${rawPath ?? 'missing'}`,
-      `parseState: ${input.attachment.parseState ?? 'unknown'}`,
+      ...(shouldRenderAttachmentParserEvidence(input.attachment.kind)
+        ? [`parseState: ${input.attachment.parseState ?? 'unknown'}`]
+        : []),
     ]
   }
 
@@ -730,7 +739,6 @@ function renderAssistantInputAttachmentLifecycleDetail(input: {
     `mime: ${normalizeNullableString(descriptor?.contentType ?? null) ?? 'unknown'}`,
     `byteSize: ${typeof descriptor?.sizeBytes === 'number' ? descriptor.sizeBytes : 'unknown'}`,
     'rawPath: missing',
-    'parseState: unknown',
   ]
 }
 
@@ -818,30 +826,15 @@ function hasStoredPdfAttachmentPath(attachment: AssistantInputAttachmentModelBun
   )
 }
 
-function hasAttachmentMetadataLine(
-  attachment: AssistantInputAttachmentModelBundle,
-  line: string,
-): boolean {
-  return attachment.fragments.some((fragment) =>
-    fragment.kind === 'attachment_metadata' &&
-    fragment.text.split('\n').some((fragmentLine) => fragmentLine === line),
-  )
-}
-
 function hasRawAttachmentStoredPath(storedPath: string | null): boolean {
   const normalizedPath = normalizeNullableString(storedPath)
-  return normalizedPath?.startsWith('raw/assistant-input/') === true ||
-    normalizedPath?.startsWith('raw/inbox/') === true
+  return normalizedPath?.startsWith('raw/inbox/') === true
 }
 
-function isDerivedAttachmentFragment(
-  fragment: AssistantInputAttachmentModelBundle['fragments'][number],
+function shouldRenderAttachmentParserEvidence(
+  kind: AssistantInputAttachmentEvidenceItem['kind'] | AssistantInputAttachmentModelBundle['kind'],
 ): boolean {
-  return fragment.kind === 'derived_plain_text' ||
-    fragment.kind === 'derived_markdown' ||
-    fragment.kind === 'derived_tables' ||
-    fragment.kind === 'attachment_json_summary' ||
-    fragment.kind === 'attachment_tabular_summary'
+  return kind === 'audio' || kind === 'video'
 }
 
 function renderAttachmentParserStatus(parseState: string | null): string | null {

@@ -75,7 +75,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('uses preserved filenames when deciding image routing eligibility', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const imagePath = 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001'
+    const imagePath = 'raw/inbox/capture-1/attachments/001'
     await writeVaultFile(vaultRoot, imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
     const bundle = await buildAssistantInputAttachmentModelBundle({
@@ -102,14 +102,14 @@ describe('assistant input attachment evidence model materialization', () => {
     {
       mime: null,
       mediaType: 'image/jpeg',
-      rawPath: 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.jpg',
+      rawPath: 'raw/inbox/capture-1/attachments/001.jpg',
     },
     {
       mime: 'application/octet-stream',
       mediaType: 'image/png',
-      rawPath: 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.png',
+      rawPath: 'raw/inbox/capture-1/attachments/001.png',
     },
-  ])('infers routable image evidence from assistant-input extension for $rawPath', async ({
+  ])('infers routable image evidence from inbox extension for $rawPath', async ({
     mediaType,
     mime,
     rawPath,
@@ -144,7 +144,7 @@ describe('assistant input attachment evidence model materialization', () => {
   })
 
   it.each([
-    'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+    'raw/inbox/capture-1/attachments/001.pdf',
     'raw/inbox/capture-1/attachments/01__scan.pdf',
   ])('keeps PDF raw artifact ref %s as inspectable local filesystem metadata without forcing multimodal input', async (pdfPath) => {
     const vaultRoot = await createTempVaultRoot()
@@ -392,10 +392,11 @@ describe('assistant input attachment evidence model materialization', () => {
     const bundle = await buildAssistantInputAttachmentModelBundle({
       attachment: {
         ...createAttachmentEvidence({
-          kind: 'document',
-          mime: 'application/pdf',
-          rawPath: 'raw/inbox/capture-1/attachments/scan.pdf',
+          kind: 'audio',
+          mime: 'audio/mpeg',
+          rawPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
         }),
+        parseState: 'succeeded',
         derived: {
           allowedRoot: 'derived/inbox/capture-1/attachments/att-1',
           kind: 'parser-manifest',
@@ -447,10 +448,11 @@ describe('assistant input attachment evidence model materialization', () => {
     const bundle = await buildAssistantInputAttachmentModelBundle({
       attachment: {
         ...createAttachmentEvidence({
-          kind: 'document',
-          mime: 'application/pdf',
-          rawPath: 'raw/inbox/capture-1/attachments/scan.pdf',
+          kind: 'audio',
+          mime: 'audio/mpeg',
+          rawPath: 'raw/inbox/capture-1/attachments/voice-note.mp3',
         }),
+        parseState: 'succeeded',
         derived: {
           allowedRoot: 'derived/inbox/capture-1/attachments/att-1',
           kind: 'parser-manifest',

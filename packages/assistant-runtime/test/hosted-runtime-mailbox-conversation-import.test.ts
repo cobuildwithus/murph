@@ -132,9 +132,12 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot,
     });
 
-    assert.deepEqual(order, []);
+    assert.deepEqual(order, [
+      "prepare:evt_synthetic_conversation_001",
+      "projection:evt_synthetic_conversation_001",
+    ]);
     assert.equal(outcome.status, "imported");
-    assert.equal(outcome.reasonCode, undefined);
+    assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
     assert.deepEqual(outcome.linqDeliveryContext, {
       directRecipientPhoneNumber: "redacted-contact-sentinel",
       fromPhoneNumber: null,
@@ -178,20 +181,16 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.deepEqual(event.projection, {
       captureId: null,
-      lastAttemptedAt: null,
-      reasonCode: null,
-      status: "pending",
+      lastAttemptedAt: event.projection.lastAttemptedAt,
+      reasonCode: "conversation-import.projection-failed",
+      status: "failed",
       updatedAt: event.projection.updatedAt,
     });
+    assert.ok(event.projection.lastAttemptedAt);
     assert.equal(JSON.stringify(event).includes("https://signed.example.invalid"), false);
     assert.equal(JSON.stringify(event).includes("voice.m4a"), true);
     assert.equal(JSON.stringify(event).includes("+15550100000"), false);
 
-    await outcome.afterCheckpoint?.();
-    assert.deepEqual(order, [
-      "prepare:evt_synthetic_conversation_001",
-      "projection:evt_synthetic_conversation_001",
-    ]);
     const afterProjection = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -545,7 +544,6 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    await outcome.afterCheckpoint?.();
 
     assert.deepEqual(loadCalls, [
       {
@@ -591,7 +589,7 @@ describe("hosted mailbox conversation import adapter", () => {
           byteSize: 256,
           kind: "vault-relative-file",
           mediaType: "audio/mp4",
-          path: `raw/assistant-input/${listed.events[0]!.inputId}/attachments/001.m4a`,
+          path: "raw/inbox/linq/cap_synthetic_evidence_001/attachments/01__voice-note.m4a",
           sha256: "b".repeat(64),
         },
         sourceAttachmentId: "att_voice_1",
@@ -645,13 +643,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    assert.deepEqual(await outcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: true,
-      kind: "inbox_projection",
-      projectionUpdated: true,
-      reasonCode: "conversation-import.inbox-runtime-unavailable",
-      status: "failed",
-    });
+    assert.equal(outcome.reasonCode, "conversation-import.inbox-runtime-unavailable");
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -745,7 +737,6 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot,
     });
     assert.equal(firstOutcome.status, "imported");
-    await firstOutcome.afterCheckpoint?.();
 
     const replayOutcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
@@ -760,13 +751,7 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot,
     });
     assert.equal(replayOutcome.status, "imported");
-    assert.deepEqual(await replayOutcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: false,
-      kind: "inbox_projection",
-      projectionUpdated: false,
-      reasonCode: "conversation-import.projection-failed",
-      status: "failed",
-    });
+    assert.equal(replayOutcome.reasonCode, "conversation-import.projection-failed");
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -783,7 +768,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(evidence?.attachments.length, 1);
     assert.equal(
       evidence?.attachments[0]?.raw?.path,
-      `raw/assistant-input/${listed.events[0]!.inputId}/attachments/001.m4a`,
+      "raw/inbox/linq/cap_synthetic_evidence_replay_001/attachments/01__voice-note.m4a",
     );
   });
 
@@ -864,7 +849,6 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot,
     });
     assert.equal(firstOutcome.status, "imported");
-    await firstOutcome.afterCheckpoint?.();
 
     const seeded = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -896,13 +880,7 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot,
     });
     assert.equal(replayOutcome.status, "imported");
-    assert.deepEqual(await replayOutcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: false,
-      kind: "inbox_projection",
-      projectionUpdated: false,
-      reasonCode: "conversation-import.projection-failed",
-      status: "failed",
-    });
+    assert.equal(replayOutcome.reasonCode, "conversation-import.projection-failed");
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -965,7 +943,6 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    await outcome.afterCheckpoint?.();
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -1036,13 +1013,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    assert.deepEqual(await outcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: true,
-      kind: "inbox_projection",
-      projectionUpdated: true,
-      reasonCode: "attachment.evidence_partial",
-      status: "partial",
-    });
+    assert.equal(outcome.reasonCode, "attachment.evidence_partial");
 
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
@@ -1122,13 +1093,7 @@ describe("hosted mailbox conversation import adapter", () => {
       });
 
       assert.equal(outcome.status, "imported");
-      assert.deepEqual(await outcome.afterCheckpoint?.(), {
-        attachmentEvidenceUpdated: true,
-        kind: "inbox_projection",
-        projectionUpdated: true,
-        reasonCode: "attachment.evidence_partial",
-        status: "partial",
-      });
+      assert.equal(outcome.reasonCode, "attachment.evidence_partial");
 
       const listed = await listAssistantInputEvents({
         vault: vaultRoot,
@@ -1205,13 +1170,7 @@ describe("hosted mailbox conversation import adapter", () => {
       });
 
       assert.equal(outcome.status, "imported");
-      assert.deepEqual(await outcome.afterCheckpoint?.(), {
-        attachmentEvidenceUpdated: true,
-        kind: "inbox_projection",
-        projectionUpdated: true,
-        reasonCode: "conversation-import.attachment-evidence-failed",
-        status: "partial",
-      });
+      assert.equal(outcome.reasonCode, "conversation-import.attachment-evidence-failed");
 
       const listed = await listAssistantInputEvents({
         vault: vaultRoot,
@@ -1541,21 +1500,6 @@ describe("hosted mailbox conversation import adapter", () => {
         payloadSource: "inline",
       },
     ]);
-    assert.deepEqual(preparedWakeIds, []);
-    assert.deepEqual(importedWakeIds, []);
-    assert.deepEqual(order, [
-      "stage:evt_synthetic_conversation_001",
-    ]);
-    assert.deepEqual(projectionUpdates, []);
-    assert.equal(outcome.status, "imported");
-    assert.equal(outcome.captureId, null);
-    assert.deepEqual(outcome.metrics, {
-      nextWakeAt: null,
-      parserProcessed: 0,
-    });
-    assert.equal(typeof outcome.afterCheckpoint, "function");
-
-    await outcome.afterCheckpoint?.();
     assert.deepEqual(preparedWakeIds, ["evt_synthetic_conversation_001"]);
     assert.deepEqual(importedWakeIds, ["evt_synthetic_conversation_001"]);
     assert.deepEqual(order, [
@@ -1571,6 +1515,13 @@ describe("hosted mailbox conversation import adapter", () => {
         status: "succeeded",
       },
     ]);
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.captureId, null);
+    assert.deepEqual(outcome.metrics, {
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    assert.equal("afterCheckpoint" in outcome, false);
   });
 
   test("requires hosted bootstrap before staging assistant input with the default context preparer", async () => {
@@ -1623,27 +1574,16 @@ describe("hosted mailbox conversation import adapter", () => {
     }
 
     assert.deepEqual(outcome, {
-      afterCheckpoint: outcome.afterCheckpoint,
       assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
       },
+      reasonCode: "conversation-import.projection-failed",
       status: "imported",
     });
-    assert.equal(outcome.reasonCode, undefined);
-    assert.equal(typeof outcome.afterCheckpoint, "function");
-    assert.deepEqual(projectionUpdates, []);
-
-    const effectResult = await outcome.afterCheckpoint?.();
-    assert.deepEqual(effectResult, {
-      attachmentEvidenceUpdated: null,
-      kind: "inbox_projection",
-      projectionUpdated: true,
-      reasonCode: "conversation-import.projection-failed",
-      status: "failed",
-    });
+    assert.equal("afterCheckpoint" in outcome, false);
     assert.deepEqual(projectionUpdates, [
       {
         captureId: null,
@@ -1680,13 +1620,7 @@ describe("hosted mailbox conversation import adapter", () => {
       throw new Error("Expected imported mailbox outcome.");
     }
 
-    assert.deepEqual(await outcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: null,
-      kind: "inbox_projection",
-      projectionUpdated: true,
-      reasonCode: "attachment.evidence_partial",
-      status: "failed",
-    });
+    assert.equal(outcome.reasonCode, "attachment.evidence_partial");
     assert.deepEqual(projectionUpdates, [
       {
         captureId: null,
@@ -1724,13 +1658,7 @@ describe("hosted mailbox conversation import adapter", () => {
         throw new Error("Expected imported mailbox outcome.");
       }
 
-      assert.deepEqual(await outcome.afterCheckpoint?.(), {
-        attachmentEvidenceUpdated: null,
-        kind: "inbox_projection",
-        projectionUpdated: true,
-        reasonCode: "conversation-import.projection-failed",
-        status: "failed",
-      });
+      assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
       assert.deepEqual(projectionUpdates, [
         {
           captureId: null,
@@ -1769,13 +1697,7 @@ describe("hosted mailbox conversation import adapter", () => {
       throw new Error("Expected imported mailbox outcome.");
     }
 
-    assert.deepEqual(await outcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: null,
-      kind: "inbox_projection",
-      projectionUpdated: false,
-      reasonCode: "conversation-import.projection-update-failed",
-      status: "partial",
-    });
+    assert.equal(outcome.reasonCode, "conversation-import.projection-update-failed");
   });
 
   test("returns partial post-checkpoint result when attachment evidence update fails", async () => {
@@ -1813,13 +1735,7 @@ describe("hosted mailbox conversation import adapter", () => {
       throw new Error("Expected imported mailbox outcome.");
     }
 
-    assert.deepEqual(await outcome.afterCheckpoint?.(), {
-      attachmentEvidenceUpdated: false,
-      kind: "inbox_projection",
-      projectionUpdated: true,
-      reasonCode: "conversation-import.attachment-evidence-update-failed",
-      status: "partial",
-    });
+    assert.equal(outcome.reasonCode, "conversation-import.attachment-evidence-update-failed");
   });
 
   test("does not record Linq provider cleanup during mailbox import", async () => {
@@ -1862,7 +1778,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    assert.equal(typeof outcome.afterCheckpoint, "function");
+    assert.equal("afterCheckpoint" in outcome, false);
   });
 
   test("keeps accepted Linq imports independent from provider cleanup", async () => {
@@ -1899,7 +1815,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    assert.equal(typeof outcome.afterCheckpoint, "function");
+    assert.equal("afterCheckpoint" in outcome, false);
   });
 
   test("keeps deterministic local-capture dedupe out of hosted cursor terms", async () => {
@@ -1937,9 +1853,8 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.deepEqual(
-      { ...first, afterCheckpoint: typeof first.afterCheckpoint },
+      first,
       {
-        afterCheckpoint: "function",
         assistantInputId: "ain_00000000000000000000000000000000",
         captureId: null,
         metrics: {
@@ -1950,9 +1865,8 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     );
     assert.deepEqual(
-      { ...second, afterCheckpoint: typeof second.afterCheckpoint },
+      second,
       {
-        afterCheckpoint: "function",
         assistantInputId: "ain_00000000000000000000000000000000",
         captureId: null,
         metrics: {
@@ -1962,15 +1876,12 @@ describe("hosted mailbox conversation import adapter", () => {
         status: "imported",
       },
     );
-    const serialized = JSON.stringify([
-      { ...first, afterCheckpoint: null },
-      { ...second, afterCheckpoint: null },
-    ]);
+    assert.equal("afterCheckpoint" in first, false);
+    assert.equal("afterCheckpoint" in second, false);
+    const serialized = JSON.stringify([first, second]);
     assert.equal(serialized.includes("runId"), false);
     assert.equal(serialized.includes("committedSeq"), false);
     assert.equal(serialized.includes("source_cursor"), false);
-
-    await first.afterCheckpoint?.();
   });
 
   test("keeps staged mailbox input imported when projection preparation fails", async () => {
@@ -1997,20 +1908,16 @@ describe("hosted mailbox conversation import adapter", () => {
     }
 
     assert.deepEqual(outcome, {
-      afterCheckpoint: outcome.afterCheckpoint,
       assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
       },
+      reasonCode: "conversation-import.projection-failed",
       status: "imported",
     });
-    assert.equal(outcome.reasonCode, undefined);
-    assert.equal(typeof outcome.afterCheckpoint, "function");
-    assert.deepEqual(projectionUpdates, []);
-
-    await outcome.afterCheckpoint?.();
+    assert.equal("afterCheckpoint" in outcome, false);
     assert.deepEqual(projectionUpdates, [
       {
         captureId: null,
@@ -2153,17 +2060,16 @@ describe("hosted mailbox conversation import adapter", () => {
       vault: vaultRoot,
     });
     assert.deepEqual(outcome, {
-      afterCheckpoint: outcome.afterCheckpoint,
       assistantInputId: listed.events[0]?.inputId,
       captureId: null,
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
       },
+      reasonCode: "conversation-import.raw-email-missing",
       status: "imported",
     });
-    assert.equal(outcome.reasonCode, undefined);
-    assert.equal(typeof outcome.afterCheckpoint, "function");
+    assert.equal("afterCheckpoint" in outcome, false);
     assert.equal(listed.events.length, 1);
     assert.equal(
       listed.events[0]?.content.text,
@@ -2181,20 +2087,16 @@ describe("hosted mailbox conversation import adapter", () => {
       promptUnavailableReason: "email.body_unavailable",
     });
     assert.equal(listed.events[0]?.projection.captureId, null);
-    assert.equal(listed.events[0]?.projection.reasonCode, null);
-    assert.equal(listed.events[0]?.projection.status, "pending");
-    assert.equal(listed.events[0]?.projection.lastAttemptedAt, null);
-
-    await outcome.afterCheckpoint?.();
-    const afterProjection = await listAssistantInputEvents({
-      vault: vaultRoot,
-    });
     assert.equal(
-      afterProjection.events[0]?.projection.reasonCode,
+      listed.events[0]?.projection.reasonCode,
       "conversation-import.raw-email-missing",
     );
-    assert.equal(afterProjection.events[0]?.projection.status, "failed");
-    assert.ok(afterProjection.events[0]?.projection.lastAttemptedAt);
+    assert.equal(listed.events[0]?.projection.status, "failed");
+    assert.ok(listed.events[0]?.projection.lastAttemptedAt);
+    assert.equal(
+      listed.events[0]?.projection.reasonCode,
+      "conversation-import.raw-email-missing",
+    );
   });
 
   test("stages hosted email input with minimized prompt-ready metadata and body preview", async () => {
@@ -2317,7 +2219,7 @@ describe("hosted mailbox conversation import adapter", () => {
         vaultRoot,
       });
       assert.equal(outcome.status, "imported");
-      assert.equal(outcome.reasonCode, undefined);
+      assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
     }
     const retryWake = stagedWakes[2]!;
     const retryOutcome = await importHostedConversationMailboxItem({
@@ -2338,6 +2240,7 @@ describe("hosted mailbox conversation import adapter", () => {
       vaultRoot,
     });
     assert.equal(retryOutcome.status, "imported");
+    assert.equal(retryOutcome.reasonCode, "conversation-import.projection-failed");
 
     const source = createHostedAssistantInputSource({
       vaultRoot,
@@ -2357,7 +2260,7 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.deepEqual(
       scannerInputs.inputs.map((input) => input.projection.status),
-      ["pending", "pending", "pending", "pending", "pending"],
+      ["failed", "failed", "failed", "failed", "failed"],
     );
     assert.deepEqual(
       scannerInputs.inputs.map((input) => input.event.replyTarget),

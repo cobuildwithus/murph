@@ -7,7 +7,7 @@ import {
 } from '../src/inbox-multimodal.ts'
 
 describe('buildInboxModelAttachmentBundle', () => {
-  it('notes that image attachments are automatically scanned for QR and barcode text', async () => {
+  it('keeps image attachments as multimodal evidence without automatic parser text claims', async () => {
     const bundle = await buildInboxModelAttachmentBundle({
       attachment: {
         attachmentId: 'attachment-image',
@@ -26,10 +26,9 @@ describe('buildInboxModelAttachmentBundle', () => {
     })
 
     expect(bundle.fragments[0]?.kind).toBe('attachment_metadata')
-    expect(bundle.fragments[0]?.text).toContain(
-      'automaticImageCodeScan: if inbox parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
-    )
-    expect(bundle.combinedText).toContain('automaticImageCodeScan:')
+    expect(bundle.fragments[0]?.text).toContain('routingImageEligible: true')
+    expect(bundle.combinedText).not.toContain('automaticImageCodeScan:')
+    expect(bundle.parseState).toBeNull()
   })
 
   it('keeps stored PDF paths as ordinary attachment metadata', async () => {

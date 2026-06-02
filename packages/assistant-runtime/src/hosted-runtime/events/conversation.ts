@@ -117,6 +117,15 @@ async function drainHostedConversationParsers(input: {
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
   vaultRoot: string;
 }): Promise<number> {
+  const pendingJobs = input.runtime.listAttachmentParseJobs({
+    captureId: input.captureId,
+    limit: 1,
+    state: "pending",
+  });
+  if (pendingJobs.length === 0) {
+    return 0;
+  }
+
   try {
     const parserConfig = await createConfiguredParserRegistry({
       ...(input.parserToolchain
@@ -142,12 +151,10 @@ async function drainHostedConversationParsers(input: {
       captureId: input.captureId,
     });
     const failedResults = results.filter((result) => result.status === "failed");
-    const observedFailedJobs = typeof input.runtime.listAttachmentParseJobs === "function"
-      ? input.runtime.listAttachmentParseJobs({
-        captureId: input.captureId,
-        state: "failed",
-      })
-      : [];
+    const observedFailedJobs = input.runtime.listAttachmentParseJobs({
+      captureId: input.captureId,
+      state: "failed",
+    });
     const parserFailures = collectHostedParserFailures({
       failedJobs: observedFailedJobs,
       failedResults,

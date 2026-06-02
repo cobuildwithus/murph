@@ -265,8 +265,9 @@ describe("hosted local Linq webhook e2e", () => {
     expect(assistantProviderBody.includes("\"file_id\"")).toBe(false);
     expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
     expect(assistantProviderBody.includes("fileName: lab-results.pdf")).toBe(true);
-    expect(assistantProviderBody.includes("raw/assistant-input/")).toBe(true);
-    expect(assistantProviderBody.includes("attachments/001.pdf")).toBe(true);
+    expect(assistantProviderBody.includes("raw/inbox/")).toBe(true);
+    expect(assistantProviderBody.includes("lab-results.pdf")).toBe(true);
+    expect(assistantProviderBody.includes("raw/assistant-input/")).toBe(false);
     expect(assistantProviderBody.includes("storedPath")).toBe(true);
     expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
     expectNoNativeAttachmentLeaks(assistantProviderBody, [

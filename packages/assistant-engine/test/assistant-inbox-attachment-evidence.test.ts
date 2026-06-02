@@ -1,26 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
-  materializeAssistantInputAttachmentRawArtifactRefs,
   type InboxCaptureAttachmentLike,
 } from '../src/assistant/inbox-attachment-evidence.ts'
 
-const tempRoots: string[] = []
-
-afterEach(async () => {
-  await Promise.all(tempRoots.splice(0).map((root) =>
-    rm(root, { force: true, recursive: true }),
-  ))
-})
-
 describe('inbox attachment evidence adapter', () => {
-  it('converts safe inbox attachment artifacts into assistant input attachment evidence', () => {
-    const rawArtifactRefs = new Map<number, string>([
-      [0, 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf'],
-    ])
+  it('converts safe inbox raw artifacts into assistant input attachment evidence', () => {
     const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
       capture: {
         captureId: 'cap_1',
@@ -40,40 +25,28 @@ describe('inbox attachment evidence adapter', () => {
       },
       descriptorAttachmentIdForAttachment: () => 'descriptor_att_1',
       now: '2026-04-22T10:00:00.000Z',
-      rawArtifactPathForAttachment: ({ index }) => rawArtifactRefs.get(index) ?? null,
-      source: 'local-parser-drain',
+      source: 'local-inbox-import',
     })
 
     expect(evidence).toMatchObject({
       optionalInboxCaptureId: 'cap_1',
       reasonCode: null,
-      source: 'local-parser-drain',
+      source: 'local-inbox-import',
       status: 'available',
       updatedAt: '2026-04-22T10:00:00.000Z',
     })
     expect(evidence.attachments).toEqual([
       expect.objectContaining({
         descriptorAttachmentId: 'descriptor_att_1',
-        derived: {
-          allowedRoot: 'derived/inbox/cap_1/attachments/att_1',
-          kind: 'parser-manifest',
-          manifestPath: 'derived/inbox/cap_1/attachments/att_1/manifest.json',
-        },
-        inlineFragments: [
-          {
-            kind: 'attachment_extracted_text',
-            label: 'attachment-1-extracted-text',
-            text: 'Parsed text.',
-            truncated: false,
-          },
-        ],
+        derived: null,
+        inlineFragments: [],
         fileName: 'scan.pdf',
+        parseState: null,
         raw: {
           byteSize: 1234,
           kind: 'vault-relative-file',
           mediaType: 'application/pdf',
-          path:
-            'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+          path: 'raw/inbox/cap_1/attachments/01__scan.pdf',
           sha256: 'a'.repeat(64),
         },
         sourceAttachmentId: 'att_1',
@@ -125,7 +98,6 @@ describe('inbox attachment evidence adapter', () => {
           }),
         ],
       },
-      rawArtifactPathForAttachment: ({ normalizedSourcePath }) => normalizedSourcePath,
       source: 'local-inbox-import',
     })
 
@@ -145,7 +117,7 @@ describe('inbox attachment evidence adapter', () => {
     })
   })
 
-  it('preserves explicit unsupported parse state on parser-supported attachments', () => {
+  it('does not carry parser lifecycle state for images', () => {
     const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
       capture: {
         captureId: 'cap_image',
@@ -161,7 +133,6 @@ describe('inbox attachment evidence adapter', () => {
           }),
         ],
       },
-      rawArtifactPathForAttachment: ({ normalizedSourcePath }) => normalizedSourcePath,
       source: 'local-inbox-import',
     })
 
@@ -170,7 +141,7 @@ describe('inbox attachment evidence adapter', () => {
     expect(evidence.attachments[0]).toMatchObject({
       kind: 'image',
       mime: 'image/jpeg',
-      parseState: 'unsupported',
+      parseState: null,
       raw: {
         byteSize: 64,
         kind: 'vault-relative-file',
@@ -214,6 +185,7 @@ describe('inbox attachment evidence adapter', () => {
           createAttachment({
             attachmentId: 'att_ready',
             extractedText: 'Parsed attachment text.',
+            storedPath: 'raw/inbox/cap_1/attachments/01__report.txt',
           }),
           createAttachment({
             attachmentId: 'att_waiting',
@@ -228,7 +200,7 @@ describe('inbox attachment evidence adapter', () => {
 
     expect(evidence.status).toBe('partial')
     expect(evidence.reasonCode).toBe('attachment.evidence_partial')
-    expect(evidence.attachments[0]?.inlineFragments).toHaveLength(1)
+    expect(evidence.attachments[0]?.inlineFragments).toHaveLength(0)
     expect(evidence.attachments[1]).toMatchObject({
       inlineFragments: [],
       raw: null,
@@ -250,7 +222,6 @@ describe('inbox attachment evidence adapter', () => {
           })
         }),
       },
-      rawArtifactPathForAttachment: ({ normalizedSourcePath }) => normalizedSourcePath,
       source: 'local-inbox-import',
     })
 
@@ -261,7 +232,7 @@ describe('inbox attachment evidence adapter', () => {
     expect(evidence.attachments.at(-1)?.sourceAttachmentId).toBe('att_32')
   })
 
-  it('omits unsafe paths, filenames, and inline text instead of creating invalid evidence', () => {
+  it('omits unsafe identifiers, filenames, and inline text without dropping safe raw paths', () => {
     const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
       capture: {
         captureId: 'cap_1',
@@ -273,190 +244,58 @@ describe('inbox attachment evidence adapter', () => {
             fileName: '../secret.pdf',
             kind: 'document',
             mime: 'application/pdf',
-            storedPath: 'raw/inbox/cap_1/attachments/signed-url.pdf',
+            storedPath: 'raw/inbox/cap_1/attachments/report.pdf',
           }),
         ],
       },
       source: 'manual',
     })
 
-    expect(evidence.status).toBe('partial')
+    expect(evidence.status).toBe('available')
     expect(evidence.attachments[0]).toMatchObject({
       derived: null,
       descriptorAttachmentId: 'attachment-1',
       fileName: null,
       inlineFragments: [],
-      raw: null,
+      raw: {
+        kind: 'vault-relative-file',
+        path: 'raw/inbox/cap_1/attachments/report.pdf',
+      },
       sourceAttachmentId: 'attachment-1',
     })
   })
 
-  it('bounds long inline fragments before storing them', () => {
+  it('preserves parser output evidence for audio attachments', () => {
     const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
       capture: {
         captureId: 'cap_1',
         attachments: [
           createAttachment({
-            extractedText: 'x'.repeat(6_500),
-            storedPath: 'raw/inbox/cap_1/attachments/report.txt',
+            attachmentId: 'att_audio',
+            derivedPath: 'derived/inbox/cap_1/attachments/att_audio/manifest.json',
+            kind: 'audio',
+            mime: 'audio/mpeg',
+            parseState: 'succeeded',
+            storedPath: 'raw/inbox/cap_1/attachments/01__voice.mp3',
+            transcriptText: 'x'.repeat(6_500),
           }),
         ],
       },
       source: 'local-parser-drain',
     })
 
+    expect(evidence.attachments[0]).toMatchObject({
+      derived: {
+        allowedRoot: 'derived/inbox/cap_1/attachments/att_audio',
+        kind: 'parser-manifest',
+        manifestPath: 'derived/inbox/cap_1/attachments/att_audio/manifest.json',
+      },
+      parseState: 'succeeded',
+    })
     expect(evidence.attachments[0]?.inlineFragments[0]).toMatchObject({
       text: 'x'.repeat(6_000),
       truncated: true,
     })
-  })
-
-  it('copies raw inbox artifacts to neutral assistant-input refs before evidence is stored', async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-inbox-evidence-'))
-    tempRoots.push(parentRoot)
-    const vaultRoot = path.join(parentRoot, 'vault')
-    const sourcePath = 'raw/inbox/cap_1/attachments/01__private-photo.jpg'
-    await writeVaultFile(vaultRoot, sourcePath, Buffer.from('image bytes'))
-
-    const attachments = [
-      createAttachment({
-        kind: 'image',
-        mime: 'image/jpeg',
-        storedPath: sourcePath,
-      }),
-    ]
-    const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
-      attachments,
-      inputId: 'ain_11111111111111111111111111111111',
-      vaultRoot,
-    })
-
-    expect(rawArtifactRefs.get(0)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.jpg',
-    )
-    await expect(readFile(path.join(vaultRoot, rawArtifactRefs.get(0)!))).resolves.toEqual(
-      Buffer.from('image bytes'),
-    )
-  })
-
-  it('materializes raw attachment refs only up to the evidence descriptor limit', async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-inbox-evidence-'))
-    tempRoots.push(parentRoot)
-    const vaultRoot = path.join(parentRoot, 'vault')
-    const attachments = Array.from({ length: 33 }, (_, index) => {
-      const ordinal = index + 1
-      return createAttachment({
-        fileName: `attachment-${ordinal}.txt`,
-        ordinal,
-        storedPath:
-          `raw/inbox/cap_many/attachments/${String(ordinal).padStart(3, '0')}.txt`,
-      })
-    })
-    await Promise.all(
-      attachments.map((attachment, index) =>
-        writeVaultFile(
-          vaultRoot,
-          attachment.storedPath!,
-          Buffer.from(`attachment ${index + 1}`),
-        ),
-      ),
-    )
-
-    const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
-      attachments,
-      inputId: 'ain_11111111111111111111111111111111',
-      vaultRoot,
-    })
-
-    expect(rawArtifactRefs.size).toBe(32)
-    expect(rawArtifactRefs.has(31)).toBe(true)
-    expect(rawArtifactRefs.has(32)).toBe(false)
-    await expect(
-      readFile(
-        path.join(
-          vaultRoot,
-          'raw/assistant-input/ain_11111111111111111111111111111111/attachments/033.txt',
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('preserves safe source extensions when MIME is missing or generic', async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-inbox-evidence-'))
-    tempRoots.push(parentRoot)
-    const vaultRoot = path.join(parentRoot, 'vault')
-    const attachments = [
-      createAttachment({
-        kind: 'image',
-        mime: null,
-        ordinal: 1,
-        storedPath: 'raw/inbox/cap_1/attachments/photo.jpg',
-      }),
-      createAttachment({
-        kind: 'document',
-        mime: null,
-        ordinal: 2,
-        storedPath: 'raw/inbox/cap_1/attachments/scan.pdf',
-      }),
-      createAttachment({
-        kind: 'image',
-        mime: 'application/octet-stream',
-        ordinal: 3,
-        storedPath: 'raw/inbox/cap_1/attachments/screenshot.png',
-      }),
-      createAttachment({
-        kind: 'image',
-        mime: null,
-        ordinal: 4,
-        storedPath: 'raw/inbox/cap_1/attachments/archive.exe',
-      }),
-      createAttachment({
-        kind: 'document',
-        mime: null,
-        ordinal: 5,
-        storedPath: 'raw/inbox/cap_1/attachments/scan',
-      }),
-      createAttachment({
-        kind: 'image',
-        mime: 'application/pdf',
-        ordinal: 6,
-        storedPath: 'raw/inbox/cap_1/attachments/photo.jpg',
-      }),
-    ]
-    await Promise.all(
-      attachments.map((attachment, index) =>
-        writeVaultFile(
-          vaultRoot,
-          attachment.storedPath!,
-          Buffer.from(`attachment ${index + 1}`),
-        ),
-      ),
-    )
-
-    const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
-      attachments,
-      inputId: 'ain_11111111111111111111111111111111',
-      vaultRoot,
-    })
-
-    expect(rawArtifactRefs.get(0)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.jpg',
-    )
-    expect(rawArtifactRefs.get(1)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/002.pdf',
-    )
-    expect(rawArtifactRefs.get(2)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/003.png',
-    )
-    expect(rawArtifactRefs.get(3)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/004.dat',
-    )
-    expect(rawArtifactRefs.get(4)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/005.bin',
-    )
-    expect(rawArtifactRefs.get(5)).toBe(
-      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/006.pdf',
-    )
   })
 })
 
@@ -480,14 +319,4 @@ function createAttachment(
     storedPath: input.storedPath ?? null,
     transcriptText: input.transcriptText ?? null,
   }
-}
-
-async function writeVaultFile(
-  vaultRoot: string,
-  relativePath: string,
-  bytes: Buffer,
-): Promise<void> {
-  const absolutePath = path.join(vaultRoot, relativePath)
-  await mkdir(path.dirname(absolutePath), { recursive: true })
-  await writeFile(absolutePath, bytes)
 }

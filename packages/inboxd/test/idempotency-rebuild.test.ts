@@ -207,7 +207,7 @@ test("processCapture recovers from a crash after raw inbox evidence is written b
   assert.equal(replayed.captureId, captureId);
   assert.equal(replayed.eventId, eventId);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
 
   const envelopeFiles = await walkNamedFiles(path.join(vaultRoot, "raw", "inbox"), "envelope.json", {
     skipDirectories: ["attachments"],
@@ -277,8 +277,8 @@ test("processCapture persists canonical evidence even when a stale projection ro
   assert.equal(runtime.getCapture(staleCaptureId), null);
   assert.equal(runtime.getCapture(captureId)?.text, "Canonical capture");
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
-  assert.equal(runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0]?.state, "pending");
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
+  assert.equal(runtime.listAttachmentParseJobs({ captureId, limit: 10 }).length, 0);
 
   const captureRecords = await readJsonlRecords({
     vaultRoot,
@@ -482,7 +482,7 @@ test("processCapture keeps importing a capture when one local attachment file di
   assert.ok(capture);
   assert.equal(capture.attachments.length, 2);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
 
   const keptAttachment = capture.attachments.find(
     (attachment) => attachment.externalId === "att-kept",
@@ -555,7 +555,7 @@ test("rebuildRuntimeFromVault restores canonical captures and remains idempotent
   assert.equal(capture.text, "Rebuild me once");
   assert.equal(capture.attachments.length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
 
   runtime.close();
@@ -602,7 +602,7 @@ test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that ar
   assert.equal(capture.text, "Current raw-only capture");
   assert.equal(capture.attachments.length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
 
   runtime.close();
@@ -613,7 +613,7 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-reset-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const documentPath = await writeExternalFile(sourceRoot, "rebuild-reset.pdf", "authoritative capture");
+  const documentPath = await writeExternalFile(sourceRoot, "rebuild-reset.m4a", "authoritative audio");
   const inbound = createCapture({
     externalId: "msg-rebuild-reset",
     occurredAt: "2026-03-13T11:07:00.000Z",
@@ -621,10 +621,10 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
     attachments: [
       {
         externalId: "att-rebuild-reset",
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: documentPath,
-        fileName: "rebuild-reset.pdf",
+        fileName: "rebuild-reset.m4a",
       },
     ],
   });
@@ -658,7 +658,7 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
     attempt: staleJob.attempts,
     providerId: "stale-parser",
     resultPath: "derived/inbox/stale-parser.json",
-    extractedText: "Glucose 88 mg/dL",
+    transcriptText: "Glucose 88 mg/dL",
   });
   assert.equal(runtime.searchCaptures({ text: "glucose", limit: 10 }).length, 1);
 
@@ -698,6 +698,7 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   assert.equal(rebuilt.attachments[0]?.parserProviderId ?? null, null);
   assert.equal(rebuilt.attachments[0]?.derivedPath ?? null, null);
   assert.equal(rebuilt.attachments[0]?.extractedText ?? null, null);
+  assert.equal(rebuilt.attachments[0]?.transcriptText ?? null, null);
   assert.equal(runtime.searchCaptures({ text: "glucose", limit: 10 }).length, 0);
 
   const headAfter = await readInboxCaptureMutationHead(vaultRoot);
@@ -770,7 +771,7 @@ test("processCapture reuses raw-only inbox evidence when retry occurredAt drifts
   assert.equal(replayed.captureId, captureId);
   assert.equal(replayed.eventId, eventId);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
 
   const envelopeFiles = await walkNamedFiles(path.join(vaultRoot, "raw", "inbox"), "envelope.json", {
     skipDirectories: ["attachments"],
@@ -848,18 +849,18 @@ test("processCapture backfills missing parse jobs for a recovered capture that a
   const sourceRoot = await makeTempDirectory("murph-inbox-recovered-parse-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const attachmentPath = await writeExternalFile(sourceRoot, "barcode.txt", "document bytes");
+  const attachmentPath = await writeExternalFile(sourceRoot, "voice-note.m4a", "audio bytes");
   const inbound = createCapture({
     externalId: "msg-recovered-parse",
     occurredAt: "2026-03-13T11:10:00.000Z",
     text: "Recovered parse job",
     attachments: [
       {
-        externalId: "att-recovered-document",
-        kind: "document",
-        mime: "text/plain",
+        externalId: "att-recovered-audio",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: attachmentPath,
-        fileName: "barcode.txt",
+        fileName: "voice-note.m4a",
       },
     ],
   });

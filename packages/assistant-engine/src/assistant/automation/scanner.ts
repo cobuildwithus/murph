@@ -36,10 +36,6 @@ import {
   type AssistantRunEvent,
 } from './shared.js'
 
-type AssistantPreserveDocumentAttachmentsResult = Awaited<
-  ReturnType<NonNullable<InboxServices['preserveDocumentAttachments']>>
->
-
 interface AssistantAutomationCandidate {
   inputCandidate: AssistantInputCandidate
   summary: AssistantAutomationInputSummary
@@ -131,51 +127,6 @@ export async function scanAssistantAutomationOnce(input: {
       candidate.inputCandidate,
     ] as const),
   )
-  const preservedProjectionResults = new Map<
-    string,
-    AssistantPreserveDocumentAttachmentsResult
-  >()
-
-  const preserveCandidateDocumentsBestEffort = async (
-    candidate: AssistantAutomationCandidate,
-  ): Promise<void> => {
-    if (!applyCanonicalWrites) {
-      return
-    }
-
-    if (candidate.summary.attachmentCount === 0) {
-      return
-    }
-    if (candidate.summary.optionalInboxCaptureId === null) {
-      return
-    }
-
-    const existing = preservedProjectionResults.get(candidate.summary.optionalInboxCaptureId)
-    if (existing) {
-      return
-    }
-
-    try {
-      const preserved = await input.inboxServices.preserveDocumentAttachments?.({
-        vault: input.vault,
-        requestId: input.requestId ?? null,
-        captureId: candidate.summary.optionalInboxCaptureId,
-      })
-      if (preserved) {
-        preservedProjectionResults.set(candidate.summary.optionalInboxCaptureId, preserved)
-      }
-    } catch {
-      input.onEvent?.({
-        type: 'input.reply-progress',
-        inputId: candidate.inputCandidate.event.inputId,
-        details: 'nonblocking document preservation failed',
-        safeDetails: 'document_preservation_failed_nonblocking',
-        providerKind: 'status',
-        providerState: 'completed',
-      })
-    }
-  }
-
   for (let index = 0; index < candidates.length; index += 1) {
     if (input.signal?.aborted) {
       break
@@ -245,15 +196,6 @@ export async function scanAssistantAutomationOnce(input: {
     }
 
     await persistScanState()
-
-    for (const item of context.items) {
-      const groupCandidate = candidatesByInputId.get(item.summary.inputId)
-      if (!groupCandidate) {
-        continue
-      }
-
-      await preserveCandidateDocumentsBestEffort(groupCandidate)
-    }
 
     if (stopReplyScan) {
       break

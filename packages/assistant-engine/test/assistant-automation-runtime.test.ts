@@ -8,7 +8,6 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   inboxListResultSchema,
-  inboxPreserveDocumentAttachmentsResultSchema,
   inboxShowResultSchema,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
@@ -358,24 +357,6 @@ function createShowResult(capture: Record<string, unknown>) {
   return inboxShowResultSchema.parse({
     vault: '/tmp/assistant-automation-vault',
     capture,
-  })
-}
-
-function createPreserveResult(captureId: string) {
-  return inboxPreserveDocumentAttachmentsResultSchema.parse({
-    vault: '/tmp/assistant-automation-vault',
-    captureId,
-    preservedCount: 1,
-    createdCount: 1,
-    documents: [
-      {
-        attachmentId: 'attachment-1',
-        ordinal: 1,
-        lookupId: 'lookup-1',
-        relatedId: 'related-1',
-        created: true,
-      },
-    ],
   })
 }
 
@@ -1754,27 +1735,24 @@ describe('assistant automation scanner', () => {
     })
   })
 
-  it('continues reply processing when automatic document preservation fails', async () => {
+  it('does not automatically preserve document attachments after reply processing', async () => {
     const capture = createCaptureSummary({
       attachmentCount: 1,
     })
+    const preserveDocumentAttachments = vi
+      .fn()
+      .mockRejectedValue(new Error('preserve should not run'))
     const inboxServices = createInboxServices({
-      preserveDocumentAttachments: vi
-        .fn()
-        .mockRejectedValue(new Error('preserve failed')),
+      preserveDocumentAttachments,
     })
     const inputSource = createAssistantInputSourceForCaptures([capture])
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
 
-    const events: Array<Record<string, unknown>> = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
       inputSource,
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
       }),
@@ -1798,18 +1776,11 @@ describe('assistant automation scanner', () => {
         skipped: 0,
       },
     })
-    expect(events).toContainEqual(expect.objectContaining({
-      type: 'input.reply-progress',
-      inputId: expect.stringMatching(/^ain_/u),
-      details: 'nonblocking document preservation failed',
-      providerKind: 'status',
-      providerState: 'completed',
-      safeDetails: 'document_preservation_failed_nonblocking',
-    }))
+    expect(preserveDocumentAttachments).not.toHaveBeenCalled()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
-  it('skips automatic document preservation when the projection capture id is absent', async () => {
+  it('does not preserve documents for captureless candidates', async () => {
     const candidate = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'thread-null-projection',
       inputId: 'ain_null_projection_0123456789abcdef01234567',
@@ -1889,7 +1860,7 @@ describe('assistant automation scanner', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
-  it('skips disabled inbox model routing when canonical writes are disabled', async () => {
+  it('skips disabled reply scanning when canonical writes are disabled', async () => {
     const preserveDocumentAttachments = vi
       .fn()
       .mockRejectedValue(new Error('should not preserve'))
@@ -1977,11 +1948,7 @@ describe('assistant automation scanner', () => {
       occurredAt: '2026-04-08T00:01:00.000Z',
     })
     const inputSource = createAssistantInputSourceForCaptures([shared])
-    const inboxServices = createInboxServices({
-      preserveDocumentAttachments: vi
-        .fn()
-        .mockResolvedValue(createPreserveResult('capture-reply')),
-    })
+    const inboxServices = createInboxServices()
     scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValue({
       advanceCursor: true,
       failed: 0,
@@ -8120,16 +8087,16 @@ describe('assistant automation run loop', () => {
     tempRoots.push(context.parentRoot)
     await writeVaultFile(
       context.vaultRoot,
-      'raw/inbox/telegram/capture-refresh/attachments/01__photo.png',
-      Buffer.from('image-bytes'),
+      'raw/inbox/telegram/capture-refresh/attachments/01__voice.mp3',
+      Buffer.from('audio-bytes'),
     )
     await stageInboxCaptureAssistantInputEvent({
       attachmentDescriptors: [
         {
-          attachmentId: 'descriptor_image_1',
-          contentType: 'image/png',
+          attachmentId: 'descriptor_audio_1',
+          contentType: 'audio/mpeg',
           fileName: null,
-          kind: 'image',
+          kind: 'audio',
           sizeBytes: 128,
         },
       ],
@@ -8154,23 +8121,23 @@ describe('assistant automation run loop', () => {
             text: 'input before parser drain',
             attachments: [
               {
-                attachmentId: 'att_image_1',
+                attachmentId: 'att_audio_1',
                 byteSize: 128,
                 derivedPath:
-                  'derived/inbox/capture-refresh/attachments/att_image_1/manifest.json',
+                  'derived/inbox/capture-refresh/attachments/att_audio_1/manifest.json',
                 externalId: null,
-                extractedText: 'Parsed image label.',
-                fileName: 'photo.png',
-                kind: 'image',
-                mime: 'image/png',
+                extractedText: null,
+                fileName: 'voice.mp3',
+                kind: 'audio',
+                mime: 'audio/mpeg',
                 ordinal: 1,
                 originalPath: null,
                 parseState: 'succeeded',
                 parserProviderId: null,
                 sha256: null,
                 storedPath:
-                  'raw/inbox/telegram/capture-refresh/attachments/01__photo.png',
-                transcriptText: null,
+                  'raw/inbox/telegram/capture-refresh/attachments/01__voice.mp3',
+                transcriptText: 'Parsed voice note.',
               },
             ],
           }),
@@ -8269,28 +8236,28 @@ describe('assistant automation run loop', () => {
     expect(stagedInputs[0]?.event.attachmentEvidence.attachments).toEqual([
       expect.objectContaining({
         derived: {
-          allowedRoot: 'derived/inbox/capture-refresh/attachments/att_image_1',
+          allowedRoot: 'derived/inbox/capture-refresh/attachments/att_audio_1',
           kind: 'parser-manifest',
           manifestPath:
-            'derived/inbox/capture-refresh/attachments/att_image_1/manifest.json',
+            'derived/inbox/capture-refresh/attachments/att_audio_1/manifest.json',
         },
         inlineFragments: [
           {
-            kind: 'attachment_extracted_text',
-            label: 'attachment-1-extracted-text',
-            text: 'Parsed image label.',
+            kind: 'attachment_transcript',
+            label: 'attachment-1-transcript',
+            text: 'Parsed voice note.',
             truncated: false,
           },
         ],
         raw: {
           byteSize: 128,
           kind: 'vault-relative-file',
-          mediaType: 'image/png',
-          path: `raw/assistant-input/${stagedInputs[0]!.event.inputId}/attachments/001.png`,
+          mediaType: 'audio/mpeg',
+          path: 'raw/inbox/telegram/capture-refresh/attachments/01__voice.mp3',
           sha256: null,
         },
-        descriptorAttachmentId: 'descriptor_image_1',
-        sourceAttachmentId: 'att_image_1',
+        descriptorAttachmentId: 'descriptor_audio_1',
+        sourceAttachmentId: 'att_audio_1',
       }),
     ])
   })

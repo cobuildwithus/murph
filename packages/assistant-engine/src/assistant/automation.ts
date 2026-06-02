@@ -70,6 +70,5 @@ export {
 } from './turn-input.js'
 export {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
-  materializeAssistantInputAttachmentRawArtifactRefs,
   type InboxCaptureAttachmentLike,
 } from './inbox-attachment-evidence.js'

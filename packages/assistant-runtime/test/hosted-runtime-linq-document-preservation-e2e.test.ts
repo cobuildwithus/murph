@@ -127,7 +127,7 @@ describe("hosted Linq document preservation", () => {
 
       assert.deepEqual(importResult.metrics, {
         nextWakeAt: null,
-        parserProcessed: 1,
+        parserProcessed: 0,
       });
 
       const runtime = await openInboxRuntime({ vaultRoot });
@@ -144,7 +144,8 @@ describe("hosted Linq document preservation", () => {
         assert.equal(capture.attachments.length, 1);
         assert.equal(capture.attachments[0]?.kind, "document");
         assert.equal(capture.attachments[0]?.mime, "application/pdf");
-        assert.match(capture.attachments[0]?.parseState ?? "", /^(failed|pending)$/u);
+        assert.equal(capture.attachments[0]?.parseState ?? null, null);
+        assert.equal(runtime.listAttachmentParseJobs({ captureId }).length, 0);
       } finally {
         runtime.close();
       }

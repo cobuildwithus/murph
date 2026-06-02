@@ -1744,7 +1744,10 @@ function buildCapturelessAssistantInputPrompt(
     .map((candidate, index) => {
       const transcript = buildAssistantInputCandidateTranscriptText(candidate)
       const attachmentContext = renderAssistantInputAttachmentDescriptorPromptSection({
+        attachments: candidate.event.attachmentEvidence.attachments,
         descriptors: candidate.event.attachmentDescriptors,
+        evidenceReasonCode: candidate.event.attachmentEvidence.reasonCode,
+        evidenceStatus: candidate.event.attachmentEvidence.status,
         projectionReasonCode: candidate.projection.reasonCode,
         projectionStatus: candidate.projection.status,
       })

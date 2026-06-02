@@ -57,7 +57,7 @@ test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", 
   );
 });
 
-test("processCapture stores redacted raw evidence, one canonical intake record, and attachment jobs", async () => {
+test("processCapture stores redacted raw evidence and one canonical document intake record", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -141,9 +141,10 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   assert.equal(capture.text, "Eggs and toast");
   assert.equal(capture.attachments.length, 1);
   assert.match(capture.attachments[0]?.attachmentId ?? "", /^att_/u);
-  assert.equal(capture.attachments[0]?.parseState, "pending");
+  assert.equal(capture.attachments[0]?.parseState, null);
   assert.equal(capture.attachments[0]?.originalPath, null);
   assert.equal(capture.attachments[0]?.storedPath?.startsWith("raw/inbox/email/self/"), true);
+  assert.equal(runtime.listAttachmentParseJobs({ captureId: first.captureId }).length, 0);
   assert.equal(capture.raw.localPath, "<REDACTED_PATH>");
   assert.equal(capture.raw.authorization, "<REDACTED_SECRET>");
   assert.equal(capture.raw.cookie, "<REDACTED_SECRET>");
@@ -172,10 +173,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   assert.equal(captureRow.raw_json.includes("<ACCESS_TOKEN>"), false);
 
   const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
-  assert.equal(jobs.length, 1);
-  assert.equal(jobs[0]?.captureId, first.captureId);
-  assert.equal(jobs[0]?.attachmentId, capture.attachments[0]?.attachmentId);
-  assert.equal(jobs[0]?.state, "pending");
+  assert.equal(jobs.length, 0);
 
   const envelopePath = path.join(vaultRoot, capture.envelopePath);
   const envelope = JSON.parse(await fs.readFile(envelopePath, "utf8")) as {
@@ -569,13 +567,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.equal(hits[0]?.captureId, capture.captureId);
   assert.match(hits[0]?.snippet ?? "", /Toast with avocado/);
   const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
-  assert.equal(jobs.length, 1);
-  assert.equal(jobs[0]?.captureId, capture.captureId);
-  assert.equal(
-    jobs[0]?.attachmentId,
-    runtime.getCapture(capture.captureId)?.attachments[0]?.attachmentId,
-  );
-  assert.equal(jobs[0]?.state, "pending");
+  assert.equal(jobs.length, 0);
 
   const fallbackHits = runtime.searchCaptures({
     text: "   ",
@@ -594,7 +586,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.ok(rebuilt);
   assert.equal(rebuilt.text, "Toast with avocado");
   assert.equal(rebuilt.attachments[0]?.fileName, "toast-note.txt");
-  assert.equal(rebuiltRuntime.listAttachmentParseJobs({ limit: 10 }).length, 1);
+  assert.equal(rebuiltRuntime.listAttachmentParseJobs({ limit: 10 }).length, 0);
   assert.equal(
     rebuilt.attachments[0]?.attachmentId,
     runtime.getCapture(capture.captureId)?.attachments[0]?.attachmentId,
@@ -609,7 +601,7 @@ test("completed attachment parse jobs refresh capture search text and attachment
   const sourceRoot = await makeTempDirectory("murph-inbox-parse-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const documentPath = await writeExternalFile(sourceRoot, "lab-result.pdf", "document");
+  const documentPath = await writeExternalFile(sourceRoot, "lab-result.m4a", "audio bytes");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -626,10 +618,10 @@ test("completed attachment parse jobs refresh capture search text and attachment
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: documentPath,
-        fileName: "lab-result.pdf",
+        fileName: "lab-result.m4a",
       },
     ],
     raw: {},
@@ -641,17 +633,17 @@ test("completed attachment parse jobs refresh capture search text and attachment
   runtime.completeAttachmentParseJob({
     jobId: pendingJob.jobId,
     attempt: pendingJob.attempts,
-    providerId: "fake-document-parser",
+    providerId: "fake-audio-parser",
     resultPath: "derived/inbox/manifest.json",
-    extractedText: "Glucose 88 mg/dL",
+    transcriptText: "Glucose 88 mg/dL",
   });
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
   assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
-  assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-document-parser");
+  assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-audio-parser");
   assert.equal(refreshed.attachments[0]?.derivedPath, "derived/inbox/manifest.json");
-  assert.equal(refreshed.attachments[0]?.extractedText, "Glucose 88 mg/dL");
+  assert.equal(refreshed.attachments[0]?.transcriptText, "Glucose 88 mg/dL");
 
   const hits = runtime.searchCaptures({
     text: "glucose",
@@ -670,7 +662,7 @@ test("capture mutation cursors advance for new captures, attachment parse update
   const sourceRoot = await makeTempDirectory("murph-inbox-mutation-cursor-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const documentPath = await writeExternalFile(sourceRoot, "cursor.pdf", "document");
+  const documentPath = await writeExternalFile(sourceRoot, "cursor.m4a", "audio bytes");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -683,10 +675,10 @@ test("capture mutation cursors advance for new captures, attachment parse update
     text: "Original text",
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: documentPath,
-        fileName: "cursor.pdf",
+        fileName: "cursor.m4a",
       },
     ],
     raw: {},
@@ -706,9 +698,9 @@ test("capture mutation cursors advance for new captures, attachment parse update
   runtime.completeAttachmentParseJob({
     jobId: job!.jobId,
     attempt: job!.attempts,
-    providerId: "fake-document-parser",
+    providerId: "fake-audio-parser",
     resultPath: "derived/inbox/cursor.json",
-    extractedText: "Parsed cursor text",
+    transcriptText: "Parsed cursor text",
   });
 
   const secondHead = await readInboxCaptureMutationHead(vaultRoot);
@@ -769,8 +761,8 @@ test("attachment parse job filters and requeue reset parser runtime state", asyn
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstPath = await writeExternalFile(sourceRoot, "first.pdf", "document-one");
-  const secondPath = await writeExternalFile(sourceRoot, "second.pdf", "document-two");
+  const firstPath = await writeExternalFile(sourceRoot, "first.m4a", "audio-one");
+  const secondPath = await writeExternalFile(sourceRoot, "second.m4a", "audio-two");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -787,10 +779,10 @@ test("attachment parse job filters and requeue reset parser runtime state", asyn
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: firstPath,
-        fileName: "first.pdf",
+        fileName: "first.m4a",
       },
     ],
     raw: {},
@@ -808,10 +800,10 @@ test("attachment parse job filters and requeue reset parser runtime state", asyn
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: secondPath,
-        fileName: "second.pdf",
+        fileName: "second.m4a",
       },
     ],
     raw: {},
@@ -831,16 +823,16 @@ test("attachment parse job filters and requeue reset parser runtime state", asyn
   runtime.completeAttachmentParseJob({
     jobId: firstJob.jobId,
     attempt: firstJob.attempts,
-    providerId: "fake-document-parser",
+    providerId: "fake-audio-parser",
     resultPath: "derived/inbox/first.json",
-    extractedText: "Glucose 88 mg/dL",
+    transcriptText: "Glucose 88 mg/dL",
   });
   runtime.completeAttachmentParseJob({
     jobId: secondJob.jobId,
     attempt: secondJob.attempts,
-    providerId: "fake-document-parser",
+    providerId: "fake-audio-parser",
     resultPath: "derived/inbox/second.json",
-    extractedText: "Unrelated text",
+    transcriptText: "Unrelated text",
   });
 
   assert.equal(
@@ -896,7 +888,7 @@ test("requeue can reset running attachment parse jobs back to pending", async ()
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-running-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const documentPath = await writeExternalFile(sourceRoot, "running.pdf", "document");
+  const documentPath = await writeExternalFile(sourceRoot, "running.m4a", "audio bytes");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -913,10 +905,10 @@ test("requeue can reset running attachment parse jobs back to pending", async ()
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: documentPath,
-        fileName: "running.pdf",
+        fileName: "running.m4a",
       },
     ],
     raw: {},
@@ -957,7 +949,7 @@ test("requeue invalidates stale running claims before finalization", async () =>
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-stale-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const documentPath = await writeExternalFile(sourceRoot, "stale.pdf", "document");
+  const documentPath = await writeExternalFile(sourceRoot, "stale.m4a", "audio bytes");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -974,10 +966,10 @@ test("requeue invalidates stale running claims before finalization", async () =>
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/mp4",
         originalPath: documentPath,
-        fileName: "stale.pdf",
+        fileName: "stale.m4a",
       },
     ],
     raw: {},
@@ -1002,7 +994,7 @@ test("requeue invalidates stale running claims before finalization", async () =>
     attempt: staleClaim.attempts,
     providerId: "stale-provider",
     resultPath: "derived/inbox/stale.json",
-    extractedText: "stale text",
+    transcriptText: "stale text",
   });
   assert.equal(staleComplete.applied, false);
   assert.equal(staleComplete.job.state, "pending");
@@ -1027,7 +1019,7 @@ test("requeue invalidates stale running claims before finalization", async () =>
     attempt: freshClaim.attempts,
     providerId: "fresh-provider",
     resultPath: "derived/inbox/fresh.json",
-    extractedText: "fresh text",
+    transcriptText: "fresh text",
   });
   assert.equal(freshComplete.applied, true);
   assert.equal(freshComplete.job.state, "succeeded");

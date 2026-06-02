@@ -5793,7 +5793,7 @@ describe("hosted workspace runtime entrypoint", () => {
       },
       {
         bytes: Buffer.from("assistant-input-preview\n", "utf8"),
-        path: "raw/assistant-input/example/preview.txt",
+        path: "raw/inbox/example/preview.txt",
       },
       {
         bytes: Buffer.from("{\"schema\":\"example\"}\n", "utf8"),
@@ -5801,7 +5801,7 @@ describe("hosted workspace runtime entrypoint", () => {
       },
       {
         bytes: Buffer.from("assistant-input-derived-summary\n", "utf8"),
-        path: "derived/assistant-input/example/summary.txt",
+        path: "derived/inbox/example/attachment/summary.txt",
       },
     ] as const;
 

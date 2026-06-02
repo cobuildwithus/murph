@@ -44,10 +44,8 @@ import { createAttachmentParseJobStore } from "./sqlite/parse-jobs.ts";
 const INBOX_RUNTIME_SQLITE_SCHEMA_VERSION = 4;
 const SQLITE_WAL_COMPANION_SUFFIXES = ["-shm", "-wal"] as const;
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
-const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
+const AUTOMATIC_ATTACHMENT_PARSE_KINDS = new Set<StoredAttachment["kind"]>([
   "audio",
-  "document",
-  "image",
   "video",
 ]);
 
@@ -1321,7 +1319,7 @@ function normalizeLimit(limit: number | undefined, fallback: number): number {
 
 function shouldEnqueueParseJobForProjection(attachment: StoredAttachment): boolean {
   return (
-    PARSEABLE_ATTACHMENT_KINDS.has(attachment.kind) &&
+    AUTOMATIC_ATTACHMENT_PARSE_KINDS.has(attachment.kind) &&
     typeof attachment.storedPath === "string" &&
     attachment.storedPath.length > 0
   );

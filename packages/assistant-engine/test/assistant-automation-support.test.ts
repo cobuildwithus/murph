@@ -1124,6 +1124,9 @@ describe('assistant auto-reply prompt builder support', () => {
         createPromptInput({
           attachments: [
             createAttachment({
+              kind: 'audio',
+              mime: 'audio/mpeg',
+              fileName: 'voice-note.mp3',
               parseState: 'pending',
             }),
           ],
@@ -1151,6 +1154,9 @@ describe('assistant auto-reply prompt builder support', () => {
       createPromptInput({
         attachments: [
           createAttachment({
+            kind: 'audio',
+            mime: 'audio/mpeg',
+            fileName: 'voice-note.mp3',
             extractedText: 'Attachment excerpt',
           }),
         ],
@@ -1183,6 +1189,9 @@ describe('assistant auto-reply prompt builder support', () => {
         attachments: [
           createAttachment({
             derivedPath: 'derived/attachments/capture-1.txt',
+            kind: 'audio',
+            mime: 'audio/mpeg',
+            fileName: 'voice-note.mp3',
             extractedText: longExtractedText,
             transcriptText: longTranscript,
           }),
@@ -1278,7 +1287,7 @@ describe('assistant auto-reply prompt builder support', () => {
     }
     expect(result.prompt).toContain('Attachment evidence:')
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('- parser output: succeeded')
+    expect(result.prompt).not.toContain('- parser output:')
     expect(result.prompt).toContain('Attachment 1\nfileName: attachment-1.txt')
     expect(result.userMessageContent).toBeNull()
   })

@@ -58,28 +58,34 @@ export async function buildInboxModelAttachmentBundle(input: {
     input.attachment.storedPath ?? null,
     input.captureId,
   )
-  const inlineDerivedPath = normalizeAnchoredVaultRelativePath(
-    input.attachment.derivedPath ?? null,
-    buildAllowedDerivedPrefixes(input.captureId, input.attachment),
-  )
   const routingImage = getRoutingImageEligibility({
     ...input.attachment,
     storedPath: storedAttachmentPath,
   })
-  const evidenceSources = [
-    ...buildInlineTextSources({
-      attachment: input.attachment,
-      derivedPath: inlineDerivedPath,
-      storedPath: storedAttachmentPath,
-    }),
-    ...(await buildDerivedTextSources({
-      attachment: input.attachment,
-      captureId: input.captureId,
-      vaultRoot: input.vaultRoot,
-    })),
-  ]
+  const useParserOutput = shouldUseInboxAttachmentParserOutput(input.attachment.kind)
+  const parseState = useParserOutput ? input.attachment.parseState ?? null : null
+  const inlineDerivedPath = useParserOutput
+    ? normalizeAnchoredVaultRelativePath(
+        input.attachment.derivedPath ?? null,
+        buildAllowedDerivedPrefixes(input.captureId, input.attachment),
+      )
+    : null
+  const evidenceSources = useParserOutput
+    ? [
+        ...buildInlineTextSources({
+          attachment: input.attachment,
+          derivedPath: inlineDerivedPath,
+          storedPath: storedAttachmentPath,
+        }),
+        ...(await buildDerivedTextSources({
+          attachment: input.attachment,
+          captureId: input.captureId,
+          vaultRoot: input.vaultRoot,
+        })),
+      ]
+    : []
   const fragments = [
-    buildMetadataFragment(input.attachment, routingImage, storedAttachmentPath),
+    buildMetadataFragment(input.attachment, routingImage, storedAttachmentPath, parseState),
     ...projectAttachmentEvidenceForModel({
       attachment: {
         byteSize: input.attachment.byteSize ?? null,
@@ -104,7 +110,7 @@ export async function buildInboxModelAttachmentBundle(input: {
     fileName: input.attachment.fileName ?? null,
     byteSize: input.attachment.byteSize ?? null,
     storedPath: storedAttachmentPath,
-    parseState: input.attachment.parseState ?? null,
+    parseState,
     routingImage,
     fragments,
     combinedText,
@@ -220,6 +226,7 @@ function buildMetadataFragment(
   attachment: InboxShowResult['capture']['attachments'][number],
   routingImage: RoutingImageEligibility,
   storedAttachmentPath: string | null,
+  parseState: InboxModelAttachmentBundle['parseState'],
 ) {
   const metadataLines = [
     `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
@@ -229,17 +236,12 @@ function buildMetadataFragment(
     `fileName: ${attachment.fileName ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? 'unknown'}`,
     `storedPath: ${storedAttachmentPath ?? 'missing'}`,
-    `parseState: ${attachment.parseState ?? 'unknown'}`,
-    ...(attachment.kind === 'image'
-      ? [
-          'automaticImageCodeScan: if inbox parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
-        ]
-      : []),
+    parseState ? `parseState: ${parseState}` : null,
     `routingImageEligible: ${String(routingImage.eligible)}`,
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
     `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
-  ]
+  ].filter((line): line is string => line !== null)
   const text = metadataLines.join('\n')
   return {
     kind: 'attachment_metadata' as const,
@@ -248,6 +250,12 @@ function buildMetadataFragment(
     text,
     truncated: false,
   }
+}
+
+function shouldUseInboxAttachmentParserOutput(
+  kind: InboxShowResult['capture']['attachments'][number]['kind'],
+): boolean {
+  return kind === 'audio' || kind === 'video'
 }
 
 function buildInlineTextSources(input: {

@@ -138,11 +138,36 @@ function createParseJobRecord(
   };
 }
 
+function mockOpenInboxRuntimeWithParseJobs(input: {
+  failedJobs?: AttachmentParseJobRecord[];
+  pendingJobs?: AttachmentParseJobRecord[];
+} = {}) {
+  const pendingJobs = input.pendingJobs ?? [
+    createParseJobRecord({
+      state: "pending",
+    }),
+  ];
+  const failedJobs = input.failedJobs ?? [];
+  mocks.openInboxRuntime.mockResolvedValueOnce({
+    close: vi.fn(),
+    listAttachmentParseJobs: vi.fn((filters: { state?: string } = {}) => {
+      if (filters.state === "pending") {
+        return pendingJobs;
+      }
+      if (filters.state === "failed") {
+        return failedJobs;
+      }
+      return [];
+    }),
+  });
+}
+
 beforeEach(() => {
   mocks.createHostedTelegramEffectsAttachmentDownloadDriver.mockReturnValue(null);
   mocks.markLinqChatRead.mockResolvedValue(undefined);
   mocks.openInboxRuntime.mockResolvedValue({
     close: vi.fn(),
+    listAttachmentParseJobs: vi.fn(() => []),
   });
   mocks.createConfiguredParserRegistry.mockResolvedValue({
     ffmpeg: undefined,
@@ -381,7 +406,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(pipelineClose).toHaveBeenCalledTimes(4);
     expect(linqImport.metrics).toEqual({
       nextWakeAt: null,
-      parserProcessed: 2,
+      parserProcessed: 0,
     });
   });
 
@@ -473,6 +498,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValue({
       source: "linq",
     });
+    mockOpenInboxRuntimeWithParseJobs();
 
     await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
@@ -533,6 +559,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",
     });
+    mockOpenInboxRuntimeWithParseJobs();
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
@@ -595,6 +622,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",
     });
+    mockOpenInboxRuntimeWithParseJobs();
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
@@ -679,6 +707,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",
     });
+    mockOpenInboxRuntimeWithParseJobs();
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: createRuntimeWithLogPort(logRequests),
@@ -723,16 +752,15 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
 
   it("logs failed parser job state when drain returns no job result", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.openInboxRuntime.mockResolvedValueOnce({
-      close: vi.fn(),
-      listAttachmentParseJobs: vi.fn(() => [
+    mockOpenInboxRuntimeWithParseJobs({
+      failedJobs: [
         createParseJobRecord({
           errorCode: "ffmpeg_unavailable",
           errorMessage: "spawn /app/test-parser-toolchain/ffmpeg ENOENT",
           jobId: "job_failed_from_state",
           state: "failed",
         }),
-      ]),
+      ],
     });
     mocks.createInboxParserService.mockReturnValueOnce({
       drain: vi.fn(async () => []),

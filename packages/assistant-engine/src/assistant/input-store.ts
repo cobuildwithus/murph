@@ -119,12 +119,10 @@ const assistantInputAttachmentEvidenceFragmentKindValues = [
 
 const ASSISTANT_INPUT_RAW_ARTIFACT_PATH_PREFIXES = [
   'raw/inbox/',
-  'raw/assistant-input/',
 ] as const
 
 const ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES = [
   'derived/inbox/',
-  'derived/assistant-input/',
 ] as const
 
 const assistantInputSourceRefSchema = z.discriminatedUnion('kind', [

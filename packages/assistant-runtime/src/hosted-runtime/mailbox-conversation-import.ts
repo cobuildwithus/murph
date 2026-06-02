@@ -18,7 +18,6 @@ import {
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
-  materializeAssistantInputAttachmentRawArtifactRefs,
   readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
   type AssistantInputAttachmentEvidence,
@@ -170,7 +169,6 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
 
 export type HostedConversationMailboxImportOutcome =
   | {
-      afterCheckpoint?: (() => Promise<HostedMailboxPostCheckpointEffectResult>) | null;
       assistantInputId?: string | null;
       captureId: string | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -313,22 +311,21 @@ export async function importHostedConversationMailboxItem(input: {
   });
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
+  const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
+    importConversationWake,
+    loadAttachmentEvidenceCapture,
+    prepareWakeContext,
+    runtime: input.runtime,
+    stagedInput,
+    vaultRoot: input.vaultRoot,
+    wake: decoded.wake,
+  });
   return {
-    afterCheckpoint: async () => {
-      return await projectHostedConversationAssistantInputBestEffort({
-        importConversationWake,
-        loadAttachmentEvidenceCapture,
-        prepareWakeContext,
-        runtime: input.runtime,
-        stagedInput,
-        vaultRoot: input.vaultRoot,
-        wake: decoded.wake,
-      });
-    },
     assistantInputId: stagedInput.inputId,
     captureId: null,
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
     metrics: createEmptyHostedConversationWakeMetrics(),
+    ...(projectionEffect.reasonCode ? { reasonCode: projectionEffect.reasonCode } : {}),
     status: "imported",
   };
 }
@@ -484,11 +481,9 @@ async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffor
     });
     const updated = await recordHostedConversationAttachmentEvidenceBestEffort({
       attachmentEvidence:
-        await createHostedConversationAttachmentEvidenceFromCaptureWithRawRefs({
+        createHostedConversationAttachmentEvidenceFromCapture({
           capture,
-          inputId: input.stagedInput.inputId,
           source: "hosted-inbox-projection",
-          vaultRoot: input.vaultRoot,
         }),
       stagedInput: input.stagedInput,
     });
@@ -527,20 +522,12 @@ async function loadHostedConversationAttachmentEvidenceCapture(input: {
   };
 }
 
-async function createHostedConversationAttachmentEvidenceFromCaptureWithRawRefs(input: {
+function createHostedConversationAttachmentEvidenceFromCapture(input: {
   capture: HostedConversationMailboxAttachmentEvidenceCapture;
-  inputId: string;
   source: NonNullable<AssistantInputAttachmentEvidence["source"]>;
-  vaultRoot: string;
-}): Promise<AssistantInputAttachmentEvidence> {
-  const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
-    attachments: input.capture.attachments,
-    inputId: input.inputId,
-    vaultRoot: input.vaultRoot,
-  });
+}): AssistantInputAttachmentEvidence {
   return createAssistantInputAttachmentEvidenceFromInboxCapture({
     capture: input.capture,
-    rawArtifactPathForAttachment: ({ index }) => rawArtifactRefs.get(index) ?? null,
     source: input.source,
   });
 }

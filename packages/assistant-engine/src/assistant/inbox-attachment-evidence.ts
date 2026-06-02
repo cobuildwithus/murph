@@ -1,13 +1,8 @@
 import path from 'node:path'
-import { runCanonicalWrite } from '@murphai/core'
-import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
 } from './input-store.js'
-import type {
-  AssistantWorkspaceArtifactMaterializer,
-} from './execution-context.js'
 import { ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT } from './input-store.js'
 import { normalizeAssistantInputFileName } from './attachment-file-name.js'
 
@@ -20,24 +15,6 @@ const ATTACHMENT_EVIDENCE_OVERFLOW_REASON_CODE =
 const SAFE_EVIDENCE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,190}$/u
 const SAFE_CONTENT_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
 const SAFE_SHA256_PATTERN = /^[0-9a-f]{64}$/u
-const SAFE_ATTACHMENT_EVIDENCE_EXTENSIONS = new Set([
-  '.csv',
-  '.gif',
-  '.jpeg',
-  '.jpg',
-  '.json',
-  '.m4a',
-  '.mp3',
-  '.mp4',
-  '.ogg',
-  '.pdf',
-  '.png',
-  '.txt',
-  '.wav',
-  '.webm',
-  '.webp',
-])
-
 type EvidenceSource = NonNullable<AssistantInputAttachmentEvidence['source']>
 
 export interface InboxCaptureAttachmentLike {
@@ -68,12 +45,6 @@ export function createAssistantInputAttachmentEvidenceFromInboxCapture(input: {
     index: number,
   ) => string | null
   now?: string | null
-  rawArtifactPathForAttachment?: (input: {
-    attachment: InboxCaptureAttachmentLike
-    index: number
-    normalizedSourcePath: string
-    ordinal: number
-  }) => string | null
   source: EvidenceSource
 }): AssistantInputAttachmentEvidence {
   const attachments = input.capture.attachments
@@ -85,7 +56,6 @@ export function createAssistantInputAttachmentEvidenceFromInboxCapture(input: {
           input.descriptorAttachmentIdForAttachment?.(attachment, index) ?? null,
         fallbackAttachmentId: `attachment-${index + 1}`,
         index,
-        rawArtifactPathForAttachment: input.rawArtifactPathForAttachment,
       }),
     )
   const hasOmittedAttachmentEvidence =
@@ -127,28 +97,15 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
   descriptorAttachmentId: string | null
   fallbackAttachmentId: string
   index: number
-  rawArtifactPathForAttachment?: (input: {
-    attachment: InboxCaptureAttachmentLike
-    index: number
-    normalizedSourcePath: string
-    ordinal: number
-  }) => string | null
 }): AssistantInputAttachmentEvidenceItem {
   const ordinal = normalizeOrdinal(input.attachment.ordinal, input.index + 1)
   const mime = normalizeContentType(input.attachment.mime)
-  const sourceRawPath = normalizeRawArtifactPath(input.attachment.storedPath ?? null)
-  const rawPath = sourceRawPath
-    ? normalizeRawArtifactPath(
-      input.rawArtifactPathForAttachment?.({
-        attachment: input.attachment,
-        index: input.index,
-        normalizedSourcePath: sourceRawPath,
-        ordinal,
-      }) ?? null,
-    )
-    : null
-  const derivedPath = normalizeDerivedArtifactPath(input.attachment.derivedPath ?? null)
+  const rawPath = normalizeRawArtifactPath(input.attachment.storedPath ?? null)
   const kind = normalizeAttachmentKind(input.attachment.kind)
+  const useParserOutput = shouldUseAttachmentParserOutput(kind)
+  const derivedPath = useParserOutput
+    ? normalizeDerivedArtifactPath(input.attachment.derivedPath ?? null)
+    : null
 
   return {
     byteSize: normalizeByteSize(input.attachment.byteSize),
@@ -164,20 +121,22 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
       normalizeEvidenceToken(input.attachment.attachmentId, input.fallbackAttachmentId),
     ),
     fileName: normalizeFileName(input.attachment.fileName),
-    inlineFragments: [
-      createInlineFragment({
-        kind: 'attachment_extracted_text',
-        label: `attachment-${ordinal}-extracted-text`,
-        text: input.attachment.extractedText ?? null,
-      }),
-      createInlineFragment({
-        kind: 'attachment_transcript',
-        label: `attachment-${ordinal}-transcript`,
-        text: input.attachment.transcriptText ?? null,
-      }),
-    ].filter((fragment): fragment is AssistantInputAttachmentEvidenceItem['inlineFragments'][number] =>
-      fragment !== null,
-    ),
+    inlineFragments: useParserOutput
+      ? [
+          createInlineFragment({
+            kind: 'attachment_extracted_text',
+            label: `attachment-${ordinal}-extracted-text`,
+            text: input.attachment.extractedText ?? null,
+          }),
+          createInlineFragment({
+            kind: 'attachment_transcript',
+            label: `attachment-${ordinal}-transcript`,
+            text: input.attachment.transcriptText ?? null,
+          }),
+        ].filter((fragment): fragment is AssistantInputAttachmentEvidenceItem['inlineFragments'][number] =>
+          fragment !== null,
+        )
+      : [],
     kind,
     mime,
     ordinal,
@@ -198,135 +157,8 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
   }
 }
 
-export async function materializeAssistantInputAttachmentRawArtifactRefs(input: {
-  attachments: readonly InboxCaptureAttachmentLike[]
-  inputId: string
-  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
-  vaultRoot: string
-}): Promise<Map<number, string>> {
-  const refs = new Map<number, string>()
-  await Promise.all(input.attachments.slice(0, ATTACHMENT_EVIDENCE_MAX_COUNT).map(async (attachment, index) => {
-    const sourcePath = normalizeRawArtifactPath(attachment.storedPath ?? null)
-    if (!sourcePath) {
-      return
-    }
-
-    const ordinal = normalizeOrdinal(attachment.ordinal, index + 1)
-    const targetPath = createAssistantInputRawArtifactPath({
-      inputId: input.inputId,
-      kind: normalizeAttachmentKind(attachment.kind),
-      mediaType: normalizeContentType(attachment.mime),
-      ordinal,
-      sourcePath,
-    })
-    if (!targetPath) {
-      return
-    }
-
-    try {
-      if (sourcePath !== targetPath) {
-        await input.materializeWorkspaceArtifacts?.([sourcePath])
-        const sourceAbsolutePath = await resolveAssistantVaultPath(
-          input.vaultRoot,
-          sourcePath,
-          'file path',
-        )
-        const mediaType = normalizeContentType(attachment.mime) ??
-          'application/octet-stream'
-        await runCanonicalWrite({
-          vaultRoot: input.vaultRoot,
-          operationType: 'assistant_input_raw_artifact',
-          summary: `Materialize assistant input raw artifact ${targetPath}`,
-          mutate: async ({ batch }) => {
-            await batch.stageRawCopy({
-              sourcePath: sourceAbsolutePath,
-              targetRelativePath: targetPath,
-              originalFileName:
-                normalizeAssistantInputFileName(attachment.fileName) ??
-                path.basename(targetPath),
-              mediaType,
-              allowExistingMatch: true,
-            })
-          },
-        })
-      }
-      refs.set(index, targetPath)
-    } catch {
-      // Missing or unreadable raw artifacts leave the attachment as partial
-      // evidence; producer paths should not block admission on parser artifacts.
-    }
-  }))
-  return refs
-}
-
-function createAssistantInputRawArtifactPath(input: {
-  inputId: string
-  kind: AssistantInputAttachmentEvidenceItem['kind']
-  mediaType: string | null
-  ordinal: number
-  sourcePath: string
-}): string | null {
-  const inputId = normalizeEvidenceToken(input.inputId, null)
-  if (!inputId) {
-    return null
-  }
-
-  const extension = extensionForAttachmentArtifact(input)
-  return `raw/assistant-input/${inputId}/attachments/${String(input.ordinal).padStart(3, '0')}${extension}`
-}
-
-function extensionForAttachmentArtifact(input: {
-  kind: AssistantInputAttachmentEvidenceItem['kind']
-  mediaType: string | null
-  sourcePath: string
-}): string {
-  const fromMime = extensionForMediaType(input.mediaType)
-  if (fromMime) {
-    return fromMime
-  }
-
-  const sourceExtension = path.posix.extname(input.sourcePath).toLowerCase()
-  if (SAFE_ATTACHMENT_EVIDENCE_EXTENSIONS.has(sourceExtension)) {
-    return sourceExtension
-  }
-
-  return input.kind === 'document' ? '.bin' : '.dat'
-}
-
 function normalizeFileName(value: unknown): string | null {
   return normalizeAssistantInputFileName(value)
-}
-
-function extensionForMediaType(mediaType: string | null): string | null {
-  switch (mediaType) {
-    case 'application/json':
-      return '.json'
-    case 'application/pdf':
-      return '.pdf'
-    case 'audio/mpeg':
-      return '.mp3'
-    case 'audio/mp4':
-    case 'audio/x-m4a':
-      return '.m4a'
-    case 'audio/ogg':
-      return '.ogg'
-    case 'image/gif':
-      return '.gif'
-    case 'image/jpeg':
-      return '.jpg'
-    case 'image/png':
-      return '.png'
-    case 'image/webp':
-      return '.webp'
-    case 'text/csv':
-      return '.csv'
-    case 'text/plain':
-      return '.txt'
-    case 'video/mp4':
-      return '.mp4'
-    default:
-      return null
-  }
 }
 
 function createInlineFragment(input: {
@@ -410,21 +242,22 @@ function normalizeParseStateForAttachment(
   attachment: InboxCaptureAttachmentLike,
   kind: AssistantInputAttachmentEvidenceItem['kind'],
 ): AssistantInputAttachmentEvidenceItem['parseState'] {
+  if (!shouldUseAttachmentParserOutput(kind)) {
+    return kind === 'other' ? 'unsupported' : null
+  }
+
   const explicit = normalizeParseState(attachment.parseState ?? null)
   if (explicit) {
     return explicit
   }
 
-  return isParserSupportedAttachmentKind(kind) ? null : 'unsupported'
+  return null
 }
 
-function isParserSupportedAttachmentKind(
+function shouldUseAttachmentParserOutput(
   kind: AssistantInputAttachmentEvidenceItem['kind'],
-): boolean {
-  return kind === 'image' ||
-    kind === 'audio' ||
-    kind === 'video' ||
-    kind === 'document'
+): kind is 'audio' | 'video' {
+  return kind === 'audio' || kind === 'video'
 }
 
 function normalizeEvidenceToken(
@@ -467,22 +300,16 @@ function normalizeSha256(value: string | null | undefined): string | null {
 }
 
 function normalizeRawArtifactPath(value: string | null | undefined): string | null {
-  return normalizeAllowedArtifactPath(value, ['raw/inbox/', 'raw/assistant-input/'])
+  return normalizeAllowedArtifactPath(value, ['raw/inbox/'])
 }
 
 function normalizeDerivedArtifactPath(value: string | null | undefined): string | null {
-  const normalized = normalizeAllowedArtifactPath(value, [
-    'derived/inbox/',
-    'derived/assistant-input/',
-  ])
+  const normalized = normalizeAllowedArtifactPath(value, ['derived/inbox/'])
   if (!normalized || path.posix.extname(normalized).toLowerCase() !== '.json') {
     return null
   }
   const allowedRoot = path.posix.dirname(normalized)
-  return allowedRoot.startsWith('derived/inbox/') ||
-      allowedRoot.startsWith('derived/assistant-input/')
-    ? normalized
-    : null
+  return allowedRoot.startsWith('derived/inbox/') ? normalized : null
 }
 
 function normalizeAllowedArtifactPath(

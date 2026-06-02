@@ -84,20 +84,28 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     attachment: input.attachment,
     rawPath,
   })
-  const evidenceSources = [
-    ...buildInlineTextSources(input.attachment),
-    ...(await buildDerivedTextSources({
-      attachment: input.attachment,
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-      vaultRoot: input.vaultRoot,
-    })),
-  ]
+  const useParserOutput = shouldUseAttachmentParserOutput(input.attachment.kind)
+  const parseState = useParserOutput
+    ? normalizeAttachmentEvidenceParseState(input.attachment.parseState)
+    : null
+  const evidenceSources = useParserOutput
+    ? [
+        ...buildInlineTextSources(input.attachment),
+        ...(await buildDerivedTextSources({
+          attachment: input.attachment,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+          vaultRoot: input.vaultRoot,
+        })),
+      ]
+    : []
   const fragments = [
-    buildMetadataFragment(input.attachment, rawPath, routingImage),
+    buildMetadataFragment(input.attachment, rawPath, routingImage, parseState),
     ...projectAttachmentEvidenceForModel({
       attachment: {
         byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
-        derivedPath: input.attachment.derived?.manifestPath ?? null,
+        derivedPath: useParserOutput
+          ? input.attachment.derived?.manifestPath ?? null
+          : null,
         fileName: input.attachment.fileName,
         mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
         storedPath: rawPath,
@@ -120,7 +128,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     fileName: input.attachment.fileName,
     byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
     storedPath: rawPath,
-    parseState: normalizeAttachmentEvidenceParseState(input.attachment.parseState),
+    parseState,
     routingImage,
     fragments,
     combinedText,
@@ -270,6 +278,7 @@ function buildMetadataFragment(
   attachment: AssistantInputAttachmentEvidenceItem,
   rawPath: string | null,
   routingImage: RoutingImageEligibility,
+  parseState: AssistantInputAttachmentModelBundle['parseState'],
 ) {
   const promptStoredPath = renderPromptStoredPath(rawPath)
   const metadataLines = [
@@ -279,17 +288,12 @@ function buildMetadataFragment(
     `mime: ${attachment.mime ?? attachment.raw?.mediaType ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? attachment.raw?.byteSize ?? 'unknown'}`,
     `storedPath: ${promptStoredPath}`,
-    `parseState: ${attachment.parseState ?? 'unknown'}`,
-    ...(attachment.kind === 'image'
-      ? [
-          'automaticImageCodeScan: if parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
-        ]
-      : []),
+    parseState ? `parseState: ${parseState}` : null,
     `routingImageEligible: ${String(routingImage.eligible)}`,
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
     `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
-  ]
+  ].filter((line): line is string => line !== null)
   const text = metadataLines.join('\n')
   return {
     kind: 'attachment_metadata' as const,
@@ -300,13 +304,18 @@ function buildMetadataFragment(
   }
 }
 
+function shouldUseAttachmentParserOutput(
+  kind: AssistantInputAttachmentEvidenceItem['kind'],
+): boolean {
+  return kind === 'audio' || kind === 'video'
+}
+
 function renderPromptStoredPath(rawPath: string | null): string {
   if (!rawPath) {
     return 'missing'
   }
 
-  return rawPath.startsWith('raw/assistant-input/') ||
-    rawPath.startsWith('raw/inbox/')
+  return rawPath.startsWith('raw/inbox/')
     ? rawPath
     : 'available'
 }
@@ -509,7 +518,6 @@ function normalizeAssistantInputRawArtifactPath(
 ): string | null {
   return normalizeAllowedVaultRelativePath(candidatePath, [
     'raw/inbox/',
-    'raw/assistant-input/',
   ])
 }
 
@@ -519,7 +527,6 @@ function normalizeAssistantInputDerivedArtifactPath(
 ): string | null {
   const normalizedRoot = normalizeAllowedVaultRelativePath(allowedRoot, [
     'derived/inbox/',
-    'derived/assistant-input/',
   ])
   if (!normalizedRoot) {
     return null

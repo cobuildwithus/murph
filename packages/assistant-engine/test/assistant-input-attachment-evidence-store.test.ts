@@ -202,6 +202,8 @@ describe('assistant input attachment evidence', () => {
     '../raw/inbox/cap_1/attachments/scan.pdf',
     'file:///tmp/scan.pdf',
     'https://example.com/scan.pdf',
+    'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+    'derived/assistant-input/ain_11111111111111111111111111111111/attachments/001/manifest.json',
     'raw/inbox/cap_1/attachments/scan.pdf?token=secret',
     'raw/inbox/cap_1/attachments/authorization-header.pdf',
     'raw/inbox/cap_1/attachments/bearer-token.pdf',
@@ -257,7 +259,7 @@ describe('assistant input attachment evidence', () => {
           updatedAt: null,
         },
       }),
-    ).rejects.toThrow(/artifact path/u)
+    ).rejects.toThrow(/artifact/u)
   })
 
   it.each([

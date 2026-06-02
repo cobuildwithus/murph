@@ -130,7 +130,7 @@ test("hosted artifact materializer records only paths that restore", async () =>
       },
       {
         bytes: Buffer.from("derived summary\n", "utf8"),
-        path: "derived/assistant-input/example/summary.txt",
+        path: "derived/inbox/example/attachment/summary.txt",
       },
     ];
     for (const file of sourceFiles) {
@@ -172,13 +172,13 @@ test("hosted artifact materializer records only paths that restore", async () =>
     assert.deepEqual([...materializedArtifactPaths], []);
 
     const restored = await materialize([
-      "derived/assistant-input/example/summary.txt",
+      "derived/inbox/example/attachment/summary.txt",
       "raw/inbox/example/scan.txt",
     ]);
     assert.deepEqual(
       [...restored.materializedArtifactPaths].sort(),
       [
-        "vault:derived/assistant-input/example/summary.txt",
+        "vault:derived/inbox/example/attachment/summary.txt",
         "vault:raw/inbox/example/scan.txt",
       ],
     );
@@ -186,13 +186,13 @@ test("hosted artifact materializer records only paths that restore", async () =>
     assert.deepEqual(
       [...materializedArtifactPaths].sort(),
       [
-        "vault:derived/assistant-input/example/summary.txt",
+        "vault:derived/inbox/example/attachment/summary.txt",
         "vault:raw/inbox/example/scan.txt",
       ],
     );
     await expect(readFile(path.join(vaultRoot, "raw", "inbox", "example", "scan.txt"), "utf8"))
       .resolves.toBe("scan artifact\n");
-    await expect(readFile(path.join(vaultRoot, "derived", "assistant-input", "example", "summary.txt"), "utf8"))
+    await expect(readFile(path.join(vaultRoot, "derived", "inbox", "example", "attachment", "summary.txt"), "utf8"))
       .resolves.toBe("derived summary\n");
   } finally {
     await rm(sourceVaultRoot, { force: true, recursive: true });

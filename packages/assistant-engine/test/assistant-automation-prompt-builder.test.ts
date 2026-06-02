@@ -268,8 +268,7 @@ function createAttachmentEvidenceItem(
 }
 
 function normalizeAttachmentEvidenceRawPath(value: string | null | undefined): string | null {
-  return value?.startsWith('raw/inbox/') ||
-    value?.startsWith('raw/assistant-input/')
+  return value?.startsWith('raw/inbox/')
     ? value
     : null
 }
@@ -388,6 +387,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
       createPromptInput({
         attachments: [
           createAttachment({
+            kind: 'audio',
+            mime: 'audio/mpeg',
+            fileName: 'voice-note.mp3',
             parseState: 'running',
           }),
         ],
@@ -422,7 +424,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('- provider descriptors: 0')
     expect(result.prompt).toContain('- inbox projection: succeeded')
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('- parser output: succeeded')
+    expect(result.prompt).not.toContain('- parser output:')
+    expect(result.prompt).not.toContain('parseState:')
     expect(result.prompt).toContain('Attachment 1\nfileName: attachment-1.txt')
   })
 
@@ -448,7 +451,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
       'storedPath: raw/inbox/capture-1/attachments/01__scan.pdf',
     )
     expect(result.prompt).toContain(
-      'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+      'For PDFs, inspect the storedPath with local PDF tools when needed.',
     )
   })
 
@@ -458,7 +461,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
         attachmentEvidence: createRawZipAttachmentEvidence({
           parseState: 'unsupported',
           rawPath:
-            'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+            'raw/inbox/capture-1/attachments/001.zip',
         }),
       }),
     ])
@@ -473,17 +476,38 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('mime: application/zip')
     expect(result.prompt).toContain('byteSize: 4096')
     expect(result.prompt).toContain('- raw evidence: available')
-    expect(result.prompt).toContain('- parser output: unsupported')
-    expect(result.prompt).toContain('rawPath: raw/assistant-input/')
+    expect(result.prompt).not.toContain('- parser output:')
+    expect(result.prompt).toContain('rawPath: raw/inbox/')
     expect(result.prompt).toContain(
-      'storedPath: raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+      'storedPath: raw/inbox/capture-1/attachments/001.zip',
     )
-    expect(result.prompt).toContain('parseState: unsupported')
+    expect(result.prompt).not.toContain('parseState: unsupported')
+    expect(result.prompt).not.toContain('Attachment parser status:')
     expect(result.prompt).toContain(
-      'Attachment parser status: no parser output is available for this attachment type.',
+      'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.',
     )
-    expect(result.prompt).toContain(
-      'Raw attachment file is available at the storedPath above. Parser output may be pending, failed, or unsupported. Inspect the local file with tools only if needed; do not claim file contents unless they appear in parsed fragments or you have inspected the file.',
+  })
+
+  it('does not render legacy or unsafe raw paths in direct prompt lifecycle details', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        attachmentEvidence: createRawZipAttachmentEvidence({
+          parseState: 'unsupported',
+          rawPath:
+            'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+        }),
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).not.toContain('raw/assistant-input/')
+    expect(result.prompt).not.toContain('storedPath:')
+    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).not.toContain(
+      'Raw attachment file is available at the storedPath above.',
     )
   })
 
@@ -502,7 +526,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
             mime: 'application/zip',
             parseState: 'failed',
             storedPath:
-              'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+              'raw/inbox/capture-1/attachments/001.zip',
           }),
         ],
       }),
@@ -515,20 +539,20 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Attachment evidence:')
     expect(result.prompt).toContain('- provider descriptors: 0')
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('- parser output: mixed(failed, pending)')
+    expect(result.prompt).not.toContain('- parser output:')
     expect(result.prompt).toContain('Attachment 1\nfileName: scan-incoming.txt')
-    expect(result.prompt).toContain('parseState: pending')
+    expect(result.prompt).not.toContain('parseState: pending')
     expect(result.prompt).toContain(
       'Attachment 2\nfileName: vault-migration-clean-2026-05-04.zip',
     )
-    expect(result.prompt).toContain('parseState: failed')
-    expect(result.prompt).toContain('storedPath: raw/assistant-input/')
+    expect(result.prompt).not.toContain('parseState: failed')
+    expect(result.prompt).toContain('storedPath: raw/inbox/')
     expect(result.prompt).toContain(
-      'Raw attachment file is available at the storedPath above. Parser output may be pending, failed, or unsupported. Inspect the local file with tools only if needed; do not claim file contents unless they appear in parsed fragments or you have inspected the file.',
+      'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.',
     )
   })
 
-  it('recognizes MIME-less assistant-input PDF refs from the stored path extension', () => {
+  it('recognizes MIME-less from inbox PDF refs from the stored path extension', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         attachments: [
@@ -537,7 +561,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
             mime: null,
             parseState: 'succeeded',
             storedPath:
-              'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+              'raw/inbox/capture-1/attachments/001.pdf',
           }),
         ],
       }),
@@ -548,10 +572,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).toContain(
-      'storedPath: raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+      'storedPath: raw/inbox/capture-1/attachments/001.pdf',
     )
     expect(result.prompt).toContain(
-      'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+      'For PDFs, inspect the storedPath with local PDF tools when needed.',
     )
   })
 
@@ -617,13 +641,13 @@ describe('buildAssistantAutoReplyPrompt', () => {
       '- inbox projection: failed(conversation-import.projection-failed)',
     )
     expect(result.prompt).toContain('- raw evidence: not_attempted')
-    expect(result.prompt).toContain('- parser output: unknown')
+    expect(result.prompt).not.toContain('- parser output:')
     expect(result.prompt).toContain('Attachment 1\nfileName: private-photo.jpg')
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
     expect(result.prompt).toContain('byteSize: 1024')
     expect(result.prompt).toContain('rawPath: missing')
-    expect(result.prompt).toContain('parseState: unknown')
+    expect(result.prompt).not.toContain('parseState: unknown')
     expect(result.prompt).toContain('Attachment 2\nfileName: private-voice.ogg')
     expect(result.prompt).toContain('kind: voice_memo')
     expect(result.prompt).toContain('mime: audio/ogg')
@@ -940,7 +964,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('- provider descriptors: 2')
     expect(result.prompt).toContain('- inbox projection: pending')
     expect(result.prompt).toContain('- raw evidence: not_attempted')
-    expect(result.prompt).toContain('- parser output: unknown')
+    expect(result.prompt).not.toContain('- parser output:')
     expect(result.prompt).toContain('Attachment 1\nfileName: private-photo.jpg')
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
@@ -1031,6 +1055,9 @@ describe('prepareAssistantAutoReplyInput', () => {
   it('prepares metadata/status input when parser work is still pending', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
+        kind: 'audio',
+        mime: 'audio/mpeg',
+        fileName: 'voice-note.mp3',
         parseState: 'pending',
       }),
     ])
@@ -1039,6 +1066,9 @@ describe('prepareAssistantAutoReplyInput', () => {
         createPromptInput({
           attachments: [
             createAttachment({
+              kind: 'audio',
+              mime: 'audio/mpeg',
+              fileName: 'voice-note.mp3',
               parseState: 'pending',
             }),
           ],
@@ -1058,7 +1088,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('- parser output: pending')
+    expect(result.prompt).toContain('parseState: pending')
     expect(promptBuilderMocks.buildAssistantInputAttachmentModelBundles).toHaveBeenCalled()
     expect(
       promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
@@ -1073,7 +1103,7 @@ describe('prepareAssistantAutoReplyInput', () => {
         fileName: 'vault-migration-clean-2026-05-04.zip',
         byteSize: 4096,
         storedPath:
-          'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+          'raw/inbox/capture-1/attachments/001.zip',
         parseState: 'unsupported',
         routingImage: {
           eligible: false,
@@ -1086,13 +1116,13 @@ describe('prepareAssistantAutoReplyInput', () => {
             kind: 'attachment_metadata',
             label: 'attachment-1-metadata',
             path:
-              'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+              'raw/inbox/capture-1/attachments/001.zip',
             text: [
               'ordinal: 1',
               'kind: other',
               'mime: application/zip',
               'byteSize: 4096',
-              'storedPath: raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+              'storedPath: raw/inbox/capture-1/attachments/001.zip',
               'parseState: unsupported',
               'routingImageEligible: false',
               'routingImageReason: not-image',
@@ -1108,7 +1138,7 @@ describe('prepareAssistantAutoReplyInput', () => {
           'kind: other',
           'mime: application/zip',
           'byteSize: 4096',
-          'storedPath: raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+          'storedPath: raw/inbox/capture-1/attachments/001.zip',
           'parseState: unsupported',
           'routingImageEligible: false',
           'routingImageReason: not-image',
@@ -1124,7 +1154,7 @@ describe('prepareAssistantAutoReplyInput', () => {
           attachmentEvidence: createRawZipAttachmentEvidence({
             parseState: 'unsupported',
             rawPath:
-              'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.zip',
+              'raw/inbox/capture-1/attachments/001.zip',
           }),
         }),
       ],
@@ -1136,18 +1166,74 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('- raw evidence: available')
-    expect(result.prompt).toContain('- parser output: unsupported')
-    expect(result.prompt).toContain('rawPath: raw/assistant-input/')
+    expect(result.prompt).not.toContain('- parser output:')
+    expect(result.prompt).toContain('rawPath: raw/inbox/')
     expect(result.prompt).toContain('Attachment 1 (other)')
-    expect(result.prompt).toContain('storedPath: raw/assistant-input/')
-    expect(result.prompt).toContain('parseState: unsupported')
+    expect(result.prompt).toContain('storedPath: raw/inbox/')
+    expect(result.prompt).not.toContain('parseState: unsupported')
+    expect(result.prompt).not.toContain('Attachment parser status:')
     expect(result.prompt).toContain(
-      'Attachment parser status: no parser output is available for this attachment type.',
-    )
-    expect(result.prompt).toContain(
-      'Raw attachment file is available at the storedPath above. Parser output may be pending, failed, or unsupported. Inspect the local file with tools only if needed; do not claim file contents unless they appear in parsed fragments or you have inspected the file.',
+      'Raw attachment file is available at the storedPath above. Inspect the local file with tools when needed; do not claim file contents unless you have inspected the file or the contents are otherwise present in this turn.',
     )
     expect(result.userMessageContent).toBeNull()
+  })
+
+  it('does not render untrusted prepared bundle combinedText', async () => {
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+      createAttachmentBundle({
+        kind: 'document',
+        mime: 'application/pdf',
+        fileName: 'scan.pdf',
+        byteSize: 4096,
+        storedPath: 'raw/inbox/capture-1/attachments/001.pdf',
+        parseState: null,
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: 'raw/inbox/capture-1/attachments/001.pdf',
+            text: [
+              'ordinal: 1',
+              'kind: document',
+              'mime: application/pdf',
+              'byteSize: 4096',
+              'storedPath: raw/inbox/capture-1/attachments/001.pdf',
+              'routingImageEligible: false',
+              'routingImageReason: not-image',
+            ].join('\n'),
+            truncated: false,
+          },
+        ],
+        combinedText: [
+          'provider secret marker',
+          'https://provider.example/download?token=secret',
+          '/tmp/provider-download.pdf',
+          'storedPath: raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+        ].join('\n'),
+      }),
+    ])
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachmentEvidence: createRawZipAttachmentEvidence({
+            parseState: null,
+            rawPath: 'raw/inbox/capture-1/attachments/001.pdf',
+          }),
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('storedPath: raw/inbox/capture-1/attachments/001.pdf')
+    expect(result.prompt).not.toContain('provider secret marker')
+    expect(result.prompt).not.toContain('provider.example')
+    expect(result.prompt).not.toContain('/tmp/provider-download.pdf')
+    expect(result.prompt).not.toContain('raw/assistant-input/')
   })
 
   it('prepares metadata-only projected attachments whose raw artifact is missing', async () => {
@@ -1223,19 +1309,19 @@ describe('prepareAssistantAutoReplyInput', () => {
     }
     expect(result.prompt).toContain('Attachment 1 (other)')
     expect(result.prompt).toContain('storedPath: missing')
-    expect(result.prompt).toContain('parseState: succeeded')
+    expect(result.prompt).not.toContain('parseState: succeeded')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
     )
   })
 
-  it('renders prepared parsed attachment text without raw-file instructions', async () => {
+  it('renders prepared media parser text without raw-file instructions', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
-        kind: 'document',
-        mime: 'text/plain',
-        fileName: 'parsed-note.txt',
-        storedPath: 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.txt',
+        kind: 'audio',
+        mime: 'audio/mpeg',
+        fileName: 'voice-note.mp3',
+        storedPath: 'raw/inbox/capture-1/attachments/01__voice-note.mp3',
         parseState: 'succeeded',
         fragments: [
           {
@@ -1268,10 +1354,10 @@ describe('prepareAssistantAutoReplyInput', () => {
         createPromptInput({
           attachments: [
             createAttachment({
-              kind: 'document',
-              mime: 'text/plain',
+              kind: 'audio',
+              mime: 'audio/mpeg',
               storedPath:
-                'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.txt',
+                'raw/inbox/capture-1/attachments/01__voice-note.mp3',
             }),
           ],
         }),
@@ -1283,7 +1369,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prepared input.')
     }
-    expect(result.prompt).toContain('Attachment 1 (document)')
+    expect(result.prompt).toContain('Attachment 1 (audio)')
     expect(result.prompt).toContain('[attachment-1-text]\nParsed note text.')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
@@ -1541,7 +1627,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     }
     expect(result.prompt).toContain('Attachment evidence:')
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('- parser output: succeeded')
+    expect(result.prompt).not.toContain('- parser output:')
     expect(result.userMessageContent).toBeNull()
     expect(
       promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
@@ -1613,7 +1699,7 @@ describe('prepareAssistantAutoReplyInput', () => {
         kind: 'document',
         mime: 'application/pdf',
         fileName: 'scan.pdf',
-        storedPath: 'inbox/attachments/scan.pdf',
+        storedPath: 'raw/inbox/capture-1/attachments/scan.pdf',
         parseState: 'succeeded',
         fragments: [
           {
@@ -1622,13 +1708,13 @@ describe('prepareAssistantAutoReplyInput', () => {
             path: null,
             text: [
               'mime: application/pdf',
-              'storedPath: inbox/attachments/scan.pdf',
+              'storedPath: raw/inbox/capture-1/attachments/scan.pdf',
             ].join('\n'),
             truncated: false,
           },
         ],
         combinedText:
-          '[metadata]\nmime: application/pdf\nstoredPath: inbox/attachments/scan.pdf',
+          '[metadata]\nmime: application/pdf\nstoredPath: raw/inbox/capture-1/attachments/scan.pdf',
       }),
     ])
     promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
@@ -1652,14 +1738,14 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+        'For PDFs, inspect the storedPath with local PDF tools when needed.',
       ),
       userMessageContent: null,
     })
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt.')
     }
-    expect(result.prompt).toContain('storedPath: inbox/attachments/scan.pdf')
+    expect(result.prompt).toContain('storedPath: raw/inbox/capture-1/attachments/scan.pdf')
   })
 
   it('keeps multimodal evidence alongside capture text when rich input is available', async () => {

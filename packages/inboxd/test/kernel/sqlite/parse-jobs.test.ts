@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createAttachmentParseJobStore } from "../../../src/kernel/sqlite/parse-jobs.ts";
 
 describe("createAttachmentParseJobStore", () => {
-  it("enqueues image attachments for automatic parsing", () => {
+  it("enqueues media attachments for parser jobs", () => {
     const database = new DatabaseSync(":memory:");
     database.exec(`
       create table capture_attachment (
@@ -42,7 +42,7 @@ describe("createAttachmentParseJobStore", () => {
           ) values (?, null, null)
         `,
       )
-      .run("attachment-image");
+      .run("attachment-audio");
 
     const store = createAttachmentParseJobStore({
       database,
@@ -52,12 +52,12 @@ describe("createAttachmentParseJobStore", () => {
       captureId: "capture-1",
       attachments: [
         {
-          attachmentId: "attachment-image",
+          attachmentId: "attachment-audio",
           ordinal: 1,
-          kind: "image",
-          mime: "image/jpeg",
-          fileName: "meal.jpg",
-          storedPath: "raw/inbox/capture-1/attachments/attachment-image/meal.jpg",
+          kind: "audio",
+          mime: "audio/mpeg",
+          fileName: "voice.mp3",
+          storedPath: "raw/inbox/capture-1/attachments/attachment-audio/voice.mp3",
         },
       ],
       createdAt: "2026-04-15T12:00:00.000Z",
@@ -67,7 +67,7 @@ describe("createAttachmentParseJobStore", () => {
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({
-      attachmentId: "attachment-image",
+      attachmentId: "attachment-audio",
       captureId: "capture-1",
       pipeline: "attachment_text",
       state: "pending",
@@ -77,7 +77,7 @@ describe("createAttachmentParseJobStore", () => {
         .prepare(
           "select parser_state from capture_attachment where attachment_id = ?",
         )
-        .get("attachment-image"),
+        .get("attachment-audio"),
     ).toEqual({ parser_state: "pending" });
   });
 });

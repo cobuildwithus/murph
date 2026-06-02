@@ -45,7 +45,6 @@ import {
 } from '../input-store.js'
 import {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
-  materializeAssistantInputAttachmentRawArtifactRefs,
   type InboxCaptureAttachmentLike,
 } from '../inbox-attachment-evidence.js'
 import { normalizeAssistantInputFileName } from '../attachment-file-name.js'
@@ -414,7 +413,7 @@ async function stageImportedCaptureAssistantInputEvent(input: {
   await updateAssistantInputAttachmentEvidence({
     inputId: stored.inputId,
     vault: input.vault,
-    attachmentEvidence: await createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs({
+    attachmentEvidence: createAssistantInputAttachmentEvidenceFromInboxCaptureWithStoredPaths({
       attachments: input.capture.attachments,
       captureId: input.persisted.captureId,
       descriptorAttachmentIdForAttachment: (attachment, index) =>
@@ -424,10 +423,7 @@ async function stageImportedCaptureAssistantInputEvent(input: {
           attachment.externalId,
           `attachment_${index}`,
       ),
-      inputId: stored.inputId,
-      executionContext: input.executionContext,
       source: 'local-inbox-import',
-      vault: input.vault,
     }),
   }).then((updated) => {
     emitAttachmentEvidenceUpdateProgress({
@@ -510,15 +506,12 @@ async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {
       await Promise.all(
         events.map(async (event) => {
           const attachmentEvidence =
-            await createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs({
+            createAssistantInputAttachmentEvidenceFromInboxCaptureWithStoredPaths({
               attachments: result.capture.attachments,
               captureId,
               descriptorAttachmentIdForAttachment: (_attachment, index) =>
                 event.content.attachmentDescriptors[index]?.attachmentId ?? null,
-              inputId: event.inputId,
-              executionContext: input.executionContext,
               source: 'local-parser-drain',
-              vault: input.vault,
             })
           const updated = await updateAssistantInputAttachmentEvidence({
             attachmentEvidence,
@@ -551,36 +544,21 @@ async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {
   }
 }
 
-async function createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs(input: {
+function createAssistantInputAttachmentEvidenceFromInboxCaptureWithStoredPaths(input: {
   attachments: readonly InboxCaptureAttachmentLike[]
   captureId: string
   descriptorAttachmentIdForAttachment?: (
     attachment: InboxCaptureAttachmentLike,
     index: number,
   ) => string | null
-  inputId: string
-  executionContext?: AssistantExecutionContext | null
   source: NonNullable<AssistantInputAttachmentEvidence['source']>
-  vault: string
-}): Promise<AssistantInputAttachmentEvidence> {
-  const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
-    attachments: input.attachments,
-    inputId: input.inputId,
-    ...(input.executionContext?.hosted?.materializeWorkspaceArtifacts
-      ? {
-          materializeWorkspaceArtifacts:
-            input.executionContext.hosted.materializeWorkspaceArtifacts,
-        }
-      : {}),
-    vaultRoot: input.vault,
-  })
+}): AssistantInputAttachmentEvidence {
   return createAssistantInputAttachmentEvidenceFromInboxCapture({
     capture: {
       attachments: input.attachments,
       captureId: input.captureId,
     },
     descriptorAttachmentIdForAttachment: input.descriptorAttachmentIdForAttachment,
-    rawArtifactPathForAttachment: ({ index }) => rawArtifactRefs.get(index) ?? null,
     source: input.source,
   })
 }

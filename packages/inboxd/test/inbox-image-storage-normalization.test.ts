@@ -141,7 +141,7 @@ async function assertStoredWebp(input: {
   return storedBytes;
 }
 
-test("processCapture normalizes JPEG image data before canonical inbox storage and parser enqueue", async () => {
+test("processCapture normalizes JPEG image data before canonical inbox storage", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-image-normalize-jpeg");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -175,10 +175,7 @@ test("processCapture normalizes JPEG image data before canonical inbox storage a
   assert.notDeepEqual(storedBytes, originalBytes);
 
   const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
-  assert.equal(jobs.length, 1);
-  assert.equal(jobs[0]?.captureId, persisted.captureId);
-  assert.equal(jobs[0]?.attachmentId, attachment.attachmentId);
-  assert.equal(jobs[0]?.state, "pending");
+  assert.equal(jobs.length, 0);
 
   const envelope = JSON.parse(
     await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
@@ -260,7 +257,7 @@ test("processCapture normalizes PNG and WebP original-path images into bounded W
     });
   }
 
-  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, cases.length);
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
 
   pipeline.close();
 });
@@ -307,7 +304,7 @@ test("processCapture normalizes image attachments by kind even with unsupported 
     });
   }
 
-  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, cases.length);
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
 
   pipeline.close();
 });

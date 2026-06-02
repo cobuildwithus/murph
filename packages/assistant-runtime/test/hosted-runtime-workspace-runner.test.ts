@@ -3059,23 +3059,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
+      assert.ok(result);
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
-      assert.ok(effectLog);
-      assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [effectLog] }));
-      assert.equal(effectLog?.level, "warn");
-      assert.deepEqual(effectLog?.redactedJson, {
-        attemptedCount: 1,
-        effectAttachmentEvidenceUpdated: [false],
-        effectKinds: ["inbox_projection"],
-        effectProjectionUpdated: [true],
-        effectReasonCodes: ["conversation-import.attachment-evidence-update-failed"],
-        effectStatuses: ["partial"],
-        errorCodes: ["post_checkpoint_effect_reported_partial"],
-        failedCount: 0,
-        partialCount: 1,
-        succeededCount: 0,
-      });
+      assert.equal(effectLog, undefined);
     } finally {
       await rm(vaultRoot, {
         force: true,
