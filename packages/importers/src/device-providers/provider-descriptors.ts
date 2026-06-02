@@ -83,6 +83,8 @@ export interface DeviceProviderDescriptor {
   sourcePriorityHints: DeviceProviderSourcePriorityHints;
 }
 
+export const DEFAULT_DEVICE_SYNC_BACKFILL_DAYS = 180;
+
 export interface ResolveDeviceProviderSourcePriorityInput {
   metric?: string | null;
   metricFamily?: DeviceProviderMetricFamily | null;
@@ -421,7 +423,7 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
   },
   sync: {
     windows: {
-      backfillDays: 90,
+      backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
       reconcileDays: 21,
       reconcileIntervalMs: 6 * 60 * 60_000,
     },
@@ -535,7 +537,7 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   },
   sync: {
     windows: {
-      backfillDays: 90,
+      backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
       reconcileDays: 21,
       reconcileIntervalMs: 6 * 60 * 60_000,
     },
@@ -576,7 +578,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
   },
   sync: {
     windows: {
-      backfillDays: 90,
+      backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
       reconcileDays: 7,
       reconcileIntervalMs: 6 * 60 * 60_000,
     },

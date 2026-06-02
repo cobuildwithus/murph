@@ -216,7 +216,7 @@ describe("deviceSyncProviderManifests", () => {
         providerFilter: ["oura", "withings"],
         summaryResources: ["profile", "activity"],
         timeseriesResources: ["steps", "heartrate"],
-        summaryBackfillDays: 90,
+        summaryBackfillDays: 180,
         timeseriesBackfillDays: 14,
         reconcileDays: 7,
         reconcileIntervalMs: 3_600_000,

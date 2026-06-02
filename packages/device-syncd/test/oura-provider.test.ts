@@ -170,7 +170,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   const requests: string[] = [];
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
-    clientSecret: "oura-client-secret",
+    clientSecret: "<REDACTED_OURA_CLIENT_SECRET>",
     fetchImpl: async (input) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       requests.push(url);
@@ -210,6 +210,11 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   assert.equal(requireOAuthTokens(connection).refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["personal", "daily", "heartrate"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
+  assert.deepEqual(connection.initialJobs?.[0]?.payload, {
+    windowStart: "2025-09-17T10:00:00.000Z",
+    windowEnd: "2026-03-16T10:00:00.000Z",
+    includePersonalInfo: true,
+  });
   assert.equal(connection.metadata, undefined);
   assert.deepEqual(requests, [
     "https://api.ouraring.com/oauth/token",
@@ -821,6 +826,64 @@ test("Oura provider imports heartrate backfills through closed daily snapshots",
       heartrate: [{ timestamp: "2026-01-03T00:00:00.000Z", bpm: 64 }],
     },
   ]);
+});
+
+test("Oura provider caps dense heartrate backfills at the provider-local dense window", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "<REDACTED_OURA_CLIENT_SECRET>",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
+        return createJsonResponse({ data: [] });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["heartrate"]),
+    now: "2026-04-01T12:00:00.000Z",
+    logger: {},
+    async importSnapshot() {
+      throw new Error("empty dense snapshots should not be imported");
+    },
+    async refreshAccountTokens() {
+      throw new Error("refresh should not be called in this test");
+    },
+  };
+
+  await provider.jobExecutor.executeJob(
+    context,
+    createJob("backfill", {
+      windowStart: "2025-10-03T00:00:00.000Z",
+      windowEnd: "2026-04-01T00:00:00.000Z",
+      includePersonalInfo: false,
+    }),
+  );
+
+  const heartrateRequests = requests
+    .filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?"))
+    .map((url) => {
+      const search = new URL(url).searchParams;
+      return {
+        start: search.get("start_datetime"),
+        end: search.get("end_datetime"),
+      };
+    });
+
+  assert.equal(heartrateRequests.length, 90);
+  assert.deepEqual(heartrateRequests[0], {
+    start: "2026-01-01T00:00:00.000Z",
+    end: "2026-01-02T00:00:00.000Z",
+  });
+  assert.deepEqual(heartrateRequests.at(-1), {
+    start: "2026-03-31T00:00:00.000Z",
+    end: "2026-04-01T00:00:00.000Z",
+  });
 });
 
 test("Oura reconcile imports heartrate through stable closed-day snapshots", async () => {

@@ -72,6 +72,7 @@ const OURA_CALLBACK_PATH = OURA_OAUTH.callbackPath;
 const OURA_WEBHOOK_PATH = OURA_WEBHOOK.path;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_BACKFILL_DAYS = OURA_SYNC.windows.backfillDays;
+const DEFAULT_DENSE_BACKFILL_DAYS = Math.min(90, DEFAULT_BACKFILL_DAYS);
 const DEFAULT_RECONCILE_DAYS = OURA_SYNC.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = OURA_SYNC.windows.reconcileIntervalMs;
 const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
@@ -333,6 +334,12 @@ function resolveOuraImportWindow(
     windowStart: normalizeString(payload.windowStart) ?? subtractDays(now, fallbackWindowDays),
     windowEnd: normalizeString(payload.windowEnd) ?? now,
   };
+}
+
+function capOuraWindowStart(windowStart: string, windowEnd: string, maxWindowDays: number): string {
+  const cappedStart = subtractDays(windowEnd, maxWindowDays);
+
+  return Date.parse(windowStart) < Date.parse(cappedStart) ? cappedStart : windowStart;
 }
 
 function buildOuraClosedDailyWindows(
@@ -1003,7 +1010,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       dataTypes: OURA_NON_DENSE_DATA_TYPES,
       skipEmpty: true,
     });
-    await importOuraDenseDailySnapshots(context, payload, backfillDays);
+    await importOuraDenseDailySnapshots(context, payload, DEFAULT_DENSE_BACKFILL_DAYS);
     return result;
   }
 
@@ -1022,9 +1029,15 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   async function importOuraDenseDailySnapshots(
     context: ProviderJobContext,
     payload: Record<string, unknown>,
-    fallbackWindowDays: number,
+    maxWindowDays: number,
   ): Promise<void> {
-    const { windowStart, windowEnd } = resolveOuraImportWindow(payload, context.now, fallbackWindowDays);
+    const resolvedWindow = resolveOuraImportWindow(payload, context.now, maxWindowDays);
+    const windowStart = capOuraWindowStart(
+      resolvedWindow.windowStart,
+      resolvedWindow.windowEnd,
+      maxWindowDays,
+    );
+    const windowEnd = resolvedWindow.windowEnd;
     const api = createApiSession(context);
 
     for (const window of buildOuraClosedDailyWindows(windowStart, windowEnd, context.now)) {

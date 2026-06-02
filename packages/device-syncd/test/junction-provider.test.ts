@@ -2783,7 +2783,7 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
   assert.equal(connection.setupPhase, "link_returned");
   assert.deepEqual(connection.initialJobs?.map((job) => job.kind), ["backfill", "reconcile"]);
   assert.deepEqual(connection.initialJobs?.[0]?.payload, {
-    windowStart: "2026-01-03T00:00:00.000Z",
+    windowStart: "2025-10-05T00:00:00.000Z",
     windowEnd: "2026-04-03T00:00:00.000Z",
   });
   const payload = connection.initialJobs?.[0]?.payload as Record<string, unknown> | undefined;

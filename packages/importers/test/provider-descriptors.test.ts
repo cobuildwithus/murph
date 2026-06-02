@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { defaultDeviceProviderAdapters } from "../src/device-providers/defaults.ts";
 import {
+  DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
   defaultDeviceProviderDescriptors,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
@@ -49,6 +50,20 @@ describe("device provider descriptors", () => {
     });
     expect("oauth" in GARMIN_DEVICE_PROVIDER_DESCRIPTOR).toBe(false);
     expect("sync" in GARMIN_DEVICE_PROVIDER_DESCRIPTOR).toBe(false);
+  });
+
+  it("keeps the common scheduled device-sync backfill window at 180 days", () => {
+    expect(DEFAULT_DEVICE_SYNC_BACKFILL_DAYS).toBe(180);
+    expect(OURA_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(
+      DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
+    );
+    expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(
+      DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
+    );
+    expect(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(
+      DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
+    );
+    expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays).toBe(30);
   });
 
   it("resolves metric priority from the shared descriptor policy", () => {

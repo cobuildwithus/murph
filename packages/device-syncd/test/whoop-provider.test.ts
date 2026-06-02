@@ -301,7 +301,7 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
   assert.deepEqual(connection.scopes, ["offline", "read:profile", "read:workout"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
   assert.deepEqual(connection.initialJobs?.[0]?.payload, {
-    windowStart: "2025-12-16T10:00:00.000Z",
+    windowStart: "2025-09-17T10:00:00.000Z",
     windowEnd: "2026-03-16T10:00:00.000Z",
   });
   assert.equal(connection.metadata, undefined);
