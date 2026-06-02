@@ -224,16 +224,6 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   meal: [],
   menstrual_cycle: [],
 } satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
-const JUNCTION_STRESS_LEVEL_TIMESERIES_VALUE_PATHS = Object.freeze([
-  "value",
-  "stressLevel",
-  "stress_level",
-  "averageStressLevel",
-  "average_stress_level",
-  "stress.average",
-  "stressLevelValue",
-  "stress_level_value",
-] as const);
 const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
   meal: {
     strings: [
@@ -765,6 +755,10 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
+    if (resource === "stress_level") {
+      return null;
+    }
+
     const webhookDataJson = normalizeString(job.payload.webhookDataJson);
     if (!webhookDataJson) {
       return null;
@@ -1278,7 +1272,7 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
     const occurredAt = extractJunctionWebhookOccurredAt(data) ?? context.now;
-    const window = buildJunctionWebhookWindow(data, occurredAt, context.now);
+    const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
       eventType,
@@ -4241,6 +4235,10 @@ function buildJunctionWebhookDataJobJsons(input: {
     return [];
   }
 
+  if (input.resource.name === "stress_level") {
+    return [];
+  }
+
   const sanitized = sanitizeJunctionImportSnapshotValue(
     input.data,
     new Map(),
@@ -4259,10 +4257,6 @@ function buildJunctionWebhookDataJobJsons(input: {
   const directJson = serializeJunctionWebhookDataJobRecord(withSource);
   if (directJson) {
     return [directJson];
-  }
-
-  if (input.resource.name === "stress_level") {
-    return [];
   }
 
   if (input.resource.category !== "timeseries") {
@@ -4434,10 +4428,6 @@ function hasJunctionWebhookDataJobRecords(input: {
       });
   }
 
-  if (input.resource === "stress_level") {
-    return hasUsefulJunctionWebhookStressLevelDataRecord(input.record);
-  }
-
   if (readJunctionWebhookNestedRecordEntries(input.record).length > 0) {
     return true;
   }
@@ -4466,27 +4456,6 @@ function hasJunctionWebhookDataJobRecords(input: {
     "respiratory_rate",
     "spo2",
   ]);
-}
-
-function hasUsefulJunctionWebhookStressLevelDataRecord(
-  record: Record<string, unknown>,
-): boolean {
-  return expandJunctionWebhookTimeseriesDataRecords(record).some((entry) =>
-    firstJunctionStressLevelScoreFromPaths(entry) !== null
-  );
-}
-
-function firstJunctionStressLevelScoreFromPaths(
-  entry: Record<string, unknown>,
-): number | null {
-  for (const path of JUNCTION_STRESS_LEVEL_TIMESERIES_VALUE_PATHS) {
-    const value = finiteJunctionNumber(readJunctionRecordPath(entry, path));
-    if (value !== undefined && value >= 0 && value <= 100) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 function expandJunctionWebhookTimeseriesDataRecords(
@@ -4712,7 +4681,7 @@ function extractJunctionWebhookObjectId(data: Record<string, unknown> | null): s
   );
 }
 
-function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null): string | null {
+function extractJunctionWebhookRootTimestamp(data: Record<string, unknown> | null): string | null {
   const candidates = [
     data?.observedAt,
     data?.observed_at,
@@ -4722,7 +4691,6 @@ function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null):
     data?.timestamp,
     data?.date,
     data?.start_time,
-    readPlainObject(data?.data)?.timestamp,
   ];
 
   for (const candidate of candidates) {
@@ -4732,6 +4700,20 @@ function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null):
     }
   }
 
+  return null;
+}
+
+function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null): string | null {
+  const rootTimestamp = extractJunctionWebhookRootTimestamp(data);
+  if (rootTimestamp) {
+    return rootTimestamp;
+  }
+
+  const nestedTimestamp = toIsoTimestampIfValid(readPlainObject(data?.data)?.timestamp);
+  if (nestedTimestamp) {
+    return nestedTimestamp;
+  }
+
   return readJunctionWebhookDataTimestampRange(data)?.firstTimestamp ?? null;
 }
 
@@ -4739,6 +4721,7 @@ function buildJunctionWebhookWindow(
   data: Record<string, unknown> | null,
   occurredAt: string,
   now: string,
+  resource: { name: string } | null,
 ): { windowStart: string; windowEnd: string } {
   const explicitStart =
     toJunctionWebhookWindowBoundaryTimestampIfValid(data?.window_start, "start")
@@ -4767,6 +4750,20 @@ function buildJunctionWebhookWindow(
     );
     if (Date.parse(windowStart) < Date.parse(windowEnd)) {
       return { windowStart, windowEnd };
+    }
+  }
+
+  if (resource?.name === "stress_level") {
+    const rootTimestamp = extractJunctionWebhookRootTimestamp(data);
+    if (rootTimestamp) {
+      const windowStart = floorUtcDayTimestamp(rootTimestamp);
+      const windowEnd = minIsoTimestamp(
+        addMilliseconds(windowStart, TIMESERIES_CHUNK_MS),
+        now,
+      );
+      if (Date.parse(windowStart) < Date.parse(windowEnd)) {
+        return { windowStart, windowEnd };
+      }
     }
   }
 
@@ -4805,12 +4802,13 @@ function toJunctionWebhookWindowBoundaryTimestampIfValid(
 function readJunctionWebhookDataTimestampRange(
   data: Record<string, unknown> | null,
 ): { firstTimestamp: string; lastTimestamp: string } | null {
-  const timestamps = readJunctionRecordArray(data?.data)
-    .flatMap((entry) => {
-      const record = readPlainObject(entry);
-      const timestamp = record ? toIsoTimestampIfValid(resolveJunctionTimeseriesRecordTimestamp(record)) : null;
-      return timestamp ? [timestamp] : [];
-    });
+  const record = data ? readPlainObject(data) : null;
+  const timestamps = record
+    ? expandJunctionWebhookTimeseriesDataRecords(record).slice(1).flatMap((entry) => {
+        const timestamp = toIsoTimestampIfValid(resolveJunctionTimeseriesRecordTimestamp(entry));
+        return timestamp ? [timestamp] : [];
+      })
+    : [];
 
   if (timestamps.length === 0) {
     return null;

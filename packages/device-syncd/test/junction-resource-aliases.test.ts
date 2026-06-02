@@ -259,10 +259,8 @@ async function executeStressLevelWebhook(input: {
   return { importedSnapshots, jobPayload };
 }
 
-test("Junction stress level webhooks import direct timeseries payloads", async () => {
-  const provider = createProvider(async (input) => {
-    throw new Error(`Unexpected request: ${readUrl(input)}`);
-  });
+test("Junction stress level webhooks fetch timeseries instead of importing small direct payloads", async () => {
+  const { provider, seenUrls } = createStressLevelFetchProvider({ responseStressLevel: 18 });
   const webhookHandler = provider.webhookHandler;
   const executor = provider.jobExecutor;
   assert.ok(webhookHandler);
@@ -298,7 +296,9 @@ test("Junction stress level webhooks import direct timeseries payloads", async (
   assert.equal(jobInput.kind, "resource");
   assert.equal(jobPayload.resource, "stress_level");
   assert.equal(jobPayload.resourceCategory, "timeseries");
-  assert.equal(typeof jobPayload.webhookDataJson, "string");
+  assert.equal(Object.hasOwn(jobPayload, "webhookDataJson"), false);
+  assert.equal(jobPayload.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(jobPayload.windowEnd, "2026-04-03T00:00:00.000Z");
 
   const importedSnapshots: unknown[] = [];
   await executor.executeJob(
@@ -306,6 +306,7 @@ test("Junction stress level webhooks import direct timeseries payloads", async (
     createJob(jobInput.kind, jobPayload),
   );
 
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/stress_level/grouped")), true);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -314,12 +315,11 @@ test("Junction stress level webhooks import direct timeseries payloads", async (
   assert.equal(Object.keys(snapshot.summaries ?? {}).length, 0);
   assert.equal(snapshot.timeseries?.stress_level?.length, 1);
   assert.equal(snapshot.timeseries?.stress_level?.[0]?.stressLevel, 18);
-  assert.equal(snapshot.timeseries?.stress_level?.[0]?.sourceProviderSlug, "garmin");
 });
 
-test("Junction stress level webhooks fetch timeseries when direct payload has no stress value", async () => {
+test("Junction stress level webhooks treat score payloads as fetch hints", async () => {
   const { provider, seenUrls } = createStressLevelFetchProvider({ responseStressLevel: 22 });
-  const { importedSnapshots } = await executeStressLevelWebhook({
+  const { importedSnapshots, jobPayload } = await executeStressLevelWebhook({
     provider,
     messageId: "msg_stress_level_fetch",
     data: {
@@ -336,6 +336,9 @@ test("Junction stress level webhooks fetch timeseries when direct payload has no
     },
   });
 
+  assert.equal(Object.hasOwn(jobPayload, "webhookDataJson"), false);
+  assert.equal(jobPayload.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(jobPayload.windowEnd, "2026-04-03T00:00:00.000Z");
   assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/stress_level/grouped")), true);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as { timeseries?: Record<string, Array<Record<string, unknown>>> };
@@ -358,7 +361,7 @@ test("Junction stress level webhooks fetch timeseries when direct value is inval
       },
     },
   });
-  assert.equal(jobPayload.windowStart, "2026-04-01T12:00:00.000Z");
+  assert.equal(jobPayload.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(jobPayload.windowEnd, "2026-04-03T00:00:00.000Z");
 
   assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/stress_level/grouped")), true);
@@ -366,6 +369,42 @@ test("Junction stress level webhooks fetch timeseries when direct value is inval
   const snapshot = importedSnapshots[0] as { timeseries?: Record<string, Array<Record<string, unknown>>> };
   assert.equal(snapshot.timeseries?.stress_level?.length, 1);
   assert.equal(snapshot.timeseries?.stress_level?.[0]?.stressLevel, 32);
+});
+
+test("Junction stress level webhook fallback windows use grouped sample timestamps", async () => {
+  const { provider, seenUrls } = createStressLevelFetchProvider({
+    responseStressLevel: 36,
+    responseTimestamp: "2026-04-01T12:00:00.000Z",
+  });
+  const { importedSnapshots, jobPayload } = await executeStressLevelWebhook({
+    provider,
+    messageId: "msg_stress_level_grouped_window",
+    now: "2026-04-03T00:00:00.000Z",
+    data: {
+      id: "stress-level-grouped-invalid-direct",
+      groups: {
+        garmin: [{
+          data: [{
+            timestamp: "2026-04-01T12:00:00.000Z",
+            stressLevel: 120,
+          }],
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+        }],
+      },
+    },
+  });
+
+  assert.equal(Object.hasOwn(jobPayload, "webhookDataJson"), false);
+  assert.equal(jobPayload.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(jobPayload.windowEnd, "2026-04-02T00:00:00.000Z");
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/stress_level/grouped")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, Array<Record<string, unknown>>> };
+  assert.equal(snapshot.timeseries?.stress_level?.length, 1);
+  assert.equal(snapshot.timeseries?.stress_level?.[0]?.stressLevel, 36);
 });
 
 test("Junction stress level webhooks fetch timeseries instead of chunking oversized direct payloads", async () => {
@@ -393,6 +432,41 @@ test("Junction stress level webhooks fetch timeseries instead of chunking oversi
   const snapshot = importedSnapshots[0] as { timeseries?: Record<string, Array<Record<string, unknown>>> };
   assert.equal(snapshot.timeseries?.stress_level?.length, 1);
   assert.equal(snapshot.timeseries?.stress_level?.[0]?.stressLevel, 28);
+});
+
+test("Junction legacy direct stress level resource jobs fetch instead of importing webhookDataJson", async () => {
+  const { provider, seenUrls } = createStressLevelFetchProvider({ responseStressLevel: 48 });
+  const executor = provider.jobExecutor;
+  assert.ok(executor);
+  const importedSnapshots: unknown[] = [];
+
+  await executor.executeJob(
+    createJobContext(importedSnapshots),
+    createJob("resource", {
+      eventType: "daily.data.stress_level.created",
+      objectId: "stress-level-legacy-direct",
+      occurredAt: "2026-04-02T12:00:00.000Z",
+      resource: "stress_level",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        id: "stress-level-legacy-direct",
+        timestamp: "2026-04-02T12:00:00.000Z",
+        stressLevel: 18,
+        marker: "legacy-direct-stress-payload",
+        sourceProviderSlug: "garmin",
+      }),
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/stress_level/grouped")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, Array<Record<string, unknown>>> };
+  assert.equal(snapshot.timeseries?.stress_level?.length, 1);
+  assert.equal(snapshot.timeseries?.stress_level?.[0]?.stressLevel, 48);
+  assert.equal(JSON.stringify(snapshot).includes("legacy-direct-stress-payload"), false);
 });
 
 test("Junction REST diagnostics canonicalize resource aliases before allowlist checks", async () => {

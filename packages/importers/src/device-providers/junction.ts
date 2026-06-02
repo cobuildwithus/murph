@@ -304,6 +304,27 @@ const JUNCTION_STRESS_LEVEL_VALUE_PATHS = [
   "stress.average",
   "stressLevelValue",
   "stress_level_value",
+  "score",
+] as const;
+const JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS = [
+  "timeZoneOffsetMinutes",
+  "time_zone_offset_minutes",
+  "timezoneOffsetMinutes",
+  "timezone_offset_minutes",
+  "utcOffsetMinutes",
+  "utc_offset_minutes",
+] as const;
+const JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS = [
+  "timezone_offset",
+  "timezoneOffset",
+  "timeZoneOffset",
+  "time_zone_offset",
+  "timezoneOffsetSeconds",
+  "timezone_offset_seconds",
+  "timeZoneOffsetSeconds",
+  "time_zone_offset_seconds",
+  "utcOffsetSeconds",
+  "utc_offset_seconds",
 ] as const;
 
 type JunctionSleepStage = JunctionSleepStageValue;
@@ -532,7 +553,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
-    const dayKey = timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
 
     if (value === undefined || !sampleAt || !dayKey) {
       continue;
@@ -1372,7 +1393,7 @@ function buildDataOrigin(
   return stripUndefined({
     ...resourceContext.origin,
     observedAtRaw: timestamp.observedAtRaw,
-    timeZoneOffsetMinutes: firstNullableNumberFromPaths(entry, ["timeZoneOffsetMinutes", "time_zone_offset_minutes", "utcOffsetMinutes", "utc_offset_minutes"]),
+    timeZoneOffsetMinutes: readJunctionTimeZoneOffsetMinutes(entry),
     timestampSemantics: timestamp.timestampSemantics,
     normalizerVersion: "junction-normalizer.v1",
   });
@@ -1911,6 +1932,66 @@ function firstTimestampSemantics(entry: PlainObject): TimestampSemantics | undef
   return value === "utc" || value === "offset" || value === "floating" || value === "unknown"
     ? value
     : undefined;
+}
+
+function resolveJunctionTimeseriesAggregateDayKey(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string | undefined,
+): string | undefined {
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (
+    offsetSeconds !== null
+    && offsetSeconds !== undefined
+    && sampleAt
+    && timestamp.observedAtRaw
+    && timestamp.timestampSemantics !== "floating"
+    && !isDateOnlyJunctionTimestamp(timestamp.observedAtRaw)
+  ) {
+    const offsetDayKey = extractLocalDayKeyFromUtcOffset(sampleAt, offsetSeconds);
+    if (offsetDayKey) {
+      return offsetDayKey;
+    }
+  }
+
+  return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+}
+
+function isDateOnlyJunctionTimestamp(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/u.test(value.trim());
+}
+
+function extractLocalDayKeyFromUtcOffset(timestamp: string, offsetSeconds: number): string | undefined {
+  if (!Number.isFinite(offsetSeconds) || Math.abs(offsetSeconds) > 24 * 60 * 60) {
+    return undefined;
+  }
+
+  const timestampMs = Date.parse(timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return undefined;
+  }
+
+  return new Date(timestampMs + offsetSeconds * 1000).toISOString().slice(0, 10);
+}
+
+function readJunctionTimeZoneOffsetMinutes(entry: PlainObject): number | null | undefined {
+  const minuteValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS);
+  if (minuteValue !== undefined) {
+    return minuteValue;
+  }
+
+  const secondValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS);
+
+  return secondValue === undefined || secondValue === null ? secondValue : secondValue / 60;
+}
+
+function readJunctionTimeZoneOffsetSeconds(entry: PlainObject): number | null | undefined {
+  const minuteValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS);
+  if (minuteValue !== undefined) {
+    return minuteValue === null ? null : minuteValue * 60;
+  }
+
+  return firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS);
 }
 
 function firstNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | undefined {

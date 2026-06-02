@@ -269,6 +269,7 @@ test("Junction normalizer compacts stress level timeseries into daily average fa
             data: [
               { timestamp: "2026-04-22T08:00:00Z", stressLevel: 18 },
               { timestamp: "2026-04-22T16:00:00Z", value: 42 },
+              { timestamp: "2026-04-22T20:00:00Z", score: 60 },
               { timestamp: "2026-04-23T08:00:00Z", stress: { average: 21 } },
               { timestamp: "2026-04-23T09:00:00Z", stressLevel: 120 },
             ],
@@ -294,14 +295,77 @@ test("Junction normalizer compacts stress level timeseries into daily average fa
   assert.equal(dayOne?.fields?.aggregationWindow, "day");
   assert.equal(dayOne?.fields?.statistic, "mean");
   assert.equal(dayOne?.fields?.unit, "score");
-  assert.equal(dayOne?.fields?.value, 30);
-  assert.equal(dayOne?.fields?.sampleCount, 2);
+  assert.equal(dayOne?.fields?.value, 40);
+  assert.equal(dayOne?.fields?.sampleCount, 3);
   assert.equal(dayOne?.fields?.minValue, 18);
-  assert.equal(dayOne?.fields?.maxValue, 42);
+  assert.equal(dayOne?.fields?.maxValue, 60);
   assert.equal(dayOne?.fields?.firstSampleAt, "2026-04-22T08:00:00.000Z");
-  assert.equal(dayOne?.fields?.lastSampleAt, "2026-04-22T16:00:00.000Z");
+  assert.equal(dayOne?.fields?.lastSampleAt, "2026-04-22T20:00:00.000Z");
   assert.equal(dayTwo?.fields?.value, 21);
   assert.equal(dayTwo?.fields?.sampleCount, 1);
+});
+
+test("Junction normalizer buckets stress level aggregates by provider local offset when present", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-23T06:30:00.000Z", timezone_offset: -25_200, score: 44 },
+              { timestamp: "2026-04-23T08:00:00.000Z", timezone_offset: -25_200, value: 55 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const stressEvents = payload.events?.filter((event) => event.fields?.metric === "stress-level") ?? [];
+  const localDayOne = stressEvents.find((event) => event.dayKey === "2026-04-22");
+  const localDayTwo = stressEvents.find((event) => event.dayKey === "2026-04-23");
+
+  assert.equal(stressEvents.length, 2);
+  assert.equal(localDayOne?.fields?.value, 44);
+  assert.equal(localDayOne?.occurredAt, "2026-04-23T06:30:00.000Z");
+  assert.equal(localDayOne?.dataOrigin?.timeZoneOffsetMinutes, -420);
+  assert.equal(localDayTwo?.fields?.value, 55);
+  assert.equal(localDayTwo?.occurredAt, "2026-04-23T08:00:00.000Z");
+  assert.equal(localDayTwo?.dataOrigin?.timeZoneOffsetMinutes, -420);
+});
+
+test("Junction normalizer keeps floating stress timestamps on their raw day despite offset metadata", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    windowStart: "2026-04-23T00:00:00.000Z",
+    windowEnd: "2026-04-23T06:30:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-23T06:30:00.000", timezone_offset: -25_200, score: 44 },
+              { date: "2026-04-23", timezone_offset: -25_200, value: 56 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const stressEvents = payload.events?.filter((event) => event.fields?.metric === "stress-level") ?? [];
+  const rawDayEvent = stressEvents.find((event) => event.dayKey === "2026-04-23");
+
+  assert.equal(stressEvents.length, 1);
+  assert.equal(rawDayEvent?.fields?.value, 50);
+  assert.equal(rawDayEvent?.fields?.sampleCount, 2);
+  assert.equal(rawDayEvent?.occurredAt, "2026-04-23T06:30:00.000Z");
+  assert.equal(rawDayEvent?.dataOrigin?.timeZoneOffsetMinutes, -420);
+  assert.equal(rawDayEvent?.dataOrigin?.timestampSemantics, "floating");
+  assert.equal(stressEvents.some((event) => event.dayKey === "2026-04-22"), false);
 });
 
 test("Junction snapshot adapter keeps glucose timeseries unsupported", () => {
