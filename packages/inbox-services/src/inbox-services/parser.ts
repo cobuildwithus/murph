@@ -133,16 +133,23 @@ export function buildAttachmentParseStatus(input: {
   attachmentId: string
   fallbackAttachment: RuntimeAttachmentRecord
 }) {
-  const jobs = input.listAttachmentParseJobs({
-    attachmentId: input.attachmentId,
-    limit: 20,
-  })
   const attachment = refreshAttachmentForCapture(
     input.runtime,
     input.captureId,
     input.attachmentId,
     input.fallbackAttachment,
   )
+  if (!isParseableAttachment(attachment)) {
+    return {
+      currentState: null,
+      jobs: [],
+    }
+  }
+
+  const jobs = input.listAttachmentParseJobs({
+    attachmentId: input.attachmentId,
+    limit: 20,
+  })
 
   return {
     currentState: resolveAttachmentParseState(attachment, jobs),

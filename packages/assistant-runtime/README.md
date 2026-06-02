@@ -27,12 +27,14 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace, then
 makes one best-effort inbox projection attempt while the decoded wake is still
-in memory. Normal foreground work may defer intermediate hosted workspace
+in memory. That projection preserves raw attachment paths for inspectable files
+and drains only audio/video transcription jobs before prompt construction when
+media parser output is available. Normal foreground work may defer intermediate hosted workspace
 checkpoints before Codex admission or reply delivery. The active invocation
 remains dirty until the runtime-owned idle/deadline/scheduled-wake
 `idle_shutdown` checkpoint succeeds; if the container dies before that
 checkpoint, local runtime residue since the last accepted checkpoint can be
-lost. Inbox capture, parser work,
+lost. Inbox capture, audio/video transcript work,
 attachment materialization, and display/search indexes are recovery context;
 they are not a hidden runtime-only admission path for Codex. Prompt construction
 reads the staged assistant input event and its sanitized vault-relative

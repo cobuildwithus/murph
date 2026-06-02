@@ -29,11 +29,13 @@ function createLogPlatform(logRequests: HostedRuntimeLogRequest[]) {
 function createInjectedFetchLinqDriver(
   fetchImplementation: typeof fetch,
   options: {
+    env?: NonNullable<Parameters<typeof createHostedLinqAttachmentDownloadDriver>[0]["env"]>;
     platform?: NonNullable<Parameters<typeof createHostedLinqAttachmentDownloadDriver>[0]["platform"]>;
   } = {},
 ) {
   const platform = options.platform ?? {};
   return createHostedLinqAttachmentDownloadDriver({
+    ...(options.env ? { env: options.env } : {}),
     platform: {
       ...platform,
       providerFetch: platform.providerFetch ?? fetchImplementation,
@@ -251,6 +253,52 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
 
     expect(providerFetch).toHaveBeenCalledTimes(1);
     expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses explicit hosted env for metadata lookup without ambient Linq env", async () => {
+    delete process.env.LINQ_API_BASE_URL;
+    delete process.env.LINQ_API_TOKEN;
+    delete process.env.LINQ_ATTACHMENT_CDN_BASE_URL;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "http://host.docker.internal:4011/attachments/att_local_env") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer explicit-linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url: "http://host.docker.internal:4011/attachment-downloads/att_local_env.pdf",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      if (url === "http://host.docker.internal:4011/attachment-downloads/att_local_env.pdf") {
+        return new Response(Uint8Array.from([21, 22, 23]), { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch, {
+      env: {
+        LINQ_API_BASE_URL: "http://host.docker.internal:4011",
+        LINQ_API_TOKEN: "explicit-linq-token",
+      },
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart({
+      attachmentId: "att_local_env",
+      mimeType: "application/pdf",
+      type: "media",
+    }, undefined)).resolves.toEqual(Uint8Array.from([21, 22, 23]));
   });
 
   it("uses public fetch for direct attachment downloads when available", async () => {

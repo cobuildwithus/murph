@@ -137,13 +137,13 @@ test('requireParsers wraps non-Error runtime failures with parser package guidan
   })
 
   await assert.rejects(
-    () => env.requireParsers('attachment parsing'),
+    () => env.requireParsers('media transcription'),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
       assert.equal(error.code, 'runtime_unavailable')
       assert.equal(
         error.message,
-        'packages/cli can describe attachment parsing, but local execution is blocked until the integrating workspace builds and links @murphai/inboxd and @murphai/parsers.',
+        'packages/cli can describe media transcription, but local execution is blocked until the integrating workspace builds and links @murphai/inboxd and @murphai/parsers.',
       )
       assert.deepEqual(error.context, {
         packages: ['@murphai/inboxd', '@murphai/parsers'],

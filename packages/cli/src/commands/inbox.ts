@@ -636,7 +636,7 @@ export function registerInboxCommands(
 
   const attachment = Cli.create('attachment', {
     description:
-      'Inspect stored inbox attachments, decoded content, and their runtime parse state.',
+      'Inspect stored inbox attachments, media transcripts, and their runtime parse state.',
   })
 
   attachment.command('list', {
@@ -676,9 +676,9 @@ export function registerInboxCommands(
       attachmentId: z.string().min(1).describe('Inbox attachment id to inspect.'),
     }),
     description:
-      'Inspect one stored inbox attachment and its extracted content by runtime attachment id.',
+      'Inspect one stored inbox attachment and its available evidence by runtime attachment id.',
     hint:
-      'Use `inspect` first when you want the stored attachment details and extracted text; successful inbox parsing already puts QR/barcode text here when it was decoded.',
+      'Use `inspect` first when you want stored attachment details, raw paths, and any available audio/video transcript evidence.',
     options: withBaseOptions(),
     output: inboxAttachmentShowResultSchema,
     async run(context) {
@@ -710,9 +710,9 @@ export function registerInboxCommands(
     args: z.object({
       attachmentId: z.string().min(1).describe('Inbox attachment id to inspect.'),
     }),
-    description: 'Show the current runtime parse status for one inbox attachment.',
+    description: 'Show the current runtime transcription status for one inbox attachment.',
     hint:
-      'Use `status` when you want the current parser state without draining or requeueing jobs.',
+      'Use `status` when you want the current audio/video parser state without draining or requeueing jobs.',
     options: withBaseOptions(),
     output: inboxAttachmentStatusResultSchema,
     async run(context) {
@@ -728,7 +728,7 @@ export function registerInboxCommands(
     args: z.object({
       attachmentId: z.string().min(1).describe('Inbox attachment id to inspect.'),
     }),
-    description: 'Show the current runtime parse status for one inbox attachment.',
+    description: 'Show the current runtime transcription status for one inbox attachment.',
     options: withBaseOptions(),
     output: inboxAttachmentStatusResultSchema,
     async run(context) {
@@ -745,9 +745,9 @@ export function registerInboxCommands(
       attachmentId: z.string().min(1).describe('Inbox attachment id to parse now.'),
     }),
     description:
-      'Run the attachment parse/decode pipeline now when existing extracted text is missing or needs a fresh parse.',
+      'Run the audio/video transcription pipeline now when existing media transcript evidence is missing or needs a fresh parse.',
     hint:
-      'Use `decode` only when you need an explicit parse run. Normal inbox parsing already scans images for QR/barcode payloads and stores decoded text for `inspect` when available.',
+      'Use `decode` only for audio/video attachments. PDFs, documents, CSVs, and images are inspected through their stored raw file paths.',
     options: withBaseOptions(),
     output: inboxAttachmentParseResultSchema,
     async run(context) {
@@ -763,7 +763,7 @@ export function registerInboxCommands(
     args: z.object({
       attachmentId: z.string().min(1).describe('Inbox attachment id to parse now.'),
     }),
-    description: 'Drain the current parse queue entry for one parseable inbox attachment.',
+    description: 'Drain the current media transcription queue entry for one audio/video inbox attachment.',
     options: withBaseOptions(),
     output: inboxAttachmentParseResultSchema,
     async run(context) {
@@ -779,7 +779,7 @@ export function registerInboxCommands(
     args: z.object({
       attachmentId: z.string().min(1).describe('Inbox attachment id to requeue.'),
     }),
-    description: 'Requeue the current runtime parse job for one parseable inbox attachment.',
+    description: 'Requeue the current runtime transcription job for one audio/video inbox attachment.',
     options: withBaseOptions(),
     output: inboxAttachmentReparseResultSchema,
     async run(context) {

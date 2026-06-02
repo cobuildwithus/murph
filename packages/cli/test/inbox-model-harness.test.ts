@@ -217,8 +217,16 @@ test('materializeInboxModelBundle emits a text-only capture audit bundle', async
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
     assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'not-image')
     assert.match(result.bundle.routingText, /Please file this lab summary/u)
-    assert.match(result.bundle.routingText, /Extracted plain text from the attachment/u)
-    assert.match(result.bundle.routingText, /Lab values and follow-up notes/u)
+    assert.match(
+      result.bundle.routingText,
+      /storedPath: raw\/inbox\/captures\/cap_1\/attachments\/1\/lab-summary\.pdf/u,
+    )
+    assert.doesNotMatch(result.bundle.routingText, /Extracted plain text from the attachment/u)
+    assert.doesNotMatch(result.bundle.routingText, /Lab values and follow-up notes/u)
+    assert.deepEqual(
+      result.bundle.attachments[0]?.fragments.map((fragment) => fragment.kind),
+      ['attachment_metadata'],
+    )
 
     const persistedBundle = JSON.parse(
       await readFile(path.join(vaultRoot, result.bundlePath), 'utf8'),
@@ -448,7 +456,7 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
   }
 })
 
-test('materializeInboxModelBundle marks parse-failed PDFs with no text as multimodal fallback candidates', async () => {
+test('materializeInboxModelBundle keeps parse-failed PDFs as stored-path metadata', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-pdf-fallback-bundle-'))
 
   const inboxServices = createStubInboxServices({
@@ -500,10 +508,14 @@ test('materializeInboxModelBundle marks parse-failed PDFs with no text as multim
     })
 
     assert.ok(result.bundle)
-    assert.equal(result.bundle.preparedInputMode, 'multimodal')
+    assert.equal(result.bundle.preparedInputMode, 'text-only')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
-    assert.match(result.bundle.routingText, /Prepared input mode: multimodal/u)
-    assert.match(result.bundle.routingText, /parseState: failed/u)
+    assert.match(result.bundle.routingText, /Prepared input mode: text-only/u)
+    assert.match(
+      result.bundle.routingText,
+      /storedPath: raw\/inbox\/captures\/cap_pdf_fallback\/attachments\/1\/scanned-lab\.pdf/u,
+    )
+    assert.doesNotMatch(result.bundle.routingText, /parseState: failed/u)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -568,10 +580,10 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
         {
           attachmentId: 'att_2',
           ordinal: 1,
-          kind: 'document',
-          mime: 'application/pdf',
-          fileName: 'lab-summary.pdf',
-          storedPath: 'raw/inbox/captures/cap_2/attachments/1/lab-summary.pdf',
+          kind: 'audio',
+          mime: 'audio/mp4',
+          fileName: 'voice-summary.m4a',
+          storedPath: 'raw/inbox/captures/cap_2/attachments/1/voice-summary.m4a',
           extractedText: 'CBC and lipid panel attached.',
           transcriptText: null,
           derivedPath: 'derived/inbox/cap_2/attachment-1/manifest.json',
@@ -667,10 +679,10 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
         {
           attachmentId: 'att_2',
           ordinal: 1,
-          kind: 'document',
-          mime: 'application/pdf',
-          fileName: 'unsafe.pdf',
-          storedPath: 'raw/inbox/captures/cap_2/attachments/1/unsafe.pdf',
+          kind: 'audio',
+          mime: 'audio/mp4',
+          fileName: 'unsafe.m4a',
+          storedPath: 'raw/inbox/captures/cap_2/attachments/1/unsafe.m4a',
           extractedText: null,
           transcriptText: null,
           derivedPath: 'derived/inbox/cap_2/attachment-1/manifest.json',
@@ -765,10 +777,10 @@ test('materializeInboxModelBundle ignores manifest entries that point at in-vaul
         {
           attachmentId: 'att_3',
           ordinal: 1,
-          kind: 'document',
-          mime: 'application/pdf',
-          fileName: 'safe.pdf',
-          storedPath: 'raw/inbox/captures/cap_3/attachments/1/safe.pdf',
+          kind: 'audio',
+          mime: 'audio/mp4',
+          fileName: 'safe.m4a',
+          storedPath: 'raw/inbox/captures/cap_3/attachments/1/safe.m4a',
           extractedText: null,
           transcriptText: null,
           derivedPath: 'derived/inbox/cap_3/attachment-1/manifest.json',
@@ -874,10 +886,10 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
         {
           attachmentId: 'att_4',
           ordinal: 1,
-          kind: 'document',
-          mime: 'application/pdf',
-          fileName: 'isolated.pdf',
-          storedPath: 'raw/inbox/captures/cap_4/attachments/1/isolated.pdf',
+          kind: 'audio',
+          mime: 'audio/mp4',
+          fileName: 'isolated.m4a',
+          storedPath: 'raw/inbox/captures/cap_4/attachments/1/isolated.m4a',
           extractedText: null,
           transcriptText: null,
           derivedPath: 'derived/inbox/cap_other/attachment-1/manifest.json',

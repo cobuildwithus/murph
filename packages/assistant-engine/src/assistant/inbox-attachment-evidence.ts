@@ -5,6 +5,10 @@ import type {
 } from './input-store.js'
 import { ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT } from './input-store.js'
 import { normalizeAssistantInputFileName } from './attachment-file-name.js'
+import {
+  normalizeAssistantDerivedAttachmentArtifactPath,
+  normalizeAssistantRawAttachmentArtifactPath,
+} from './attachment-artifact-paths.js'
 
 const INLINE_FRAGMENT_TEXT_MAX_LENGTH = 6_000
 const ATTACHMENT_EVIDENCE_MAX_COUNT =
@@ -300,65 +304,14 @@ function normalizeSha256(value: string | null | undefined): string | null {
 }
 
 function normalizeRawArtifactPath(value: string | null | undefined): string | null {
-  return normalizeAllowedArtifactPath(value, ['raw/inbox/'])
+  return normalizeAssistantRawAttachmentArtifactPath(value)
 }
 
 function normalizeDerivedArtifactPath(value: string | null | undefined): string | null {
-  const normalized = normalizeAllowedArtifactPath(value, ['derived/inbox/'])
+  const normalized = normalizeAssistantDerivedAttachmentArtifactPath(value)
   if (!normalized || path.posix.extname(normalized).toLowerCase() !== '.json') {
     return null
   }
   const allowedRoot = path.posix.dirname(normalized)
   return allowedRoot.startsWith('derived/inbox/') ? normalized : null
-}
-
-function normalizeAllowedArtifactPath(
-  value: string | null | undefined,
-  allowedPrefixes: readonly string[],
-): string | null {
-  const trimmed = typeof value === 'string' ? value.trim() : ''
-  if (
-    !trimmed ||
-    trimmed.includes('\\') ||
-    trimmed.includes('\0') ||
-    trimmed.includes('?') ||
-    trimmed.includes('#') ||
-    trimmed.startsWith('/') ||
-    trimmed.startsWith('~/') ||
-    /^[A-Za-z]:[\\/]/u.test(trimmed) ||
-    /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) ||
-    /[{}"'<>]/u.test(trimmed) ||
-    /[a-z][a-z0-9+.-]*:/iu.test(trimmed)
-  ) {
-    return null
-  }
-
-  const normalized = trimmed
-    .replace(/\/+/gu, '/')
-    .replace(/^\.\//u, '')
-    .replace(/\/+$/u, '')
-  const segments = normalized.split('/')
-  if (
-    normalized !== trimmed ||
-    segments.some((segment) =>
-      !segment ||
-      segment === '.' ||
-      segment === '..' ||
-      segment === 'tmp' ||
-      segment === 'temp' ||
-      isUnsafeArtifactPathSegmentMarker(segment.toLowerCase())
-    )
-  ) {
-    return null
-  }
-
-  return allowedPrefixes.some((prefix) => normalized.startsWith(prefix))
-    ? normalized
-    : null
-}
-
-function isUnsafeArtifactPathSegmentMarker(segment: string): boolean {
-  return /(?:^|[-_.])(?:authorization|bearer|token|access[-_]?token|refresh[-_]?token|id[-_]?token|api[-_]?key|x[-_]?api[-_]?key|set[-_]?cookie|signed[-_]?url)(?:$|[-_.])/u.test(
-    segment,
-  )
 }

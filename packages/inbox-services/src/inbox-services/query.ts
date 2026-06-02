@@ -11,7 +11,10 @@ import type {
   RuntimeStore,
 } from '../inbox-app/types.js'
 import { requireConnector } from './state.js'
-import { runtimeNamespaceAccountId } from './shared.js'
+import {
+  isParseableAttachment,
+  runtimeNamespaceAccountId,
+} from './shared.js'
 
 export function hasStoredPath(
   attachment: RuntimeAttachmentRecord,
@@ -92,7 +95,9 @@ export function toCliAttachment(attachment: RuntimeAttachmentRecord) {
     transcriptText: attachment.transcriptText ?? null,
     derivedPath: attachment.derivedPath ?? null,
     parserProviderId: attachment.parserProviderId ?? null,
-    parseState: normalizeAttachmentParseState(attachment.parseState),
+    parseState: isParseableAttachment(attachment)
+      ? normalizeAttachmentParseState(attachment.parseState)
+      : null,
   }
 }
 

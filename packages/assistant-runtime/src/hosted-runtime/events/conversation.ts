@@ -27,6 +27,7 @@ import {
 } from "@murphai/parsers";
 
 import {
+  buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
 } from "../channel-activity.ts";
 import {
@@ -119,10 +120,14 @@ async function drainHostedConversationParsers(input: {
 }): Promise<number> {
   const pendingJobs = input.runtime.listAttachmentParseJobs({
     captureId: input.captureId,
-    limit: 1,
+    limit: 20,
     state: "pending",
   });
-  if (pendingJobs.length === 0) {
+  if (!hasPendingHostedConversationMediaParseJob({
+    captureId: input.captureId,
+    pendingJobs,
+    runtime: input.runtime,
+  })) {
     return 0;
   }
 
@@ -229,6 +234,34 @@ function collectHostedParserFailures(input: {
   return [...failuresByJobId.values()];
 }
 
+function hasPendingHostedConversationMediaParseJob(input: {
+  captureId: string;
+  pendingJobs: ReadonlyArray<{ attachmentId: string }>;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+}): boolean {
+  if (input.pendingJobs.length === 0) {
+    return false;
+  }
+
+  const capture = input.runtime.getCapture(input.captureId);
+  if (!capture) {
+    return false;
+  }
+
+  const mediaAttachmentIds = new Set(
+    capture.attachments
+      .filter((attachment) =>
+        attachment.kind === "audio" || attachment.kind === "video"
+      )
+      .map((attachment) => attachment.attachmentId)
+      .filter((attachmentId): attachmentId is string =>
+        typeof attachmentId === "string" && attachmentId.length > 0
+      ),
+  );
+
+  return input.pendingJobs.some((job) => mediaAttachmentIds.has(job.attachmentId));
+}
+
 async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
@@ -240,6 +273,7 @@ async function normalizeHostedConversationMessageWake(input: {
       accountId: contact.lookupKey,
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
       downloadDriver: createHostedLinqAttachmentDownloadDriver({
+        env: buildHostedLinqAttachmentDownloadEnv(input.runtime),
         platform: input.runtime.platform,
       }),
       linqMessage: input.wake.message.linqMessage,
@@ -298,4 +332,29 @@ async function normalizeHostedConversationMessageWake(input: {
   }
 
   throw new TypeError("Unsupported hosted conversation message wake kind.");
+}
+
+function buildHostedLinqAttachmentDownloadEnv(input: Pick<
+  NormalizedHostedAssistantRuntimeConfig,
+  "forwardedEnv" | "platformEnv" | "userEnv"
+>): Record<string, string> {
+  const env = buildHostedLinqChannelEnv({
+    forwardedEnv: input.forwardedEnv,
+    userEnv: input.userEnv,
+  });
+  const cdnBaseUrl =
+    readHostedLinqAttachmentEnvValue(input.forwardedEnv, "LINQ_ATTACHMENT_CDN_BASE_URL")
+    ?? readHostedLinqAttachmentEnvValue(input.platformEnv, "LINQ_ATTACHMENT_CDN_BASE_URL");
+  if (cdnBaseUrl) {
+    env.LINQ_ATTACHMENT_CDN_BASE_URL = cdnBaseUrl;
+  }
+  return env;
+}
+
+function readHostedLinqAttachmentEnvValue(
+  env: Readonly<Record<string, string>> | undefined,
+  key: string,
+): string | null {
+  const value = env?.[key]?.trim();
+  return value ? value : null;
 }

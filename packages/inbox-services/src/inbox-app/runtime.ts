@@ -240,7 +240,7 @@ export function createInboxRuntimeOps(
         const parserService = await createParserServiceContext(
           paths.absoluteVaultRoot,
           runtime,
-          await env.requireParsers('inbox parser queue drains'),
+          await env.requireParsers('inbox media transcription queue drains'),
         )
         const results = await parserService.drain({
           captureId: input.captureId ?? undefined,
@@ -305,7 +305,7 @@ export function createInboxRuntimeOps(
 
       try {
         if (input.parse) {
-          const parsers = await env.requireParsers('historical inbox backfill parsing')
+          const parsers = await env.requireParsers('historical inbox media transcription')
           const configured = await parsers.createConfiguredParserRegistry({
             vaultRoot: paths.absoluteVaultRoot,
           })
@@ -384,7 +384,7 @@ export function createInboxRuntimeOps(
     async run(input, options) {
       const paths = await ensureInitialized(env.loadInbox, input.vault)
       const inboxd = await env.loadInbox()
-      const parsers = await env.requireParsers('inbox daemon parser integration')
+      const parsers = await env.requireParsers('inbox daemon media transcription integration')
       const config = await readConfig(paths)
       const enabledConnectors = config.connectors.filter(
         (connector) => connector.enabled,

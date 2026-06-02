@@ -1,8 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
 import { z } from 'zod'
-import {
-  normalizeRelativeVaultPath,
-} from '@murphai/core'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import type {
@@ -27,6 +24,11 @@ import {
   projectAttachmentEvidenceForModel,
   type ModelEvidenceSource,
 } from '../inbox-evidence-projection.js'
+import {
+  normalizeAllowedAssistantAttachmentArtifactPath,
+  normalizeAssistantDerivedAttachmentArtifactPath,
+  normalizeAssistantRawAttachmentArtifactPath,
+} from './attachment-artifact-paths.js'
 
 const parserManifestSchema = z.object({
   schema: z.literal('murph.parser-manifest.v1'),
@@ -516,24 +518,21 @@ function normalizeAttachmentEvidenceParseState(
 function normalizeAssistantInputRawArtifactPath(
   candidatePath: string | null | undefined,
 ): string | null {
-  return normalizeAllowedVaultRelativePath(candidatePath, [
-    'raw/inbox/',
-  ])
+  return normalizeAssistantRawAttachmentArtifactPath(candidatePath)
 }
 
 function normalizeAssistantInputDerivedArtifactPath(
   candidatePath: string | null | undefined,
   allowedRoot: string,
 ): string | null {
-  const normalizedRoot = normalizeAllowedVaultRelativePath(allowedRoot, [
-    'derived/inbox/',
-  ])
+  const normalizedRoot = normalizeAssistantDerivedAttachmentArtifactPath(allowedRoot)
   if (!normalizedRoot) {
     return null
   }
-  const normalizedCandidate = normalizeAllowedVaultRelativePath(candidatePath, [
-    `${normalizedRoot}/`,
-  ])
+  const normalizedCandidate = normalizeAllowedAssistantAttachmentArtifactPath(
+    candidatePath,
+    [`${normalizedRoot}/`],
+  )
   if (!normalizedCandidate) {
     return null
   }
@@ -541,39 +540,6 @@ function normalizeAssistantInputDerivedArtifactPath(
       normalizedCandidate.startsWith(`${normalizedRoot}/`)
     ? normalizedCandidate
     : null
-}
-
-function normalizeAllowedVaultRelativePath(
-  candidatePath: string | null | undefined,
-  allowedPrefixes: readonly string[],
-): string | null {
-  const normalizedCandidate = normalizeNullableString(candidatePath)
-  if (!normalizedCandidate) {
-    return null
-  }
-  try {
-    if (
-      normalizedCandidate.includes('\\') ||
-      normalizedCandidate.includes('?') ||
-      normalizedCandidate.includes('#') ||
-      hasUnsafeAttachmentPathSyntax(normalizedCandidate)
-    ) {
-      return null
-    }
-    const normalized = normalizeRelativeVaultPath(normalizedCandidate)
-    return allowedPrefixes.some((prefix) => normalized.startsWith(prefix))
-      ? normalized
-      : null
-  } catch {
-    return null
-  }
-}
-
-function hasUnsafeAttachmentPathSyntax(candidatePath: string): boolean {
-  return /[\u0000-\u001F\u007F]/u.test(candidatePath) ||
-    candidatePath.split('/').some((segment) =>
-      segment === '.' || segment === '..',
-    )
 }
 
 async function readParserManifest(

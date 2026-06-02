@@ -29,6 +29,7 @@ type HostedLinqAttachmentDownloadPlatform =
     NormalizedHostedAssistantRuntimeConfig["platform"],
     "logPort" | "providerFetch" | "publicInternetFetch"
   >;
+type HostedLinqAttachmentDownloadEnv = Readonly<Record<string, string | undefined>>;
 
 type HostedLinqAttachmentDownloadResult = "failed" | "not_downloaded" | "succeeded";
 
@@ -74,10 +75,12 @@ const HOSTED_LINQ_LOCAL_ATTACHMENT_CDN_HOSTNAMES = new Set([
 
 export function createHostedLinqAttachmentDownloadDriver(
   options: {
+    env?: HostedLinqAttachmentDownloadEnv;
     platform: HostedLinqAttachmentDownloadPlatform | null;
   },
 ): HostedLinqAttachmentDownloadDriver | null {
   const platform = options.platform;
+  const env = options.env ?? process.env;
   const fetchImplementation = resolveHostedLinqAttachmentFetchImplementation({
     platform,
   });
@@ -88,17 +91,17 @@ export function createHostedLinqAttachmentDownloadDriver(
   const metadataFetch = fetchImplementation?.metadataFetch ?? null;
 
   const apiConfig = metadataFetch
-    ? resolveHostedLinqAttachmentApiConfig()
+    ? resolveHostedLinqAttachmentApiConfig(env)
     : null;
 
   return {
     downloadUrl: async (url: string, signal?: AbortSignal) => {
       const locatorPresent = typeof url === "string" && url.trim().length > 0;
-      const normalizedUrl = normalizeHostedLinqAttachmentUrl(url);
+      const normalizedUrl = normalizeHostedLinqAttachmentUrl(url, env);
       if (!normalizedUrl) {
         await writeHostedLinqAttachmentDownloadAttemptLog({
           attempt: {
-            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(env),
             directLocatorAllowed: false,
             directLocatorPresent: locatorPresent,
             failureCode: "url_not_allowed",
@@ -118,7 +121,7 @@ export function createHostedLinqAttachmentDownloadDriver(
         await writeHostedLinqAttachmentDownloadAttemptLog({
           attempt: {
             byteCountBucket: bucketHostedLinqAttachmentByteCount(bytes.byteLength),
-            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(env),
             directFetchAttempted: true,
             directFetchSucceeded: true,
             directLocatorAllowed: true,
@@ -133,7 +136,7 @@ export function createHostedLinqAttachmentDownloadDriver(
         const failure = classifyHostedLinqAttachmentDownloadError(error);
         await writeHostedLinqAttachmentDownloadAttemptLog({
           attempt: {
-            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+            cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(env),
             directFetchAttempted: true,
             directFetchSucceeded: false,
             directLocatorAllowed: true,
@@ -152,6 +155,7 @@ export function createHostedLinqAttachmentDownloadDriver(
       downloadHostedLinqAttachmentPart({
         apiConfig,
         downloadFetch,
+        env,
         metadataFetch,
         part,
         platform,
@@ -160,7 +164,10 @@ export function createHostedLinqAttachmentDownloadDriver(
   };
 }
 
-export function normalizeHostedLinqAttachmentUrl(value: string | null | undefined): string | null {
+export function normalizeHostedLinqAttachmentUrl(
+  value: string | null | undefined,
+  env: HostedLinqAttachmentDownloadEnv = process.env,
+): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -172,7 +179,7 @@ export function normalizeHostedLinqAttachmentUrl(value: string | null | undefine
 
   try {
     const url = new URL(normalized);
-    const attachmentCdnBaseUrl = resolveHostedLinqAttachmentCdnBaseUrl();
+    const attachmentCdnBaseUrl = resolveHostedLinqAttachmentCdnBaseUrl(env);
     if (!isHostedLinqAttachmentUrlAllowed(url, attachmentCdnBaseUrl)) {
       return null;
     }
@@ -186,6 +193,7 @@ export function normalizeHostedLinqAttachmentUrl(value: string | null | undefine
 async function downloadHostedLinqAttachmentPart(input: {
   apiConfig: HostedLinqAttachmentApiConfig | null;
   downloadFetch: typeof fetch;
+  env: HostedLinqAttachmentDownloadEnv;
   metadataFetch: typeof fetch | null;
   part: HostedLinqAttachmentDownloadPart;
   platform: HostedLinqAttachmentDownloadPlatform | null;
@@ -196,7 +204,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     apiBaseKind: input.apiConfig ? classifyHostedLinqApiBaseUrl(input.apiConfig.apiBaseUrl) : null,
     apiConfigured: input.apiConfig !== null,
     attachmentKeyPresent: Boolean(normalizeHostedLinqAttachmentId(input.part.attachmentId)),
-    cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(),
+    cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(input.env),
     declaredSizeBucket: bucketHostedLinqAttachmentByteCount(declaredSize),
     directLocatorAllowed: false,
     directLocatorPresent: typeof input.part.url === "string" && input.part.url.trim().length > 0,
@@ -221,7 +229,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     throw error;
   }
 
-  const directUrl = normalizeHostedLinqAttachmentUrl(input.part.url);
+  const directUrl = normalizeHostedLinqAttachmentUrl(input.part.url, input.env);
   let directError: unknown = null;
   let directFailure: HostedLinqAttachmentFailureSummary | null = null;
 
@@ -283,7 +291,7 @@ async function downloadHostedLinqAttachmentPart(input: {
     fetchImplementation: input.metadataFetch,
     signal: input.signal,
   });
-  const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(metadataResult.downloadLocator)
+  const normalizedRefreshedUrl = normalizeHostedLinqAttachmentUrl(metadataResult.downloadLocator, input.env)
     ?? normalizeHostedLinqMetadataAttachmentUrl(metadataResult.downloadLocator, input.apiConfig.apiBaseUrl);
 
   if (!normalizedRefreshedUrl) {

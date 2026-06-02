@@ -225,12 +225,7 @@ export function listAllCaptures(runtime: RuntimeStore): RuntimeCaptureRecord[] {
 export function isParseableAttachment(
   attachment: RuntimeAttachmentRecord,
 ): boolean {
-  return (
-    attachment.kind === 'audio' ||
-    attachment.kind === 'document' ||
-    attachment.kind === 'image' ||
-    attachment.kind === 'video'
-  )
+  return attachment.kind === 'audio' || attachment.kind === 'video'
 }
 
 export function resolveAttachmentParseState(

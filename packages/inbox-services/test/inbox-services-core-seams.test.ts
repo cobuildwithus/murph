@@ -790,10 +790,10 @@ test('parser helpers build service context, summarize drains, and enforce runtim
     captureId: 'capture-1',
     fallbackAttachment: {
       attachmentId: 'attachment-1',
-      kind: 'document',
+      kind: 'audio',
       ordinal: 1,
       parseState: 'pending',
-      storedPath: 'derived/inbox/capture-1/fallback.pdf',
+      storedPath: 'raw/inbox/capture-1/fallback.m4a',
     },
     listAttachmentParseJobs,
     runtime: {
@@ -804,10 +804,10 @@ test('parser helpers build service context, summarize drains, and enforce runtim
           attachments: [
             {
               attachmentId: 'attachment-1',
-              kind: 'document',
+              kind: 'audio',
               ordinal: 1,
               parseState: null,
-              storedPath: 'derived/inbox/capture-1/final.pdf',
+              storedPath: 'raw/inbox/capture-1/final.m4a',
             },
           ],
         })

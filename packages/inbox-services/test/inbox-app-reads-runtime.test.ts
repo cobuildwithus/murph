@@ -510,33 +510,43 @@ function createConfig(
 
 test('read ops cover list, attachment, parse, reparse, show, and search flows', async () => {
   const paths = await createTempPaths()
-  const documentAttachment = createAttachment({
-    attachmentId: 'attachment-doc',
-    fileName: 'invoice.pdf',
-    kind: 'document',
+  const audioAttachment = createAttachment({
+    attachmentId: 'attachment-audio',
+    fileName: 'voice-note.m4a',
+    kind: 'audio',
     ordinal: 1,
     parseState: 'pending',
-    storedPath: 'derived/inbox/capture-1/invoice.pdf',
+    storedPath: 'raw/inbox/capture-1/attachments/voice-note.m4a',
   })
   const otherAttachment = createAttachment({
     attachmentId: 'attachment-other',
     kind: 'other',
     ordinal: 2,
+    parseState: 'succeeded',
   })
   const capture = createCapture({
-    attachments: [documentAttachment, otherAttachment],
+    attachments: [audioAttachment, otherAttachment],
     source: 'telegram',
   })
   const promotion = { relatedId: 'doc-1', target: 'document' } as const
   const parseJobs: RuntimeAttachmentParseJobRecord[] = [
     {
-      attachmentId: 'attachment-doc',
+      attachmentId: 'attachment-audio',
       attempts: 1,
       captureId: capture.captureId,
       createdAt: '2026-04-08T00:01:00.000Z',
       jobId: 'job-1',
       pipeline: 'attachment_text',
       state: 'running',
+    },
+    {
+      attachmentId: 'attachment-other',
+      attempts: 1,
+      captureId: capture.captureId,
+      createdAt: '2026-04-08T00:02:00.000Z',
+      jobId: 'job-legacy-document',
+      pipeline: 'attachment_text',
+      state: 'succeeded',
     },
   ]
   const { runtime } = createRuntimeStore({
@@ -595,14 +605,15 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
     vault: paths.absoluteVaultRoot,
   })
   assert.equal(listedAttachments.attachmentCount, 2)
+  assert.equal(listedAttachments.attachments[1]?.parseState, null)
 
   const shownAttachment = await ops.showAttachment({
-    attachmentId: 'attachment-doc',
+    attachmentId: 'attachment-audio',
     requestId: null,
     vault: paths.absoluteVaultRoot,
   })
   assert.equal(shownAttachment.captureId, capture.captureId)
-  assert.equal(shownAttachment.attachment.fileName, 'invoice.pdf')
+  assert.equal(shownAttachment.attachment.fileName, 'voice-note.m4a')
 
   const shownStatus = await ops.showAttachmentStatus({
     attachmentId: 'attachment-other',
@@ -610,10 +621,11 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
     vault: paths.absoluteVaultRoot,
   })
   assert.equal(shownStatus.parseable, false)
+  assert.equal(shownStatus.currentState, null)
   assert.equal(shownStatus.jobs.length, 0)
 
   const parsed = await ops.parseAttachment({
-    attachmentId: 'attachment-doc',
+    attachmentId: 'attachment-audio',
     requestId: null,
     vault: paths.absoluteVaultRoot,
   })
@@ -622,7 +634,7 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
   assert.equal(parsed.results[0]?.manifestPath, 'derived/inbox/job-1.json')
 
   const reparsed = await ops.reparseAttachment({
-    attachmentId: 'attachment-doc',
+    attachmentId: 'attachment-audio',
     requestId: null,
     vault: paths.absoluteVaultRoot,
   })
@@ -707,8 +719,8 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
   const capture = createCapture({
     attachments: [
       createAttachment({
-        attachmentId: 'attachment-doc',
-        kind: 'document',
+        attachmentId: 'attachment-audio',
+        kind: 'audio',
         ordinal: 1,
       }),
     ],
@@ -732,12 +744,12 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
 
   assert.deepEqual(
     await ops.showAttachmentStatus({
-      attachmentId: 'attachment-doc',
+      attachmentId: 'attachment-audio',
       requestId: null,
       vault: paths.absoluteVaultRoot,
     }),
     {
-      attachmentId: 'attachment-doc',
+      attachmentId: 'attachment-audio',
       captureId: capture.captureId,
       currentState: null,
       jobs: [],
@@ -750,8 +762,8 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
 test('read ops cover missing source filters, empty promotions, and missing reparse jobs', async () => {
   const paths = await createTempPaths()
   const parseableAttachment = createAttachment({
-    attachmentId: 'attachment-doc',
-    kind: 'document',
+    attachmentId: 'attachment-audio',
+    kind: 'audio',
     ordinal: 1,
   })
   const capture = createCapture({
@@ -816,7 +828,7 @@ test('read ops cover missing source filters, empty promotions, and missing repar
   await assert.rejects(
     () =>
       ops.reparseAttachment({
-        attachmentId: 'attachment-doc',
+        attachmentId: 'attachment-audio',
         requestId: null,
         vault: paths.absoluteVaultRoot,
       }),
@@ -829,7 +841,7 @@ test('read ops cover missing source filters, empty promotions, and missing repar
 test('runtime ops parse, requeue, status, and stop stay deterministic', async () => {
   const paths = await createTempPaths()
   const parseJob: RuntimeAttachmentParseJobRecord = {
-    attachmentId: 'attachment-doc',
+    attachmentId: 'attachment-audio',
     attempts: 1,
     captureId: 'capture-1',
     createdAt: '2026-04-08T00:01:00.000Z',
@@ -842,8 +854,8 @@ test('runtime ops parse, requeue, status, and stop stay deterministic', async ()
       createCapture({
         attachments: [
           createAttachment({
-            attachmentId: 'attachment-doc',
-            kind: 'document',
+            attachmentId: 'attachment-audio',
+            kind: 'audio',
             ordinal: 1,
           }),
         ],
@@ -914,7 +926,7 @@ test('runtime ops parse, requeue, status, and stop stay deterministic', async ()
   assert.equal(parsed.failed, 1)
 
   const requeued = await ops.requeue({
-    attachmentId: 'attachment-doc',
+    attachmentId: 'attachment-audio',
     requestId: null,
     vault: paths.absoluteVaultRoot,
   })
@@ -1195,8 +1207,8 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
   const emittedCapture = createCapture({
     attachments: [
       createAttachment({
-        attachmentId: 'attachment-doc',
-        kind: 'document',
+        attachmentId: 'attachment-audio',
+        kind: 'audio',
         ordinal: 1,
       }),
     ],
@@ -1204,7 +1216,7 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
     externalId: 'external-imported',
   })
   const parseJob: RuntimeAttachmentParseJobRecord = {
-    attachmentId: 'attachment-doc',
+    attachmentId: 'attachment-audio',
     attempts: 1,
     captureId: 'capture-imported',
     createdAt: '2026-04-08T00:02:00.000Z',

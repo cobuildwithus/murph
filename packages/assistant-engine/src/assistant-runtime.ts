@@ -9,6 +9,9 @@ export * from './assistant-outbox.js'
 export * from './assistant-service.js'
 export * from './assistant-status.js'
 export * from './inbox-evidence-projection.js'
+export {
+  normalizeAssistantRawAttachmentArtifactPath,
+} from './assistant/attachment-artifact-paths.js'
 export * from './assistant/channel-adapters.js'
 export type {
   AssistantModelContentPart,

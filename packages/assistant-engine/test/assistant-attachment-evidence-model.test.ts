@@ -173,6 +173,24 @@ describe('assistant input attachment evidence model materialization', () => {
     })
   })
 
+  it('keeps raw inbox artifact paths even when filenames look sensitive', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: createAttachmentEvidence({
+        kind: 'document',
+        mime: 'application/pdf',
+        rawPath: 'raw/inbox/capture-1/attachments/api-key.pdf',
+      }),
+      vaultRoot,
+    })
+
+    expect(bundle.storedPath).toBe('raw/inbox/capture-1/attachments/api-key.pdf')
+    expect(bundle.combinedText).toContain(
+      'raw/inbox/capture-1/attachments/api-key.pdf',
+    )
+    expect(bundle.combinedText).not.toContain('storedPath: missing')
+  })
+
   it('preserves unsupported parse state in the materialized bundle metadata', async () => {
     const vaultRoot = await createTempVaultRoot()
     const bundle = await buildAssistantInputAttachmentModelBundle({

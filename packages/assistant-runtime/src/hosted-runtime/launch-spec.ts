@@ -15,7 +15,7 @@ import {
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
-  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+  HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES,
 } from "../hosted-env-categories.ts";
 import {
   sanitizeHostedAssistantRuntimeForwardedEnv,
@@ -273,7 +273,7 @@ export function buildHostedRuntimePlatformEnv(
 ): Record<string, string> {
   const env: Record<string, string> = {};
 
-  for (const key of HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES) {
+  for (const key of HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES) {
     const value = normalizeHostedRuntimeEnvString(
       typeof source[key] === "string" ? source[key] : undefined,
     );

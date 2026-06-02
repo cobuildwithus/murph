@@ -727,6 +727,44 @@ test("hosted runtime config strips platform-only Telegram vars from forwarded an
   assert.deepEqual(normalized.userEnv, {});
 });
 
+test("hosted runtime preserves trusted Linq attachment CDN config outside user env", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        LINQ_ATTACHMENT_CDN_BASE_URL: "https://forwarded-cdn.linq.example",
+        OPENAI_API_KEY: "openai-secret",
+      },
+      platformEnv: {
+        LINQ_ATTACHMENT_CDN_BASE_URL: "https://platform-cdn.linq.example",
+      },
+      userEnv: {
+        LINQ_ATTACHMENT_CDN_BASE_URL: "http://169.254.169.254/attachments",
+        OPENAI_API_KEY: "user-openai-secret",
+      },
+    },
+    platform,
+  );
+
+  assert.deepEqual(normalized.forwardedEnv, {
+    LINQ_ATTACHMENT_CDN_BASE_URL: "https://forwarded-cdn.linq.example",
+    OPENAI_API_KEY: "openai-secret",
+  });
+  assert.deepEqual(normalized.platformEnv, {
+    LINQ_ATTACHMENT_CDN_BASE_URL: "https://platform-cdn.linq.example",
+  });
+  assert.deepEqual(normalized.userEnv, {});
+  assert.deepEqual(
+    buildHostedRuntimePlatformEnv({
+      LINQ_ATTACHMENT_CDN_BASE_URL: "https://platform-cdn.linq.example",
+    }),
+    {
+      LINQ_ATTACHMENT_CDN_BASE_URL: "https://platform-cdn.linq.example",
+    },
+  );
+});
+
 test("hosted runtime config strips hosted control-plane secrets from forwarded and user env", () => {
   const platform = createHostedRuntimePlatformStub();
 

@@ -59,6 +59,13 @@ export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   "HOSTED_LOG_FINGERPRINT_SECRET",
 ] as const;
 
+// These vars may come from trusted forwarded runtime profiles for legacy/local
+// paths, but user-provided runtime env must not control them.
+export const HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES = [
+  ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+  "LINQ_ATTACHMENT_CDN_BASE_URL",
+] as const;
+
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   assistantConfigured: [
     "OPENAI_API_KEY",

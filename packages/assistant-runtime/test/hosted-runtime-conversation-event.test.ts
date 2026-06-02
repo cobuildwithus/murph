@@ -139,6 +139,7 @@ function createParseJobRecord(
 }
 
 function mockOpenInboxRuntimeWithParseJobs(input: {
+  attachmentKinds?: Readonly<Record<string, "audio" | "video" | "document" | "image" | "other">>;
   failedJobs?: AttachmentParseJobRecord[];
   pendingJobs?: AttachmentParseJobRecord[];
 } = {}) {
@@ -148,8 +149,22 @@ function mockOpenInboxRuntimeWithParseJobs(input: {
     }),
   ];
   const failedJobs = input.failedJobs ?? [];
+  const attachmentKinds = input.attachmentKinds ?? {};
+  const attachmentIds = Array.from(
+    new Set(
+      [...pendingJobs, ...failedJobs].map((job) => job.attachmentId),
+    ),
+  );
   mocks.openInboxRuntime.mockResolvedValueOnce({
     close: vi.fn(),
+    getCapture: vi.fn((captureId: string) => ({
+      attachments: attachmentIds.map((attachmentId, index) => ({
+        attachmentId,
+        kind: attachmentKinds[attachmentId] ?? "audio",
+        ordinal: index + 1,
+      })),
+      captureId,
+    })),
     listAttachmentParseJobs: vi.fn((filters: { state?: string } = {}) => {
       if (filters.state === "pending") {
         return pendingJobs;
@@ -205,11 +220,15 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
       },
+      userEnv: {
+        LINQ_ATTACHMENT_CDN_BASE_URL: "http://169.254.169.254/attachment-downloads",
+      },
       platform: {
         ...baseRuntime.platform,
         providerFetch,
       },
       platformEnv: {
+        LINQ_ATTACHMENT_CDN_BASE_URL: "https://cdn.linq.example/attachment-downloads",
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -349,6 +368,13 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     });
 
     expect(mocks.createHostedLinqAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedLinqAttachmentDownloadDriver).toHaveBeenCalledWith({
+      env: {
+        LINQ_ATTACHMENT_CDN_BASE_URL: "https://cdn.linq.example/attachment-downloads",
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platform: runtime.platform,
+    });
     expect(mocks.normalizeHostedLinqConversationCapture).toHaveBeenCalledWith({
       accountId: "15551234567",
       attachmentDownloadTimeoutMs: 5_000,
@@ -669,6 +695,48 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         },
       }),
     ]);
+  });
+
+  it("does not initialize parser tooling for legacy non-media pending jobs", async () => {
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+    mockOpenInboxRuntimeWithParseJobs({
+      attachmentKinds: {
+        "attachment-document": "document",
+      },
+      pendingJobs: [
+        createParseJobRecord({
+          attachmentId: "attachment-document",
+          state: "pending",
+        }),
+      ],
+    });
+
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime: createRuntime(),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_legacy_document_parse_job",
+        linqMessage: {
+          chatId: "chat_legacy_document_parse_job",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(importResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
+    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
   });
 
   it("logs aggregate parser job failures without exposing attachment paths", async () => {

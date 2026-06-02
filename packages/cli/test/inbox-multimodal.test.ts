@@ -39,7 +39,7 @@ function makeJsonExport(recordCount: number): string {
 }
 
 describe('buildInboxModelAttachmentBundle', () => {
-  it('summarizes large CSV-like attachment evidence instead of duplicating raw parser text', async () => {
+  it('keeps CSV-like attachments as stored-path metadata without parser text', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-model-'))
     const csv = makeCsv(125)
     const derivedDir = path.join(
@@ -92,11 +92,13 @@ describe('buildInboxModelAttachmentBundle', () => {
 
       expect(bundle.fragments.map((fragment) => fragment.kind)).toEqual([
         'attachment_metadata',
-        'attachment_tabular_summary',
       ])
       expect(bundle.fragments[0]?.text).toContain(`byteSize: ${csv.length}`)
-      expect(bundle.combinedText).toContain('Large tabular attachment summary:')
-      expect(bundle.combinedText).toContain('rows: 125 data rows plus header')
+      expect(bundle.combinedText).toContain(
+        'storedPath: raw/inbox/capture-1/attachments/attachment-1/o2ring.csv',
+      )
+      expect(bundle.parseState).toBeNull()
+      expect(bundle.combinedText).not.toContain('Large tabular attachment summary:')
       expect(bundle.combinedText).not.toContain('[derived-plain-text]')
       expect(bundle.combinedText).not.toContain('[derived-markdown]')
       expect(bundle.combinedText).not.toContain('[derived-tables]')
@@ -106,7 +108,7 @@ describe('buildInboxModelAttachmentBundle', () => {
     }
   })
 
-  it('summarizes large JSON attachment evidence instead of duplicating raw parser text', async () => {
+  it('keeps JSON-like attachments as stored-path metadata without parser text', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-model-'))
     const json = makeJsonExport(125)
     const derivedDir = path.join(
@@ -157,11 +159,13 @@ describe('buildInboxModelAttachmentBundle', () => {
 
       expect(bundle.fragments.map((fragment) => fragment.kind)).toEqual([
         'attachment_metadata',
-        'attachment_json_summary',
       ])
       expect(bundle.fragments[0]?.text).toContain(`byteSize: ${json.length}`)
-      expect(bundle.combinedText).toContain('Large JSON attachment summary:')
-      expect(bundle.combinedText).toContain('$.records: 125 items')
+      expect(bundle.combinedText).toContain(
+        'storedPath: raw/inbox/capture-1/attachments/attachment-1/export.json',
+      )
+      expect(bundle.parseState).toBeNull()
+      expect(bundle.combinedText).not.toContain('Large JSON attachment summary:')
       expect(bundle.combinedText).not.toContain('[derived-plain-text]')
       expect(bundle.combinedText).not.toContain('[derived-markdown]')
       expect(bundle.combinedText).not.toContain('record-064')

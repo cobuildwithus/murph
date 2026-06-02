@@ -19,6 +19,7 @@ import {
   type AssistantInputAttachmentModelBundle,
   type AssistantInputAttachmentModelBundleSource,
 } from '../attachment-evidence-model.js'
+import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
@@ -116,7 +117,7 @@ export function buildAssistantAutoReplyPrompt(
   if (sections.length === 0 || inputs.length === 0) {
     return {
       kind: 'skip',
-      reason: 'input has no text or parsed attachment content',
+      reason: 'input has no text or attachment context',
     }
   }
 
@@ -207,7 +208,7 @@ export async function prepareAssistantAutoReplyInput(
       kind: 'skip',
       reason:
         preparedMultimodalInput.fallbackError ??
-        'input has no text or parsed attachment content',
+        'input has no text or attachment context',
     }
   }
 
@@ -373,7 +374,7 @@ function renderAttachmentEvidencePromptSection(
 
   if (omittedKinds.length > 0) {
     chunks.push(
-      `Large parsed attachment content omitted from prompt to keep context small: ${omittedKinds.join(', ')}.`,
+      `Large audio/video attachment transcript content omitted from prompt to keep context small: ${omittedKinds.join(', ')}.`,
     )
   }
 
@@ -423,20 +424,7 @@ function renderAttachmentEvidencePromptStoredPath(
 function normalizePromptRawAttachmentPath(
   value: string | null | undefined,
 ): string | null {
-  const normalized = normalizeNullableString(value)
-  if (!normalized || !hasRawAttachmentStoredPath(normalized)) {
-    return null
-  }
-  if (
-    normalized.includes('\\') ||
-    normalized.includes('?') ||
-    normalized.includes('#') ||
-    /[\u0000-\u001F\u007F]/u.test(normalized) ||
-    normalized.split('/').some((segment) => segment === '.' || segment === '..')
-  ) {
-    return null
-  }
-  return normalized
+  return normalizeAssistantRawAttachmentArtifactPath(value)
 }
 
 function hasPdfAttachmentEvidencePath(
@@ -558,7 +546,7 @@ function renderPreparedAttachmentPromptSection(
   }
   if (richEvidenceCandidate && !hasTextFragments) {
     sections.push(
-      'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+      'No decoded attachment text is available. Inspect local attachment paths with tools when needed; do not claim a QR or barcode payload was decoded unless it appears in explicit text evidence.',
     )
   }
   if (storedPdfMetadata && hasRawStoredPath && !hasTextFragments) {
@@ -827,8 +815,7 @@ function hasStoredPdfAttachmentPath(attachment: AssistantInputAttachmentModelBun
 }
 
 function hasRawAttachmentStoredPath(storedPath: string | null): boolean {
-  const normalizedPath = normalizeNullableString(storedPath)
-  return normalizedPath?.startsWith('raw/inbox/') === true
+  return normalizeAssistantRawAttachmentArtifactPath(storedPath) !== null
 }
 
 function shouldRenderAttachmentParserEvidence(
@@ -839,11 +826,11 @@ function shouldRenderAttachmentParserEvidence(
 
 function renderAttachmentParserStatus(parseState: string | null): string | null {
   if (parseState === 'pending' || parseState === 'running') {
-    return 'Attachment parser status: parser output is not available yet.'
+    return 'Attachment parser status: audio/video transcript is not available yet.'
   }
 
   if (parseState === 'failed') {
-    return 'Attachment parser status: parser failed; parsed attachment text or transcript is unavailable.'
+    return 'Attachment parser status: parser failed; audio/video transcript is unavailable.'
   }
 
   if (parseState === 'unsupported') {

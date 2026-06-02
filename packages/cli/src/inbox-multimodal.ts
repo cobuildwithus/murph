@@ -6,6 +6,7 @@ import {
   normalizeRelativeVaultPath,
 } from '@murphai/core'
 import {
+  normalizeAssistantRawAttachmentArtifactPath,
   projectAttachmentEvidenceForModel,
   type ModelEvidenceSource,
 } from '@murphai/assistant-engine/assistant-runtime'
@@ -36,24 +37,51 @@ export async function buildInboxModelAttachmentBundle(input: {
   captureId: string
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle> {
-  const routingImage = getRoutingImageEligibility(input.attachment)
-  const evidenceSources = [
-    ...buildInlineTextSources(input.attachment),
-    ...(await buildDerivedTextSources({
-      attachment: input.attachment,
-      captureId: input.captureId,
-      vaultRoot: input.vaultRoot,
-    })),
-  ]
+  const storedAttachmentPath = normalizeAssistantRawAttachmentArtifactPath(
+    input.attachment.storedPath ?? null,
+  )
+  const routingImage = getRoutingImageEligibility({
+    ...input.attachment,
+    storedPath: storedAttachmentPath,
+  })
+  const useParserOutput = shouldUseInboxAttachmentParserOutput(
+    input.attachment.kind,
+  )
+  const parseState = useParserOutput ? input.attachment.parseState ?? null : null
+  const inlineDerivedPath = useParserOutput
+    ? normalizeAnchoredVaultRelativePath(
+        input.attachment.derivedPath ?? null,
+        buildAllowedDerivedPrefixes(input.captureId, input.attachment),
+      )
+    : null
+  const evidenceSources = useParserOutput
+    ? [
+        ...buildInlineTextSources({
+          attachment: input.attachment,
+          derivedPath: inlineDerivedPath,
+          storedPath: storedAttachmentPath,
+        }),
+        ...(await buildDerivedTextSources({
+          attachment: input.attachment,
+          captureId: input.captureId,
+          vaultRoot: input.vaultRoot,
+        })),
+      ]
+    : []
   const fragments = [
-    buildMetadataFragment(input.attachment, routingImage),
+    buildMetadataFragment(
+      input.attachment,
+      routingImage,
+      storedAttachmentPath,
+      parseState,
+    ),
     ...projectAttachmentEvidenceForModel({
       attachment: {
         byteSize: input.attachment.byteSize ?? null,
-        derivedPath: input.attachment.derivedPath ?? null,
+        derivedPath: inlineDerivedPath,
         fileName: input.attachment.fileName ?? null,
         mime: input.attachment.mime ?? null,
-        storedPath: input.attachment.storedPath ?? null,
+        storedPath: storedAttachmentPath,
       },
       sources: evidenceSources,
     }),
@@ -69,8 +97,9 @@ export async function buildInboxModelAttachmentBundle(input: {
     kind: input.attachment.kind,
     mime: input.attachment.mime ?? null,
     fileName: input.attachment.fileName ?? null,
-    storedPath: input.attachment.storedPath ?? null,
-    parseState: input.attachment.parseState ?? null,
+    byteSize: input.attachment.byteSize ?? null,
+    storedPath: storedAttachmentPath,
+    parseState,
     routingImage,
     fragments,
     combinedText,
@@ -96,35 +125,16 @@ export async function buildInboxModelAttachmentBundles(input: {
 export function inferInboxMultimodalInputMode(
   attachments: readonly InboxModelAttachmentBundle[],
 ): InboxModelInputMode {
-  return attachments.some(
-    (attachment) =>
-      attachment.routingImage.eligible || isRoutingPdfFallbackCandidate(attachment),
-  )
+  return attachments.some((attachment) => attachment.routingImage.eligible)
     ? 'multimodal'
     : 'text-only'
-}
-
-export function isRoutingPdfFallbackCandidate(
-  attachment: InboxModelAttachmentBundle,
-): boolean {
-  return (
-    attachment.kind === 'document' &&
-    isPdfAttachment({
-      fileName: attachment.fileName,
-      mime: attachment.mime,
-      storedPath: attachment.storedPath,
-    }) &&
-    typeof attachment.storedPath === 'string' &&
-    attachment.storedPath.length > 0 &&
-    attachment.parseState !== 'pending' &&
-    attachment.parseState !== 'running' &&
-    !attachment.fragments.some((fragment) => fragment.kind !== 'attachment_metadata')
-  )
 }
 
 function buildMetadataFragment(
   attachment: InboxShowResult['capture']['attachments'][number],
   routingImage: RoutingImageEligibility,
+  storedAttachmentPath: string | null,
+  parseState: InboxModelAttachmentBundle['parseState'],
 ) {
   const metadataLines = [
     `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
@@ -133,31 +143,35 @@ function buildMetadataFragment(
     `mime: ${attachment.mime ?? 'unknown'}`,
     `fileName: ${attachment.fileName ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? 'unknown'}`,
-    `storedPath: ${attachment.storedPath ?? 'missing'}`,
-    `parseState: ${attachment.parseState ?? 'unknown'}`,
-    ...(attachment.kind === 'image'
-      ? [
-          'automaticImageCodeScan: if inbox parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
-        ]
-      : []),
+    `storedPath: ${storedAttachmentPath ?? 'missing'}`,
+    parseState ? `parseState: ${parseState}` : null,
     `routingImageEligible: ${String(routingImage.eligible)}`,
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
     `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
-  ]
+  ].filter((line): line is string => line !== null)
   const text = metadataLines.join('\n')
   return {
     kind: 'attachment_metadata' as const,
     label: `attachment-${attachment.ordinal}-metadata`,
-    path: attachment.storedPath ?? null,
+    path: storedAttachmentPath,
     text,
     truncated: false,
   }
 }
 
-function buildInlineTextSources(
-  attachment: InboxShowResult['capture']['attachments'][number],
-): ModelEvidenceSource[] {
+function shouldUseInboxAttachmentParserOutput(
+  kind: InboxShowResult['capture']['attachments'][number]['kind'],
+): boolean {
+  return kind === 'audio' || kind === 'video'
+}
+
+function buildInlineTextSources(input: {
+  attachment: InboxShowResult['capture']['attachments'][number]
+  derivedPath: string | null
+  storedPath: string | null
+}): ModelEvidenceSource[] {
+  const { attachment } = input
   const sources: ModelEvidenceSource[] = []
 
   const extracted = normalizeNullableString(attachment.extractedText)
@@ -165,7 +179,7 @@ function buildInlineTextSources(
     sources.push({
       kind: 'attachment_extracted_text',
       label: `attachment-${attachment.ordinal}-extracted-text`,
-      path: attachment.derivedPath ?? attachment.storedPath ?? null,
+      path: input.derivedPath ?? input.storedPath,
       text: extracted,
     })
   }
@@ -175,7 +189,7 @@ function buildInlineTextSources(
     sources.push({
       kind: 'attachment_transcript',
       label: `attachment-${attachment.ordinal}-transcript`,
-      path: attachment.derivedPath ?? attachment.storedPath ?? null,
+      path: input.derivedPath ?? input.storedPath,
       text: transcript,
     })
   }
@@ -307,22 +321,6 @@ function normalizeAnchoredVaultRelativePath(
   } catch {
     return null
   }
-}
-
-function isPdfAttachment(input: {
-  fileName: string | null
-  mime: string | null
-  storedPath?: string | null
-}): boolean {
-  const mime = normalizeNullableString(input.mime)?.toLowerCase() ?? null
-  if (mime === 'application/pdf' || mime === 'application/x-pdf') {
-    return true
-  }
-
-  const candidates = [input.fileName, input.storedPath ?? null]
-  return candidates.some((candidate) =>
-    normalizeNullableString(candidate)?.toLowerCase().endsWith('.pdf') ?? false,
-  )
 }
 
 async function readParserManifest(

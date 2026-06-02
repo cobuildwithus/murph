@@ -81,6 +81,7 @@ async function loadBuiltInboxRuntime() {
           derivedPath?: string | null
           extractedText?: string | null
           parseState?: string | null
+          transcriptText?: string | null
         }>
       } | null
       claimNextAttachmentParseJob(filters?: {
@@ -98,6 +99,7 @@ async function loadBuiltInboxRuntime() {
         providerId: string
         resultPath: string
         extractedText?: string | null
+        transcriptText?: string | null
       }): unknown
       }
     >
@@ -149,6 +151,7 @@ function createFakeParsersModule() {
               providerId: string
               resultPath: string
               extractedText?: string | null
+              transcriptText?: string | null
             }): unknown
           }
           const job = runtime.claimNextAttachmentParseJob(filters)
@@ -161,7 +164,7 @@ function createFakeParsersModule() {
             attempt: job.attempts,
             providerId: 'fake-parser',
             resultPath: 'derived/inbox/parse-result.json',
-            extractedText: 'Parsed attachment text',
+            transcriptText: 'Parsed media transcript',
           })
 
           return [
@@ -249,6 +252,7 @@ test.sequential(
   'inbox attachment commands expose stored metadata, parse status, and requeue support',
   async () => {
     const fixture = await makeVaultFixture('murph-inbox-attachments')
+    const audioPath = path.join(fixture.vaultRoot, 'voice-note.m4a')
     const pdfPath = path.join(fixture.vaultRoot, 'lab-result.pdf')
     const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
@@ -258,6 +262,7 @@ test.sequential(
     })
 
     try {
+      await writeFile(audioPath, 'audio', 'utf8')
       await writeFile(pdfPath, 'pdf', 'utf8')
       await initializeInbox({
         services,
@@ -281,19 +286,19 @@ test.sequential(
             displayName: 'Friend',
             isSelf: false,
           },
-          text: 'Lab result attached',
+          text: 'Voice note and lab result attached',
           attachments: [
+            {
+              kind: 'audio',
+              fileName: 'voice-note.m4a',
+              mime: 'audio/mp4',
+              originalPath: audioPath,
+            },
             {
               kind: 'document',
               fileName: 'lab-result.pdf',
               mime: 'application/pdf',
               originalPath: pdfPath,
-            },
-            {
-              kind: 'image',
-              fileName: 'barcode.png',
-              mime: 'image/png',
-              originalPath: fixture.photoPath,
             },
           ],
           raw: {},
@@ -304,7 +309,9 @@ test.sequential(
         vaultRoot: fixture.vaultRoot,
       })
       const attachmentId = capture.attachments[0]?.attachmentId
+      const documentAttachmentId = capture.attachments[1]?.attachmentId
       assert.ok(attachmentId)
+      assert.ok(documentAttachmentId)
 
       const inboxRuntime = await loadBuiltInboxRuntime()
       const runtime = await inboxRuntime.openInboxRuntime({
@@ -316,9 +323,9 @@ test.sequential(
         runtime.completeAttachmentParseJob({
           jobId: pendingJob.jobId,
           attempt: pendingJob.attempts,
-          providerId: 'fake-image-parser',
+          providerId: 'fake-audio-parser',
           resultPath: 'derived/inbox/manifest.json',
-          extractedText: 'Glucose 88 mg/dL',
+          transcriptText: 'Remember to log this voice note.',
         })
       } finally {
         runtime.close()
@@ -360,6 +367,7 @@ test.sequential(
             attachmentId: string | null
             derivedPath: string | null
             extractedText: string | null
+            transcriptText: string | null
           }
         }>(
           ['inbox', 'attachment', 'inspect', attachmentId, '--vault', fixture.vaultRoot],
@@ -369,7 +377,7 @@ test.sequential(
       assert.equal(shown.captureId, capture.captureId)
       assert.equal(shown.attachment.attachmentId, attachmentId)
       assert.equal(shown.attachment.derivedPath, 'derived/inbox/manifest.json')
-      assert.equal(shown.attachment.extractedText, 'Glucose 88 mg/dL')
+      assert.equal(shown.attachment.transcriptText, 'Remember to log this voice note.')
 
       const status = requireData(
         await runInProcessInboxCli<{
@@ -390,6 +398,20 @@ test.sequential(
       assert.equal(status.currentState, 'succeeded')
       assert.equal(status.jobs[0]?.state, 'succeeded')
       assert.equal(status.jobs[0]?.resultPath, 'derived/inbox/manifest.json')
+
+      const documentStatus = requireData(
+        await runInProcessInboxCli<{
+          attachmentId: string
+          parseable: boolean
+          jobs: unknown[]
+        }>(
+          ['inbox', 'attachment', 'status', documentAttachmentId, '--vault', fixture.vaultRoot],
+          services,
+        ),
+      )
+      assert.equal(documentStatus.attachmentId, documentAttachmentId)
+      assert.equal(documentStatus.parseable, false)
+      assert.equal(documentStatus.jobs.length, 0)
 
       const parsed = requireData(
         await runInProcessInboxCli<{

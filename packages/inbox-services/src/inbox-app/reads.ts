@@ -224,7 +224,7 @@ export function createInboxReadOps(
         const parserService = await createParserServiceContext(
           paths.absoluteVaultRoot,
           runtime,
-          await env.requireParsers('attachment-level inbox parser drains'),
+          await env.requireParsers('attachment-level media transcription drains'),
         )
         const results = await parserService.drain({
           attachmentId: input.attachmentId,

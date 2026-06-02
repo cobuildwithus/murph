@@ -9,6 +9,7 @@ import {
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+  HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES,
 } from "../hosted-env-categories.ts";
 
 import type {
@@ -157,7 +158,7 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   [
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
-    ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+    ...HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES,
     ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
     ...HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES,
     ...HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES,
@@ -292,7 +293,7 @@ export function sanitizeHostedAssistantRuntimeForwardedEnv(
 export function sanitizeHostedAssistantRuntimePlatformEnv(
   platformEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
-  const allowedKeys = new Set<string>(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES);
+  const allowedKeys = new Set<string>(HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES);
   return Object.fromEntries(
     Object.entries(platformEnv).filter(([key]) => allowedKeys.has(key)),
   );

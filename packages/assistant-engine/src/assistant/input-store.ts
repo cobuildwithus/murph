@@ -18,6 +18,11 @@ import { isMissingFileError, resolveTimestamp } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
+import {
+  ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+  ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
+  normalizeAssistantAttachmentArtifactPath,
+} from './attachment-artifact-paths.js'
 
 export const ASSISTANT_INPUT_EVENT_SCHEMA = 'murph.assistant-input-event.v1'
 export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
@@ -117,14 +122,6 @@ const assistantInputAttachmentEvidenceFragmentKindValues = [
   'derived_tables',
 ] as const
 
-const ASSISTANT_INPUT_RAW_ARTIFACT_PATH_PREFIXES = [
-  'raw/inbox/',
-] as const
-
-const ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES = [
-  'derived/inbox/',
-] as const
-
 const assistantInputSourceRefSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -192,7 +189,7 @@ const assistantInputArtifactRefSchema = z
     mediaType: safeAttachmentContentTypeSchema(),
     path: safeAssistantInputArtifactPathSchema(
       'attachmentEvidence.raw.path',
-      ASSISTANT_INPUT_RAW_ARTIFACT_PATH_PREFIXES,
+      ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
     ),
     sha256: safeNullableAssistantInputSha256Schema(),
   })
@@ -202,12 +199,12 @@ const assistantInputDerivedArtifactRefSchema = z
   .object({
     allowedRoot: safeAssistantInputArtifactRootSchema(
       'attachmentEvidence.derived.allowedRoot',
-      ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES,
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
     ),
     kind: z.literal('parser-manifest'),
     manifestPath: safeAssistantInputArtifactPathSchema(
       'attachmentEvidence.derived.manifestPath',
-      ASSISTANT_INPUT_DERIVED_ARTIFACT_PATH_PREFIXES,
+      ASSISTANT_DERIVED_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
     ),
   })
   .strict()
@@ -1362,7 +1359,7 @@ function safeAssistantInputArtifactPathSchema(
     .string()
     .min(1)
     .max(ASSISTANT_INPUT_EVENT_ARTIFACT_PATH_MAX_LENGTH)
-    .transform((value) => normalizeAssistantInputArtifactPath(value) ?? value)
+    .transform((value) => normalizeAssistantAttachmentArtifactPath(value) ?? value)
     .superRefine((value, context) => {
       assertSafeAssistantInputArtifactPath(value, context, fieldName, allowedPrefixes)
     })
@@ -1376,7 +1373,7 @@ function safeAssistantInputArtifactRootSchema(
     .string()
     .min(1)
     .max(ASSISTANT_INPUT_EVENT_ATTACHMENT_EVIDENCE_ALLOWED_ROOT_MAX_LENGTH)
-    .transform((value) => normalizeAssistantInputArtifactPath(value) ?? value)
+    .transform((value) => normalizeAssistantAttachmentArtifactPath(value) ?? value)
     .superRefine((value, context) => {
       assertSafeAssistantInputArtifactPath(value, context, fieldName, allowedPrefixes)
     })
@@ -1416,7 +1413,7 @@ function assertSafeAssistantInputArtifactPath(
   fieldName: string,
   allowedPrefixes: readonly string[],
 ): void {
-  const normalized = normalizeAssistantInputArtifactPath(value)
+  const normalized = normalizeAssistantAttachmentArtifactPath(value)
   if (!normalized || normalized !== value) {
     context.addIssue({
       code: 'custom',
@@ -1430,12 +1427,6 @@ function assertSafeAssistantInputArtifactPath(
       message: `${fieldName} must point to an allowed raw or derived vault artifact root.`,
     })
     return
-  }
-  if (hasUnsafeAssistantInputArtifactPathPayload(normalized)) {
-    context.addIssue({
-      code: 'custom',
-      message: `${fieldName} must be a minimized artifact path, not a secret, raw payload, URL, or temp path.`,
-    })
   }
 }
 
@@ -1534,66 +1525,6 @@ function safeAttachmentContentTypeSchema() {
     .regex(/^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u)
     .nullable()
     .default(null)
-}
-
-function normalizeAssistantInputArtifactPath(value: string): string | null {
-  const trimmed = value.trim()
-  if (
-    trimmed.length === 0
-    || trimmed.includes('\\')
-    || trimmed.includes('\0')
-    || trimmed.includes('?')
-    || trimmed.includes('#')
-    || trimmed.startsWith('/')
-    || trimmed.startsWith('~/')
-    || /^[A-Za-z]:[\\/]/u.test(trimmed)
-    || /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed)
-  ) {
-    return null
-  }
-
-  const normalized = trimmed
-    .replace(/\/+/gu, '/')
-    .replace(/^\.\//u, '')
-    .replace(/\/+$/u, '')
-  if (normalized.length === 0) {
-    return null
-  }
-  const segments = normalized.split('/')
-  if (
-    segments.some((segment) =>
-      segment.length === 0 || segment === '.' || segment === '..'
-    )
-  ) {
-    return null
-  }
-
-  return normalized
-}
-
-function hasUnsafeAssistantInputArtifactPathPayload(value: string): boolean {
-  if (hasControlCharacters(value)) {
-    return true
-  }
-  if (/[{}"'<>]/u.test(value)) {
-    return true
-  }
-  if (/[a-z][a-z0-9+.-]*:/iu.test(value)) {
-    return true
-  }
-
-  const segments = value.split('/').map((segment) => segment.toLowerCase())
-  return segments.some((segment) =>
-    hasUnsafeArtifactPathSegmentMarker(segment) ||
-    segment === 'tmp' ||
-    segment === 'temp'
-  )
-}
-
-function hasUnsafeArtifactPathSegmentMarker(segment: string): boolean {
-  return /(?:^|[-_.])(?:authorization|bearer|token|access[-_]?token|refresh[-_]?token|id[-_]?token|api[-_]?key|x[-_]?api[-_]?key|set[-_]?cookie|signed[-_]?url)(?:$|[-_.])/u.test(
-    segment,
-  )
 }
 
 function assertSafeAssistantInputText(

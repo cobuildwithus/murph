@@ -205,19 +205,8 @@ describe('assistant input attachment evidence', () => {
     'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
     'derived/assistant-input/ain_11111111111111111111111111111111/attachments/001/manifest.json',
     'raw/inbox/cap_1/attachments/scan.pdf?token=secret',
-    'raw/inbox/cap_1/attachments/authorization-header.pdf',
-    'raw/inbox/cap_1/attachments/bearer-token.pdf',
-    'raw/inbox/cap_1/attachments/token-secret.pdf',
-    'raw/inbox/cap_1/attachments/access-token.pdf',
-    'raw/inbox/cap_1/attachments/refresh-token.pdf',
-    'raw/inbox/cap_1/attachments/id-token.pdf',
-    'raw/inbox/cap_1/attachments/api-key.txt',
-    'raw/inbox/cap_1/attachments/x-api-key.txt',
-    'raw/inbox/cap_1/attachments/set-cookie.txt',
-    'raw/inbox/cap_1/attachments/signed-url.pdf',
     'raw/inbox/cap_1/attachments/https:example.test-token.jpg',
     'raw/inbox/cap_1/attachments/scan{"token"}.pdf',
-    'raw/inbox/cap_1/tmp/scan.pdf',
   ])('rejects unsafe artifact path %s', async (unsafePath) => {
     const { vaultRoot } = await createAssistantInputEvidenceVault(
       'assistant-input-attachment-evidence-unsafe-',
@@ -260,6 +249,52 @@ describe('assistant input attachment evidence', () => {
         },
       }),
     ).rejects.toThrow(/artifact/u)
+  })
+
+  it('accepts structurally safe raw inbox paths with ordinary sensitive-looking filenames', async () => {
+    const { vaultRoot } = await createAssistantInputEvidenceVault(
+      'assistant-input-attachment-evidence-safe-raw-path-',
+    )
+    const input = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput('evt_safe_raw_path_filename'),
+    })
+
+    const updated = await updateAssistantInputAttachmentEvidence({
+      inputId: input.inputId,
+      vault: vaultRoot,
+      attachmentEvidence: {
+        attachments: [
+          {
+            descriptorAttachmentId: 'att_descriptor',
+            derived: null,
+            fileName: 'api-key.pdf',
+            inlineFragments: [],
+            kind: 'document',
+            mime: 'application/pdf',
+            ordinal: 1,
+            parseState: null,
+            raw: {
+              byteSize: null,
+              kind: 'vault-relative-file',
+              mediaType: 'application/pdf',
+              path: 'raw/inbox/cap_1/attachments/api-key.pdf',
+              sha256: null,
+            },
+            sourceAttachmentId: 'att_source',
+          },
+        ],
+        optionalInboxCaptureId: 'cap_1',
+        reasonCode: null,
+        source: 'manual',
+        status: 'available',
+        updatedAt: null,
+      },
+    })
+
+    expect(updated.attachmentEvidence.attachments[0]?.raw?.path).toBe(
+      'raw/inbox/cap_1/attachments/api-key.pdf',
+    )
   })
 
   it.each([

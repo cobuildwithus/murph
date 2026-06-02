@@ -1670,22 +1670,22 @@ test('inbox attachment help exposes inspect, status, and decode commands', async
   const decodeHelp = await runSourceCliRaw(['inbox', 'attachment', 'decode', '--help'])
 
   assert.match(help, /inspect\s+Inspect one stored inbox attachment/u)
-  assert.match(help, /status\s+Show the current runtime parse status/u)
+  assert.match(help, /status\s+Show the current runtime transcription status/u)
   assert.match(
     help,
-    /decode\s+Run the attachment parse\/decode pipeline now when existing extracted text is missing or needs a fresh parse/u,
+    /decode\s+Run the audio\/video transcription pipeline now when existing media transcript evidence is missing or needs a fresh parse/u,
   )
   assert.match(
     inspectHelp,
-    /Use `inspect` first when you want the stored attachment details and extracted text/u,
+    /Use `inspect` first when you want stored attachment details, raw paths, and any available audio\/video transcript evidence/u,
   )
   assert.match(
     statusHelp,
-    /Use `status` when you want the current parser state/u,
+    /Use `status` when you want the current audio\/video parser state/u,
   )
   assert.match(
     decodeHelp,
-    /Use `decode` only when you need an explicit parse run/u,
+    /Use `decode` only for audio\/video attachments/u,
   )
 })
 

@@ -17,8 +17,6 @@ import { decodeAttachmentParseJobRow, decodeAttachmentParseJobRows } from "./row
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
 const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
   "audio",
-  "document",
-  "image",
   "video",
 ]);
 
@@ -132,6 +130,11 @@ export function createAttachmentParseJobStore(input: {
               select job_id, attachment_id
               from attachment_parse_job
               where state = 'pending'
+                and attachment_id in (
+                  select attachment_id
+                  from capture_attachment
+                  where kind in ('audio', 'video')
+                )
                 and (? is null or capture_id = ?)
                 and (? is null or attachment_id = ?)
               order by created_at asc, job_id asc
@@ -200,6 +203,11 @@ export function createAttachmentParseJobStore(input: {
                 and (? is null or attachment_id = ?)
                 and (? is null or state = ?)
                 and state in ('failed', 'running', 'succeeded')
+                and attachment_id in (
+                  select attachment_id
+                  from capture_attachment
+                  where kind in ('audio', 'video')
+                )
             `,
           )
           .all(
@@ -284,6 +292,11 @@ export function createAttachmentParseJobStore(input: {
               where job_id = ?
                 and state = 'running'
                 and attempts = ?
+                and attachment_id in (
+                  select attachment_id
+                  from capture_attachment
+                  where kind in ('audio', 'video')
+                )
             `,
           )
           .run(input.providerId, input.resultPath, finishedAt, input.jobId, input.attempt);
@@ -337,6 +350,11 @@ export function createAttachmentParseJobStore(input: {
               where job_id = ?
                 and state = 'running'
                 and attempts = ?
+                and attachment_id in (
+                  select attachment_id
+                  from capture_attachment
+                  where kind in ('audio', 'video')
+                )
             `,
           )
           .run(

@@ -88,7 +88,7 @@ export function createInboxBootstrapDoctorOps(
   }) => {
     const paths = resolveRuntimePaths(input.vault)
     const inboxd = await env.loadInbox()
-    const parsers = await env.requireParsers('inbox parser setup')
+    const parsers = await env.requireParsers('inbox media transcription setup')
 
     await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
 

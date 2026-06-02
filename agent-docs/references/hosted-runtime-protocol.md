@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-29
+Last verified: 2026-06-02
 
 ## Decision
 
@@ -71,7 +71,7 @@ signal Temporal hosted orchestration
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 pull pending device-sync dirty rows
-run best-effort local inbox projection/parser enrichment without checkpointing it
+run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
 wait for the runtime idle window, a coalesced wake, or the host deadline
 checkpoint final dirty runtime state with checkpoint reason idle_shutdown
@@ -94,10 +94,10 @@ local inbox artifacts may help the same invocation, but hosted runtime must not
 take a separate workspace checkpoint just to persist projection/cache cleanup.
 Failed projection is not durably retried by hosted runtime unless a future
 executor adds enough typed remote projection reference data to reconstruct the
-work without raw payload duplication. Inbox capture and parser state remain
-useful projections for search, display, attachment enrichment, and debugging,
-but hosted callers must not stage hidden runtime-only inbox rows to make Codex
-admission succeed.
+work without raw payload duplication. Inbox capture state, raw attachment
+paths, and audio/video transcript state remain useful projections for search,
+display, attachment evidence, and debugging, but hosted callers must not stage
+hidden runtime-only inbox rows to make Codex admission succeed.
 Invocation-local Worker routes such as artifact writes, browser-vault replica
 writes, provider effects, and mailbox payload decode authorize the current
 runner by runtime write-fence identity (`attemptId`, `generation`, and
@@ -341,8 +341,8 @@ pending checkpoint intent. Activity expiry is cleanup-only. Projection status
 is logged and artifacts remain rebuildable best-effort state rather than a
 reason to take another workspace checkpoint, so failed or slow projection does
 not block assistant admission and does not imply a durable retry queue.
-Successful projection may make parsed or bounded attachment evidence available
-to the same assistant turn.
+Successful projection may make raw attachment paths, image evidence, or
+audio/video transcript evidence available to the same assistant turn.
 Retryable mailbox import blockers, including lane gaps, missing or temporarily
 unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
@@ -391,8 +391,8 @@ terminal auto-reply evidence, not from mailbox import progress.
 
 Mailbox import has no provider-visible pre-assistant side-effect phase.
 Provider-visible cleanup and read acknowledgement must not run between local
-mailbox staging and assistant admission. Local inbox projection and parser
-enrichment may run after local staging and before assistant admission because
+mailbox staging and assistant admission. Local inbox projection and audio/video
+transcript enrichment may run after local staging and before assistant admission because
 they only update rebuildable local projection artifacts and `AssistantInputEvent`
 projection metadata. These projection updates must not request an additional
 workspace checkpoint. Linq inbound message deletion is still eventual, but it is
@@ -485,7 +485,7 @@ same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
-publishing, inbox projection and parser enrichment, provider cleanup and read
+publishing, inbox projection and audio/video transcript enrichment, provider cleanup and read
 acknowledgement, usage record, telemetry, log export, post-checkpoint
 system-mailbox acknowledgement, billing/customer decoration, and device-connect
 context enrichment may record degraded status or request a later wake. They

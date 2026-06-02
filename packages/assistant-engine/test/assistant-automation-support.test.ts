@@ -1135,7 +1135,7 @@ describe('assistant auto-reply prompt builder support', () => {
     ).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'Attachment parser status: parser output is not available yet.',
+        'Attachment parser status: audio/video transcript is not available yet.',
       ),
     })
 
@@ -1145,7 +1145,7 @@ describe('assistant auto-reply prompt builder support', () => {
       ]),
     ).toEqual({
       kind: 'skip',
-      reason: 'input has no text or parsed attachment content',
+      reason: 'input has no text or attachment context',
     })
   })
 
@@ -1239,7 +1239,7 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result.prompt).toContain('Extracted text excerpt:')
     expect(result.prompt).toContain('[truncated 1450 characters]')
     expect(result.prompt).toContain(
-      'Large parsed attachment content omitted from prompt to keep context small',
+      'Large audio/video attachment transcript content omitted from prompt to keep context small',
     )
   })
 
@@ -1346,7 +1346,7 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+        'No decoded attachment text is available. Inspect local attachment paths with tools when needed; do not claim a QR or barcode payload was decoded unless it appears in explicit text evidence.',
       ),
       userMessageContent: [
         {

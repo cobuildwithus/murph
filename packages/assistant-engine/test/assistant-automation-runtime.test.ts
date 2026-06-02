@@ -4965,7 +4965,7 @@ describe('assistant auto-reply runtime', () => {
   it('skips the group when prompt preparation produces no replyable content', async () => {
     replyMocks.prepareAssistantAutoReplyInput.mockResolvedValue({
       kind: 'skip',
-      reason: 'input has no text or parsed attachment content',
+      reason: 'input has no text or attachment context',
     })
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),

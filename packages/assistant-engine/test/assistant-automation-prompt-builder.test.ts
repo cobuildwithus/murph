@@ -399,7 +399,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'Attachment parser status: parser output is not available yet.',
+        'Attachment parser status: audio/video transcript is not available yet.',
       ),
     })
   })
@@ -807,7 +807,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     )
     expect(result.prompt).toContain('fileName: voice-note.m4a')
     expect(result.prompt).toContain(
-      'Large parsed attachment content omitted from prompt to keep context small: transcript (2005 chars).',
+      'Large audio/video attachment transcript content omitted from prompt to keep context small: transcript (2005 chars).',
     )
     expect(result.prompt).toContain('[truncated 1405 characters]')
     expect(result.prompt).toContain('Extracted text:\nShort extracted text')
@@ -1052,7 +1052,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(messageResult.prompt).not.toContain('attachment evidence')
   })
 
-  it('prepares metadata/status input when parser work is still pending', async () => {
+  it('prepares metadata/status input when media transcript work is still pending', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'audio',
@@ -1080,7 +1080,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'Attachment parser status: parser output is not available yet.',
+        'Attachment parser status: audio/video transcript is not available yet.',
       ),
       userMessageContent: null,
     })
@@ -1234,6 +1234,48 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).not.toContain('provider.example')
     expect(result.prompt).not.toContain('/tmp/provider-download.pdf')
     expect(result.prompt).not.toContain('raw/assistant-input/')
+  })
+
+  it('keeps raw inbox paths even when filenames look sensitive', async () => {
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+      createAttachmentBundle({
+        kind: 'document',
+        mime: 'application/pdf',
+        fileName: 'scan.pdf',
+        byteSize: 4096,
+        storedPath: 'raw/inbox/capture-1/attachments/api-key.pdf',
+        parseState: null,
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: 'raw/inbox/capture-1/attachments/api-key.pdf',
+            text: 'storedPath: raw/inbox/capture-1/attachments/api-key.pdf',
+            truncated: false,
+          },
+        ],
+        combinedText: 'storedPath: raw/inbox/capture-1/attachments/api-key.pdf',
+      }),
+    ])
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachmentEvidence: createRawZipAttachmentEvidence({
+            parseState: null,
+            rawPath: 'raw/inbox/capture-1/attachments/001.pdf',
+          }),
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('raw/inbox/capture-1/attachments/api-key.pdf')
+    expect(result.prompt).not.toContain('storedPath: missing')
   })
 
   it('prepares metadata-only projected attachments whose raw artifact is missing', async () => {
@@ -1687,7 +1729,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+        'No decoded attachment text is available. Inspect local attachment paths with tools when needed; do not claim a QR or barcode payload was decoded unless it appears in explicit text evidence.',
       ),
       userMessageContent,
     })
