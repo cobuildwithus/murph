@@ -145,9 +145,11 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "routePlanningElapsedMs",
   "routePlanningFallbackInstructionsElapsedMs",
   "routePlanningFreshThreadFallbackPrepared",
+  "routePlanningFreshThreadFallbackPromptElapsedMs",
   "routePlanningMeasuredElapsedMs",
   "routePlanningMemoryOverviewElapsedMs",
   "routePlanningPrimaryInstructionsElapsedMs",
+  "routePlanningPrimarySystemPromptElapsedMs",
   "routePlanningResumeBindingElapsedMs",
   "routePlanningSensitiveHealthContextAllowed",
   "routePlanningSlowestStage",
@@ -155,6 +157,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "routePlanningSupportedExperimentProtocolsElapsedMs",
   "routePlanningTargetCapabilitiesElapsedMs",
   "routePlanningUnaccountedElapsedMs",
+  "routePlanningVaultOverviewElapsedMs",
   "codexInvalidOutputTraceType",
   "codexInvalidOutputPhase",
   "codexInvalidOutputInputIndex",
@@ -287,13 +290,13 @@ export async function runHostedWorkspaceAssistantPhase(
     input,
   });
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
-    await writeHostedDeviceConnectRuntimeLog({
+    void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
       input,
       issueLinkAvailable: issueDeviceConnectLink !== undefined,
       stage: "context",
       status: issueDeviceConnectLink ? "available" : "unavailable",
-    });
+    }).catch(() => undefined);
   }
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {

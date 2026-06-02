@@ -153,7 +153,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.browserVaultReplicaRef, null);
   });
 
-  test("imports mailbox and foreground enrichment before the assistant phase without checkpointing", async () => {
+  test("imports mailbox before the assistant phase and waits for enrichment only after the assistant", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -178,6 +178,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    let releaseEffect!: () => void;
+    const effectGate = new Promise<void>((resolve) => {
+      releaseEffect = resolve;
+    });
+    let resultPromise: Promise<Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>>
+      | null = null;
     const workspacePort = createWorkspacePort({
       checkpointRequests,
       async onCheckpoint() {
@@ -186,7 +192,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
 
     try {
-      const result = await runHostedWorkspaceUntilIdleOrBudget({
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_001",
           browserVaultReplicaRef: TEST_BROWSER_VAULT_REPLICA_REF,
@@ -205,7 +211,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push(`import:${item.item.laneSeq}`);
           return {
             afterCheckpoint: async () => {
-              events.push("mailbox:afterCheckpoint");
+              events.push("mailbox:afterCheckpoint:start");
+              await effectGate;
+              events.push("mailbox:afterCheckpoint:done");
               return createInboxProjectionEffectResult();
             },
             status: "imported",
@@ -239,12 +247,22 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      await flushBackgroundMailboxEffects();
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox:afterCheckpoint:start"), true);
+      });
+      assert.deepEqual(events, [
+        "import:1",
+        "assistant",
+        "mailbox:afterCheckpoint:start",
+      ]);
+      releaseEffect();
+      const result = await resultPromise;
 
       assert.deepEqual(events, [
         "import:1",
-        "mailbox:afterCheckpoint",
         "assistant",
+        "mailbox:afterCheckpoint:start",
+        "mailbox:afterCheckpoint:done",
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
@@ -318,6 +336,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
       ]);
     } finally {
+      releaseEffect?.();
+      await resultPromise?.catch(() => undefined);
       await rm(vaultRoot, {
         force: true,
         recursive: true,
@@ -602,7 +622,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("waits for mailbox enrichment before assistant reply-started", async () => {
+  test("does not wait for mailbox enrichment before assistant reply-started", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
@@ -660,15 +680,230 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           now: () => TEST_NOW,
         }),
       );
+      await flushBackgroundMailboxEffects();
 
       assert.deepEqual(events, [
         "import:1",
+        "assistant:input.reply-started",
         "mailbox:afterCheckpoint:start",
         "mailbox:afterCheckpoint:done",
-        "assistant:input.reply-started",
       ]);
       assert.deepEqual(checkpointRequests, []);
     } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("stops foreground imports before post-assistant mailbox enrichment", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_stop_loop_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const events: string[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_stop_loop_before_import_effect",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          events.push(`import:${item.item.laneSeq}`);
+          return {
+            afterCheckpoint: item.item.laneSeq === "1"
+              ? async () => {
+                events.push("mailbox:afterCheckpoint:start");
+                items.push(createMailboxItem({
+                  id: "mailbox_item_runner_stop_loop_late",
+                  laneSeq: "2",
+                  occurredAt: "2026-04-26T00:00:02.000Z",
+                }));
+                runtimeWakeSignal.notify();
+                await Promise.resolve();
+                events.push("mailbox:afterCheckpoint:done");
+                return createInboxProjectionEffectResult({
+                  attachmentEvidenceUpdated: true,
+                  projectionUpdated: true,
+                  status: "succeeded",
+                });
+              }
+              : null,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_stop_loop_before_import_effect",
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          events.push("assistant:returned");
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(events, [
+        "import:1",
+        "assistant:returned",
+        "mailbox:afterCheckpoint:start",
+        "mailbox:afterCheckpoint:done",
+      ]);
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+      ]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("times out post-assistant import enrichment so the runner can return", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_import_effect_timeout",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const events: string[] = [];
+    let effectStartedResolve: (() => void) | null = null;
+    const effectStarted = new Promise<void>((resolve) => {
+      effectStartedResolve = resolve;
+    });
+    const effectRelease: { current: (() => void) | null } = { current: null };
+    let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+
+    vi.useFakeTimers();
+    try {
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_import_effect_timeout",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          events.push("import:1");
+          return {
+            afterCheckpoint: async () => {
+              events.push("mailbox:afterCheckpoint:start");
+              effectStartedResolve?.();
+              return await new Promise<HostedMailboxPostCheckpointEffectResult>((resolve) => {
+                effectRelease.current = () => resolve(createInboxProjectionEffectResult({
+                  attachmentEvidenceUpdated: true,
+                  projectionUpdated: true,
+                  status: "succeeded",
+                }));
+              });
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_import_effect_timeout",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_import_effect_timeout",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          events.push("assistant:returned");
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      await effectStarted;
+      let resolved = false;
+      void resultPromise.then(() => {
+        resolved = true;
+      });
+      assert.equal(resolved, false);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await resultPromise;
+
+      assert.deepEqual(events, [
+        "import:1",
+        "assistant:returned",
+        "mailbox:afterCheckpoint:start",
+      ]);
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+      assert.equal(result.latestWorkspace, null);
+      assert.deepEqual(checkpointRequests, []);
+      const effectLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
+      assert.ok(effectLog);
+      assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [effectLog] }));
+      assert.equal(effectLog?.level, "warn");
+      assert.deepEqual(effectLog?.redactedJson, {
+        attemptedCount: 1,
+        effectAttachmentEvidenceUpdated: [],
+        effectKinds: [],
+        effectProjectionUpdated: [],
+        effectReasonCodes: [],
+        effectStatuses: [],
+        errorCodes: ["checkpoint_error", "post_checkpoint_effect_failed"],
+        failureCodeDetails: ["HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT"],
+        failureNames: ["Error"],
+        failureSummaries: ["Hosted mailbox post-checkpoint effect timed out."],
+        failedCount: 1,
+        partialCount: 0,
+        succeededCount: 0,
+      });
+    } finally {
+      effectRelease.current?.();
+      vi.useRealTimers();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
       await rm(vaultRoot, {
         force: true,
         recursive: true,
@@ -1262,8 +1497,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "mailbox:afterCheckpoint",
         "assistant",
+        "mailbox:afterCheckpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
@@ -1432,9 +1667,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "optional:log",
-        "optional:projection",
-        "optional:log",
         "assistant",
+        "optional:log",
+        "optional:projection",
         "optional:log",
       ]);
     } finally {
@@ -1503,8 +1738,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "mailbox:afterCheckpoint",
         "assistant",
+        "mailbox:afterCheckpoint",
       ]);
       assert.deepEqual(checkpointRequests, []);
     } finally {
@@ -3769,6 +4004,22 @@ async function flushBackgroundMailboxEffects(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
 }
 
 async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 250): Promise<T> {

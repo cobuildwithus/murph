@@ -886,6 +886,83 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures assistant context snapshot as a route-planning slowest stage", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_plan_context_snapshot",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_plan_context_snapshot",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_context_snapshot",
+      },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-provider-plan-diagnostics.v1",
+          type: "assistant.provider.plan",
+          activeTurnHistoryCount: 1,
+          activeTurnHistoryPresent: true,
+          codexContinuation: "provider-state-optimization",
+          providerRequestOrdinal: 0,
+          refreshThreadInstructions: false,
+          resumeCodexThreadIdPresent: true,
+          routePlanningAssistantContextSnapshotElapsedMs: 8,
+          routePlanningElapsedMs: 23,
+          routePlanningMeasuredElapsedMs: 22,
+          routePlanningSensitiveHealthContextAllowed: true,
+          routePlanningSlowestStage: "assistant_context_snapshot",
+          routePlanningSlowestStageElapsedMs: 8,
+          workingDirectoryKind: "hosted-stable-proc-cwd",
+        },
+        updates: [],
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_provider_plan_context_snapshot",
+      level: "info",
+      message: "Hosted assistant provider plan captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexContinuation: "provider-state-optimization",
+        providerPlanKind: "provider.plan",
+        requestId: "req_context_snapshot",
+        routePlanningAssistantContextSnapshotElapsedMs: 8,
+        routePlanningElapsedMs: 23,
+        routePlanningMeasuredElapsedMs: 22,
+        routePlanningSensitiveHealthContextAllowed: true,
+        routePlanningSlowestStage: "assistant_context_snapshot",
+        routePlanningSlowestStageElapsedMs: 8,
+        workingDirectoryKind: "hosted-stable-proc-cwd",
+      }),
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime.provider",
+        message: "Hosted assistant provider plan captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+  });
+
   it("captures provider prompt-size diagnostics without prompt text", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_prompt_size",

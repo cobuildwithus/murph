@@ -61,19 +61,67 @@ const FORBIDDEN_RAW_HOSTED_RUNTIME_REDACTED_KEY_NAMES = [
   "token",
 ] as const;
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
+  "authorizationHeaderValue",
+  "bodyJson",
+  "executionContextHosted",
   "failureAssistantProviderErrorBodyMessage",
   "failureAssistantProviderErrorMessage",
   "failureAssistantProviderErrorStatusText",
+  "messageContent",
+  "messageText",
+  "payload",
+  "payloadValue",
   "providerHttpStatusText",
   "providerRequestBodyFieldNames",
   "routePlanningActiveExperimentContextElapsedMs",
+  "routePlanningAssistantContextSnapshotElapsedMs",
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
+  "routePlanningFreshThreadFallbackPromptElapsedMs",
+  "routePlanningPrimarySystemPromptElapsedMs",
   "routePlanningSensitiveHealthContextAllowed",
   "safeErrorMessage",
+  "tokenPreview",
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
+const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
+  "routePlanningActiveExperimentContextElapsedMs",
+  "routePlanningAssistantContextSnapshotElapsedMs",
+  "routePlanningCliBootstrapElapsedMs",
+  "routePlanningElapsedMs",
+  "routePlanningFallbackInstructionsElapsedMs",
+  "routePlanningFreshThreadFallbackPromptElapsedMs",
+  "routePlanningMeasuredElapsedMs",
+  "routePlanningMemoryOverviewElapsedMs",
+  "routePlanningPrimaryInstructionsElapsedMs",
+  "routePlanningPrimarySystemPromptElapsedMs",
+  "routePlanningResumeBindingElapsedMs",
+  "routePlanningSlowestStageElapsedMs",
+  "routePlanningSupportedExperimentProtocolsElapsedMs",
+  "routePlanningTargetCapabilitiesElapsedMs",
+  "routePlanningUnaccountedElapsedMs",
+  "routePlanningVaultOverviewElapsedMs",
+]);
+const ROUTE_PLANNING_STAGE_VALUES = new Set([
+  "active_experiment_context",
+  "assistant_context_snapshot",
+  "cli_bootstrap",
+  "fallback_instructions",
+  "memory_overview",
+  "primary_instructions",
+  "resume_binding",
+  "supported_experiment_protocols",
+  "target_capabilities",
+]);
+const ROUTE_PLANNING_REDACTED_KEY_NAMES = new Set([
+  ...ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES,
+  "routePlanningAnyBootstrapContextPrepared",
+  "routePlanningBootstrapContextPrepared",
+  "routePlanningFreshThreadFallbackPrepared",
+  "routePlanningSensitiveHealthContextAllowed",
+  "routePlanningSlowestStage",
+]);
 const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
   "Bytes",
   "Code",
@@ -911,6 +959,13 @@ function parseHostedRuntimeRedactedValue(
   label: string,
   key: string,
 ): HostedRuntimeRedactedValue {
+  if (ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES.has(key)) {
+    return parseHostedRuntimeRedactedElapsedMs(value, label);
+  }
+  if (key === "routePlanningSlowestStage") {
+    return parseHostedRuntimeRedactedRoutePlanningStage(value, label);
+  }
+
   if (Array.isArray(value)) {
     if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
       throw new TypeError(
@@ -932,6 +987,38 @@ function parseHostedRuntimeRedactedValue(
   }
 
   return parseHostedRuntimeRedactedScalar(value, label);
+}
+
+function parseHostedRuntimeRedactedElapsedMs(
+  value: unknown,
+  label: string,
+): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 0) {
+      return value;
+    }
+  }
+
+  throw new TypeError(`${label} must be a nonnegative finite number or null.`);
+}
+
+function parseHostedRuntimeRedactedRoutePlanningStage(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === "string" && ROUTE_PLANNING_STAGE_VALUES.has(value)) {
+    return value;
+  }
+
+  throw new TypeError(`${label} must be a known route-planning stage or null.`);
 }
 
 function parseHostedRuntimeRedactedObject(
@@ -982,6 +1069,9 @@ function parseHostedRuntimeRedactedScalar(
 function assertAllowedHostedRuntimeRedactedKey(key: string, label: string): void {
   if (isSafeHostedRuntimeDiagnosticTextRedactedKey(key)) {
     return;
+  }
+  if (key.startsWith("routePlanning") && !ROUTE_PLANNING_REDACTED_KEY_NAMES.has(key)) {
+    throw new TypeError(`${label} is not an allowed route-planning diagnostic key.`);
   }
 
   const normalized = key.toLowerCase();

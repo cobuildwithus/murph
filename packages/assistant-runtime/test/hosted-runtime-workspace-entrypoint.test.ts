@@ -433,6 +433,106 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("waits for deferred import enrichment before idle checkpointing dirty runtime state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const enrichmentGate = createDeferred<void>();
+    let resultPromise: Promise<Awaited<ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess>>>
+      | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_import_enrichment_checkpoint_barrier",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/import-enrichment-barrier.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            events.push("import");
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox:afterCheckpoint:start");
+                await enrichmentGate.promise;
+                events.push("mailbox:afterCheckpoint:done");
+                return {
+                  attachmentEvidenceUpdated: true,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
+                  reasonCode: null,
+                  status: "succeeded",
+                };
+              },
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            events.push("assistant");
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox:afterCheckpoint:start"), true);
+      });
+      assert.equal(events.includes("snapshot:idle_shutdown"), false);
+      assert.equal(events.includes("workspace.checkpoint"), false);
+      assert.equal(checkpointRequests.length, 0);
+
+      enrichmentGate.resolve();
+      const result = await resultPromise;
+
+      assert.equal(result.status, "idle");
+      assert.ok(
+        requireEventIndex(events, "mailbox:afterCheckpoint:done")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+      assert.ok(
+        requireEventIndex(events, "mailbox:afterCheckpoint:done")
+          < requireEventIndex(events, "workspace.checkpoint"),
+      );
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+    } finally {
+      enrichmentGate.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("preserves a deferred durable checkpoint effect wake after draining a checkpoint wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

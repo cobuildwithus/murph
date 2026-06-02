@@ -543,6 +543,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
     }));
     expect("afterCheckpoint" in result).toBe(false);
+    await Promise.resolve();
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "assistant.device_connect",
       "device-sync.job_failed",
@@ -1710,6 +1711,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(connectLinkRequests).toEqual([
       { connectTarget: "whoop", messagingReturnTarget: "telegram" },
     ]);
+    await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
       .filter((entry) => entry.eventCode === "assistant.device_connect");

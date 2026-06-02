@@ -79,6 +79,7 @@ const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
 ]);
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",
+  "assistant_context_snapshot",
   "cli_bootstrap",
   "fallback_instructions",
   "memory_overview",

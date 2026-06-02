@@ -937,9 +937,26 @@ describe("hosted runtime control contracts", () => {
         promptTokenCount: 120,
         rawPayloadBytes: 2048,
         routePlanningActiveExperimentContextElapsedMs: 6000,
+        routePlanningAssistantContextSnapshotElapsedMs: 8,
+        routePlanningCliBootstrapElapsedMs: null,
+        routePlanningElapsedMs: 16,
+        routePlanningFallbackInstructionsElapsedMs: null,
         routePlanningAnyBootstrapContextPrepared: true,
         routePlanningBootstrapContextPrepared: false,
+        routePlanningFreshThreadFallbackPromptElapsedMs: null,
+        routePlanningFreshThreadFallbackPrepared: false,
+        routePlanningMeasuredElapsedMs: 15,
+        routePlanningMemoryOverviewElapsedMs: null,
+        routePlanningPrimaryInstructionsElapsedMs: 12,
+        routePlanningPrimarySystemPromptElapsedMs: 12,
+        routePlanningResumeBindingElapsedMs: 0,
         routePlanningSensitiveHealthContextAllowed: true,
+        routePlanningSlowestStage: "assistant_context_snapshot",
+        routePlanningSlowestStageElapsedMs: 8,
+        routePlanningSupportedExperimentProtocolsElapsedMs: 0,
+        routePlanningTargetCapabilitiesElapsedMs: 1,
+        routePlanningUnaccountedElapsedMs: 1,
+        routePlanningVaultOverviewElapsedMs: null,
       },
     }).redactedJson).toEqual({
       authorizationHeaderPresent: false,
@@ -950,10 +967,60 @@ describe("hosted runtime control contracts", () => {
       promptTokenCount: 120,
       rawPayloadBytes: 2048,
       routePlanningActiveExperimentContextElapsedMs: 6000,
+      routePlanningAssistantContextSnapshotElapsedMs: 8,
+      routePlanningCliBootstrapElapsedMs: null,
+      routePlanningElapsedMs: 16,
+      routePlanningFallbackInstructionsElapsedMs: null,
       routePlanningAnyBootstrapContextPrepared: true,
       routePlanningBootstrapContextPrepared: false,
+      routePlanningFreshThreadFallbackPromptElapsedMs: null,
+      routePlanningFreshThreadFallbackPrepared: false,
+      routePlanningMeasuredElapsedMs: 15,
+      routePlanningMemoryOverviewElapsedMs: null,
+      routePlanningPrimaryInstructionsElapsedMs: 12,
+      routePlanningPrimarySystemPromptElapsedMs: 12,
+      routePlanningResumeBindingElapsedMs: 0,
       routePlanningSensitiveHealthContextAllowed: true,
+      routePlanningSlowestStage: "assistant_context_snapshot",
+      routePlanningSlowestStageElapsedMs: 8,
+      routePlanningSupportedExperimentProtocolsElapsedMs: 0,
+      routePlanningTargetCapabilitiesElapsedMs: 1,
+      routePlanningUnaccountedElapsedMs: 1,
+      routePlanningVaultOverviewElapsedMs: null,
     });
+    for (const timingKey of [
+      "routePlanningActiveExperimentContextElapsedMs",
+      "routePlanningAssistantContextSnapshotElapsedMs",
+      "routePlanningElapsedMs",
+      "routePlanningFreshThreadFallbackPromptElapsedMs",
+      "routePlanningPrimarySystemPromptElapsedMs",
+      "routePlanningVaultOverviewElapsedMs",
+    ] as const) {
+      expect(() => parseHostedRuntimeLogEntry({
+        ...entry,
+        redactedJson: {
+          [timingKey]: "prompt-like timing text",
+        },
+      })).toThrow(/finite number or null/u);
+      expect(() => parseHostedRuntimeLogEntry({
+        ...entry,
+        redactedJson: {
+          [timingKey]: -1,
+        },
+      })).toThrow(/nonnegative finite number or null/u);
+    }
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        routePlanningGlucoseContextElapsedMs: 12,
+      },
+    })).toThrow(/allowed route-planning diagnostic key/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        routePlanningSlowestStage: "oura_sleep_context",
+      },
+    })).toThrow(/known route-planning stage/u);
     expect(parseHostedRuntimeLogRequest({
       entries: [{
         ...entry,
