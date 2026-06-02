@@ -18,6 +18,7 @@ import {
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
+import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -3383,6 +3384,120 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   )
 })
 
+test('sendAssistantMessageLocal preflights hosted attachment progress before provider execution', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-hosted-attachment-progress-',
+  )
+  tempRoots.push(context.parentRoot)
+  const hostedInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [
+          {
+            attachmentId: 'att_pdf_1',
+            contentType: 'application/pdf',
+            fileName: 'lab-report.pdf',
+            kind: 'document',
+            sizeBytes: 12_345,
+          },
+        ],
+        text: 'Received a Linq message with 1 attachment.',
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'thread-progress',
+        threadIsDirect: true,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'message-progress',
+        threadId: 'thread-progress',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_attachment_progress',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    realAcceptedInputPersistence: true,
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: hostedInput.inputId,
+            version: hostedInput.schema,
+          },
+          id: hostedInput.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Process the attached PDF',
+    turnTrigger: 'automation-auto-reply',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+  expect(mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]).toMatchObject({
+    dependencies: progressDeliveryDependencies,
+    text: "File received. I'm checking the attachment now.",
+  })
+  expect(
+    mocks.deliverAssistantProgressUpdate.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.executeCodexTurnWithRecovery.mock.invocationCallOrder[0] ??
+      Number.MAX_SAFE_INTEGER,
+  )
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  await expect(
+    progressDelivery.send('Checking the saved context now.'),
+  ).resolves.toEqual({
+    kind: 'skipped',
+    reason: 'limit',
+    source: 'model',
+  })
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+})
+
 test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
@@ -4679,6 +4794,29 @@ function isTraceEventWithRawType(
     !Array.isArray(rawEvent) &&
     (rawEvent as { type?: unknown }).type === type
   )
+}
+
+function createHostedMailboxSourceRef(input: {
+  dedupeKey?: string | null
+  eventId: string
+  itemId?: string
+  lane?: 'conversation' | 'system'
+  laneSeq: string
+}) {
+  return {
+    dedupeKey: input.dedupeKey === undefined
+      ? `${input.eventId}_dedupe`
+      : input.dedupeKey,
+    eventId: input.eventId,
+    itemId: input.itemId ?? `${input.eventId}_item`,
+    kind: 'hosted-mailbox' as const,
+    lane: input.lane ?? 'conversation',
+    laneSeq: input.laneSeq,
+    payloadSchema: 'murph.hosted-payload.v1',
+    payloadSource: 'sidecar' as const,
+    source: 'hosted-mailbox' as const,
+    wakeSchema: 'murph.hosted-wake.v1',
+  }
 }
 
 function createProviderUsage(
