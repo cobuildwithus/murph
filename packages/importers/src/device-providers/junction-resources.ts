@@ -1,7 +1,6 @@
 export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "profile",
   "activity",
-  "stress_level",
   "sleep",
   "sleep_cycle",
   "workouts",
@@ -16,6 +15,7 @@ export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
   { resource: "hrv", retentionClass: "debug_temporary" },
   { resource: "respiratory_rate", retentionClass: "debug_temporary" },
   { resource: "blood_oxygen", retentionClass: "debug_temporary" },
+  { resource: "stress_level", retentionClass: "debug_temporary" },
   { resource: "weight", retentionClass: "provider_evidence" },
 ] as const);
 

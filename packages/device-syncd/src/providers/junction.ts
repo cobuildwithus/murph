@@ -127,7 +127,6 @@ interface JunctionWindowFetchOptions {
 
 const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES = Object.freeze([
   "activity",
-  "stress_level",
   "sleep",
   "sleep_cycle",
   "workouts",
@@ -186,17 +185,6 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
     "activity_score",
     "score",
   ],
-  stress_level: [
-    "stressLevel",
-    "stress_level",
-    "averageStressLevel",
-    "average_stress_level",
-    "stress.average",
-    "stressLevelValue",
-    "stress_level_value",
-    "value",
-    "score",
-  ],
   body: [
     "weightKg",
     "weight_kg",
@@ -236,6 +224,16 @@ const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
   meal: [],
   menstrual_cycle: [],
 } satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
+const JUNCTION_STRESS_LEVEL_TIMESERIES_VALUE_PATHS = Object.freeze([
+  "value",
+  "stressLevel",
+  "stress_level",
+  "averageStressLevel",
+  "average_stress_level",
+  "stress.average",
+  "stressLevelValue",
+  "stress_level_value",
+] as const);
 const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
   meal: {
     strings: [
@@ -4263,6 +4261,10 @@ function buildJunctionWebhookDataJobJsons(input: {
     return [directJson];
   }
 
+  if (input.resource.name === "stress_level") {
+    return [];
+  }
+
   if (input.resource.category !== "timeseries") {
     return [];
   }
@@ -4432,6 +4434,10 @@ function hasJunctionWebhookDataJobRecords(input: {
       });
   }
 
+  if (input.resource === "stress_level") {
+    return hasUsefulJunctionWebhookStressLevelDataRecord(input.record);
+  }
+
   if (readJunctionWebhookNestedRecordEntries(input.record).length > 0) {
     return true;
   }
@@ -4460,6 +4466,53 @@ function hasJunctionWebhookDataJobRecords(input: {
     "respiratory_rate",
     "spo2",
   ]);
+}
+
+function hasUsefulJunctionWebhookStressLevelDataRecord(
+  record: Record<string, unknown>,
+): boolean {
+  return expandJunctionWebhookTimeseriesDataRecords(record).some((entry) =>
+    firstJunctionStressLevelScoreFromPaths(entry) !== null
+  );
+}
+
+function firstJunctionStressLevelScoreFromPaths(
+  entry: Record<string, unknown>,
+): number | null {
+  for (const path of JUNCTION_STRESS_LEVEL_TIMESERIES_VALUE_PATHS) {
+    const value = finiteJunctionNumber(readJunctionRecordPath(entry, path));
+    if (value !== undefined && value >= 0 && value <= 100) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function expandJunctionWebhookTimeseriesDataRecords(
+  record: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const entries = [
+    record,
+    ...readJunctionWebhookNestedRecordEntries(record),
+  ];
+  const groups = readPlainObject(record.groups);
+  if (!groups) {
+    return entries;
+  }
+
+  for (const rawGroups of Object.values(groups)) {
+    for (const rawGroup of readJunctionRecordArray(rawGroups)) {
+      const group = readPlainObject(rawGroup);
+      if (!group) {
+        continue;
+      }
+
+      entries.push(group, ...readJunctionWebhookNestedRecordEntries(group));
+    }
+  }
+
+  return entries;
 }
 
 function hasUsefulJunctionWebhookSummaryDataRecord(input: {
@@ -4661,6 +4714,8 @@ function extractJunctionWebhookObjectId(data: Record<string, unknown> | null): s
 
 function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null): string | null {
   const candidates = [
+    data?.observedAt,
+    data?.observed_at,
     data?.occurred_at,
     data?.created_at,
     data?.updated_at,

@@ -157,11 +157,6 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
             steps: 7100,
           },
         ],
-        stress_level: [{
-          connectionId: "source-oura",
-          observedAt: "2026-04-22T12:00:00Z",
-          stressLevel: 18,
-        }],
         sleep: [{
           connectionId: "source-oura",
           id: "sleep-a",
@@ -204,6 +199,11 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
           timestampSemantics: "floating",
           value: 97,
         }],
+        stress_level: [{
+          connectionId: "source-oura",
+          timestamp: "2026-04-22T12:00:00Z",
+          stressLevel: 18,
+        }],
         glucose: [{
           connectionId: "source-dexcom",
           timestamp: "2026-04-22T07:16:00Z",
@@ -219,6 +219,7 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
   assert.deepEqual(payload.provenance?.timeseriesResources, [
     "heartrate",
     "blood_oxygen",
+    "stress_level",
   ]);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-activity"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-heartrate"));
@@ -250,34 +251,57 @@ test("Junction snapshot adapter preserves aggregator identity and upstream sourc
 
   const floatingSample = samples.find((sample) => sample.stream === "spo2");
   assert.equal(floatingSample, undefined);
+  const stressEvent = observations.find((event) => event.fields?.metric === "stress-level");
+  assert.equal(stressEvent?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(stressEvent?.fields?.observationGrain, "daily_timeseries_aggregate");
+  assert.equal(stressEvent?.fields?.value, 18);
 
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
-test("Junction snapshot adapter normalizes stress level summaries", () => {
+test("Junction normalizer compacts stress level timeseries into daily average facts", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
-    summaries: {
-      stress_level: [{
-        id: "stress-level-1",
-        sourceProviderSlug: "garmin",
-        sourceType: "watch",
-        observedAt: "2026-04-22T12:00:00Z",
-        stressLevel: 18,
-      }],
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T08:00:00Z", stressLevel: 18 },
+              { timestamp: "2026-04-22T16:00:00Z", value: 42 },
+              { timestamp: "2026-04-23T08:00:00Z", stress: { average: 21 } },
+              { timestamp: "2026-04-23T09:00:00Z", stressLevel: 120 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
     },
   });
 
-  assert.deepEqual(payload.provenance?.summaryResources, ["stress_level"]);
-  assert.equal(payload.samples?.length ?? 0, 0);
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-stress-level"));
+  const stressEvents = payload.events?.filter((event) => event.fields?.metric === "stress-level") ?? [];
+  const dayOne = stressEvents.find((event) => event.dayKey === "2026-04-22");
+  const dayTwo = stressEvents.find((event) => event.dayKey === "2026-04-23");
 
-  const stressEvent = payload.events?.find((event) => event.fields?.metric === "stress-level");
-  assert.ok(stressEvent);
-  assert.equal(stressEvent.dataOrigin?.sourceProviderSlug, "garmin");
-  assert.equal(stressEvent.fields?.observationGrain, "summary");
-  assert.equal(stressEvent.fields?.unit, "score");
-  assert.equal(stressEvent.fields?.value, 18);
+  assert.deepEqual(payload.provenance?.summaryResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["stress_level"]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-stress-level"));
+  assert.equal(stressEvents.length, 2);
+  assert.equal(dayOne?.dataOrigin?.sourceProviderSlug, "garmin");
+  assert.equal(dayOne?.dataOrigin?.sourceType, "watch");
+  assert.equal(dayOne?.fields?.observationGrain, "daily_timeseries_aggregate");
+  assert.equal(dayOne?.fields?.aggregationWindow, "day");
+  assert.equal(dayOne?.fields?.statistic, "mean");
+  assert.equal(dayOne?.fields?.unit, "score");
+  assert.equal(dayOne?.fields?.value, 30);
+  assert.equal(dayOne?.fields?.sampleCount, 2);
+  assert.equal(dayOne?.fields?.minValue, 18);
+  assert.equal(dayOne?.fields?.maxValue, 42);
+  assert.equal(dayOne?.fields?.firstSampleAt, "2026-04-22T08:00:00.000Z");
+  assert.equal(dayOne?.fields?.lastSampleAt, "2026-04-22T16:00:00.000Z");
+  assert.equal(dayTwo?.fields?.value, 21);
+  assert.equal(dayTwo?.fields?.sampleCount, 1);
 });
 
 test("Junction snapshot adapter keeps glucose timeseries unsupported", () => {
@@ -1254,7 +1278,6 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual([...JUNCTION_DEFAULT_SUMMARY_RESOURCES], [
     "profile",
     "activity",
-    "stress_level",
     "sleep",
     "sleep_cycle",
     "workouts",
@@ -1268,6 +1291,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "hrv",
     "respiratory_rate",
     "blood_oxygen",
+    "stress_level",
     "weight",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
@@ -1304,7 +1328,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("glucose"), false);
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-profile"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-stress-level"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-stress-level"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-timeseries-blood-oxygen"));
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));

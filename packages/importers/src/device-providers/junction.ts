@@ -201,25 +201,6 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
 
-const STRESS_LEVEL_METRICS: readonly MetricDescriptor[] = [
-  {
-    metric: "stress-level",
-    unit: "score",
-    title: "Junction stress level",
-    paths: [
-      "stressLevel",
-      "stress_level",
-      "averageStressLevel",
-      "average_stress_level",
-      "stress.average",
-      "stressLevelValue",
-      "stress_level_value",
-      "value",
-      "score",
-    ],
-  },
-];
-
 const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
@@ -314,10 +295,20 @@ const JUNCTION_BLOOD_OXYGEN_VALUE_PATHS = [
   "oxygenSaturation",
   "oxygen_saturation",
 ] as const;
+const JUNCTION_STRESS_LEVEL_VALUE_PATHS = [
+  "value",
+  "stressLevel",
+  "stress_level",
+  "averageStressLevel",
+  "average_stress_level",
+  "stress.average",
+  "stressLevelValue",
+  "stress_level_value",
+] as const;
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
-interface BloodOxygenDailyAggregate {
+interface JunctionDailyTimeseriesAggregate {
   dayKey: string;
   entry: PlainObject;
   firstSampleAt: string;
@@ -416,9 +407,6 @@ function normalizeSummaries(
         case "activity":
           pushObservationMetrics(entry, resourceContext, context, ACTIVITY_METRICS);
           break;
-        case "stress_level":
-          pushObservationMetrics(entry, resourceContext, context, STRESS_LEVEL_METRICS);
-          break;
         case "body":
           pushObservationMetrics(entry, resourceContext, context, BODY_METRICS);
           break;
@@ -458,6 +446,8 @@ function normalizeTimeseries(
 
     if (resource === "blood_oxygen") {
       pushBloodOxygenDailyObservations(payload, resource, resourceSlug, context);
+    } else if (resource === "stress_level") {
+      pushStressLevelDailyObservations(payload, resource, resourceSlug, context);
     }
   }
 }
@@ -468,29 +458,79 @@ function pushBloodOxygenDailyObservations(
   resourceSlug: string,
   context: NormalizationContext,
 ): void {
-  const fallbackArtifactRole = `junction-timeseries-${resourceSlug}`;
-  const aggregates = new Map<string, BloodOxygenDailyAggregate>();
+  for (const aggregate of buildJunctionDailyTimeseriesAggregates({
+    payload,
+    resource,
+    resourceSlug,
+    context,
+    valuePaths: JUNCTION_BLOOD_OXYGEN_VALUE_PATHS,
+    normalizeValue: normalizeBloodOxygenPercent,
+  })) {
+    const meanValue = roundBloodOxygenValue(aggregate.sum / aggregate.sampleCount);
+    pushBloodOxygenDailyObservation(context, aggregate, {
+      metric: "spo2",
+      statistic: "mean",
+      title: "Junction blood oxygen average",
+      value: meanValue,
+    });
+    pushBloodOxygenDailyObservation(context, aggregate, {
+      metric: "lowest-spo2",
+      statistic: "min",
+      title: "Junction blood oxygen minimum",
+      value: aggregate.minValue,
+    });
+  }
+}
 
-  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+function pushStressLevelDailyObservations(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  for (const aggregate of buildJunctionDailyTimeseriesAggregates({
+    payload,
+    resource,
+    resourceSlug,
+    context,
+    valuePaths: JUNCTION_STRESS_LEVEL_VALUE_PATHS,
+    normalizeValue: normalizeStressLevelScore,
+  })) {
+    pushStressLevelDailyObservation(context, aggregate, {
+      value: roundStressLevelValue(aggregate.sum / aggregate.sampleCount),
+    });
+  }
+}
+
+function buildJunctionDailyTimeseriesAggregates(input: {
+  context: NormalizationContext;
+  normalizeValue: (value: unknown) => number | undefined;
+  payload: unknown;
+  resource: string;
+  resourceSlug: string;
+  valuePaths: readonly string[];
+}): JunctionDailyTimeseriesAggregate[] {
+  const fallbackArtifactRole = `junction-timeseries-${input.resourceSlug}`;
+  const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
     const resourceContext = buildResourceContext({
       entry,
       originFallback,
-      resource,
-      resourceSlug,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
       identityKind: "timeseries",
       index,
       fallbackArtifactRole,
-      context,
+      context: input.context,
     });
 
     if (!resourceContext) {
       continue;
     }
 
-    const value = normalizeBloodOxygenPercent(
-      firstNumberFromPaths(entry, JUNCTION_BLOOD_OXYGEN_VALUE_PATHS),
-    );
-    const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+    const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
+    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
     const dayKey = timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
 
@@ -547,26 +587,12 @@ function pushBloodOxygenDailyObservations(
     }
   }
 
-  for (const aggregate of [...aggregates.values()].sort(compareBloodOxygenDailyAggregates)) {
-    const meanValue = roundBloodOxygenValue(aggregate.sum / aggregate.sampleCount);
-    pushBloodOxygenDailyObservation(context, aggregate, {
-      metric: "spo2",
-      statistic: "mean",
-      title: "Junction blood oxygen average",
-      value: meanValue,
-    });
-    pushBloodOxygenDailyObservation(context, aggregate, {
-      metric: "lowest-spo2",
-      statistic: "min",
-      title: "Junction blood oxygen minimum",
-      value: aggregate.minValue,
-    });
-  }
+  return [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
 }
 
 function pushBloodOxygenDailyObservation(
   context: NormalizationContext,
-  aggregate: BloodOxygenDailyAggregate,
+  aggregate: JunctionDailyTimeseriesAggregate,
   observation: {
     metric: "spo2" | "lowest-spo2";
     statistic: "mean" | "min";
@@ -605,6 +631,47 @@ function pushBloodOxygenDailyObservation(
       minValue: aggregate.minValue,
       maxValue: aggregate.maxValue,
       minObservedAt: observation.statistic === "min" ? aggregate.minObservedAt : undefined,
+    }),
+  }));
+}
+
+function pushStressLevelDailyObservation(
+  context: NormalizationContext,
+  aggregate: JunctionDailyTimeseriesAggregate,
+  observation: {
+    value: number;
+  },
+): void {
+  const timestamp = withTimestampOverride(aggregate.timestamp, {
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    observedAtRaw: `${aggregate.dayKey}:stress_level:daily`,
+  });
+
+  context.events.push(stripUndefined({
+    kind: "observation",
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    timeZone: aggregate.timeZone,
+    source: "device",
+    title: "Junction stress level average",
+    rawArtifactRoles: aggregate.resourceContext.rawArtifactRoles,
+    externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, "stress-level"),
+    dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
+    fields: stripUndefined({
+      metric: "stress-level",
+      observationGrain: "daily_timeseries_aggregate",
+      aggregationWindow: "day",
+      statistic: "mean",
+      value: roundStressLevelValue(observation.value),
+      unit: "score",
+      sampleCount: aggregate.sampleCount,
+      firstSampleAt: aggregate.firstSampleAt,
+      lastSampleAt: aggregate.lastSampleAt,
+      minValue: roundStressLevelValue(aggregate.minValue),
+      maxValue: roundStressLevelValue(aggregate.maxValue),
     }),
   }));
 }
@@ -1978,13 +2045,27 @@ function normalizeBloodOxygenPercent(value: unknown): number | undefined {
   return roundBloodOxygenValue(numeric);
 }
 
+function normalizeStressLevelScore(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric < 0 || numeric > 100) {
+    return undefined;
+  }
+
+  return roundStressLevelValue(numeric);
+}
+
 function roundBloodOxygenValue(value: number): number {
   return Number(value.toFixed(4));
 }
 
-function compareBloodOxygenDailyAggregates(
-  left: BloodOxygenDailyAggregate,
-  right: BloodOxygenDailyAggregate,
+function roundStressLevelValue(value: number): number {
+  return Number(value.toFixed(4));
+}
+
+function compareJunctionDailyTimeseriesAggregates(
+  left: JunctionDailyTimeseriesAggregate,
+  right: JunctionDailyTimeseriesAggregate,
 ): number {
   return left.dayKey.localeCompare(right.dayKey)
     || left.resourceContext.sourceProviderSlug.localeCompare(right.resourceContext.sourceProviderSlug)
