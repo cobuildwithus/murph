@@ -252,6 +252,7 @@ describe("cleanupHostedRunnerContainers", () => {
   it("uses the isolated E2E worker container namespace", async () => {
     const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
       { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: "" },
     ]);
 
     await expect(cleanupHostedRunnerContainers({
@@ -273,6 +274,51 @@ describe("cleanupHostedRunnerContainers", () => {
         /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
       ),
     ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      expect.stringMatching(/^name=workerd-murph-hosted-e2e-[a-f0-9]{24}-$/u),
+    ]);
+  });
+
+  it("sweeps current-build E2E proxy containers after the labeled runner container is gone", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+      {
+        exitCode: 0,
+        stdout: [
+          "proxy123 workerd-murph-hosted-e2e-9d19e47df7b08810c933dd26-RunnerContainer-alpha-proxy",
+          "noise456 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy",
+        ].join("\n"),
+      },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      env: {
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "e2e-suite-build",
+      },
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      "name=workerd-murph-hosted-e2e-9d19e47df7b08810c933dd26-",
+    ]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "rm",
+      "-f",
+      "proxy123",
+    ]);
   });
 
   it("can sweep stale E2E runner containers without matching the default dev namespace", async () => {
@@ -283,6 +329,11 @@ describe("cleanupHostedRunnerContainers", () => {
           "runner123 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha",
           "smoke456 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-DeploySmokeRunnerContainer-beta",
         ].join("\n"),
+      },
+      {
+        exitCode: 0,
+        stdout:
+          "proxy789 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy\n",
       },
       { exitCode: 0, stdout: "proxy789\n" },
       { exitCode: 0, stdout: "" },
@@ -307,22 +358,74 @@ describe("cleanupHostedRunnerContainers", () => {
     ]);
     expect(spawn.mock.calls[1]?.[1]).toEqual([
       "ps",
-      "-aq",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
       "--filter",
-      "name=workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy",
+      "name=workerd-murph-hosted-e2e-",
     ]);
     expect(spawn.mock.calls[2]?.[1]).toEqual([
       "ps",
       "-aq",
       "--filter",
-      "name=workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-DeploySmokeRunnerContainer-beta-proxy",
+      "name=workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy",
     ]);
     expect(spawn.mock.calls[3]?.[1]).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      "name=workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-DeploySmokeRunnerContainer-beta-proxy",
+    ]);
+    expect(spawn.mock.calls[4]?.[1]).toEqual([
       "rm",
       "-f",
       "runner123",
       "smoke456",
       "proxy789",
+    ]);
+  });
+
+  it("sweeps orphan E2E proxy containers after the labeled runner container is gone", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+      {
+        exitCode: 0,
+        stdout: [
+          "proxy123 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy",
+          "noise456 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-OtherContainer-alpha-proxy",
+        ].join("\n"),
+      },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      scope: "e2e-builds",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      "name=workerd-murph-hosted-e2e-",
+      "--filter",
+      "label=murph.hosted.local-build-id",
+    ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      "name=workerd-murph-hosted-e2e-",
+    ]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "rm",
+      "-f",
+      "proxy123",
     ]);
   });
 

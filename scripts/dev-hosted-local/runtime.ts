@@ -1033,8 +1033,26 @@ async function listHostedRunnerContainerIds(input: {
         result: listed.result,
       };
     }
+    const proxies = await listHostedRunnerContainersByNamePrefix({
+      cwd: input.cwd,
+      env: input.env,
+      namePrefix: HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX,
+      requireLocalBuildLabel: false,
+      timeoutMs: input.timeoutMs,
+    });
+    if (proxies.result.timedOut || proxies.result.exitCode !== 0) {
+      return {
+        containerIds: [],
+        result: proxies.result,
+      };
+    }
 
     const containerIds = new Set(listed.containers.map((container) => container.id));
+    for (const proxy of proxies.containers) {
+      if (isHostedLocalE2eRunnerProxyContainerName(proxy.name)) {
+        containerIds.add(proxy.id);
+      }
+    }
     const proxyResult = await addHostedRunnerProxyContainerIds({
       containerIds,
       containers: listed.containers,
@@ -1128,6 +1146,18 @@ async function listHostedRunnerContainerIds(input: {
     return {
       containerIds: [...containerIds],
       result: proxyResult,
+    };
+  }
+  const e2eProxyResult = await addCurrentHostedLocalE2eRunnerProxyContainerIds({
+    containerIds,
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+  if (e2eProxyResult !== null) {
+    return {
+      containerIds: [...containerIds],
+      result: e2eProxyResult,
     };
   }
   return {
@@ -1231,6 +1261,40 @@ async function addHostedRunnerProxyContainerIds(input: {
   return null;
 }
 
+async function addCurrentHostedLocalE2eRunnerProxyContainerIds(input: {
+  containerIds: Set<string>;
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<BoundedCommandResult | null> {
+  const namePrefix = resolveHostedRunnerContainerNamePrefix(input.env);
+  if (!namePrefix.startsWith(HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX)) {
+    return null;
+  }
+
+  const proxies = await listHostedRunnerContainersByNamePrefix({
+    cwd: input.cwd,
+    env: input.env,
+    namePrefix,
+    requireLocalBuildLabel: false,
+    timeoutMs: input.timeoutMs,
+  });
+  if (proxies.result.timedOut || proxies.result.exitCode !== 0) {
+    return proxies.result;
+  }
+
+  for (const proxy of proxies.containers) {
+    if (
+      proxy.name.startsWith(namePrefix)
+      && isHostedLocalE2eRunnerProxyContainerName(proxy.name)
+    ) {
+      input.containerIds.add(proxy.id);
+    }
+  }
+
+  return null;
+}
+
 function parseHostedRunnerContainerIdNameRows(
   output: string,
 ): Array<{ id: string; name: string }> {
@@ -1249,6 +1313,14 @@ function parseWhitespaceSeparatedDockerIds(output: string): string[] {
     .split(/\s+/)
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
+}
+
+function isHostedLocalE2eRunnerProxyContainerName(name: string): boolean {
+  return name.startsWith(HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX)
+    && name.endsWith("-proxy")
+    && HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES.some((className) =>
+      name.includes(`-${className}-`)
+    );
 }
 
 function isHostedRunnerLocalImageRef(value: string): boolean {

@@ -310,6 +310,7 @@ export async function startHostedLocalLinqStub(input: {
   }): Promise<ObservedLinqRequest[]> => {
     const startedAt = Date.now();
     let nextNudgeAt = startedAt;
+    let latestStatusReadError: string | null = null;
 
     while ((Date.now() - startedAt) < 60_000) {
       const matchingRequests = observedRequests.filter((request) =>
@@ -328,19 +329,36 @@ export async function startHostedLocalLinqStub(input: {
       const now = Date.now();
       if (now >= nextNudgeAt) {
         nextNudgeAt = now + 2_000;
-        await input.scenario.harness.nudgeUserBestEffort(input.userId);
+        const status = await input.scenario.harness.readUserStatus(input.userId)
+          .catch((error: unknown) => {
+            latestStatusReadError = error instanceof Error ? error.message : String(error);
+            return null;
+          });
+        if (status?.lastErrorCode) {
+          throw new Error(
+            await input.scenario.buildFailureMessage(input.userId, [
+              `Hosted runner reported ${status.lastErrorCode} before the expected Linq request was observed.`,
+              `expected path: ${input.expectedPath}`,
+              `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
+            ]),
+          );
+        }
+        if (status === null || status.inFlight !== true) {
+          await input.scenario.harness.nudgeUserBestEffort(input.userId);
+        }
       }
 
       await sleep(250);
     }
 
-      throw new Error(
-        await input.scenario.buildFailureMessage(input.userId, [
-          `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
-          `expected path: ${input.expectedPath}`,
-          `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
-        ]),
-      );
+    throw new Error(
+      await input.scenario.buildFailureMessage(input.userId, [
+        `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
+        `expected path: ${input.expectedPath}`,
+        `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
+        latestStatusReadError ? `latest status read error: ${latestStatusReadError}` : null,
+      ].filter((line): line is string => Boolean(line))),
+    );
   };
 
   return {

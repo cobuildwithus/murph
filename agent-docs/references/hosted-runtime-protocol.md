@@ -301,9 +301,10 @@ it returns `already_warm`; otherwise it returns `started` or `retry_later`.
 Prewarm readiness must be preemptible by real workspace invocation or
 ensure-processing calls.
 Cloudflare worker config fails closed when `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`
-is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus the
-owner-watchdog recheck margin, so env overrides cannot make Temporal re-read
-demand before the runtime has had a fair idle-checkpoint window.
+is not greater than `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS` plus
+`HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` plus the owner-watchdog recheck
+margin, so env overrides cannot make Temporal re-read demand before the runtime
+has had a fair idle-checkpoint window and commit budget.
 The Durable Object keeps lease, in-flight invocation, alarm, and short-lived
 coordination metadata only. It does not persist queue history, per-message
 completion, outbox truth, assistant channel enablement state, or checkpoint
@@ -358,8 +359,10 @@ Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
 for that input, such as committed reply intent evidence or explicit suppression
-evidence. Auto-reply channel state stores only a fixed `eligibleAfter` seed
-boundary for channel enablement; it is never advanced as handling progress.
+evidence. Auto-reply channel state stores the durable assistant-handling cursor
+(`eligibleAfter`) for that channel. The assistant automation scanner advances
+that cursor only after terminal handling tells it to advance; mailbox import,
+Assistant Input ID creation, and active-turn notification must not advance it.
 Inbox projections are rebuildable scan acceleration and must not hide
 imported-but-unhandled assistant input. Late same-conversation input is
 supported by the hosted foreground mailbox import loop plus the store-backed

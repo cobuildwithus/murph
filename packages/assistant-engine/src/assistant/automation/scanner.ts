@@ -99,6 +99,7 @@ export async function scanAssistantAutomationOnce(input: {
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
     requestId: input.requestId ?? null,
+    signal: input.signal,
     vault: input.vault,
   })
   if (candidates.length === 0) {
@@ -209,11 +210,29 @@ export async function scanAssistantAutomationOnce(input: {
   }
 }
 
+export async function hasPendingAssistantAutoReplyInput(input: {
+  inputSource: AssistantInputSource
+  state: Pick<AssistantAutomationState, 'autoReply'>
+  signal?: AbortSignal
+  vault: string
+}): Promise<boolean> {
+  const candidates = await listAssistantReplyCandidates({
+    autoReply: input.state.autoReply,
+    inputSource: input.inputSource,
+    limit: 1,
+    requestId: null,
+    signal: input.signal,
+    vault: input.vault,
+  })
+  return candidates.length > 0
+}
+
 async function listAssistantReplyCandidates(input: {
   autoReply: AssistantAutomationScanStateProgress['autoReply']
   inputSource: AssistantInputSource
   limit: number
   requestId: string | null
+  signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutomationCandidate[]> {
   if (input.autoReply.length === 0) {
@@ -273,6 +292,7 @@ async function listAssistantReplyCandidates(input: {
         const listed = await input.inputSource.listInputCandidates({
           afterCursor: cursor,
           limit: input.limit,
+          signal: input.signal,
           sourceId: channelState.channel,
         })
         const listedItems = listed.inputs

@@ -236,9 +236,7 @@ export async function recordHostedIngressProviderStarted(input: {
       userId: input.authenticatedUserId,
     },
   });
-  const eligibleRows = rows.filter((row) =>
-    !runtimeAttemptId || !row.runtimeAttemptId || row.runtimeAttemptId === runtimeAttemptId
-  );
+  const eligibleRows = rows;
   const matchedIds = new Set(eligibleRows.map((row) => row.assistantInputId).filter(Boolean));
 
   await Promise.all(eligibleRows.map((row) => {

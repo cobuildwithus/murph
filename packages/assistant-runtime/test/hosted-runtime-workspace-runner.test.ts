@@ -15,6 +15,7 @@ import {
   createStoreBackedAssistantInputSource,
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotState,
+  saveAssistantAutomationState,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import type {
@@ -2313,6 +2314,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     let assistantPhaseCompleted = false;
 
     try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_active_turn_yield",
@@ -2379,6 +2389,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(yieldStates, [false, true]);
       assert.deepEqual(backgroundDeviceSyncJobStarts, ["job-1"]);
       assert.equal(assistantPhaseCompleted, true);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
@@ -2388,6 +2400,95 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("runtime wake interrupts background maintenance after late conversation import is blocked", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items: HostedMailboxItem[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+    const backgroundDeviceSyncJobStarts: string[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_blocked_yield",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          return {
+            reasonCode: "synthetic.retryable-block",
+            retryable: true,
+            status: "blocked",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_active_turn_blocked_yield",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          backgroundDeviceSyncJobStarts.push("job-1");
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_yield_late_blocked",
+            laneSeq: "1",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedSeqs.includes("1"));
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          if (input.shouldYieldBackgroundMaintenance?.() !== true) {
+            backgroundDeviceSyncJobStarts.push("job-2");
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual({
+        backgroundDeviceSyncJobStarts,
+        importedSeqs,
+        yieldStates,
+      }, {
+        backgroundDeviceSyncJobStarts: ["job-1"],
+        importedSeqs: ["1"],
+        yieldStates: [false, true],
+      });
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "conversation" },
         ],
       ]);
     } finally {

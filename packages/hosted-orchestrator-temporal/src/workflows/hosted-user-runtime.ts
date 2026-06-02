@@ -59,6 +59,8 @@ const HOSTED_USER_RUNTIME_PREWARM_DEDICATED_TASK_QUEUE_PATCH =
   "hosted-user-runtime-prewarm-dedicated-task-queue-v1";
 const HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH =
   "hosted-user-runtime-coalesced-pending-signal-v1";
+const HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH =
+  "hosted-user-runtime-ensure-processing-source-v1";
 export const HOSTED_USER_RUNTIME_DEVICE_SYNC_RECOVERY_WAKE_ACCEPTED_LIMIT = 3;
 
 export const runtimeSignal = defineSignal<[HostedRuntimeSignal]>(
@@ -155,6 +157,8 @@ export async function hostedUserRuntimeWorkflow(
       patched(HOSTED_USER_RUNTIME_RECHECK_SIGNAL_PATCH),
     useCoalescedPendingSignalPatch: () =>
       patched(HOSTED_USER_RUNTIME_COALESCED_PENDING_SIGNAL_PATCH),
+    useEnsureRuntimeProcessingSourcePatch: () =>
+      patched(HOSTED_USER_RUNTIME_ENSURE_PROCESSING_SOURCE_PATCH),
     useSignalOnlyWaitForNonRetryableFailure: () =>
       patched(HOSTED_USER_RUNTIME_NON_RETRYABLE_FAILURE_SIGNAL_WAIT_PATCH),
     uuid: uuid4,
@@ -197,6 +201,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   useRuntimePrewarmSignalPatch(): boolean;
   useRuntimeRecheckSignalPatch(): boolean;
   useCoalescedPendingSignalPatch(): boolean;
+  useEnsureRuntimeProcessingSourcePatch(): boolean;
   useSameRuntimeWakeAcceptedCountPatch(): boolean;
   useSignalOnlyWaitForNonRetryableFailure(): boolean;
   uuid(): string;
@@ -452,12 +457,13 @@ export function createHostedUserRuntimeWorkflowMachine(
       clearPendingRuntimePrewarm(state);
       try {
         runtime.useEnsureRuntimeProcessingPatch();
+        const forwardDemandSource =
+          runtime.useEnsureRuntimeProcessingSourcePatch()
+          || demand.source === "device_sync_recovery";
         execution = await runtime.ensureRuntimeProcessing({
           orchestrationAttemptId,
           reason: demand.reason,
-          ...(demand.source === "device_sync_recovery"
-            ? { source: demand.source }
-            : {}),
+          ...(forwardDemandSource ? { source: demand.source } : {}),
           userId: input.userId,
         });
       } catch (error) {

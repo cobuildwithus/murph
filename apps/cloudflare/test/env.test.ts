@@ -30,6 +30,7 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.idleCheckpointDelayMs).toBe(180_000);
     expect(environment.retryDelayMs).toBe(30_000);
+    expect(environment.runnerCommitTimeoutMs).toBe(30_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
     expect(environment.runnerTimeoutMs).toBe(600_000);
     expect(environment.webControlTimeoutMs).toBe(30_000);
@@ -182,20 +183,23 @@ describe("readHostedExecutionEnvironment", () => {
   it("reads the runner timeout when configured", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "5000",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "15000",
     }));
 
+    expect(environment.runnerCommitTimeoutMs).toBe(1_000);
     expect(environment.runnerTimeoutMs).toBe(15_000);
   });
 
-  it("rejects a runner timeout that can recheck before the idle checkpoint margin", () => {
+  it("rejects a runner timeout that can recheck before the idle checkpoint commit budget", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
-        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "185000",
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000",
+        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "215000",
       })),
     ).toThrow(
-      /HOSTED_EXECUTION_RUNNER_TIMEOUT_MS must be greater than HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS plus 5000ms/u,
+      /HOSTED_EXECUTION_RUNNER_TIMEOUT_MS must be greater than HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS plus HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS plus 5000ms/u,
     );
   });
 
@@ -234,6 +238,7 @@ describe("readHostedExecutionEnvironment", () => {
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000abc",
       HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: "3abc",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "30000abc",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000abc",
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000abc",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000abc",

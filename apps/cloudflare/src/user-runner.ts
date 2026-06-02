@@ -670,6 +670,14 @@ export class HostedUserRunner {
     }
 
     const activeFence = record.writeFence;
+    if (input.input.source === "workspace_wake") {
+      await this.syncWatchdogAlarm(record);
+      return this.createActiveWorkspaceWakeRetryLater({
+        activeFence,
+        userId: input.input.userId,
+      });
+    }
+
     const containerResult = await this.ensureActiveRuntimeProcessing({
       activeRuntime: {
         attemptId: activeFence.attemptId,
@@ -1079,6 +1087,28 @@ export class HostedUserRunner {
     return {
       kind: "retry_later",
       retryAt: this.computeRuntimeProcessingRetryAt(input.reason),
+    };
+  }
+
+  private createActiveWorkspaceWakeRetryLater(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    userId: string;
+  }): HostedRuntimeEnsureProcessingResponse {
+    const retryAt = this.computeRuntimeProcessingOwnerWatchdogAt(input.activeFence);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        retryAt,
+        runtimeProcessingRetryReason: "active_runtime_workspace_wake",
+        workspaceAttemptIdPresent: input.activeFence.attemptId.length > 0,
+      },
+      message: "Hosted runner deferred workspace wake while runtime processing is already active.",
+      phase: "runtime.starting",
+      userId: input.userId,
+    });
+    return {
+      kind: "retry_later",
+      retryAt,
     };
   }
 
@@ -1849,6 +1879,7 @@ export class HostedUserRunner {
     return new Date(
       Date.now() + computeHostedRuntimeProcessingRecheckDelayMs({
         idleCheckpointDelayMs: this.env.idleCheckpointDelayMs,
+        runnerCommitTimeoutMs: this.env.runnerCommitTimeoutMs,
       }),
     ).toISOString();
   }

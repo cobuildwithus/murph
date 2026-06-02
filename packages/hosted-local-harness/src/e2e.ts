@@ -10,6 +10,8 @@ import { hostedLocalHarnessRepoRoot } from "./repo.ts";
 const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 const HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV =
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE";
+const HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV =
+  "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID";
 const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
@@ -53,6 +55,7 @@ export interface HostedLocalE2eScenario {
   file: string;
   manualOnly?: boolean;
   name: Exclude<HostedLocalE2eScenarioName, "all">;
+  processIsolation?: boolean;
   requiresParserToolchain?: boolean;
 }
 
@@ -119,6 +122,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
+    processIsolation: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
@@ -370,11 +374,29 @@ async function runHostedLocalVitest(input: {
     runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
   });
   try {
-    await runHostedLocalVitestForScenarios({
-      env: input.env,
-      label: "Hosted local full-stack e2e suite",
-      scenarios: input.scenarios,
-    });
+    const batches = buildHostedLocalVitestBatches(input.scenarios);
+    for (let index = 0; index < batches.length; index += 1) {
+      const scenarios = batches[index] ?? [];
+      await runHostedLocalVitestForScenarios({
+        env: buildHostedLocalVitestBatchEnv({
+          env: input.env,
+          scenarios,
+        }),
+        label: formatHostedLocalVitestBatchLabel({
+          batchCount: batches.length,
+          batchIndex: index,
+          scenarios,
+        }),
+        scenarios,
+      });
+      if (index < batches.length - 1) {
+        await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
+          ignoreRunnerCleanupErrors: true,
+          removeRunnerImages: false,
+          runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
+        });
+      }
+    }
   } finally {
     await cleanupHostedLocalE2eRunnerArtifacts(input.env, {
       ignoreRunnerCleanupErrors: true,
@@ -382,6 +404,69 @@ async function runHostedLocalVitest(input: {
       runnerCleanupTimeoutMs: SCENARIO_RUNNER_CLEANUP_TIMEOUT_MS,
     });
   }
+}
+
+function buildHostedLocalVitestBatches(
+  scenarios: readonly HostedLocalE2eScenario[],
+): HostedLocalE2eScenario[][] {
+  const batches: HostedLocalE2eScenario[][] = [];
+  let currentBatch: HostedLocalE2eScenario[] = [];
+
+  for (const scenario of scenarios) {
+    if (scenario.processIsolation) {
+      if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+        currentBatch = [];
+      }
+      batches.push([scenario]);
+      continue;
+    }
+
+    currentBatch.push(scenario);
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
+
+function formatHostedLocalVitestBatchLabel(input: {
+  batchCount: number;
+  batchIndex: number;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): string {
+  const prefix = input.batchCount > 1
+    ? `${input.batchIndex + 1}/${input.batchCount}`
+    : "1/1";
+
+  if (input.scenarios.length === 1) {
+    return [
+      "Hosted local full-stack e2e scenario",
+      prefix,
+      input.scenarios[0]?.name ?? "unknown",
+    ].join(" ");
+  }
+
+  return [
+    "Hosted local full-stack e2e suite",
+    prefix,
+  ].join(" ");
+}
+
+function buildHostedLocalVitestBatchEnv(input: {
+  env: NodeJS.ProcessEnv;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): NodeJS.ProcessEnv {
+  if (!input.scenarios.some((scenario) => scenario.processIsolation)) {
+    return input.env;
+  }
+
+  const env = { ...input.env };
+  delete env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV];
+  delete env[HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID_ENV];
+  return env;
 }
 
 async function runHostedLocalVitestForScenarios(input: {
@@ -450,7 +535,7 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
     cwd: hostedLocalHarnessRepoRoot,
     env,
     ignoreErrors: options.ignoreRunnerCleanupErrors,
-    scope: "e2e-builds",
+    scope: "current-build",
     timeoutMs: options.runnerCleanupTimeoutMs,
   });
   if (options.removeRunnerImages) {

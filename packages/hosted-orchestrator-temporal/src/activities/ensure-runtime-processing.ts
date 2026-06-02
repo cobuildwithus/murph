@@ -73,15 +73,12 @@ export async function ensureRuntimeProcessing(
         },
       );
     } catch (error) {
-      if (
-        parsedRequest.source !== "device_sync_recovery"
-        || !isEnsureProcessingSourceDeploySkewRejection(error)
-      ) {
+      if (!parsedRequest.source || !isEnsureProcessingSourceDeploySkewRejection(error)) {
         throw error;
       }
 
       // Deploy-skew only: old Cloudflare workers reject the new optional
-      // `source` key. Keep the recovery demand pending until the consumer
+      // `source` key. Keep sourced demand pending until the consumer
       // deployment can accept it instead of silently running without source.
       return {
         kind: "retry_later",

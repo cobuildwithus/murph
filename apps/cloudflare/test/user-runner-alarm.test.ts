@@ -78,8 +78,8 @@ vi.mock("../src/web-control-plane.ts", async () => {
 
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 const WORKSPACE_NEXT_WAKE_AT = "2026-04-27T00:02:00.000Z";
-const RUNNER_TIMEOUT_AT = "2026-04-27T00:01:00.000Z";
-const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:00:59.000Z";
+const RUNNER_TIMEOUT_AT = "2026-04-27T00:01:02.000Z";
+const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:01:00.000Z";
 const TEST_USER_ID = "member_123";
 const RUNNER_STATUS_REASON_CASES = [
   "manual",
@@ -1185,6 +1185,53 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("defers workspace wakes behind an active write fence without poking the runner", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      reason: "nudge",
+      source: "workspace_wake",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: ACTIVE_RUNTIME_RECHECK_AT,
+    });
+
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token?.attemptId,
+      active_expires_at: RUNNER_TIMEOUT_AT,
+      backoff_until: null,
+      wake_at: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "active_runtime_workspace_wake",
+        }),
+        message: "Hosted runner deferred workspace wake while runtime processing is already active.",
+      }),
+    );
+  });
+
   it("uses the active write fence watchdog for accepted processing wakes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1239,7 +1286,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
-    vi.setSystemTime(new Date("2026-04-27T00:01:01.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:01:03.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-expired",
@@ -1248,7 +1295,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:02:00.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:03.000Z",
       runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
     });
 
@@ -1256,7 +1303,7 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token?.attemptId ?? ""),
-      active_expires_at: "2026-04-27T00:02:01.000Z",
+      active_expires_at: "2026-04-27T00:02:05.000Z",
       failure_count: 1,
       wake_at: null,
     });
@@ -1341,7 +1388,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:30.000Z",
+      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
       runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
     });
 
@@ -1349,7 +1396,7 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token?.attemptId ?? ""),
-      active_expires_at: "2026-04-27T00:01:31.000Z",
+      active_expires_at: "2026-04-27T00:01:33.000Z",
       backoff_until: null,
       wake_at: null,
     });
@@ -2058,7 +2105,8 @@ function createRunnerHarness(input: {
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "60000",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
     })),
     input.bucket ?? new MemoryEncryptedR2Bucket(),
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,

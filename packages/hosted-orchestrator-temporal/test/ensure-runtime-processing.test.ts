@@ -188,7 +188,7 @@ describe("ensureRuntimeProcessing", () => {
     });
   });
 
-  it("does not turn non-recovery source parse failures into retry-later", async () => {
+  it("keeps non-recovery source demands pending when Cloudflare has not deployed source parsing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
     await stubCloudflareEnvironment();
@@ -202,10 +202,9 @@ describe("ensureRuntimeProcessing", () => {
       reason: "manual",
       source: "manual",
       userId: "member_test",
-    })).rejects.toMatchObject({
-      message: "Hosted orchestrator runtime ensure processing failed with HTTP 400.",
-      nonRetryable: true,
-      type: "hosted_orchestrator_http_non_retryable",
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-05-20T12:00:30.000Z",
     });
   });
 

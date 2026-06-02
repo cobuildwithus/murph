@@ -1851,7 +1851,7 @@ describe("cloudflare worker routes", () => {
       expect(response).toEqual({
         action: "started",
         kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:00:59.000Z",
+        recommendedRecheckAt: "2026-04-27T00:01:00.000Z",
         runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
       });
       await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -1872,7 +1872,7 @@ describe("cloudflare worker routes", () => {
         failure_count: 0,
         wake_at: null,
       });
-      expect(alarms).toContain("2026-04-27T00:01:00.000Z");
+      expect(alarms).toContain("2026-04-27T00:01:02.000Z");
       expect(alarms).toContain("deleted");
       expect(alarms).not.toContain(runtimeNextWakeAt);
     });
@@ -1901,7 +1901,7 @@ describe("cloudflare worker routes", () => {
       expect(response).toEqual({
         action: "woken",
         kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:00:59.000Z",
+        recommendedRecheckAt: "2026-04-27T00:01:00.000Z",
         runtimeAttemptId: token?.attemptId,
       });
       expect(ensureProcessing).toHaveBeenCalledWith({
@@ -2576,7 +2576,8 @@ function createRuntimeControlRunnerHarness(input: {
     } satisfies DurableObjectStateLike,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "60000",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "62000",
     })),
     createBucketStore().api,
     {

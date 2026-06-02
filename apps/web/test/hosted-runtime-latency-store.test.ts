@@ -150,6 +150,41 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.stageLatencyMs.acceptedToStagedP50).toBe(2_000);
     expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
   });
+
+  it("records provider start by assistant input even when a later runtime attempt handles it", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:10:20.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_cross_attempt_1",
+      at: instant("2026-06-02T19:10:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_staged_1",
+      source: "linq",
+    });
+    const result = await recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_cross_attempt_1"],
+      at: instant("2026-06-02T19:10:22.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_provider_2",
+      source: "linq",
+    });
+
+    const trace = prisma.readTrace();
+    expect(result).toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    expect(trace?.runtimeAttemptId).toBe("attempt_staged_1");
+    expect(trace?.providerStartAt?.toISOString()).toBe("2026-06-02T19:10:22.000Z");
+    expect(trace?.providerRequestOrdinal).toBe(0);
+  });
 });
 
 function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {

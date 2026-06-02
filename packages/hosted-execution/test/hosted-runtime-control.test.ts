@@ -716,6 +716,8 @@ describe("hosted runtime control contracts", () => {
       nextWakeReason: null,
       reason: "import",
       redactedStatus: {
+        assistantContextSnapshotRefreshAttempted: true,
+        assistantContextSnapshotRefreshed: false,
         importedConversationSeq: "11",
         importedSystemSeq: "4",
       },
@@ -728,11 +730,30 @@ describe("hosted runtime control contracts", () => {
       nextWakeReason: null,
       reason: "import",
       redactedStatus: {
+        assistantContextSnapshotRefreshAttempted: true,
+        assistantContextSnapshotRefreshed: false,
         importedConversationSeq: "11",
         importedSystemSeq: "4",
       },
       snapshotRef: null,
     });
+    for (const key of [
+      "assistantContextSnapshotRefreshAttempted",
+      "assistantContextSnapshotRefreshed",
+    ] as const) {
+      for (const value of [null, "true", 1, [true], { value: true }] as const) {
+        expect(() => parseHostedWorkspaceCheckpointRequest({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          redactedStatus: {
+            [key]: value,
+          },
+          snapshotRef: null,
+        })).toThrow(/must be a boolean/u);
+      }
+    }
     expect(parseHostedWorkspaceCheckpointResponse({
       checkpointed: true,
       workspace,
@@ -1174,6 +1195,23 @@ describe("hosted runtime control contracts", () => {
         },
       ],
     });
+    for (const key of [
+      "assistantContextSnapshotRefreshAttempted",
+      "assistantContextSnapshotRefreshed",
+    ] as const) {
+      for (const value of [null, "true", 1, [true], { value: true }] as const) {
+        expect(() => parseHostedRuntimeLogEntry({
+          ...entry,
+          redactedJson: {
+            codexActionToolSummaries: [
+              {
+                [key]: value,
+              },
+            ],
+          },
+        })).toThrow(/must be a boolean/u);
+      }
+    }
     expect(parseHostedRuntimeLogEntry({
       at: "2026-04-26T00:00:03.000Z",
       component: "runner",

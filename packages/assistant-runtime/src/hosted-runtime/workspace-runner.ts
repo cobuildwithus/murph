@@ -62,6 +62,9 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import {
+  resolveHostedPendingAssistantInputWakeAt,
+} from "./pending-assistant-input.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
 
@@ -435,6 +438,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
+    if (foregroundConversationInputImported) {
+      await mergePendingForegroundAssistantInputWake({
+        now: input.now,
+        result: assistantPhaseResult,
+        signal: input.signal ?? null,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -625,7 +636,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           phase: "active_turn_input",
           signal: controller.signal,
         });
-        if (hasHostedMailboxImportAssistantInput(result)) {
+        if (hasHostedMailboxImportForegroundConversationWork(result)) {
           input.onForegroundConversationInputImported?.();
         }
         await notifyHostedActiveTurnInputForMailboxImport({
@@ -656,10 +667,15 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   };
 }
 
-function hasHostedMailboxImportAssistantInput(
+function hasHostedMailboxImportForegroundConversationWork(
   result: HostedMailboxImportCheckpointResult,
 ): boolean {
-  return (result.importResult.assistantInputIds?.length ?? 0) > 0;
+  return (
+    (result.importResult.assistantInputIds?.length ?? 0) > 0
+    || result.importResult.blocked.some((item) =>
+      item.retryable && item.lane === "conversation"
+    )
+  );
 }
 
 async function notifyHostedActiveTurnInputForMailboxImport(input: {
@@ -964,7 +980,41 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
   }
 
   const wakeAt = resolveHostedWorkspaceRunnerNowIso(input.now);
-  const wakeMs = Date.parse(wakeAt);
+  mergeHostedAssistantWake({
+    reason: "assistant",
+    result: input.result,
+    wakeAt,
+  });
+}
+
+async function mergePendingForegroundAssistantInputWake(input: {
+  now?: (() => string) | null;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<void> {
+  const wakeAt = await resolveHostedPendingAssistantInputWakeAt({
+    now: input.now,
+    signal: input.signal ?? null,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!wakeAt) {
+    return;
+  }
+
+  mergeHostedAssistantWake({
+    reason: "assistant",
+    result: input.result,
+    wakeAt,
+  });
+}
+
+function mergeHostedAssistantWake(input: {
+  reason: string;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+  wakeAt: string;
+}): void {
+  const wakeMs = Date.parse(input.wakeAt);
   const existingWakeMs = input.result.nextWakeAt
     ? Date.parse(input.result.nextWakeAt)
     : NaN;
@@ -972,8 +1022,8 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
     return;
   }
 
-  input.result.nextWakeAt = wakeAt;
-  input.result.nextWakeReason = "assistant";
+  input.result.nextWakeAt = input.wakeAt;
+  input.result.nextWakeReason = input.reason;
 }
 
 async function isAssistantContextSnapshotRefreshPendingBestEffort(

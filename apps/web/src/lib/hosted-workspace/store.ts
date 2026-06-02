@@ -62,6 +62,8 @@ const FORBIDDEN_RAW_HOSTED_RUNTIME_REDACTED_KEY_NAMES = [
 ] as const;
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "authorizationHeaderValue",
+  "assistantContextSnapshotRefreshAttempted",
+  "assistantContextSnapshotRefreshed",
   "bodyJson",
   "executionContextHosted",
   "failureAssistantProviderErrorBodyMessage",
@@ -82,6 +84,10 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "routePlanningSensitiveHealthContextAllowed",
   "safeErrorMessage",
   "tokenPreview",
+]);
+const BOOLEAN_HOSTED_RUNTIME_REDACTED_KEY_NAMES = new Set([
+  "assistantContextSnapshotRefreshAttempted",
+  "assistantContextSnapshotRefreshed",
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
@@ -959,6 +965,9 @@ function parseHostedRuntimeRedactedValue(
   label: string,
   key: string,
 ): HostedRuntimeRedactedValue {
+  if (BOOLEAN_HOSTED_RUNTIME_REDACTED_KEY_NAMES.has(key)) {
+    return parseHostedRuntimeRedactedBoolean(value, label);
+  }
   if (ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES.has(key)) {
     return parseHostedRuntimeRedactedElapsedMs(value, label);
   }
@@ -987,6 +996,17 @@ function parseHostedRuntimeRedactedValue(
   }
 
   return parseHostedRuntimeRedactedScalar(value, label);
+}
+
+function parseHostedRuntimeRedactedBoolean(
+  value: unknown,
+  label: string,
+): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  throw new TypeError(`${label} must be a boolean.`);
 }
 
 function parseHostedRuntimeRedactedElapsedMs(
@@ -1039,7 +1059,9 @@ function parseHostedRuntimeRedactedObject(
   const output: HostedRuntimeRedactedObject = {};
   for (const [key, entry] of entries) {
     assertAllowedHostedRuntimeRedactedKey(key, `${label}.${key}`);
-    output[key] = parseHostedRuntimeRedactedScalar(entry, `${label}.${key}`);
+    output[key] = BOOLEAN_HOSTED_RUNTIME_REDACTED_KEY_NAMES.has(key)
+      ? parseHostedRuntimeRedactedBoolean(entry, `${label}.${key}`)
+      : parseHostedRuntimeRedactedScalar(entry, `${label}.${key}`);
   }
 
   return output;

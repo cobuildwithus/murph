@@ -79,6 +79,8 @@ describe("hosted workspace store", () => {
       nextWakeReason: "mailbox",
       reason: "import",
       redactedStatusJson: {
+        assistantContextSnapshotRefreshAttempted: true,
+        assistantContextSnapshotRefreshed: false,
         importedConversationSeq: "12",
         state: "idle",
       },
@@ -93,6 +95,8 @@ describe("hosted workspace store", () => {
         nextWakeAt: new Date("2026-04-26T00:05:00.000Z"),
         nextWakeReason: "mailbox",
         redactedStatusJson: {
+          assistantContextSnapshotRefreshAttempted: true,
+          assistantContextSnapshotRefreshed: false,
           importedConversationSeq: "12",
           state: "idle",
         },
@@ -144,6 +148,32 @@ describe("hosted workspace store", () => {
         version: "6",
       },
     });
+  });
+
+  it("rejects non-boolean assistant context snapshot checkpoint status", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    for (const key of [
+      "assistantContextSnapshotRefreshAttempted",
+      "assistantContextSnapshotRefreshed",
+    ] as const) {
+      for (const value of [null, "true", 1, [true], { value: true }] as const) {
+        await expect(checkpointHostedWorkspaceTx({
+          expectedVersion: "4",
+          reason: "import",
+          redactedStatusJson: {
+            [key]: value,
+          },
+          snapshotRef: createBundleRef("snapshot_2"),
+          tx,
+          userId: "member_workspace_1",
+        })).rejects.toThrow(/must be a boolean/u);
+      }
+    }
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects legacy maintenance checkpoint reasons", async () => {
@@ -1443,6 +1473,31 @@ describe("hosted runtime log store", () => {
       }),
     });
     expect(result.redactedJson).toEqual(diagnostic);
+
+    for (const key of [
+      "assistantContextSnapshotRefreshAttempted",
+      "assistantContextSnapshotRefreshed",
+    ] as const) {
+      for (const value of [null, "true", 1] as const) {
+        await expect(recordHostedRuntimeLogTx({
+          at: "2026-04-26T00:02:00.000Z",
+          component: "assistant",
+          eventCode: "assistant.automation_detail",
+          level: "info",
+          phase: "invoke",
+          redacted: {
+            codexActionToolSummaries: [
+              {
+                [key]: value,
+              },
+            ],
+          },
+          tx,
+          userId: "member_workspace_1",
+        })).rejects.toThrow(/must be a boolean/u);
+      }
+    }
+    expect(hostedRuntimeLog.create).toHaveBeenCalledTimes(1);
   });
 
   it("rejects raw OpenAI diagnostic payload fields before persistence", async () => {

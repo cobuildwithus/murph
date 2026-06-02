@@ -15,10 +15,8 @@ import {
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
-  compareAssistantInputCursors,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
-  readLatestAssistantInputCursor,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   readAssistantAutomationState,
@@ -48,6 +46,9 @@ import {
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane,
 } from "./maintenance.ts";
+import {
+  resolveHostedPendingAssistantInputWakeAt,
+} from "./pending-assistant-input.ts";
 import {
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes,
   drainHostedProviderCleanupAfterCommit,
@@ -2143,27 +2144,11 @@ function resolveHostedAssistantPhaseNowMs(input: {
 async function resolvePendingAssistantInputWakeAt(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<string | null> {
-  const wakeAt = new Date(resolveHostedAssistantPhaseNowMs(input)).toISOString();
-  const assistantInputIds = input.initialMailboxImport.importResult.assistantInputIds ?? [];
-  if (assistantInputIds.length > 0) {
-    return wakeAt;
-  }
-
-  const [automationState, latestInputCursor] = await Promise.all([
-    readAssistantAutomationState(input.restored.vaultRoot),
-    readLatestAssistantInputCursor({
-      vault: input.restored.vaultRoot,
-    }),
-  ]);
-  if (!latestInputCursor) {
-    return null;
-  }
-
-  const hasPendingAutoReplyInput = automationState.autoReply.some((entry) =>
-    !entry.eligibleAfter
-    || compareAssistantInputCursors(latestInputCursor, entry.eligibleAfter) > 0
-  );
-  return hasPendingAutoReplyInput ? wakeAt : null;
+  return await resolveHostedPendingAssistantInputWakeAt({
+    now: input.now,
+    signal: input.signal,
+    vaultRoot: input.restored.vaultRoot,
+  });
 }
 
 function buildHostedProviderCleanupRedactedStatus(input: {

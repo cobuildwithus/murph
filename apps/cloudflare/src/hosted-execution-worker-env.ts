@@ -24,6 +24,7 @@ export interface HostedExecutionWorkerEnvironment {
   idleCheckpointDelayMs: number;
   maxEventAttempts: number;
   retryDelayMs: number;
+  runnerCommitTimeoutMs: number;
   runnerReadyTimeoutMs: number;
   runnerIdleTtlMs: number;
   runnerTimeoutMs: number;
@@ -70,8 +71,14 @@ export function readHostedExecutionWorkerEnvironment(
     600_000,
     "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
   );
+  const runnerCommitTimeoutMs = parsePositiveInteger(
+    normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS),
+    30_000,
+    "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+  );
   assertHostedRuntimeProcessingTimingInvariants({
     idleCheckpointDelayMs,
+    runnerCommitTimeoutMs,
     runnerTimeoutMs,
   });
   const webControlTimeoutMs = parsePositiveInteger(
@@ -132,6 +139,7 @@ export function readHostedExecutionWorkerEnvironment(
       30_000,
       "HOSTED_EXECUTION_RETRY_DELAY_MS",
     ),
+    runnerCommitTimeoutMs,
     runnerReadyTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS),
       20_000,

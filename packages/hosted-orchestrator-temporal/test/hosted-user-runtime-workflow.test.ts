@@ -43,6 +43,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "nudge",
+        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -279,6 +280,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-2",
         reason: "nudge",
+        source: "mailbox_backlog",
         userId: "member_test",
       },
     ]);
@@ -632,6 +634,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       {
         orchestrationAttemptId: "orchestration-attempt-1",
         reason: "manual",
+        source: "manual",
         userId: "member_test",
       },
     ]);
@@ -641,6 +644,29 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests[0]).not.toHaveProperty(
       "requiresAiUsageDecision",
     );
+  });
+
+  it("preserves the old ensure-processing source shape before the source patch", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.ensureProcessingSourcePatchEnabled = false;
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        reason: "manual",
+        userId: "member_test",
+      },
+    ]);
   });
 
   it("does not suppress workspace wakes after processing is merely accepted", async () => {
@@ -664,6 +690,9 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
+    expect(runtime.executionRequests[0]).toMatchObject({
+      source: "workspace_wake",
+    });
     expect(runtime.demandRequests[1]).toMatchObject({
       userId: "member_test",
     });
@@ -1369,6 +1398,7 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
   coalescedPendingSignalPatchEnabled = true;
+  ensureProcessingSourcePatchEnabled = true;
   runtimeRecheckSignalPatchEnabled = true;
   sameRuntimeWakeAcceptedCountPatchEnabled = true;
   signalOnlyNonRetryableFailureWaitEnabled = true;
@@ -1488,6 +1518,10 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   useCoalescedPendingSignalPatch(): boolean {
     return this.coalescedPendingSignalPatchEnabled;
+  }
+
+  useEnsureRuntimeProcessingSourcePatch(): boolean {
+    return this.ensureProcessingSourcePatchEnabled;
   }
 
   useRuntimePrewarmSignalPatch(): boolean {

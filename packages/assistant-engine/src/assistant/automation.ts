@@ -14,6 +14,7 @@ export {
   type RunAssistantAutomationPassInput,
 } from './automation/run-loop.js'
 export {
+  hasPendingAssistantAutoReplyInput,
   scanAssistantAutomationOnce,
 } from './automation/scanner.js'
 export {

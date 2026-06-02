@@ -29,20 +29,24 @@ const mocks = vi.hoisted(() => ({
     }
     return env;
   }),
-  compareAssistantInputCursors: vi.fn(),
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes: vi.fn(),
   createHostedAssistantProgressDeliveryDependencies: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
+  createStoreBackedAssistantInputSource: vi.fn(() => ({
+    listInputCandidates: vi.fn(),
+    listNewConversationInputs: vi.fn(),
+    refresh: vi.fn(),
+  })),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
+  hasPendingAssistantAutoReplyInput: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   readAssistantAutomationState: vi.fn(),
-  readLatestAssistantInputCursor: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
@@ -54,11 +58,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
-  compareAssistantInputCursors: mocks.compareAssistantInputCursors,
+  createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
+  hasPendingAssistantAutoReplyInput: mocks.hasPendingAssistantAutoReplyInput,
   listPendingAssistantAutoReplyLinqCleanupEvidence:
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
-  readLatestAssistantInputCursor: mocks.readLatestAssistantInputCursor,
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-store", () => ({
@@ -246,6 +250,7 @@ beforeEach(() => {
   });
   mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([]);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
+  mocks.hasPendingAssistantAutoReplyInput.mockResolvedValue(false);
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
     captureIds: [],
     linqMessageIds: [],
@@ -258,7 +263,6 @@ beforeEach(() => {
     cron: [],
     schemaVersion: 1,
   });
-  mocks.readLatestAssistantInputCursor.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
     recorded: 1,
@@ -3291,14 +3295,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("schedules an immediate assistant wake when staged input predates a system mailbox reset", async () => {
-    const pendingCursor = {
-      createdAt: "2026-04-27T00:09:00.000Z",
-      inputId: "ain_00000000000000000000000000000002",
-      occurredAt: "2026-04-27T00:09:00.000Z",
-      sourceKind: "hosted-conversation",
-      sourcePosition: "hosted-mailbox:conversation:00000000000000000002",
-    };
+  it("schedules an immediate assistant wake when the scanner sees pending input after system mailbox work", async () => {
     const eligibleAfter = {
       createdAt: "2026-04-27T00:08:00.000Z",
       inputId: "ain_00000000000000000000000000000001",
@@ -3326,8 +3323,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       cron: [],
       schemaVersion: 1,
     });
-    mocks.readLatestAssistantInputCursor.mockResolvedValueOnce(pendingCursor);
-    mocks.compareAssistantInputCursors.mockReturnValueOnce(1);
+    mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(true);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -3341,7 +3337,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeReason: "assistant",
     }));
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(mocks.readLatestAssistantInputCursor).toHaveBeenCalledWith({
+    expect(mocks.hasPendingAssistantAutoReplyInput).toHaveBeenCalledWith({
+      inputSource: expect.any(Object),
+      signal: undefined,
+      state: {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter,
+          enabledAt: "2026-04-27T00:00:00.000Z",
+        }],
+        cron: [],
+        schemaVersion: 1,
+      },
       vault: "/tmp/murph-vault",
     });
   });
