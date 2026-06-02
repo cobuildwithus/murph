@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-05-13
+Last verified: 2026-06-02
 
 ## Non-Negotiable Rules
 
@@ -46,4 +46,5 @@ Last verified: 2026-05-13
 - Runtime and CI logs must never print raw PHI, health data, vault contents, model prompts, model messages, transcripts, request/response bodies, final provider requests, file text, lab reports, or similarly sensitive payloads. The static `pnpm logs:guard` check blocks direct logging of variables named `prompt`, `messages`, `input`, `output`, `response`, `body`, `transcript`, `vault`, `finalRequest`, `fileText`, and `labReport` unless the value is passed through an explicit redaction, sanitization, or summarization helper, or reduced to metadata-only counts/status.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
 - Codex App Server is a privileged local adapter, not a sandbox boundary. Assistant turns should rely on the bound Murph runtime/tool surface and normal canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model.
+- Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.

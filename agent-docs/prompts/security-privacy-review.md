@@ -29,12 +29,13 @@ Review for:
 - auth/session bypasses, bearer-link authority expansion, confused deputy flows, replay risks, missing nonce/expiry checks, and mismatched identity checks
 - changes that weaken fail-closed behavior around missing env, crypto, billing, external webhook verification, or trusted-control-plane calls
 - trust-boundary drift across client/server, worker/container, hosted/local, provider webhook, payment, runtime callback, and internal-control surfaces
-- secrets, credentials, tokens, signing material, bearer headers, cookies, session ids, invite codes, raw provider payloads, or local filesystem details reaching unsafe code paths
+- secrets, credentials, tokens, signing material, bearer headers, cookies, session ids, invite codes, raw provider payloads, or local filesystem details reaching surfaces outside the privileged local runtime boundary
+- Do not flag local/container filesystem paths merely because they are visible to the Codex agent running inside the local Murph runtime or hosted execution container. That Codex route is assumed to have full local/container filesystem access. Treat those paths as findings only when they escape to an unsafe surface such as user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs.
 - overly broad client payloads, public API responses, route params, redirects, cookies, headers, logs, metrics, errors, fixtures, screenshots, or generated docs that create an exploitable or concrete leakage risk
 - persisted-state placement mistakes, including security-sensitive data stored in logs, assistant runtime, rebuildable projections, generated artifacts, public content, or long-retained operational state
 - injection, request-smuggling, SSRF/open-redirect, path traversal, cache-key, idempotency, race, or retry behavior that can cross authority boundaries
-- privacy issues only when they create concrete unnecessary exposure of personal data, health data, contact identifiers, account identifiers, private paths, or diagnostic text; do not perform a broad privacy/product-policy review
-- tests and examples that use realistic personal identifiers, raw provider ids, invite codes, local paths, or unredacted diagnostic text
+- privacy issues only when they create concrete unnecessary exposure of personal data, health data, contact identifiers, account identifiers, private paths outside the privileged local/container Codex boundary, or diagnostic text; do not perform a broad privacy/product-policy review
+- tests and examples that use realistic personal identifiers, raw provider ids, invite codes, real environment-specific local paths, or unredacted diagnostic text
 - security-sensitive copy or docs claims that overpromise what the implementation proves
 
 Output requirements:

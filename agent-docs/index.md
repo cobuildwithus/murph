@@ -31,7 +31,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and the protocol outcome graph. | Product/marketing decisions | High | 2026-05-13 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-05-13 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access. | Security policy | High | 2026-05-13 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access. | Security policy | High | 2026-06-02 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-notice-templates.md` | Counsel-reviewed template starting points for consumer, FTC, media, vendor, and internal incident notices. | Health-data notice workflow | High | 2026-04-29 |
