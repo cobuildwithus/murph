@@ -965,6 +965,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let result: HostedWorkspaceRunnerResult;
     let runtimeStateDirty = false;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
     let durableCheckpointWakeAt: string | null = null;
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
@@ -1003,6 +1004,68 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       }
     };
+    const trackMailboxPostCheckpointEffects = (passResult: HostedWorkspaceRunnerResult): void => {
+      const effectsFinished = passResult.mailboxPostCheckpointEffectsFinished;
+      if (!effectsFinished) {
+        return;
+      }
+      pendingMailboxPostCheckpointEffectCompletions.add(effectsFinished);
+      void effectsFinished.finally(() => {
+        pendingMailboxPostCheckpointEffectCompletions.delete(effectsFinished);
+      });
+    };
+    const waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint = async (): Promise<
+      "external_wake" | "finished"
+    > => {
+      while (pendingMailboxPostCheckpointEffectCompletions.size > 0) {
+        const effectsFinished = Promise.all([
+          ...pendingMailboxPostCheckpointEffectCompletions,
+        ]);
+        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+        if (
+          !runtimeWakeSignal
+          || isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)
+        ) {
+          await raceHostedRuntimeCancellation(
+            effectsFinished,
+            runtimeAbortController.signal,
+          );
+          continue;
+        }
+
+        const wakeAbortController = new AbortController();
+        const abortWake = () => {
+          wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
+        };
+        runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
+        try {
+          const wake = runtimeWakeSignal.wait(wakeAbortController.signal)
+            .then(() => "external_wake" as const)
+            .catch((error: unknown) => {
+              if (
+                wakeAbortController.signal.aborted
+                && !runtimeAbortController.signal.aborted
+              ) {
+                return "finished" as const;
+              }
+              throw error;
+            });
+          const waitResult = await Promise.race([
+            effectsFinished.then(() => "finished" as const),
+            wake,
+          ]);
+          if (waitResult === "external_wake") {
+            return "external_wake";
+          }
+        } finally {
+          runtimeAbortController.signal.removeEventListener("abort", abortWake);
+          if (!wakeAbortController.signal.aborted) {
+            wakeAbortController.abort();
+          }
+        }
+      }
+      return "finished";
+    };
     try {
       result = await runForegroundPass({
         initialMailboxImport,
@@ -1010,6 +1073,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
+      trackMailboxPostCheckpointEffects(result);
       runtimeStateDirty ||= result.runtimeStateDirty;
       if (result.runtimeStateDirty) {
         markIdleCheckpointDeadlineAfterDirtyWork();
@@ -1038,6 +1102,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           workspace: passWorkspace,
         });
         pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
+        trackMailboxPostCheckpointEffects(result);
         if (result.runtimeStateDirty) {
           markIdleCheckpointDeadlineAfterDirtyWork();
         }
@@ -1119,6 +1184,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stage: "workspace.checkpoint.idle_shutdown",
           status: "start",
         });
+        const mailboxEffectsWaitResult =
+          await waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint();
+        if (mailboxEffectsWaitResult === "external_wake") {
+          if (isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)) {
+            checkpointStartedForHostDeadline = true;
+          } else {
+            await runIdleWakeForegroundPass({
+              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+              requestIdKind: "idle-wake",
+            });
+            continue;
+          }
+        } else if (
+          !checkpointStartedForHostDeadline
+          && !isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)
+          && consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null)
+        ) {
+          await runIdleWakeForegroundPass({
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+          continue;
+        }
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
@@ -1180,6 +1268,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             workspace: checkpoint.workspace,
           });
           pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
+          trackMailboxPostCheckpointEffects(result);
           idleCheckpointStartByMs = result.runtimeStateDirty
             ? Date.now() + idleCheckpointDelayMs
             : null;

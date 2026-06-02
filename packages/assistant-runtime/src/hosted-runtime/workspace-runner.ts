@@ -240,7 +240,6 @@ interface HostedMailboxPostCheckpointEffectsResult {
 }
 
 const HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS = 15_000;
-const HOSTED_POST_ASSISTANT_IMPORT_EFFECT_TIMEOUT_MS = 5_000;
 
 export interface HostedWorkspaceRunnerResult {
   afterDurableCheckpoint: readonly HostedWorkspaceDurableCheckpointEffect[];
@@ -248,6 +247,7 @@ export interface HostedWorkspaceRunnerResult {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
+  mailboxPostCheckpointEffectsFinished: Promise<void> | null;
   runtimeStateDirty: boolean;
 }
 
@@ -396,6 +396,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
+      mailboxPostCheckpointEffectsFinished: null,
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
@@ -419,6 +420,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     workspace: input.workspace,
   };
   let assistantContextSnapshotDirty = false;
+  let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     initialMailboxImport,
@@ -507,14 +509,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       }
     }
     await foregroundMailboxImportLoop.stop();
-    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+    mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
       phase: "import",
     });
   } catch (error) {
     await foregroundMailboxImportLoop.stop();
-    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+    scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
       phase: "import",
@@ -533,6 +535,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
+    mailboxPostCheckpointEffectsFinished,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
 }
@@ -1289,6 +1292,29 @@ async function runHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
   });
 }
 
+function scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  input: HostedWorkspaceRunnerInput;
+  phase: "active_turn_input" | "import";
+}): Promise<void> | null {
+  const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
+  if (effects.length === 0) {
+    return null;
+  }
+  const effectsFinished = runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+    effects,
+    input: input.input,
+    phase: input.phase,
+  }).catch((error: unknown) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: "hosted mailbox post-checkpoint effects",
+    });
+  });
+  void effectsFinished;
+  return effectsFinished;
+}
+
 async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   input: HostedWorkspaceRunnerInput;
@@ -1303,7 +1329,7 @@ async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffo
     signal: input.signal ?? input.input.signal ?? null,
     timeoutMs: input.phase === "active_turn_input"
       ? HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS
-      : HOSTED_POST_ASSISTANT_IMPORT_EFFECT_TIMEOUT_MS,
+      : null,
   });
 }
 
