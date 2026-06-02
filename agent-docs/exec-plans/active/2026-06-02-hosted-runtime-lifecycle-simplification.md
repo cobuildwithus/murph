@@ -10,13 +10,13 @@ should not normally spawn and stop a fresh Codex app-server process.
 The first hard-cut target is:
 
 ```text
-Temporal hosted workflow
-  -> UserRunner Durable Object
-    -> warm RunnerContainer
-      -> thin container-entrypoint active invocation slot
-        -> package-owned hosted runtime invocation
-          -> local Murph runtime primitives
-            -> assistant-engine single-use Codex app-server per turn
+UserRunner Durable Object
+  -> warm RunnerContainer
+    -> container-entrypoint active invocation slot
+      -> explicit HostedInvocationScope
+      -> package-owned runHostedWorkspaceInvocation(...)
+      -> single-use assistant-engine Codex app-server
+      -> container process cleanup proof
 ```
 
 Warm Codex app-server reuse is a separate follow-on project after the per-run
@@ -79,6 +79,12 @@ Temporal hosted workflow
 - The cut does not introduce long-lived rollout flags, compatibility services,
   or a permanent dual-path architecture. Rollback is by deploying the previous
   known-good image/version, not by carrying the old runtime stack forward.
+- Milestone 1 direct invocation preserves every non-lifecycle side effect of the
+  isolated runner path: browser-vault warm-source clearing, warm-root creation,
+  native parser-toolchain rebinding, env projection, and redacted error
+  classification.
+- Milestone 1 deploy skew is handled by an architecture/version handshake and
+  warm-container reset, not by request-shape compatibility branches.
 
 ## First-Principles Corrections
 
@@ -94,6 +100,10 @@ much lifecycle machinery. A later first-principles pass tightened this further:
 - Direct hosted runtime and warm Codex are separate projects. The first project
   deletes the per-invocation Node child while keeping Codex single-use. The
   second project introduces a single-slot hosted Codex state machine.
+- Milestone 1 must explicitly forbid warm-process infrastructure. No managed
+  process registry, warm Codex process hooks, app-server session cache,
+  lingering direct-runtime feature flag, package-wide migration, or new
+  Cloudflare runtime service wrapper belongs in the first cut.
 - Warm Codex app-server reuse stays in scope, but its process state belongs to
   `packages/assistant-engine`, where Codex RPC state and live-turn state already
   live.
@@ -115,6 +125,9 @@ much lifecycle machinery. A later first-principles pass tightened this further:
 - Wake authority should stay one coherent boundary. The current
   RunnerContainer/DO write-fence validation remains authoritative unless a
   later transport change deliberately adds route-level validation.
+- Hosted invocation code may read only `HostedInvocationScope`, not ambient
+  `process.env`. Supervisor code may read only frozen startup config, not live
+  invocation env.
 
 ## Current Code Shape
 
@@ -335,6 +348,38 @@ entrypoint and `RunnerContainer` lifecycle owners.
 Do not add `apps/cloudflare` modules that own local Murph runtime semantics.
 Cloudflare-specific code should implement ports and transport only.
 
+Milestone 1 target:
+
+```text
+UserRunner DO
+  -> warm RunnerContainer
+    -> container-entrypoint active invocation slot
+      -> explicit HostedInvocationScope
+      -> package-owned runHostedWorkspaceInvocation(...)
+      -> single-use assistant-engine Codex app-server
+      -> container process cleanup proof
+```
+
+Milestone 1 forbidden list:
+
+- no managed process registry
+- no warm Codex process hooks
+- no app-server session cache
+- no direct-runtime feature flag kept past the cut
+- no package-wide migration unless needed to delete the child
+- no new Cloudflare runtime service wrapper
+
+Anything beyond that belongs after the child is gone. The existing container
+already has the Milestone 1 primitives: one active invocation and post-run
+process cleanup.
+
+Milestone 2 target:
+
+```text
+Same as Milestone 1, except assistant-engine may keep exactly one verified
+Codex app-server root process warm when identity and authority rules allow it.
+```
+
 ### Package-Owned Invocation Primitive
 
 Replace the detached child with one package-owned callable primitive exported
@@ -363,8 +408,10 @@ This primitive owns Murph runtime behavior. `container-entrypoint.ts` owns only:
 
 Implementation shape:
 
-- Move package-owned logic out of `apps/cloudflare/src/runtime-bridge-workspace.ts`
-  into `packages/assistant-runtime` or lower package-owned helpers.
+- Move code into packages only when it removes hosted runtime semantics from
+  Cloudflare. Keep Cloudflare-specific transport adapters in Cloudflare. Do not
+  block child deletion on pure code motion that does not change the lifecycle
+  boundary.
 - Keep Cloudflare-specific fetch, R2, Durable Object, and outbound-control
   adapters in `apps/cloudflare` as implementations of `HostedRuntimePlatform`
   ports.
@@ -377,6 +424,14 @@ Implementation shape:
   `process.env`.
 - Create one `RuntimeWakeSignal` per active invocation.
 - Keep the same mailbox payload decoder and workspace bridge options.
+- Preserve all non-lifecycle side effects of the isolated runner path,
+  including browser-vault warm-source clearing, per-user warm-root creation,
+  safe root permissions, native parser-toolchain rebinding, env projection, and
+  redacted config/error classification.
+- Treat UserRunner's runtime config as the launch spec except for
+  container-image facts such as native parser tool paths. Those remain container
+  facts and must not be trusted from Worker-provided typed paths across the
+  Worker-to-container seam.
 - Call the package-owned hosted invocation function directly.
 - Return the existing `HostedWorkspaceInvocationResult`.
 - Delete `node-runner.ts`, `node-runner-isolated.ts`,
@@ -430,6 +485,11 @@ Required behavior:
   in this plan.
 - Compute immutable entrypoint constants at startup, including app/image root,
   runner bundle manifest path, and base supervisor env.
+- Read immutable supervisor config into a frozen startup object.
+- Build platform adapters from the frozen startup object.
+- Delete, neutralize, or otherwise make unreachable raw `process.env` entries
+  that hosted invocation code must never see.
+- Fail tests if invocation code reads raw `process.env` for per-run truth.
 - Make `/health` use only those immutable constants, not `process.cwd()` or
   invocation env. During an active invocation, `/health` may return a smaller
   response if that keeps the route independent.
@@ -441,6 +501,44 @@ Required behavior:
 Hard-cut gate: no required hosted runtime path reads the supervisor's ambient
 `process.env` or `process.cwd()` for per-invocation authority, provider
 transport config, vault root, operator home, or working directory.
+
+Long-term rule:
+
+- hosted invocation code reads only `HostedInvocationScope`, never ambient
+  `process.env`
+- supervisor code reads only frozen startup config, never live invocation env
+
+### Per-Invocation Cleanup Scope
+
+Use a small cleanup stack for direct invocation instead of another runtime
+service:
+
+```ts
+const scope = createHostedInvocationCleanupScope();
+
+try {
+  scope.defer(() => clearRuntimeWakeCallback());
+  scope.defer(() => stopCliBridge());
+  scope.defer(() => removeAbortListener());
+  return await runHostedWorkspaceInvocation(...);
+} finally {
+  await scope.dispose();
+}
+```
+
+Every per-invocation resource must either be returned from the package call or
+registered in the cleanup scope before it can leak.
+
+Resources that belong in this cleanup scope include:
+
+- wake callback
+- pending wake state
+- CLI bridge
+- temp roots
+- active-turn registration
+- abort listeners
+- progress delivery
+- any compatibility env/cwd shim while it still exists
 
 ### Wake Authority Boundary
 
@@ -466,6 +564,48 @@ Target behavior:
 - If a future route-level body is added, validate attempt id, lease generation,
   and user there too; do not split semantics between two half-authoritative
   boundaries.
+
+### Boring Health Route
+
+Keep `/health` deterministic and cheap. It should report only:
+
+- process alive
+- hosted runtime architecture version
+- image/bundle architecture version
+- active job count
+- poisoned flag
+- last cleanup status if already known
+
+Do not make `/health` perform full `/proc` scanning, deep warm-Codex identity
+verification, or expensive runtime checks. Expensive proof belongs at the points
+that decide whether state may survive:
+
+- before accepting an invocation if a warm expected process exists
+- after every invocation
+- before keeping the container warm
+- on explicit reset/shutdown
+
+Health is a status route, not a second lifecycle owner.
+
+### Architecture Version Handshake
+
+Avoid deploy-skew compatibility matrices with one explicit architecture/version
+handshake:
+
+- `/health` returns `hostedRuntimeArchitectureVersion`
+- invocation requests include the expected architecture version
+- the entrypoint rejects a version mismatch with a reset-worthy error
+- `RunnerContainer` destroys the warm container on version mismatch
+
+This covers:
+
+- new Worker with old warm container
+- old Worker with new warm container
+- new request shape with old entrypoint
+- old request shape with new entrypoint
+
+Rollback remains previous-image redeploy plus warm-container reset. Do not keep
+old/new request-shape branches as a long-lived compatibility layer.
 
 ### Warm Codex Root Process Tracking
 
@@ -740,8 +880,16 @@ during an invocation independent of invocation env/cwd:
 
 - compute immutable app/image root at startup
 - compute immutable runner bundle manifest path at startup
-- capture base supervisor env at startup for non-invocation configuration only
-- make `/health` read from immutable paths/constants
+- capture and freeze base supervisor env/config at startup for non-invocation
+  configuration only
+- create platform adapters from frozen startup config, not raw live env
+- neutralize or make unreachable raw env entries that hosted invocation code
+  must never see
+- make `/health` read from immutable paths/constants and keep it cheap: process
+  alive, architecture version, active job count, poisoned flag, and last cleanup
+  status only
+- add a `hostedRuntimeArchitectureVersion` handshake between RunnerContainer and
+  entrypoint, and destroy the warm container on mismatch
 - keep `/internal/runtime-wake` payloadless and independent of env/cwd
 
 Success: `/health` and `/internal/runtime-wake` are safe while any remaining
@@ -749,7 +897,8 @@ compatibility shim mutates env/cwd during development.
 
 ### Step 2: Move Runtime Bridge Ownership Into Packages
 
-Move package-owned runtime bridge behavior out of Cloudflare:
+Move package-owned runtime bridge behavior out of Cloudflare only where it
+removes hosted runtime semantics from Cloudflare:
 
 - snapshot/checkpoint construction that operates through
   `HostedRuntimeWorkspaceSnapshotPort`
@@ -768,7 +917,8 @@ Keep in Cloudflare only the platform-specific adapters:
 
 Success: `apps/cloudflare` builds `HostedRuntimePlatform` and
 `HostedInvocationScope`, then calls a package function. It does not
-assemble Murph assistant runtime behavior.
+assemble Murph assistant runtime behavior. Do not block child deletion on pure
+code motion that does not change the lifecycle boundary.
 
 ### Step 3: Remove Ambient Hosted Env/Cwd
 
@@ -789,9 +939,16 @@ working directory.
 Change `container-entrypoint.ts` to:
 
 - parse the existing invocation request
+- verify the expected hosted runtime architecture version
 - validate the already-built runtime spec from UserRunner
 - compute explicit roots/context
 - create one invocation `RuntimeWakeSignal`
+- register wake callbacks, CLI bridge stop, abort listeners, temp roots,
+  progress delivery, and any temporary env/cwd compatibility shim in a small
+  per-invocation cleanup scope
+- preserve browser-vault warm-source clearing, per-user warm-root creation,
+  safe permissions, parser-toolchain rebinding to container-image paths, env
+  projection, and redacted config/error classification
 - build Cloudflare platform ports
 - call `runHostedWorkspaceInvocation`
 - run existing process cleanup
@@ -806,18 +963,25 @@ or alternate production path.
 Success: no normal hosted invocation spawns the Node runtime child, and the
 container has no dynamic node-runner loader.
 
+Direct-mode abort rule: if the request aborts before the invocation reaches a
+known durable return boundary and cleanup cannot prove all in-process state is
+idle, do not keep the container warm. Do not use partial reset heuristics.
+
 ### Step 5: Add A Boring Warm-Container Recycle Policy
 
 The removed child was an automatic memory reset. Keep the replacement simple:
 
 - destroy the warm container after a fixed number of successful hosted
   invocations
-- destroy the warm container when RSS/cgroup memory crosses a configured
-  threshold
 - destroy the warm container after any ambiguous in-process cleanup failure
 
 This is not a new owner or healer. It is a safety valve while the warm container
 now owns more lifetime.
+
+Memory threshold is observation-first. Keep emitting RSS/cgroup diagnostics,
+but start Milestone 1 with count-based recycle plus ambiguous-failure recycle.
+Add memory thresholds only after direct invocation data proves a stable
+threshold.
 
 Success: hosted invocation does not require a complex memory/state recovery
 system.
@@ -845,6 +1009,19 @@ Operational checks after deploy:
 Success: hosted steady state is one warm container plus package-owned hosted
 runtime invocation plus single-use Codex, with Cloudflare remaining a thin
 platform adapter.
+
+State that must not exist after Milestone 1:
+
+- `node-runner.ts` is imported by `container-entrypoint.ts`
+- `node-runner-child` is built into the normal runtime path
+- child IPC result/wake schemas are used by production code
+- successful invocation SIGKILLs a runtime Node child
+- hosted invocation path calls `withHostedProcessEnvironment`
+- hosted runtime reads `process.cwd()` for vault root
+- hosted runtime reads `process.env` for per-invocation authority
+- `container-entrypoint.ts` dynamically loads `node-runner`
+- warm Codex process can survive an invocation
+- any long-lived child process is expected inside the runtime
 
 ### Step 7: Refactor Codex Without Warming
 
@@ -931,18 +1108,36 @@ Update or add tests for:
   context
 - package-owned invocation uses explicit projected env instead of supervisor env
 - package-owned invocation uses explicit `vaultRoot` instead of supervisor cwd
+- package-owned invocation cannot read raw `process.env` for per-run truth
 - package-owned invocation exposes wake readiness without IPC
+- direct path preserves browser-vault warm-source clearing before each
+  invocation
+- direct path computes the same per-user warm root and creates required roots
+  with safe permissions
+- direct path rebinds native parser toolchain to container-image paths and does
+  not trust Worker-provided typed tool paths across the Worker-to-container seam
+- direct path preserves config-error classification and redacted diagnostics
 - entrypoint rejects concurrent invocations
 - entrypoint records pending wake while runtime is starting
 - entrypoint delivers pending wake after runtime becomes ready
 - entrypoint clears wake callback and pending wake state after every invocation
 - `/health` remains correct while an invocation is active and never depends on
   invocation cwd
+- `/health` stays cheap and does not perform full `/proc` scans or deep
+  warm-process identity checks
+- `/health` returns the hosted runtime architecture version
+- invocation architecture-version mismatch returns a reset-worthy error
+- `RunnerContainer` destroys the warm container on architecture-version mismatch
+- per-invocation cleanup scope disposes wake callback, pending wake state, CLI
+  bridge, abort listeners, temp roots, progress delivery, and compatibility
+  shims on success, failure, abort, and timeout
 - container process cleanup kills leaked descendants
 - container process cleanup kills daemonized same-UID orphans
 - failed cleanup exits/destroys the warm shell
-- warm-container recycle policy triggers on max successful invocations,
-  memory threshold, and ambiguous cleanup failure
+- warm-container recycle policy triggers on max successful invocations and
+  ambiguous cleanup failure
+- memory/cgroup diagnostics remain observable, but memory-threshold recycling is
+  not required for Milestone 1
 - package-owned invocation preserves env projection
 - package-owned invocation does not expose control-plane env through runtime
   tests
@@ -955,6 +1150,10 @@ Update or add tests for:
   - runtime context metadata
   - identity digests
   - runtime health payloads
+- static deletion-proof checks fail if Milestone 1 production code still uses
+  `node-runner`, child IPC result/wake schemas, dynamic node-runner loading,
+  `withHostedProcessEnvironment`, hosted `process.cwd()` vault-root reads,
+  hosted `process.env` authority reads, or any expected warm child process
 
 ### Codex Refactor Tests
 
@@ -1088,12 +1287,18 @@ Expected deletion or heavy simplification in the hard cut:
 
 Expected retention:
 
+- browser-vault warm-source clearing before each invocation
+- per-user warm-root computation and safe root creation
 - runner env policy
 - hosted secret filtering
+- parser-toolchain rebinding to container-image paths
+- config-error classification and redacted diagnostics
 - runtime platform construction
 - mailbox payload decode bridge
 - workspace snapshot bridge
 - runtime wake semantics
+- architecture-version mismatch reset semantics
+- per-invocation cleanup scope for in-process resources
 - container process cleanup
 - Codex shell env allowlist
 
@@ -1112,10 +1317,15 @@ Mitigation:
 
 - move explicit `HostedInvocationScope` value objects into the package-owned
   hosted invocation API
+- read immutable supervisor config into a frozen startup object
+- create platform adapters from frozen startup config
+- delete, neutralize, or otherwise make unreachable raw env values that hosted
+  invocation code must never see
 - keep single active invocation
 - keep `/health` and `/internal/runtime-wake` independent of ambient env/cwd
 - restart warm container on restore failure
-- fail tests if hosted invocation uses `withHostedProcessEnvironment`
+- fail tests if hosted invocation uses `withHostedProcessEnvironment` or reads
+  raw `process.env` for per-run truth
 
 ### Risk: Leaked Tool Process Survives Warm Reuse
 
@@ -1194,10 +1404,13 @@ controllers, CLI bridges, pending RPCs, and module-level state by exiting.
 Mitigation:
 
 - clear wake callback and pending wake state in `finally`
+- register wake callbacks, CLI bridge stop, abort listeners, temp roots,
+  progress delivery, and compatibility shims in a per-invocation cleanup scope
 - assert active-turn controller cleanup
 - assert no pending RPCs after success/failure
 - reset or destroy warm shell on ambiguous abort
-- include in-process state health in `/health`
+- keep `/health` boring; expensive cleanup proof runs after invocations and
+  before keeping the container warm, not on every health check
 
 ### Risk: Deploy Skew Or Temporal Replay Changes
 
@@ -1207,10 +1420,42 @@ would affect Temporal compatibility.
 
 Mitigation:
 
+- add hosted runtime architecture version to `/health`
+- include expected architecture version in invocation requests
+- reject architecture-version mismatch with a reset-worthy error
+- destroy warm containers on version mismatch
+- avoid old/new request-shape compatibility branches
 - keep Temporal workflow signal/activity order unchanged for this plan
 - document that deployment is Cloudflare/container and assistant-engine internal
   unless a later change proves otherwise
 - add Temporal replay/version proof before any orchestration contract changes
+
+### Risk: Child Deletion Loses Non-Lifecycle Side Effects
+
+Cause: `node-runner.ts` and `node-runner-isolated.ts` do more than spawn a
+child process.
+
+Mitigation:
+
+- preserve browser-vault warm-source clearing before each invocation
+- preserve per-user warm-root computation and safe root creation
+- preserve native parser-toolchain rebinding to container-image paths
+- preserve env projection and Codex shell env allowlist
+- preserve config-error classification and redacted diagnostics
+- test these behaviors on the direct path before deleting the child stack
+
+### Risk: Health Becomes A Lifecycle Owner
+
+Cause: adding warm-process checks to `/health` can make health checks expensive
+or stateful.
+
+Mitigation:
+
+- keep `/health` limited to process-alive, architecture version, active job
+  count, poisoned flag, and last known cleanup status
+- run expensive process proof only before accepting an invocation when needed,
+  after every invocation, before keeping the container warm, and during reset
+  or shutdown
 
 ## Rollback Plan
 
@@ -1241,17 +1486,30 @@ Rollback steps:
 Milestone 1: delete the per-run Node child while keeping Codex single-use.
 
 1. Freeze the ownership boundary and delete list.
-2. Make entrypoint `/health` and `/internal/runtime-wake` env/cwd independent.
-3. Move package-owned runtime bridge behavior out of Cloudflare.
-4. Add explicit `HostedInvocationScope` value objects and remove hosted-path
+2. Add the Milestone 1 forbidden list to the implementation checklist: no
+   managed process registry, no warm Codex hooks, no app-server cache, no
+   persistent feature flag, no package-wide migration, and no Cloudflare runtime
+   service wrapper.
+3. Freeze supervisor startup config, make `/health` and
+   `/internal/runtime-wake` env/cwd independent, and add the architecture-version
+   handshake.
+4. Move package-owned runtime bridge behavior out of Cloudflare only where it
+   removes hosted runtime semantics.
+5. Add explicit `HostedInvocationScope` value objects and remove hosted-path
    ambient env/cwd use.
-5. Replace the entrypoint runtime call and delete the Node child stack in the
+6. Add the per-invocation cleanup scope.
+7. Preserve browser-vault warm-source clearing, warm-root creation,
+   parser-toolchain rebinding, env projection, and redacted config/error
+   classification on the direct path.
+8. Replace the entrypoint runtime call and delete the Node child stack in the
    same change.
-6. Keep Codex app-server single-use per turn.
-7. Add the warm-container recycle safety valve.
-8. Prove focused tests and hosted-local E2E.
-9. Deploy Milestone 1 as one hard cut with previous-image rollback.
-10. Update durable docs for the direct hosted runtime architecture.
+9. Keep Codex app-server single-use per turn.
+10. Add count-based warm-container recycle and ambiguous-failure recycle; leave
+   memory-threshold recycle observation-first.
+11. Prove focused tests, deletion-proof checks, and hosted-local E2E.
+12. Deploy Milestone 1 as one hard cut with previous-image rollback plus
+   warm-container reset on architecture-version mismatch.
+13. Update durable docs for the direct hosted runtime architecture.
 
 Milestone 2: introduce warm Codex only after Milestone 1 is stable.
 
@@ -1272,7 +1530,13 @@ Milestone 2: introduce warm Codex only after Milestone 1 is stable.
 - No new scheduler.
 - No new queue.
 - No new durable demand owner.
+- No managed process registry in Milestone 1.
+- No warm Codex process hooks in Milestone 1.
+- No app-server session cache in Milestone 1.
+- No new Cloudflare runtime service wrapper.
 - No long-lived hosted CLI bridge in this plan; keep it per-invocation.
+- No memory-threshold recycle gate in Milestone 1 until direct invocation data
+  proves a stable threshold.
 - No weakening of write-fence authorization.
 - No weakening of secret/env projection.
 - No broad hosted protocol redesign.
