@@ -529,8 +529,7 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 
 - mailbox import watermarks
 - staged assistant input events and accepted-input journal state
-- fixed auto-reply channel enablement boundaries
-- auto-reply terminal handling evidence
+- auto-reply channel state, including channel enablement, `eligibleAfter`, and terminal handling evidence
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy

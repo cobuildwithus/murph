@@ -103,7 +103,13 @@ type HostedRuntimeBridgeReadCurrentLease = () =>
   | Promise<HostedRuntimeBridgeCheckpointLease | null>;
 type HostedRuntimeBridgeNormalizedRuntime = Pick<
   ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
-  "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
+  | "commitTimeoutMs"
+  | "forwardedEnv"
+  | "parserToolchain"
+  | "platform"
+  | "platformEnv"
+  | "resolvedConfig"
+  | "userEnv"
 >;
 type HostedWorkspaceIdleCheckpointRequest =
   HostedWorkspaceCheckpointRequest & { reason: "idle_shutdown" };
@@ -1047,11 +1053,7 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
 
 function createHostedWorkspaceBridgeMailboxImporter(input: {
   decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
-  runtime: {
-    forwardedEnv: Readonly<Record<string, string>>;
-    platform: HostedWorkspaceRuntimeJobOptions["platform"];
-    platformEnv: Readonly<Record<string, string>>;
-  } & Pick<HostedRuntimeBridgeNormalizedRuntime, "commitTimeoutMs" | "resolvedConfig" | "userEnv">;
+  runtime: HostedRuntimeBridgeNormalizedRuntime;
   vaultRoot: string;
 }): HostedWorkspaceRuntimeBridgeImportItem {
   return async (item, context) => {
@@ -1107,11 +1109,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   item: HostedWorkspaceRuntimeBridgeImportItemInput;
   context?: HostedWorkspaceRuntimeBridgeImportItemContext;
   decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
-  runtime: {
-    forwardedEnv: Readonly<Record<string, string>>;
-    platform: HostedWorkspaceRuntimeJobOptions["platform"];
-    platformEnv: Readonly<Record<string, string>>;
-  } & Pick<HostedRuntimeBridgeNormalizedRuntime, "commitTimeoutMs" | "resolvedConfig" | "userEnv">;
+  runtime: HostedRuntimeBridgeNormalizedRuntime;
   vaultRoot: string;
 }): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
   if (

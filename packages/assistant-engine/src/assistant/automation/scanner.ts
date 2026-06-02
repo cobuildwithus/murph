@@ -98,7 +98,6 @@ export async function scanAssistantAutomationOnce(input: {
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
-    requestId: input.requestId ?? null,
     signal: input.signal,
     vault: input.vault,
   })
@@ -220,7 +219,6 @@ export async function hasPendingAssistantAutoReplyInput(input: {
     autoReply: input.state.autoReply,
     inputSource: input.inputSource,
     limit: 1,
-    requestId: null,
     signal: input.signal,
     vault: input.vault,
   })
@@ -231,7 +229,6 @@ async function listAssistantReplyCandidates(input: {
   autoReply: AssistantAutomationScanStateProgress['autoReply']
   inputSource: AssistantInputSource
   limit: number
-  requestId: string | null
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutomationCandidate[]> {

@@ -1443,9 +1443,22 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "+15550100000",
       },
     });
+    const parserToolchain = {
+      tools: {
+        ffmpeg: {
+          command: "/app/test-parser-toolchain/ffmpeg",
+        },
+        whisper: {
+          command: "/app/test-parser-toolchain/whisper-cli",
+          modelPath: "/app/test-parser-toolchain/ggml-test.bin",
+        },
+      },
+    } satisfies NonNullable<NormalizedHostedAssistantRuntimeConfig["parserToolchain"]>;
     const decodeCalls: unknown[] = [];
     const importedWakeIds: string[] = [];
+    const importedParserToolchains: NormalizedHostedAssistantRuntimeConfig["parserToolchain"][] = [];
     const preparedWakeIds: string[] = [];
+    const preparedParserToolchains: NormalizedHostedAssistantRuntimeConfig["parserToolchain"][] = [];
     const order: string[] = [];
     const projectionUpdates: unknown[] = [];
 
@@ -1462,6 +1475,7 @@ describe("hosted mailbox conversation import adapter", () => {
       async importConversationWake(input) {
         order.push(`import:${input.wake.eventId}`);
         importedWakeIds.push(input.wake.eventId);
+        importedParserToolchains.push(input.runtime.parserToolchain);
         return {
           captureId: "cap_synthetic_conversation_001",
           metrics: {
@@ -1473,9 +1487,10 @@ describe("hosted mailbox conversation import adapter", () => {
       async prepareWakeContext(input) {
         order.push(`prepare:${input.wake.eventId}`);
         preparedWakeIds.push(input.wake.eventId);
+        preparedParserToolchains.push(input.runtime.parserToolchain);
       },
       item,
-      runtime: createRuntime(),
+      runtime: createRuntime({ parserToolchain }),
       stageAssistantInputEvent: createAssistantInputEventStager({
         order,
         projectionUpdates,
@@ -1502,6 +1517,8 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
     assert.deepEqual(preparedWakeIds, ["evt_synthetic_conversation_001"]);
     assert.deepEqual(importedWakeIds, ["evt_synthetic_conversation_001"]);
+    assert.deepEqual(preparedParserToolchains, [parserToolchain]);
+    assert.deepEqual(importedParserToolchains, [parserToolchain]);
     assert.deepEqual(order, [
       "stage:evt_synthetic_conversation_001",
       "prepare:evt_synthetic_conversation_001",
@@ -2443,13 +2460,23 @@ async function writeVaultFile(
 
 function createRuntime(input: Partial<Pick<
   NormalizedHostedAssistantRuntimeConfig,
-  "forwardedEnv" | "platformEnv" | "resolvedConfig" | "userEnv"
+  | "forwardedEnv"
+  | "parserToolchain"
+  | "platformEnv"
+  | "resolvedConfig"
+  | "userEnv"
 >> = {}): Pick<
   NormalizedHostedAssistantRuntimeConfig,
-  "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
+  | "forwardedEnv"
+  | "parserToolchain"
+  | "platform"
+  | "platformEnv"
+  | "resolvedConfig"
+  | "userEnv"
 > {
   return {
     forwardedEnv: input.forwardedEnv ?? {},
+    parserToolchain: input.parserToolchain ?? null,
     platform: {
       artifactStore: {
         async get() {

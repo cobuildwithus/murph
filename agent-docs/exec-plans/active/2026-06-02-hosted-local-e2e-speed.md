@@ -28,15 +28,21 @@ Done:
 - Linq wait helper now avoids nudging while work is in-flight and fails fast on observed runtime errors.
 - Active `workspace_wake` demands now round-trip the demand source through Temporal/Cloudflare and return `retry_later` at the owner recheck instead of re-waking the active runtime.
 - Focused Temporal workflow/activity tests, hosted-orchestrator typecheck, Cloudflare runner/route/env tests, Cloudflare typecheck, and hosted-execution parser tests passed after the source-aware guard.
+- Bounded import-phase mailbox post-checkpoint effects with the same timeout as prompt-prep effects.
+- Confirmed current conversation import projection is inline and currently returns no `afterCheckpoint` effect.
+- Preserved the structured hosted parser toolchain through the Cloudflare workspace bridge into conversation import.
+- Added retry-later backoff coverage for stale retry timestamps.
+- Fresh-bundle hosted-local `linq-webhook` E2E passed 6/6.
 
 Now:
-- Re-running hosted-local scheduled-reminder E2E after source-aware active wake deferral.
+- Holding broad hosted-local matrix while an interactive `pnpm dev` stack is active to avoid competing local state.
 
 Next:
-- Re-run aggregate hosted-local E2E and complete scoped reviews.
+- Re-run aggregate hosted-local E2E in a clean window, or keep validation scoped to fresh-bundle Linq webhook plus focused unit/build/type checks.
+- Complete scoped reviews and handoff.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: whether the scheduled-reminder E2E is now green after preventing stale active workspace wake re-entry.
+- UNCONFIRMED: whether the aggregate hosted-local default matrix is green after the latest changes; the broad run was interrupted intentionally because an interactive dev stack was active.
 
 Working set (files/ids/commands):
 - `packages/hosted-local-harness/src/e2e.ts`
@@ -50,6 +56,12 @@ Working set (files/ids/commands):
 - `packages/assistant-runtime/src/hosted-runtime/events/conversation.ts`
 - `packages/assistant-runtime/test/hosted-runtime-linq-event.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-conversation-event.test.ts`
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts`
+- `packages/assistant-runtime/src/hosted-runtime/workspace-runner.ts`
+- `packages/assistant-runtime/test/hosted-runtime-mailbox-conversation-import.test.ts`
+- `packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts`
+- `apps/cloudflare/src/runtime-bridge-workspace.ts`
+- `apps/cloudflare/test/helpers/hosted-local-wake.test.ts`
 - `packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts`
 - `packages/hosted-orchestrator-temporal/src/activities/ensure-runtime-processing.ts`
 - `packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts`

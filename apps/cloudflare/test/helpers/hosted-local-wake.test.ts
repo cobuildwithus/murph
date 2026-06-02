@@ -149,6 +149,52 @@ it("retries retry_later responses until processing is accepted", async () => {
   }
 });
 
+it("backs off stale retry_later responses instead of spinning requests", async () => {
+  const retryAt = new Date(Date.now() - 1_000).toISOString();
+  const acceptedResponse: HostedRuntimeEnsureProcessingResponse = {
+    action: "woken",
+    kind: "runtime_processing_accepted",
+    recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+    runtimeAttemptId: "runtime-attempt-test",
+  };
+  const responses: HostedRuntimeEnsureProcessingResponse[] = [
+    {
+      kind: "retry_later",
+      retryAt,
+    },
+    acceptedResponse,
+  ];
+  const fetchMock = vi.fn(async () => {
+    const response = responses.shift();
+    if (!response) {
+      throw new Error("Unexpected hosted local wake request.");
+    }
+    return Response.json(response);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const wakePromise = wakeHostedWorkerForLatestPendingWake({
+    harness: {
+      runtimeEnv: {
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
+          TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      stderrTail: () => "",
+      stdoutTail: () => "",
+      workerBaseUrl: "https://worker.example.test",
+    } as HostedLocalDevHarness,
+    timeoutMs: 5_000,
+    userId: "member_local_retry_backoff_123",
+  });
+
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+
+  await expect(wakePromise).resolves.toEqual(acceptedResponse);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it("stops retrying retry_later responses when the wake timeout expires", async () => {
   const retryAt = new Date(Date.now() + 60_000).toISOString();
   const fetchMock = vi.fn(async () => Response.json({

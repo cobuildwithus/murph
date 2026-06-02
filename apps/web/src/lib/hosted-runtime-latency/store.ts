@@ -236,10 +236,10 @@ export async function recordHostedIngressProviderStarted(input: {
       userId: input.authenticatedUserId,
     },
   });
-  const eligibleRows = rows;
-  const matchedIds = new Set(eligibleRows.map((row) => row.assistantInputId).filter(Boolean));
+  const matchedRows = rows;
+  const matchedIds = new Set(matchedRows.map((row) => row.assistantInputId).filter(Boolean));
 
-  await Promise.all(eligibleRows.map((row) => {
+  await Promise.all(matchedRows.map((row) => {
     const shouldUpdateProviderStart = !row.providerStartAt || row.providerStartAt > at;
     const shouldUpdateRuntimeAttempt = !row.runtimeAttemptId && runtimeAttemptId;
 
@@ -264,8 +264,8 @@ export async function recordHostedIngressProviderStarted(input: {
   }));
 
   return {
-    matchedCount: eligibleRows.length,
-    recorded: eligibleRows.length > 0,
+    matchedCount: matchedRows.length,
+    recorded: matchedRows.length > 0,
     unmatchedCount: assistantInputIds.filter((id) => !matchedIds.has(id)).length,
   };
 }

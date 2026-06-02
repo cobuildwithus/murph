@@ -110,11 +110,18 @@ export interface HostedConversationMailboxLocalImportResult {
   metrics: HostedConversationWakeMetrics;
 }
 
+type HostedConversationMailboxRuntime = Pick<
+  NormalizedHostedAssistantRuntimeConfig,
+  | "forwardedEnv"
+  | "parserToolchain"
+  | "platform"
+  | "platformEnv"
+  | "resolvedConfig"
+  | "userEnv"
+>;
+
 export type HostedConversationMailboxLocalImporter = (input: {
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  runtime: HostedConversationMailboxRuntime;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxLocalImportResult>;
@@ -159,10 +166,7 @@ export type HostedConversationMailboxAttachmentEvidenceCaptureLoader = (input: {
 }) => Promise<HostedConversationMailboxAttachmentEvidenceCapture>;
 
 export type HostedConversationMailboxWakeContextPreparer = (input: {
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "resolvedConfig" | "userEnv"
-  >;
+  runtime: HostedConversationMailboxRuntime;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<void>;
@@ -192,10 +196,7 @@ export function createHostedConversationMailboxImportItem(input: {
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  runtime: HostedConversationMailboxRuntime;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }): (
@@ -217,10 +218,7 @@ export async function importHostedConversationMailboxItem(input: {
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
   item: HostedMailboxResolvedImportItem;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
@@ -367,10 +365,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   importConversationWake: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   prepareWakeContext: HostedConversationMailboxWakeContextPreparer;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  runtime: HostedConversationMailboxRuntime;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
@@ -533,10 +528,7 @@ function createHostedConversationAttachmentEvidenceFromCapture(input: {
 }
 
 async function importHostedConversationWakeWithLocalInbox(input: {
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
-  >;
+  runtime: HostedConversationMailboxRuntime;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxLocalImportResult> {

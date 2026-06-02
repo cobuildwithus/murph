@@ -468,7 +468,10 @@ describe("hosted local Linq webhook e2e", () => {
     );
     expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
     expect(assistantProviderBody.includes("fileName: Audio Message.m4a")).toBe(true);
-    expect(assistantProviderBody.includes(hostedLinqVoiceNoteTranscriptText)).toBe(true);
+    expect(
+      assistantProviderBody.includes(hostedLinqVoiceNoteTranscriptText),
+      summarizeProviderAudioRequestShape(assistantProviderBody),
+    ).toBe(true);
     expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
     expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,
@@ -684,6 +687,25 @@ function summarizeProviderImageRequestShape(
       .map((match) => match[1])
       .slice(0, 8),
     routingImageReasons: Array.from(rawBody.matchAll(/routingImageReason: ([A-Za-z0-9-]+)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
+  });
+}
+
+function summarizeProviderAudioRequestShape(rawBody: string): string {
+  return JSON.stringify({
+    hasAttachmentContext: rawBody.includes("Attachment context:"),
+    hasAudioFileName: rawBody.includes("fileName: Audio Message.m4a"),
+    hasParserPendingStatus: rawBody.includes(
+      "Attachment parser status: audio/video transcript is not available yet.",
+    ),
+    hasRawInboxPath: rawBody.includes("raw/inbox/"),
+    hasStoredPath: rawBody.includes("storedPath:"),
+    hasTranscript: rawBody.includes(hostedLinqVoiceNoteTranscriptText),
+    parseStates: Array.from(rawBody.matchAll(/parseState: ([A-Za-z0-9_-]+)/gu))
+      .map((match) => match[1])
+      .slice(0, 8),
+    rawEvidenceStates: Array.from(rawBody.matchAll(/- raw evidence: ([A-Za-z0-9_-]+)/gu))
       .map((match) => match[1])
       .slice(0, 8),
   });

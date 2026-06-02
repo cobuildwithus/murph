@@ -7,8 +7,23 @@ const mocks = vi.hoisted(() => ({
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   createHostedAssistantProgressDeliveryDependencies: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
+  createStoreBackedAssistantInputSource: vi.fn(() => ({
+    listInputCandidates: vi.fn(async () => ({
+      inputs: [],
+      nextCursor: null,
+    })),
+    listNewConversationInputs: vi.fn(async () => ({
+      inputs: [],
+      nextCursor: null,
+    })),
+    refresh: vi.fn(async () => ({
+      progressed: false,
+      reason: "no_new_input",
+    })),
+  })),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
+  hasPendingAssistantAutoReplyInput: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
@@ -25,10 +40,19 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
+  hasPendingAssistantAutoReplyInput: mocks.hasPendingAssistantAutoReplyInput,
   listPendingAssistantAutoReplyLinqCleanupEvidence:
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
 }));
+
+vi.mock("@murphai/assistant-engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/assistant-engine")>();
+  return {
+    ...actual,
+    createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
+  };
+});
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
@@ -93,6 +117,7 @@ beforeEach(() => {
     captureIds: [],
     linqMessageIds: [],
   });
+  mocks.hasPendingAssistantAutoReplyInput.mockResolvedValue(false);
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);

@@ -58,6 +58,10 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   return filePath;
 }
 
+function disableFfmpegLookup() {
+  return { commandCandidates: ["definitely-not-installed-ffmpeg"], allowSystemLookup: false };
+}
+
 async function writeExecutableFile(directory: string, fileName: string, content: string): Promise<string> {
   if (process.platform === "win32" && path.extname(fileName) === "") {
     await writeExternalFile(directory, `${fileName}.js`, content);
@@ -1918,7 +1922,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   const sourceRoot = await makeTempDirectory("murph-parser-worker-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "meal-photo.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "meal-photo.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -1936,10 +1940,10 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "meal-photo.pdf",
+        fileName: "meal-photo.wav",
       },
     ],
     raw: {},
@@ -1960,7 +1964,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
       };
     },
     supports(request) {
-      return (request.preparedKind ?? request.artifact.kind) === "document";
+      return (request.preparedKind ?? request.artifact.kind) === "audio";
     },
     async run() {
       return {
@@ -1983,6 +1987,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 1,
   });
 
@@ -2000,7 +2005,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
   assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-image-parser");
   assert.equal(refreshed.attachments[0]?.derivedPath, results[0]?.manifestPath);
-  assert.equal(refreshed.attachments[0]?.extractedText, "Omelet with spinach and feta");
+  assert.equal(refreshed.attachments[0]?.transcriptText, "Omelet with spinach and feta");
 
   const hits = runtime.searchCaptures({
     text: "spinach",
@@ -2034,7 +2039,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "race.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "race.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2052,10 +2057,10 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "race.pdf",
+        fileName: "race.wav",
       },
     ],
     raw: {},
@@ -2081,7 +2086,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
         };
       },
       supports(request) {
-        return (request.preparedKind ?? request.artifact.kind) === "document";
+        return (request.preparedKind ?? request.artifact.kind) === "audio";
       },
       async run() {
         runCount += 1;
@@ -2103,6 +2108,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
   });
 
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -2118,6 +2124,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
   });
   assert.equal(rerun?.status, "succeeded");
   assert.match(rerun?.manifestPath ?? "", /attempts\/0002\/manifest\.json$/u);
@@ -2127,7 +2134,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
-  assert.equal(refreshed.attachments[0]?.extractedText, "fresh rerun text");
+  assert.equal(refreshed.attachments[0]?.transcriptText, "fresh rerun text");
   assert.match(refreshed.attachments[0]?.derivedPath ?? "", /attempts\/0002\/manifest\.json$/u);
   const refreshedManifest = JSON.parse(
     await fs.readFile(path.join(vaultRoot, refreshed.attachments[0]?.derivedPath ?? ""), "utf8"),
@@ -2163,7 +2170,7 @@ test("attachment parse worker removes published attempts when completion fails a
   const sourceRoot = await makeTempDirectory("murph-parser-worker-post-publish-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "completion-error.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "completion-error.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2181,10 +2188,10 @@ test("attachment parse worker removes published attempts when completion fails a
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "completion-error.pdf",
+        fileName: "completion-error.wav",
       },
     ],
     raw: {},
@@ -2215,7 +2222,7 @@ test("attachment parse worker removes published attempts when completion fails a
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "document";
+          return (request.preparedKind ?? request.artifact.kind) === "audio";
         },
         async run() {
           return {
@@ -2224,6 +2231,7 @@ test("attachment parse worker removes published attempts when completion fails a
         },
       },
     ]),
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 1,
   });
 
@@ -2263,7 +2271,7 @@ test("attachment parse worker removes published attempts when failure finalizati
   const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-finalize-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "failure-finalize.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "failure-finalize.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2281,10 +2289,10 @@ test("attachment parse worker removes published attempts when failure finalizati
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "failure-finalize.pdf",
+        fileName: "failure-finalize.wav",
       },
     ],
     raw: {},
@@ -2319,7 +2327,7 @@ test("attachment parse worker removes published attempts when failure finalizati
             };
           },
           supports(request) {
-            return (request.preparedKind ?? request.artifact.kind) === "document";
+            return (request.preparedKind ?? request.artifact.kind) === "audio";
           },
           async run() {
             return {
@@ -2328,6 +2336,7 @@ test("attachment parse worker removes published attempts when failure finalizati
           },
         },
       ]),
+      ffmpeg: disableFfmpegLookup(),
     }),
     /failure finalization exploded/u,
   );
@@ -2415,7 +2424,7 @@ test("attachment parse worker marks jobs failed when no provider is available", 
   const sourceRoot = await makeTempDirectory("murph-parser-worker-fail-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "scan.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "scan.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2433,10 +2442,10 @@ test("attachment parse worker marks jobs failed when no provider is available", 
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "scan.pdf",
+        fileName: "scan.wav",
       },
     ],
     raw: {},
@@ -2447,6 +2456,7 @@ test("attachment parse worker marks jobs failed when no provider is available", 
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 1,
   });
 
@@ -2470,8 +2480,8 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
   const sourceRoot = await makeTempDirectory("murph-parser-worker-scoped-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstPath = await writeExternalFile(sourceRoot, "first.pdf", "first-document");
-  const secondPath = await writeExternalFile(sourceRoot, "second.pdf", "second-document");
+  const firstPath = await writeExternalFile(sourceRoot, "first.wav", "first-audio");
+  const secondPath = await writeExternalFile(sourceRoot, "second.wav", "second-audio");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2488,10 +2498,10 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: firstPath,
-        fileName: "first.pdf",
+        fileName: "first.wav",
       },
     ],
     raw: {},
@@ -2509,10 +2519,10 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: secondPath,
-        fileName: "second.pdf",
+        fileName: "second.wav",
       },
     ],
     raw: {},
@@ -2532,7 +2542,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
         };
       },
       supports(request) {
-        return (request.preparedKind ?? request.artifact.kind) === "document";
+        return (request.preparedKind ?? request.artifact.kind) === "audio";
       },
       async run() {
         return {
@@ -2546,6 +2556,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 10,
     jobFilters: {
       captureId: first.captureId,
@@ -2566,7 +2577,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
   const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "auto-parse.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "auto-parse.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createParsedInboxPipeline({
     vaultRoot,
@@ -2585,7 +2596,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "document";
+          return (request.preparedKind ?? request.artifact.kind) === "audio";
         },
         async run() {
           return {
@@ -2594,6 +2605,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
         },
       },
     ]),
+    ffmpeg: disableFfmpegLookup(),
   });
 
   const capture = await pipeline.processCapture({
@@ -2609,10 +2621,10 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "auto-parse.pdf",
+        fileName: "auto-parse.wav",
       },
     ],
     raw: {},
@@ -2621,7 +2633,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
   assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
-  assert.equal(refreshed.attachments[0]?.extractedText, "Auto-drained OCR text");
+  assert.equal(refreshed.attachments[0]?.transcriptText, "Auto-drained OCR text");
   assert.equal(
     runtime.listAttachmentParseJobs({
       captureId: capture.captureId,
@@ -2638,7 +2650,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-startup-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "startup.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "startup.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2655,10 +2667,10 @@ test("daemon with parsers drains pending jobs before connector watch work begins
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "startup.pdf",
+        fileName: "startup.wav",
       },
     ],
     raw: {},
@@ -2716,7 +2728,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "document";
+          return (request.preparedKind ?? request.artifact.kind) === "audio";
         },
         async run() {
           return {
@@ -2725,6 +2737,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
         },
       },
     ]),
+    ffmpeg: disableFfmpegLookup(),
     connectors: [connector],
     signal: controller.signal,
   });
@@ -2738,7 +2751,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
     const refreshed = refreshedRuntime.getCapture(capture.captureId);
     assert.ok(refreshed);
     assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
-    assert.equal(refreshed.attachments[0]?.extractedText, "Startup-drained OCR text");
+    assert.equal(refreshed.attachments[0]?.transcriptText, "Startup-drained OCR text");
   } finally {
     refreshedRuntime.close();
   }
@@ -2749,7 +2762,7 @@ test("daemon with parsers skips startup drain when the signal is already aborted
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-aborted-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "aborted.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "aborted.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2766,10 +2779,10 @@ test("daemon with parsers skips startup drain when the signal is already aborted
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "aborted.pdf",
+        fileName: "aborted.wav",
       },
     ],
     raw: {},
@@ -2785,6 +2798,7 @@ test("daemon with parsers skips startup drain when the signal is already aborted
     vaultRoot,
     runtime: daemonRuntime,
     registry: createParserRegistry([]),
+    ffmpeg: disableFfmpegLookup(),
     connectors: [
       {
         id: "aborted-telegram",
@@ -2826,8 +2840,8 @@ test("daemon with parsers leaves startup drain jobs pending when abort arrives b
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstPath = await writeExternalFile(sourceRoot, "first.pdf", "first-document");
-  const secondPath = await writeExternalFile(sourceRoot, "second.pdf", "second-document");
+  const firstPath = await writeExternalFile(sourceRoot, "first.wav", "first-audio");
+  const secondPath = await writeExternalFile(sourceRoot, "second.wav", "second-audio");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2844,10 +2858,10 @@ test("daemon with parsers leaves startup drain jobs pending when abort arrives b
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: firstPath,
-        fileName: "first.pdf",
+        fileName: "first.wav",
       },
     ],
     raw: {},
@@ -2865,10 +2879,10 @@ test("daemon with parsers leaves startup drain jobs pending when abort arrives b
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: secondPath,
-        fileName: "second.pdf",
+        fileName: "second.wav",
       },
     ],
     raw: {},
@@ -2896,7 +2910,7 @@ test("daemon with parsers leaves startup drain jobs pending when abort arrives b
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "document";
+          return (request.preparedKind ?? request.artifact.kind) === "audio";
         },
         async run() {
           parseCount += 1;
@@ -2910,6 +2924,7 @@ test("daemon with parsers leaves startup drain jobs pending when abort arrives b
         },
       },
     ]),
+    ffmpeg: disableFfmpegLookup(),
     connectors: [],
     signal: controller.signal,
   });
@@ -3059,12 +3074,13 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
   const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "auto-fail.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "auto-fail.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createParsedInboxPipeline({
     vaultRoot,
     runtime,
     registry: createParserRegistry([]),
+    ffmpeg: disableFfmpegLookup(),
   });
 
   const capture = await pipeline.processCapture({
@@ -3080,10 +3096,10 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "auto-fail.pdf",
+        fileName: "auto-fail.wav",
       },
     ],
     raw: {},
@@ -3117,7 +3133,7 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
   const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "unknown-document.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "unknown-audio.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -3135,10 +3151,10 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "unknown-document.pdf",
+        fileName: "unknown-audio.wav",
       },
     ],
     raw: {},
@@ -3148,6 +3164,7 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
     vaultRoot,
     runtime,
     registry: createParserRegistry([]),
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 1,
   });
 
@@ -3257,7 +3274,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   const sourceRoot = await makeTempDirectory("murph-parser-rebuild-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "receipt.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "receipt.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -3275,10 +3292,10 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "receipt.pdf",
+        fileName: "receipt.wav",
       },
     ],
     raw: {},
@@ -3298,7 +3315,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
         };
       },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "document";
+          return (request.preparedKind ?? request.artifact.kind) === "audio";
       },
       async run() {
         return {
@@ -3312,6 +3329,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 1,
   });
 
@@ -3321,7 +3339,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   const parsedCapture = runtime.getCapture(capture.captureId);
   assert.ok(parsedCapture);
   assert.equal(parsedCapture.attachments[0]?.parseState, "succeeded");
-  assert.equal(parsedCapture.attachments[0]?.extractedText, "Distinct rebuild-only OCR text");
+  assert.equal(parsedCapture.attachments[0]?.transcriptText, "Distinct rebuild-only OCR text");
   assert.equal(
     runtime.searchCaptures({
       text: "rebuild-only",
@@ -3345,7 +3363,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   assert.ok(rebuilt);
   assert.equal(rebuilt.attachments[0]?.parseState, "pending");
   assert.equal(rebuilt.attachments[0]?.derivedPath ?? null, null);
-  assert.equal(rebuilt.attachments[0]?.extractedText ?? null, null);
+  assert.equal(rebuilt.attachments[0]?.transcriptText ?? null, null);
   assert.equal(
     rebuiltRuntime.searchCaptures({
       text: "rebuild-only",
@@ -3367,7 +3385,7 @@ test("attachment parse worker redacts local paths from stored failure messages",
   const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "failure-document.pdf", "document-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "failure-audio.wav", "wav-bytes-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -3385,10 +3403,10 @@ test("attachment parse worker redacts local paths from stored failure messages",
     text: null,
     attachments: [
       {
-        kind: "document",
-        mime: "application/pdf",
+        kind: "audio",
+        mime: "audio/wav",
         originalPath: imagePath,
-        fileName: "failure-document.pdf",
+        fileName: "failure-audio.wav",
       },
     ],
     raw: {},
@@ -3419,6 +3437,7 @@ test("attachment parse worker redacts local paths from stored failure messages",
     vaultRoot,
     runtime,
     registry,
+    ffmpeg: disableFfmpegLookup(),
     maxJobs: 1,
   });
 

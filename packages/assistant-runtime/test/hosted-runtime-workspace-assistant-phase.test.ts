@@ -3337,20 +3337,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeReason: "assistant",
     }));
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(mocks.hasPendingAssistantAutoReplyInput).toHaveBeenCalledWith({
+    expect(mocks.hasPendingAssistantAutoReplyInput).toHaveBeenCalledWith(expect.objectContaining({
       inputSource: expect.any(Object),
       signal: undefined,
-      state: {
+      state: expect.objectContaining({
         autoReply: [{
           channel: "linq",
           eligibleAfter,
           enabledAt: "2026-04-27T00:00:00.000Z",
         }],
-        cron: [],
-        schemaVersion: 1,
-      },
+      }),
       vault: "/tmp/murph-vault",
+    }));
+  });
+
+  it("runs pending assistant input before idle dirty device sync work", async () => {
+    mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(true);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
     });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:10:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      source: "device_sync_recovery",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalled();
+    expect(mocks.hasPendingAssistantAutoReplyInput).toHaveBeenCalled();
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+    }));
   });
 
   it("uses a full bootstrap checkpoint reason for member activation work", async () => {

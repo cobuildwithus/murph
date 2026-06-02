@@ -65,6 +65,10 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
+  createHostedRuntimeWakeCandidate,
+  selectHostedRuntimeWakeCandidate,
+} from "./wake-candidates.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
 
@@ -242,7 +246,7 @@ interface HostedMailboxPostCheckpointEffectsResult {
   succeeded: number;
 }
 
-const HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS = 15_000;
+const HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS = 15_000;
 
 export interface HostedWorkspaceRunnerResult {
   afterDurableCheckpoint: readonly HostedWorkspaceDurableCheckpointEffect[];
@@ -405,13 +409,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
-  let foregroundConversationInputImported = false;
+  let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
-      onForegroundConversationInputImported: () => {
-        foregroundConversationInputImported = true;
+      onForegroundConversationWorkObserved: () => {
+        foregroundConversationWorkObserved = true;
       },
     });
   const assistantPhaseInput = {
@@ -419,7 +423,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
-    shouldYieldBackgroundMaintenance: () => foregroundConversationInputImported,
+    shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
     workspace: input.workspace,
   };
   let assistantContextSnapshotDirty = false;
@@ -438,7 +442,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
-    if (foregroundConversationInputImported) {
+    if (foregroundConversationWorkObserved) {
       await mergePendingForegroundAssistantInputWake({
         now: input.now,
         result: assistantPhaseResult,
@@ -576,7 +580,7 @@ function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): voi
 function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   input: HostedWorkspaceRunnerInput;
-  onForegroundConversationInputImported?: (() => void) | null;
+  onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
   stop(): Promise<void>;
 } {
@@ -637,7 +641,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           signal: controller.signal,
         });
         if (hasHostedMailboxImportForegroundConversationWork(result)) {
-          input.onForegroundConversationInputImported?.();
+          input.onForegroundConversationWorkObserved?.();
         }
         await notifyHostedActiveTurnInputForMailboxImport({
           input: input.input,
@@ -672,6 +676,7 @@ function hasHostedMailboxImportForegroundConversationWork(
 ): boolean {
   return (
     (result.importResult.assistantInputIds?.length ?? 0) > 0
+    || (result.importResult.conversationImportedCount ?? 0) > 0
     || result.importResult.blocked.some((item) =>
       item.retryable && item.lane === "conversation"
     )
@@ -1014,16 +1019,22 @@ function mergeHostedAssistantWake(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   wakeAt: string;
 }): void {
-  const wakeMs = Date.parse(input.wakeAt);
-  const existingWakeMs = input.result.nextWakeAt
-    ? Date.parse(input.result.nextWakeAt)
-    : NaN;
-  if (Number.isFinite(existingWakeMs) && existingWakeMs <= wakeMs) {
+  const selectedWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      input.result.nextWakeAt ?? null,
+      input.result.nextWakeReason ?? null,
+    ),
+    createHostedRuntimeWakeCandidate(input.wakeAt, input.reason),
+  ]);
+  if (
+    selectedWake.at === input.result.nextWakeAt
+    && selectedWake.reason === input.result.nextWakeReason
+  ) {
     return;
   }
 
-  input.result.nextWakeAt = input.wakeAt;
-  input.result.nextWakeReason = input.reason;
+  input.result.nextWakeAt = selectedWake.at;
+  input.result.nextWakeReason = selectedWake.reason;
 }
 
 async function isAssistantContextSnapshotRefreshPendingBestEffort(
@@ -1339,6 +1350,7 @@ async function runHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
     effects,
     input: input.input,
     phase: "import",
+    timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
   });
 }
 
@@ -1355,6 +1367,7 @@ function scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
     effects,
     input: input.input,
     phase: input.phase,
+    timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
   }).catch((error: unknown) => {
     warnAssistantBestEffortFailure({
       error,
@@ -1377,9 +1390,7 @@ async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffo
     input: input.input,
     phase: input.phase,
     signal: input.signal ?? input.input.signal ?? null,
-    timeoutMs: input.phase === "active_turn_input"
-      ? HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS
-      : null,
+    timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
   });
 }
 

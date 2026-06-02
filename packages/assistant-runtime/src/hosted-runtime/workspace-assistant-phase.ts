@@ -19,9 +19,6 @@ import {
   markAssistantAutoReplyLinqCleanupQueued,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
-  readAssistantAutomationState,
-} from "@murphai/assistant-engine/assistant-store";
-import {
   listConfiguredDeviceSyncConnectTargets,
 } from "@murphai/device-syncd/config";
 
@@ -1012,10 +1009,14 @@ function systemMailboxPreparationRanDeviceSync(
 }
 
 function shouldRunIdleDeviceSyncMaintenance(input: {
+  pendingAssistantInputWakeAt: string | null;
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   shouldYieldAfterSystemMailboxPreparation: boolean;
   systemMailboxPreparation: HostedSystemMailboxPreparation | null;
 }): boolean {
+  if (input.pendingAssistantInputWakeAt) {
+    return false;
+  }
   if (input.shouldYieldAfterSystemMailboxPreparation) {
     return false;
   }
@@ -1276,11 +1277,13 @@ async function runSystemMailboxMaintenancePhase(input: {
     phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const initialProviderCleanupCheckpoint =
     await readHostedProviderCleanupCheckpoint(phaseInput.restored.vaultRoot);
+  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   const initialProviderCleanupDue =
     !shouldYieldAfterSystemMailboxPreparation
     && isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
   const shouldRunDirtyDeviceSyncWorkSource = shouldRunIdleDeviceSyncMaintenance({
     phaseInput,
+    pendingAssistantInputWakeAt,
     shouldYieldAfterSystemMailboxPreparation,
     systemMailboxPreparation,
   });
@@ -1291,6 +1294,14 @@ async function runSystemMailboxMaintenancePhase(input: {
       })
     : null;
   if (!systemMailboxPreparation) {
+    if (pendingAssistantInputWakeAt) {
+      return {
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        result: null,
+      };
+    }
     if (dirtyDeviceSyncMetrics) {
       return {
         continueAssistantLane: false,
@@ -1373,7 +1384,6 @@ async function runSystemMailboxMaintenancePhase(input: {
       ])
     : null;
   const dirtyDeviceSyncWakeAt = dirtyDeviceSyncWake?.at ?? null;
-  const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(systemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(systemMailboxMetricsWakeAt, systemMailboxMetricsWakeReason),

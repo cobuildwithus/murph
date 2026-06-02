@@ -24,3 +24,6 @@ Preserve the invariant that foreground user messages staged as Assistant Input r
 - Focused assistant-runtime hosted runner or phase regression for foreground import wake scheduling.
 - Focused hosted latency store regression for cross-attempt provider start.
 - Package/app scoped typecheck for touched owners where feasible.
+Status: completed
+Updated: 2026-06-02
+Completed: 2026-06-02
