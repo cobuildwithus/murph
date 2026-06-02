@@ -73,6 +73,7 @@ import {
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
   refreshHostedBrowserVaultReplicaFromRuntime,
@@ -190,6 +191,7 @@ export {
 };
 export {
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 export {
   parseHostedRuntimeIssueRecordResponse,
@@ -408,11 +410,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   };
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
+  let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput) => {
       assertRuntimeNotAborted();
       const snapshot = await options.createCheckpointSnapshot(snapshotInput);
       assertRuntimeNotAborted();
+      latestCheckpointSnapshotCleanForWarmReuse =
+        snapshot.localWorkspaceCleanForWarmReuse === true;
       return snapshot;
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
@@ -740,14 +745,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       return invocationResult;
     }
-    if (restored.restoreWasCold) {
+    if (restored.inboxSidecarNeedsRebuild) {
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
     }
     const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
     emitPhaseLog({
       details: {
         inboxReady,
-        rebuild: !inboxReady && restored.restoreWasCold,
+        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
         restoreWasCold: restored.restoreWasCold,
       },
       input,
@@ -758,7 +763,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await raceHostedRuntimeCancellation(
       ensureHostedInboxSidecarReady({
         bestEffort: true,
-        rebuild: !inboxReady && restored.restoreWasCold,
+        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
         requestId,
         vaultRoot: restored.vaultRoot,
       }),
@@ -766,7 +771,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     emitPhaseLog({
       details: {
-        rebuild: !inboxReady && restored.restoreWasCold,
+        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
       },
       input,
       requestId,
@@ -1116,6 +1121,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
+          latestCheckpointSnapshotCleanForWarmReuse = false;
           checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
             assertRuntimeNotAborted,
             checkpointRequestBuilder,
@@ -1147,7 +1153,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stage: "workspace.checkpoint.idle_shutdown",
           status: "done",
         });
+        const durableCheckpointEffectCount = pendingDurableCheckpointEffects.length;
         await runDurableCheckpointEffectsBestEffort();
+        if (
+          latestCheckpointSnapshotCleanForWarmReuse
+          && durableCheckpointEffectCount === 0
+        ) {
+          await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
+            vaultRoot: restored.vaultRoot,
+            workspace: checkpoint.workspace,
+          });
+        }
         clearStagedDeviceSyncDirtyAcks();
         checkpointMetadata.expectedWorkspaceVersion = checkpoint.workspace.version;
         checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;

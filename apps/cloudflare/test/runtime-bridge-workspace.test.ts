@@ -272,6 +272,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
     const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
+    expect(result.localWorkspaceCleanForWarmReuse).toBe(true);
     expect(snapshotRef.archive.fileCount).toBeGreaterThanOrEqual(41);
     expect(workspaceSnapshotUploads.size).toBe(1);
     expect(workspaceSnapshotUploads.get(snapshotRef.objectKey)).toEqual(expect.objectContaining({
@@ -340,6 +341,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
     const uploaded = workspaceSnapshotUploads.get(snapshotRef.objectKey);
 
+    expect(result.localWorkspaceCleanForWarmReuse).toBe(true);
     expect(uploaded).toBeDefined();
     const entries = listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef);
     expect(entries).toContain("vault/note.md");

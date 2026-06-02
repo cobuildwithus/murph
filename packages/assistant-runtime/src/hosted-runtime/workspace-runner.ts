@@ -86,6 +86,7 @@ export interface HostedWorkspaceSnapshotCheckpointMetadata {
 export interface HostedWorkspaceSnapshotCheckpointResult {
   browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   checkpoint?: HostedWorkspaceCheckpointResponse;
+  localWorkspaceCleanForWarmReuse?: boolean;
   snapshotRef: HostedWorkspaceCheckpointRequest["snapshotRef"];
 }
 

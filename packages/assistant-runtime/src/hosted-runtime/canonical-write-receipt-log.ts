@@ -27,6 +27,12 @@ export interface HostedCanonicalWriteReceiptLogUpdate {
   logRef: HostedCanonicalWriteReceiptContentRef;
 }
 
+export interface HostedCanonicalWriteReceiptLogStatusFingerprint {
+  byteSize: number;
+  entryCount: number;
+  sha256: string;
+}
+
 export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   artifactStore: HostedRuntimeArtifactStore;
   previousStatus: HostedRuntimeRedactedJson | null | undefined;
@@ -81,6 +87,31 @@ export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   }
 
   return parseHostedCanonicalWriteReceiptLog(bytes).entries;
+}
+
+export function readHostedCanonicalWriteReceiptLogStatusFingerprint(
+  status: HostedRuntimeRedactedJson | null | undefined,
+): HostedCanonicalWriteReceiptLogStatusFingerprint | null {
+  const sha256 = status?.[LOG_SHA_STATUS_KEY];
+  const byteSize = status?.[LOG_SIZE_STATUS_KEY];
+  const entryCount = status?.[LOG_COUNT_STATUS_KEY];
+  if (sha256 === undefined && byteSize === undefined && entryCount === undefined) {
+    return null;
+  }
+  if (typeof sha256 !== "string" || !isSha256(sha256)) {
+    throw new Error("Hosted canonical write receipt log checkpoint ref has an invalid sha256.");
+  }
+  if (!isNonNegativeInteger(byteSize)) {
+    throw new Error("Hosted canonical write receipt log checkpoint ref has an invalid size.");
+  }
+  if (!isNonNegativeInteger(entryCount)) {
+    throw new Error("Hosted canonical write receipt log checkpoint ref has an invalid count.");
+  }
+  return {
+    byteSize,
+    entryCount,
+    sha256,
+  };
 }
 
 function readHostedCanonicalWriteReceiptLogRefFromStatus(

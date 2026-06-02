@@ -341,6 +341,7 @@ async function createHostedWorkspaceV2Snapshot(
   input: HostedWorkspaceBridgeV2SnapshotInput,
 ): Promise<{
   checkpoint?: HostedWorkspaceCheckpointResponse;
+  localWorkspaceCleanForWarmReuse: boolean;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }> {
   const startedAt = Date.now();
@@ -376,6 +377,7 @@ async function createHostedWorkspaceV2Snapshot(
   let encryptedTemporaryDirectoryPath: string | null = null;
   let snapshotSession: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startSnapshotSession"]>> | null = null;
   let checkpointAttempted = false;
+  let localWorkspaceCleanForWarmReuse = false;
   let prunedRuntimeSymlinkCount = 0;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
@@ -564,10 +566,14 @@ async function createHostedWorkspaceV2Snapshot(
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
-    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
-      plan: input.legacyMaterialization,
-      vaultRoot: input.vaultRoot,
-    }).catch((clearError) => {
+    try {
+      await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+        plan: input.legacyMaterialization,
+        vaultRoot: input.vaultRoot,
+      });
+      localWorkspaceCleanForWarmReuse = true;
+    } catch (clearError) {
+      localWorkspaceCleanForWarmReuse = false;
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
@@ -579,7 +585,7 @@ async function createHostedWorkspaceV2Snapshot(
         phase: "checkpoint",
         userId: input.userId,
       });
-    });
+    }
   } catch (error) {
     const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
     const abortedSnapshotSession = snapshotSession;
@@ -672,6 +678,7 @@ async function createHostedWorkspaceV2Snapshot(
 
   return {
     ...(checkpoint ? { checkpoint } : {}),
+    localWorkspaceCleanForWarmReuse,
     snapshotRef,
   };
 }

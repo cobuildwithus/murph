@@ -1,4 +1,5 @@
-import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -8,6 +9,9 @@ import {
   type HostedCanonicalWriteReceiptContentRef,
   type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
+import {
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
@@ -20,6 +24,9 @@ import {
   readHostedExecutionSnapshotHotRef,
   isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   clearHostedAssistantRuntimeHotState,
   clearHostedCodexContinuityRestoreRoot,
@@ -43,6 +50,8 @@ import {
 } from "./runtime-logs.ts";
 import {
   readHostedCanonicalWriteReceiptLogEntries,
+  readHostedCanonicalWriteReceiptLogStatusFingerprint,
+  type HostedCanonicalWriteReceiptLogStatusFingerprint,
 } from "./canonical-write-receipt-log.ts";
 
 import {
@@ -70,6 +79,9 @@ const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-re
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
 const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
+const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_FILE_NAME = ".hosted-workspace-clean-checkpoint.json";
+const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA =
+  "murph.hosted-workspace-clean-checkpoint.v1";
 
 type HostedCodexContinuityRepairReason =
   | "manifest_invalid_json"
@@ -91,6 +103,7 @@ export interface HostedWorkspaceRuntimeRestoreResult
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
+  inboxSidecarNeedsRebuild: boolean;
   restoreWasCold: boolean;
 }
 
@@ -120,7 +133,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
-  const restored = await createHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
+  const restored = readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
@@ -134,6 +147,21 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
     if (!input.platform.workspaceSnapshotPort) {
       throw new Error("Hosted workspace snapshot v2 restore requires a workspace snapshot port.");
+    }
+    const warmRestored = await tryRestoreHostedWorkspaceFromCleanCheckpointMarker({
+      logContext: input.logContext ?? null,
+      platform: input.platform,
+      restored,
+      snapshotRef,
+      workspace: input.workspace ?? null,
+    });
+    if (warmRestored) {
+      return {
+        ...warmRestored,
+        mode: "snapshot",
+        restoreWasCold: false,
+        inboxSidecarNeedsRebuild: true,
+      };
     }
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
@@ -171,6 +199,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       }),
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "snapshot",
+      inboxSidecarNeedsRebuild: true,
       restoreWasCold: true,
     };
   }
@@ -192,6 +221,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       }),
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "null-bootstrap",
+      inboxSidecarNeedsRebuild: true,
       restoreWasCold: true,
     };
   }
@@ -300,8 +330,345 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     }),
     materializedArtifactPaths: restoredMaterializedArtifactPaths,
     mode: "snapshot",
+    inboxSidecarNeedsRebuild: restoreWasCold,
     restoreWasCold,
   };
+}
+
+interface HostedWorkspaceCleanCheckpointMarker {
+  receiptLogByteSize: number | null;
+  receiptLogEntryCount: number;
+  receiptLogSha256: string | null;
+  schema: typeof HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA;
+  snapshotFingerprintSha256: string;
+  workspaceVersion: string;
+  writtenAt: string;
+}
+
+interface HostedWorkspaceCleanCheckpointReceiptMarkerFields {
+  receiptLogByteSize: number | null;
+  receiptLogEntryCount: number;
+  receiptLogSha256: string | null;
+}
+
+async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
+  logContext: HostedRuntimeLogContext | null;
+  platform: HostedRuntimePlatform;
+  restored: HostedRestoredExecutionContext;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+  workspace: HostedWorkspaceState | null;
+}): Promise<
+  | (HostedRestoredExecutionContext & {
+      materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
+      materializedArtifactPaths: ReadonlySet<string>;
+    })
+  | null
+> {
+  const expected = tryBuildHostedWorkspaceCleanCheckpointMarker({
+    snapshotRef: input.snapshotRef,
+    workspace: input.workspace,
+  });
+  if (!expected) {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
+    return null;
+  }
+
+  let marker: HostedWorkspaceCleanCheckpointMarker | null = null;
+  try {
+    marker = await readHostedWorkspaceCleanCheckpointMarker(input.restored.vaultRoot);
+  } catch {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
+    return null;
+  }
+  if (!marker) {
+    return null;
+  }
+  if (!sameHostedWorkspaceCleanCheckpointMarker(marker, expected)) {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
+    return null;
+  }
+
+  try {
+    await consumeHostedWorkspaceCleanCheckpointMarker(input.restored.vaultRoot);
+  } catch {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
+    return null;
+  }
+
+  try {
+    await assertHostedWorkspaceWarmCleanRoots(input.restored);
+    await verifyOrRepairRestoredHostedCodexContinuity({
+      logContext: input.logContext,
+      platform: input.platform,
+      restored: input.restored,
+    });
+    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+      vaultRoot: input.restored.vaultRoot,
+    });
+    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      platform: input.platform,
+      status: input.workspace?.redactedStatus ?? null,
+      vaultRoot: input.restored.vaultRoot,
+    });
+    return {
+      ...input.restored,
+      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+        materializedArtifactPaths: restoredMaterializedArtifactPaths,
+        platform: input.platform,
+        restored: input.restored,
+        readBundles: [],
+      }),
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
+    };
+  } catch {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
+    return null;
+  }
+}
+
+export async function writeHostedWorkspaceCleanCheckpointMarkerBestEffort(input: {
+  vaultRoot: string;
+  workspace: HostedWorkspaceState | null;
+}): Promise<boolean> {
+  const snapshotRef = input.workspace?.snapshotRef ?? null;
+  if (!isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.vaultRoot);
+    return false;
+  }
+  const marker = tryBuildHostedWorkspaceCleanCheckpointMarker({
+    snapshotRef,
+    workspace: input.workspace,
+  });
+  if (!marker) {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.vaultRoot);
+    return false;
+  }
+  try {
+    await writeHostedWorkspaceCleanCheckpointMarker(input.vaultRoot, marker);
+    return true;
+  } catch {
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.vaultRoot);
+    return false;
+  }
+}
+
+function tryBuildHostedWorkspaceCleanCheckpointMarker(input: {
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceCleanCheckpointMarker | null {
+  if (!input.workspace || input.workspace.version.trim().length === 0) {
+    return null;
+  }
+  let receiptFields: HostedWorkspaceCleanCheckpointReceiptMarkerFields;
+  try {
+    receiptFields = createHostedWorkspaceCleanCheckpointReceiptMarkerFields(
+      readHostedCanonicalWriteReceiptLogStatusFingerprint(input.workspace.redactedStatus ?? null),
+    );
+  } catch {
+    return null;
+  }
+  return {
+    ...receiptFields,
+    schema: HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA,
+    snapshotFingerprintSha256: buildHostedWorkspaceSnapshotV2FingerprintSha256(input.snapshotRef),
+    workspaceVersion: input.workspace.version,
+    writtenAt: new Date().toISOString(),
+  };
+}
+
+function createHostedWorkspaceCleanCheckpointReceiptMarkerFields(
+  fingerprint: HostedCanonicalWriteReceiptLogStatusFingerprint | null,
+): HostedWorkspaceCleanCheckpointReceiptMarkerFields {
+  return fingerprint
+    ? {
+        receiptLogByteSize: fingerprint.byteSize,
+        receiptLogEntryCount: fingerprint.entryCount,
+        receiptLogSha256: fingerprint.sha256,
+      }
+    : {
+        receiptLogByteSize: null,
+        receiptLogEntryCount: 0,
+        receiptLogSha256: null,
+      };
+}
+
+function buildHostedWorkspaceSnapshotV2FingerprintSha256(
+  ref: HostedWorkspaceSnapshotV2Ref,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      archive: {
+        compression: ref.archive.compression,
+        encryptedByteSize: ref.archive.encryptedByteSize,
+        encryptedObjectSha256: ref.archive.encryptedObjectSha256,
+        fileCount: ref.archive.fileCount,
+        format: ref.archive.format,
+        plaintextArchiveSha256: ref.archive.plaintextArchiveSha256,
+        totalPlainBytes: ref.archive.totalPlainBytes,
+      },
+      createdAt: ref.createdAt,
+      encryption: {
+        aad: ref.encryption.aad,
+        ivBase64: ref.encryption.ivBase64,
+        rootKeyId: ref.encryption.rootKeyId,
+        scheme: ref.encryption.scheme,
+        wrappedDataKey: ref.encryption.wrappedDataKey,
+      },
+      objectKey: ref.objectKey,
+      schema: ref.schema,
+      snapshotId: ref.snapshotId,
+      upload: ref.upload,
+      userId: ref.userId,
+    }))
+    .digest("hex");
+}
+
+async function readHostedWorkspaceCleanCheckpointMarker(
+  vaultRoot: string,
+): Promise<HostedWorkspaceCleanCheckpointMarker | null> {
+  const markerPath = resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot);
+  let markerStat;
+  try {
+    markerStat = await lstat(markerPath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+    throw error;
+  }
+  if (!markerStat.isFile()) {
+    throw new Error("Hosted workspace clean checkpoint marker must be a regular file.");
+  }
+  return parseHostedWorkspaceCleanCheckpointMarker(await readFile(markerPath, "utf8"));
+}
+
+function parseHostedWorkspaceCleanCheckpointMarker(
+  raw: string,
+): HostedWorkspaceCleanCheckpointMarker {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isPlainObject(parsed)) {
+    throw new Error("Hosted workspace clean checkpoint marker must be an object.");
+  }
+  const schema = parsed.schema;
+  const workspaceVersion = parsed.workspaceVersion;
+  const snapshotFingerprintSha256 = parsed.snapshotFingerprintSha256;
+  const receiptLogSha256 = parsed.receiptLogSha256;
+  const receiptLogByteSize = parsed.receiptLogByteSize;
+  const receiptLogEntryCount = parsed.receiptLogEntryCount;
+  const writtenAt = parsed.writtenAt;
+  if (schema !== HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA) {
+    throw new Error("Hosted workspace clean checkpoint marker schema is invalid.");
+  }
+  if (typeof workspaceVersion !== "string" || workspaceVersion.trim().length === 0) {
+    throw new Error("Hosted workspace clean checkpoint marker workspace version is invalid.");
+  }
+  if (!isSha256(snapshotFingerprintSha256)) {
+    throw new Error("Hosted workspace clean checkpoint marker snapshot fingerprint is invalid.");
+  }
+  if (
+    receiptLogSha256 !== null
+    && !isSha256(receiptLogSha256)
+  ) {
+    throw new Error("Hosted workspace clean checkpoint marker receipt hash is invalid.");
+  }
+  if (
+    receiptLogByteSize !== null
+    && !isNonNegativeInteger(receiptLogByteSize)
+  ) {
+    throw new Error("Hosted workspace clean checkpoint marker receipt size is invalid.");
+  }
+  if (!isNonNegativeInteger(receiptLogEntryCount)) {
+    throw new Error("Hosted workspace clean checkpoint marker receipt count is invalid.");
+  }
+  if (
+    (receiptLogSha256 === null || receiptLogByteSize === null)
+    && (receiptLogSha256 !== null || receiptLogByteSize !== null || receiptLogEntryCount !== 0)
+  ) {
+    throw new Error("Hosted workspace clean checkpoint marker receipt fields are inconsistent.");
+  }
+  if (
+    typeof writtenAt !== "string"
+    || !Number.isFinite(Date.parse(writtenAt))
+    || new Date(writtenAt).toISOString() !== writtenAt
+  ) {
+    throw new Error("Hosted workspace clean checkpoint marker timestamp is invalid.");
+  }
+  return {
+    receiptLogByteSize,
+    receiptLogEntryCount,
+    receiptLogSha256,
+    schema,
+    snapshotFingerprintSha256,
+    workspaceVersion,
+    writtenAt,
+  };
+}
+
+function sameHostedWorkspaceCleanCheckpointMarker(
+  actual: HostedWorkspaceCleanCheckpointMarker,
+  expected: HostedWorkspaceCleanCheckpointMarker,
+): boolean {
+  return actual.schema === expected.schema
+    && actual.workspaceVersion === expected.workspaceVersion
+    && actual.snapshotFingerprintSha256 === expected.snapshotFingerprintSha256
+    && actual.receiptLogSha256 === expected.receiptLogSha256
+    && actual.receiptLogByteSize === expected.receiptLogByteSize
+    && actual.receiptLogEntryCount === expected.receiptLogEntryCount;
+}
+
+async function writeHostedWorkspaceCleanCheckpointMarker(
+  vaultRoot: string,
+  marker: HostedWorkspaceCleanCheckpointMarker,
+): Promise<void> {
+  const markerPath = resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot);
+  const tempPath = `${markerPath}.${randomUUID().replace(/-/g, "")}.tmp`;
+  await mkdir(path.dirname(markerPath), { mode: 0o700, recursive: true });
+  try {
+    await writeFile(tempPath, `${JSON.stringify(marker, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await chmod(tempPath, 0o600);
+    await rename(tempPath, markerPath);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    throw error;
+  }
+}
+
+async function consumeHostedWorkspaceCleanCheckpointMarker(vaultRoot: string): Promise<void> {
+  await rm(resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot));
+}
+
+async function assertHostedWorkspaceWarmCleanRoots(
+  restored: HostedRestoredExecutionContext,
+): Promise<void> {
+  await Promise.all([
+    assertHostedWorkspaceWarmCleanDirectory(resolveHostedWorkspaceDurableRoot(restored.vaultRoot)),
+    assertHostedWorkspaceWarmCleanDirectory(restored.vaultRoot),
+    assertHostedWorkspaceWarmCleanDirectory(restored.assistantStateRoot),
+    assertHostedWorkspaceWarmCleanDirectory(restored.operatorHomeRoot),
+  ]);
+  await assertHostedWorkspaceWarmCleanFile(path.join(restored.vaultRoot, VAULT_LAYOUT.metadata));
+  await Promise.all([
+    createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
+    createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
+    createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
+  ]);
+}
+
+async function assertHostedWorkspaceWarmCleanDirectory(directoryPath: string): Promise<void> {
+  const directoryStat = await lstat(directoryPath);
+  if (!directoryStat.isDirectory()) {
+    throw new Error("Hosted warm workspace root is not a directory.");
+  }
+}
+
+async function assertHostedWorkspaceWarmCleanFile(filePath: string): Promise<void> {
+  const fileStat = await lstat(filePath);
+  if (!fileStat.isFile()) {
+    throw new Error("Hosted warm workspace metadata is not a regular file.");
+  }
 }
 
 async function verifyOrRepairRestoredHostedCodexContinuity(input: {
@@ -827,9 +1194,12 @@ export async function markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBest
   vaultRoot: string;
 }): Promise<void> {
   void input.snapshotRef;
-  // Dirty local runtime state is valid only inside the currently owned child
-  // process. A later lease must restore from durable workspace truth.
-  await clearHostedWorkspaceLiveRuntimeStateBestEffort(input.vaultRoot);
+  // Dirty local runtime state is valid only inside the currently owned child.
+  // A later lease may reuse only an explicitly clean checkpoint marker.
+  await Promise.all([
+    clearHostedWorkspaceLiveRuntimeStateBestEffort(input.vaultRoot),
+    clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.vaultRoot),
+  ]);
 }
 
 async function clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot: string): Promise<void> {
@@ -837,6 +1207,16 @@ async function clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot: string)
     await rm(resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot), { force: true });
   } catch {
     // The legacy marker is best-effort cleanup only.
+  }
+}
+
+export async function clearHostedWorkspaceCleanCheckpointMarkerBestEffort(
+  vaultRoot: string,
+): Promise<void> {
+  try {
+    await rm(resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot), { force: true });
+  } catch {
+    // A stale marker can only affect performance; warm restore consumes it fail-closed.
   }
 }
 
@@ -881,6 +1261,13 @@ function resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot: string): string {
   return path.join(
     path.dirname(path.resolve(vaultRoot)),
     HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME,
+  );
+}
+
+function resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot: string): string {
+  return path.join(
+    path.dirname(path.resolve(vaultRoot)),
+    HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_FILE_NAME,
   );
 }
 
@@ -1030,20 +1417,6 @@ function hasHostedRuntimeEagerArtifactPrefix(
   return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
 }
 
-async function createHostedWorkspaceRuntimeLocalRoots(
-  vaultRoot: string,
-): Promise<HostedRestoredExecutionContext> {
-  const restored = readHostedWorkspaceRuntimeLocalRoots(vaultRoot);
-
-  await Promise.all([
-    createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
-    createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
-    createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
-  ]);
-
-  return restored;
-}
-
 function readHostedWorkspaceRuntimeLocalRoots(
   vaultRoot: string,
 ): HostedRestoredExecutionContext {
@@ -1115,6 +1488,7 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
 async function clearHostedWorkspaceRestoreCachesBestEffort(vaultRoot: string): Promise<void> {
   await Promise.all([
     clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot),
+    clearHostedWorkspaceCleanCheckpointMarkerBestEffort(vaultRoot),
     clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot),
     clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot),
     clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot),

@@ -35,6 +35,7 @@ import { describe, test } from "vitest";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import type {
   HostedRuntimePlatform,
@@ -180,6 +181,174 @@ describe("hosted workspace restore Codex continuity", () => {
       await assert.rejects(readFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "utf8"), {
         code: "ENOENT",
       });
+    } finally {
+      await rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("reuses a matching warm-clean v2 workspace marker once", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-warm-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "durable", "vault");
+      const operatorHomeRoot = path.join(workspaceRoot, "durable", "home");
+      const assistantStateRoot = resolveAssistantStatePaths(restoredVaultRoot).assistantStateRoot;
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const workspace = createWorkspaceState({ snapshotRef });
+      await mkdir(assistantStateRoot, { recursive: true });
+      await mkdir(operatorHomeRoot, { recursive: true });
+      await writeFile(path.join(restoredVaultRoot, "vault.json"), "{}\n", "utf8");
+      await writeFile(path.join(restoredVaultRoot, "note.md"), "warm local workspace\n", "utf8");
+      assert.equal(
+        await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
+          vaultRoot: restoredVaultRoot,
+          workspace,
+        }),
+        true,
+      );
+
+      let restoreCallCount = 0;
+      const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot() {
+              restoreCallCount += 1;
+              throw new Error("matching warm marker should skip v2 snapshot restore.");
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace,
+      });
+
+      assert.equal(restored.mode, "snapshot");
+      assert.equal(restored.restoreWasCold, false);
+      assert.equal(restored.inboxSidecarNeedsRebuild, true);
+      assert.equal(restoreCallCount, 0);
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),
+        "warm local workspace\n",
+      );
+
+      const coldRestoreCalls: string[] = [];
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              coldRestoreCalls.push(request.ref.snapshotId);
+              const vaultRoot = path.join(request.durableRoot, "vault");
+              await mkdir(vaultRoot, { recursive: true });
+              await writeFile(path.join(vaultRoot, "vault.json"), "{}\n", "utf8");
+              await writeFile(path.join(vaultRoot, "note.md"), "cold restore\n", "utf8");
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace,
+      });
+
+      assert.deepEqual(coldRestoreCalls, [snapshotRef.snapshotId]);
+      assert.equal(await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"), "cold restore\n");
+    } finally {
+      await rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("falls back to cold v2 restore when canonical receipt status changes", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-warm-receipts-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "durable", "vault");
+      const operatorHomeRoot = path.join(workspaceRoot, "durable", "home");
+      const assistantStateRoot = resolveAssistantStatePaths(restoredVaultRoot).assistantStateRoot;
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+      await mkdir(assistantStateRoot, { recursive: true });
+      await mkdir(operatorHomeRoot, { recursive: true });
+      await writeFile(path.join(restoredVaultRoot, "vault.json"), "{}\n", "utf8");
+
+      assert.equal(
+        await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({ snapshotRef }),
+        }),
+        true,
+      );
+
+      const receiptLogBytes = new TextEncoder().encode(JSON.stringify({
+        entries: [],
+        schema: "murph.hosted-canonical-write-receipt-log.v1",
+      }));
+      const receiptLogSha256 = sha256HostedBundleHex(receiptLogBytes);
+      const workspace = createWorkspaceState({
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+          hostedCanonicalWriteReceiptLogEntryCount: 0,
+          hostedCanonicalWriteReceiptLogSha256: receiptLogSha256,
+        },
+        snapshotRef,
+      });
+      const restoreCalls: string[] = [];
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map([[receiptLogSha256, receiptLogBytes]]),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              restoreCalls.push(request.ref.snapshotId);
+              const vaultRoot = path.join(request.durableRoot, "vault");
+              await mkdir(vaultRoot, { recursive: true });
+              await writeFile(path.join(vaultRoot, "vault.json"), "{}\n", "utf8");
+            },
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace,
+      });
+
+      assert.deepEqual(restoreCalls, [snapshotRef.snapshotId]);
     } finally {
       await rm(workspaceRoot, {
         force: true,
@@ -1837,10 +2006,12 @@ function createRestorePlatform(input: {
 }
 
 function createWorkspaceState(input: {
+  redactedStatus?: HostedWorkspaceState["redactedStatus"];
   snapshotRef: HostedWorkspaceState["snapshotRef"];
 }): HostedWorkspaceState {
   return {
     createdAt: "2026-05-05T00:00:00.000Z",
+    ...(input.redactedStatus ? { redactedStatus: input.redactedStatus } : {}),
     snapshotRef: input.snapshotRef,
     updatedAt: "2026-05-05T00:00:00.000Z",
     userId: "member_synthetic_workspace_restore",
