@@ -52,6 +52,9 @@ import {
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../src/runner-outbound/headers.ts";
+import {
+  buildHostedRunnerContainerEnv,
+} from "../src/runner-env.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -2301,6 +2304,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://host.docker.internal:4011/",
       "https://files.telegram.example/",
     ]);
+  });
+
+  it("keeps hosted-local Linq URL rewrite and provider fetch allowlist in sync", async () => {
+    const runnerEnv = buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011/api/partner/v3",
+    });
+
+    expect(runnerEnv.LINQ_API_BASE_URL).toBe(
+      "http://host.docker.internal:4011/api/partner/v3",
+    );
+    const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(runnerEnv);
+    expect(providerFetchBaseUrls).toEqual([
+      "http://host.docker.internal:4011/api/partner/v3",
+    ]);
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        providerFetchBaseUrls,
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    const response = await hostedFetch("http://host.docker.internal:4011/api/partner/v3/chats", {
+      body: "{}",
+      method: "POST",
+    });
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "configured Linq provider fetch");
+    expect(request.url).toBe("http://host.docker.internal:4011/api/partner/v3/chats");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
   it("rejects external provider fetches when the runtime write-fence lease is missing", async () => {
