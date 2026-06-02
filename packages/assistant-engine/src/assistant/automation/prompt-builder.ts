@@ -13,11 +13,11 @@ import type {
 } from '../input-store.js'
 import type { AssistantRunEvent } from './shared.js'
 import {
-  buildAssistantInputAttachmentModelBundles,
+  buildAssistantInputAttachmentPromptBundles,
   hasAssistantInputAttachmentEvidenceCandidate,
   prepareAssistantInputMultimodalUserMessageContent,
-  type AssistantInputAttachmentModelBundle,
-  type AssistantInputAttachmentModelBundleSource,
+  type AssistantInputAttachmentPromptBundle,
+  type AssistantInputAttachmentPromptBundleSource,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
 import { normalizeNullableString } from '../shared.js'
@@ -72,7 +72,7 @@ export type AssistantAutoReplyPreparedInput =
   | { kind: 'skip'; reason: string }
 
 type AssistantAutoReplyPromptInputWithBundles = AssistantAutoReplyPromptInput & {
-  attachmentBundles: readonly AssistantInputAttachmentModelBundle[]
+  attachmentBundles: readonly AssistantInputAttachmentPromptBundle[]
 }
 
 /**
@@ -505,7 +505,7 @@ function buildAssistantAutoReplyPromptText(
 }
 
 function renderPreparedAttachmentPromptSection(
-  attachment: AssistantInputAttachmentModelBundle,
+  attachment: AssistantInputAttachmentPromptBundle,
 ): string | null {
   const includeParserEvidence = shouldRenderAttachmentParserEvidence(attachment.kind)
   const textFragments = includeParserEvidence
@@ -558,7 +558,7 @@ function renderPreparedAttachmentPromptSection(
 }
 
 function renderPreparedAttachmentMetadataLines(input: {
-  attachment: AssistantInputAttachmentModelBundle
+  attachment: AssistantInputAttachmentPromptBundle
   includeParserEvidence: boolean
 }): string[] {
   const attachment = input.attachment
@@ -580,7 +580,7 @@ function renderPreparedAttachmentMetadataLines(input: {
 
 function buildPreparedAttachmentSources(
   inputs: readonly AssistantAutoReplyPromptInputWithBundles[],
-): AssistantInputAttachmentModelBundleSource[] {
+): AssistantInputAttachmentPromptBundleSource[] {
   return inputs.flatMap((entry) =>
     entry.attachmentBundles.map((bundle) => ({
       bundle,
@@ -594,7 +594,7 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvent?: (event: AssistantRunEvent) => void
   vaultRoot: string
-}): Promise<AssistantInputAttachmentModelBundle[]> {
+}): Promise<AssistantInputAttachmentPromptBundle[]> {
   if (
     input.entry.attachmentEvidence.status !== 'available' &&
     input.entry.attachmentEvidence.status !== 'partial'
@@ -606,7 +606,7 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
   }
 
   try {
-    return await buildAssistantInputAttachmentModelBundles({
+    return await buildAssistantInputAttachmentPromptBundles({
       attachments: input.entry.attachmentEvidence.attachments,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot,
@@ -798,7 +798,7 @@ function renderAssistantInputPromptUnavailableNote(
   return null
 }
 
-function hasStoredPdfAttachmentPath(attachment: AssistantInputAttachmentModelBundle): boolean {
+function hasStoredPdfAttachmentPath(attachment: AssistantInputAttachmentPromptBundle): boolean {
   const storedPath = normalizeNullableString(attachment.storedPath)
   if (!storedPath) {
     return false
@@ -819,7 +819,7 @@ function hasRawAttachmentStoredPath(storedPath: string | null): boolean {
 }
 
 function shouldRenderAttachmentParserEvidence(
-  kind: AssistantInputAttachmentEvidenceItem['kind'] | AssistantInputAttachmentModelBundle['kind'],
+  kind: AssistantInputAttachmentEvidenceItem['kind'] | AssistantInputAttachmentPromptBundle['kind'],
 ): boolean {
   return kind === 'audio' || kind === 'video'
 }

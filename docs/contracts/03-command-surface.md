@@ -172,7 +172,6 @@ vault-cli intake import <file> --vault <path> [--title <title>] [--occurred-at <
 vault-cli intake show <id> --vault <path> [--request-id <id>]
 vault-cli intake list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli intake manifest <id> --vault <path> [--request-id <id>]
-vault-cli intake raw <id> --vault <path> [--request-id <id>]
 vault-cli intake project <id> --vault <path> [--request-id <id>]
 vault-cli regimen import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli regimen save <title> --vault <path> --kind medication|supplement|therapy|habit [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--substance <text>] [--dose <number>] [--unit <unit>] [--group <text>] [--ingredient-compound <text>] [--ingredient-label <text>] [--ingredient-amount <number>] [--ingredient-unit <unit>] [--ingredient-active] [--ingredient-note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]
@@ -233,7 +232,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `capture` is a dated media-evidence noun layered on canonical event records plus immutable raw capture attachments.
 - `measurement` is the primary scalar-measurement noun for numeric body, vitals, performance, and custom metrics.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
-- `intake` exposes `import | show | list | manifest | raw | project`.
+- `intake` exposes `import | show | list | manifest | project`.
 - `samples` exposes `add | import-json | import-csv | csv profile | csv import | summarize | show | list | batch show | batch list`.
 - `experiment` is a lifecycle noun.
 - `journal` is a date-addressed document noun.
@@ -295,7 +294,7 @@ Read surfaces intentionally separate summary from detail:
 - `blood-test show` accepts the canonical `evt_*` id and may also resolve the stored blood test by its title, `testName`, or `labPanelId`.
 - Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids. `event show` remains the explicit provenance-oriented follow-up surface when the caller needs the internal event id path, while `document manifest` and `meal manifest` expose immutable import artifacts.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
-- `intake manifest` and `intake raw` are the first-class follow-up surface for immutable assessment evidence under `raw/assessments/**`.
+- `intake manifest` is the first-class follow-up surface for immutable assessment import evidence under `raw/assessments/**`.
 - `audit show|list|tail` and `vault show|stats|repair|update` are first-class vault noun commands layered on top of the read model and core metadata write path.
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
@@ -679,7 +678,7 @@ The `plan.operations` values are internal core plan operation names, not public 
 
 - `provider show`, `food show`, `recipe show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
 - `provider list`, `food list`, `recipe list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
-- `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
+- `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
 ### `show`
 
 `entity.id` is the surfaced canonical read identity for the record. For meal/document events, that identity is the stable family id.

@@ -218,6 +218,13 @@ describe("canonical CLI JSON input split", () => {
     }
   });
 
+  it("does not expose the removed intake raw leaf command in generated metadata", () => {
+    expect(generatedTypes).not.toContain("'intake raw':");
+    expect(
+      Object.keys(configCommand("intake").properties.commands?.properties ?? {}),
+    ).not.toContain("raw");
+  });
+
   it("keeps command discovery aligned with newly discoverable JSON escape hatches", () => {
     for (const pathLiteral of [
       "path: ['capture', 'import-json']",

@@ -5,12 +5,12 @@ import {
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import {
-  inboxModelAttachmentBundleSchema,
-  type InboxModelAttachmentBundle,
-} from '../src/inbox-model-contracts.ts'
+  attachmentPromptBundleSchema,
+  type AttachmentPromptBundle,
+} from '../src/attachment-prompt-contracts.ts'
 import type {
   AssistantInputAttachmentEvidenceReadFailure,
-  AssistantInputAttachmentModelBundleSource,
+  AssistantInputAttachmentPromptBundleSource,
 } from '../src/assistant/attachment-evidence-model.ts'
 import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
 import type {
@@ -22,7 +22,7 @@ import type {
 } from '../src/assistant/input-store.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
-  buildAssistantInputAttachmentModelBundles: vi.fn(),
+  buildAssistantInputAttachmentPromptBundles: vi.fn(),
   hasAssistantInputAttachmentEvidenceCandidate: vi.fn(),
   prepareAssistantInputMultimodalUserMessageContent: vi.fn(),
 }))
@@ -34,8 +34,8 @@ vi.mock('../src/assistant/attachment-evidence-model.js', async () => {
 
   return {
     ...actual,
-    buildAssistantInputAttachmentModelBundles:
-      promptBuilderMocks.buildAssistantInputAttachmentModelBundles,
+    buildAssistantInputAttachmentPromptBundles:
+      promptBuilderMocks.buildAssistantInputAttachmentPromptBundles,
     hasAssistantInputAttachmentEvidenceCandidate:
       promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate,
     prepareAssistantInputMultimodalUserMessageContent:
@@ -51,7 +51,7 @@ import {
 } from '../src/assistant/automation/prompt-builder.ts'
 
 beforeEach(() => {
-  promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([])
+  promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([])
   promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(false)
   promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
     fallbackError: null,
@@ -339,9 +339,9 @@ function createRawZipAttachmentEvidence(input: {
 }
 
 function createAttachmentBundle(
-  overrides: Partial<InboxModelAttachmentBundle> = {},
-): InboxModelAttachmentBundle {
-  return inboxModelAttachmentBundleSchema.parse({
+  overrides: Partial<AttachmentPromptBundle> = {},
+): AttachmentPromptBundle {
+  return attachmentPromptBundleSchema.parse({
     attachmentId: 'bundle-1',
     ordinal: 1,
     kind: 'document',
@@ -974,7 +974,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result.prompt).toContain('mime: audio/ogg')
     expect(result.prompt).toContain('byteSize: unknown')
     expect(result.userMessageContent).toBeNull()
-    expect(promptBuilderMocks.buildAssistantInputAttachmentModelBundles).not.toHaveBeenCalled()
+    expect(promptBuilderMocks.buildAssistantInputAttachmentPromptBundles).not.toHaveBeenCalled()
   })
 
   it('prepares staged text without attachment context for text-only pending projections', async () => {
@@ -1053,7 +1053,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('prepares metadata/status input when media transcript work is still pending', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'audio',
         mime: 'audio/mpeg',
@@ -1089,14 +1089,14 @@ describe('prepareAssistantAutoReplyInput', () => {
     }
     expect(result.prompt).toContain('- raw evidence: partial')
     expect(result.prompt).toContain('parseState: pending')
-    expect(promptBuilderMocks.buildAssistantInputAttachmentModelBundles).toHaveBeenCalled()
+    expect(promptBuilderMocks.buildAssistantInputAttachmentPromptBundles).toHaveBeenCalled()
     expect(
       promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
     ).toHaveBeenCalled()
   })
 
   it('prepares raw non-image non-PDF attachment evidence with unsupported parser status', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'other',
         mime: 'application/zip',
@@ -1179,7 +1179,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('does not render untrusted prepared bundle combinedText', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'document',
         mime: 'application/pdf',
@@ -1237,7 +1237,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('keeps raw inbox paths even when filenames look sensitive', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'document',
         mime: 'application/pdf',
@@ -1279,7 +1279,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('prepares metadata-only projected attachments whose raw artifact is missing', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'other',
         mime: 'application/zip',
@@ -1358,7 +1358,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('renders prepared media parser text without raw-file instructions', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'audio',
         mime: 'audio/mpeg',
@@ -1422,7 +1422,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
   it('emits a safe nonblocking event when attachment bundle preparation fails', async () => {
     const onEvent = vi.fn()
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockRejectedValueOnce(
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockRejectedValueOnce(
       new Error('parser bundle failed for private input'),
     )
 
@@ -1456,7 +1456,7 @@ describe('prepareAssistantAutoReplyInput', () => {
 
   it('emits a safe nonblocking event when rich attachment evidence cannot be read', async () => {
     const onEvent = vi.fn()
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValueOnce([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValueOnce([
       createAttachmentBundle({
         kind: 'image',
         mime: 'image/jpeg',
@@ -1549,13 +1549,13 @@ describe('prepareAssistantAutoReplyInput', () => {
         extension: '.png',
       },
     })
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles
       .mockResolvedValueOnce([firstBundle])
       .mockResolvedValueOnce([secondBundle])
     promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(true)
     promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockImplementationOnce(
       async (input: {
-        attachmentSources: readonly AssistantInputAttachmentModelBundleSource[]
+        attachmentSources: readonly AssistantInputAttachmentPromptBundleSource[]
         onEvidenceReadFailure?: (
           failure: AssistantInputAttachmentEvidenceReadFailure,
         ) => void
@@ -1641,7 +1641,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('keeps lifecycle context when rich evidence cannot be prepared', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         fileName: null,
         mime: null,
@@ -1681,7 +1681,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('prepares multimodal user message content when only raw image evidence remains', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'image',
         mime: 'image/png',
@@ -1736,7 +1736,7 @@ describe('prepareAssistantAutoReplyInput', () => {
   })
 
   it('keeps PDF-only input as stored-path metadata without routed file evidence', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'document',
         mime: 'application/pdf',

@@ -11,7 +11,6 @@ import { registerExportCommands } from '../src/commands/export.js'
 import {
   materializeStoredExportPack,
   pruneStoredExportPack,
-  showAssessmentRaw,
   showStoredExportPack,
 } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
@@ -88,6 +87,8 @@ test('intake import schema exposes the richer importer-backed metadata options',
 
 test('intake and export pack help use generic id selectors plus from/to list filters', async () => {
   const intakeShowHelp = await runRawSliceCli(['intake', 'show', '--help'])
+  const intakeManifestHelp = await runRawSliceCli(['intake', 'manifest', '--help'])
+  const intakeRawHelp = await runRawSliceCli(['intake', 'raw', '--help'])
   const intakeListSchema = JSON.parse(
     await runRawSliceCli(['intake', 'list', '--schema', '--format', 'json']),
   ) as {
@@ -104,6 +105,8 @@ test('intake and export pack help use generic id selectors plus from/to list fil
   ])
 
   assert.match(intakeShowHelp, /Usage: vault-cli intake show <id> \[options\]/u)
+  assert.match(intakeManifestHelp, /Usage: vault-cli intake manifest <id> \[options\]/u)
+  assert.doesNotMatch(intakeRawHelp, /Usage: vault-cli intake raw\b/u)
   assert.equal('from' in intakeListSchema.options.properties, true)
   assert.equal('to' in intakeListSchema.options.properties, true)
   assert.equal('dateFrom' in intakeListSchema.options.properties, false)
@@ -116,7 +119,7 @@ test('intake and export pack help use generic id selectors plus from/to list fil
 })
 
 test.sequential(
-  'intake import forwards richer metadata and exposes manifest/raw follow-up commands',
+  'intake import forwards richer metadata and exposes the manifest follow-up command',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-'))
     const assessmentPath = path.join(vaultRoot, 'assessment.json')
@@ -198,28 +201,6 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const rawResult = await runSliceCli<{
-        entityId: string
-        lookupId: string
-        kind: string
-        rawFile: string
-        mediaType: string
-        raw: {
-          questionnaireSlug?: string
-          responses?: {
-            sleep?: {
-              averageHours?: number
-            }
-          }
-        }
-      }>([
-        'intake',
-        'raw',
-        requireData(imported).assessmentId,
-        '--vault',
-        vaultRoot,
-      ])
-
       assert.equal(manifestResult.ok, true)
       assert.equal(manifestResult.meta?.command, 'intake manifest')
       assert.equal(requireData(manifestResult).entityId, requireData(imported).assessmentId)
@@ -265,19 +246,6 @@ test.sequential(
         requireData(manifestResult).manifest.provenance.lookupId,
         requireData(imported).assessmentId,
       )
-
-      assert.equal(rawResult.ok, true)
-      assert.equal(rawResult.meta?.command, 'intake raw')
-      assert.equal(requireData(rawResult).entityId, requireData(imported).assessmentId)
-      assert.equal(requireData(rawResult).lookupId, requireData(imported).assessmentId)
-      assert.equal(requireData(rawResult).kind, 'assessment')
-      assert.equal(requireData(rawResult).rawFile, requireData(imported).rawFile)
-      assert.equal(requireData(rawResult).mediaType, 'application/json')
-      assert.equal(requireData(rawResult).raw.questionnaireSlug, 'baseline-intake')
-      assert.equal(
-        requireData(rawResult).raw.responses?.sleep?.averageHours,
-        7,
-      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -317,60 +285,6 @@ test.sequential(
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'intake raw rejects assessment artifacts that escape the vault through symlinks',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-raw-symlink-'))
-    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-raw-outside-'))
-    const assessmentPath = path.join(vaultRoot, 'assessment.json')
-
-    try {
-      await initializeVault({ vaultRoot })
-      await writeFile(
-        assessmentPath,
-        JSON.stringify({
-          questionnaireSlug: 'baseline-intake',
-          responses: {
-            symptoms: ['fatigue'],
-          },
-        }),
-        'utf8',
-      )
-
-      const imported = await runSliceCli<{
-        assessmentId: string
-        rawFile: string
-      }>([
-        'intake',
-        'import',
-        assessmentPath,
-        '--vault',
-        vaultRoot,
-      ])
-
-      const rawFile = requireData(imported).rawFile
-      const rawAbsolutePath = path.join(vaultRoot, rawFile)
-      const outsideJsonPath = path.join(outsideRoot, 'secret.json')
-      await writeFile(outsideJsonPath, JSON.stringify({ leaked: true }), 'utf8')
-      await rm(rawAbsolutePath, { force: true })
-      await symlink(outsideJsonPath, rawAbsolutePath)
-
-      await assert.rejects(
-        () => showAssessmentRaw(vaultRoot, requireData(imported).assessmentId),
-        {
-          name: 'VaultCliError',
-          code: 'invalid_path',
-          message:
-            `Vault-relative path "${rawFile}" may not traverse symbolic links inside the selected vault root.`,
-        },
-      )
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-      await rm(outsideRoot, { recursive: true, force: true })
     }
   },
 )

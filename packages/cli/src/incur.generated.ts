@@ -141,7 +141,6 @@ declare module 'incur' {
       'intake list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'intake manifest': { args: { id: string }; options: { requestId?: string } }
       'intake project': { args: { id: string }; options: { requestId?: string } }
-      'intake raw': { args: { id: string }; options: { requestId?: string } }
       'intake show': { args: { id: string }; options: { requestId?: string } }
       'intervention add': { args: { text: string }; options: { requestId?: string; duration?: number; type?: string; regimenId?: string; experiment?: string; skipExperimentLink?: boolean; allowOutOfWindow?: boolean; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'intervention delete': { args: { id: string }; options: { requestId?: string } }

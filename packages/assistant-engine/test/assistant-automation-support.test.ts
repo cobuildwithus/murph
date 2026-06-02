@@ -56,7 +56,7 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
 } satisfies AssistantInputCandidate['event']['attachmentEvidence']
 
 const promptBuilderMocks = vi.hoisted(() => ({
-  buildAssistantInputAttachmentModelBundles: vi.fn(),
+  buildAssistantInputAttachmentPromptBundles: vi.fn(),
   hasAssistantInputAttachmentEvidenceCandidate: vi.fn(),
   prepareAssistantInputMultimodalUserMessageContent: vi.fn(),
 }))
@@ -68,8 +68,8 @@ vi.mock('../src/assistant/attachment-evidence-model.js', async () => {
 
   return {
     ...actual,
-    buildAssistantInputAttachmentModelBundles:
-      promptBuilderMocks.buildAssistantInputAttachmentModelBundles,
+    buildAssistantInputAttachmentPromptBundles:
+      promptBuilderMocks.buildAssistantInputAttachmentPromptBundles,
     hasAssistantInputAttachmentEvidenceCandidate:
       promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate,
     prepareAssistantInputMultimodalUserMessageContent:
@@ -94,7 +94,7 @@ afterEach(async () => {
 })
 
 beforeEach(() => {
-  promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([])
+  promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([])
   promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
     false,
   )
@@ -1244,7 +1244,7 @@ describe('assistant auto-reply prompt builder support', () => {
   })
 
   it('keeps lifecycle context when no textual or rich evidence is available', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       {
         attachmentId: 'bundle-1',
         ordinal: 1,
@@ -1293,7 +1293,7 @@ describe('assistant auto-reply prompt builder support', () => {
   })
 
   it('prepares rich multimodal input when only attachment evidence remains', async () => {
-    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       {
         attachmentId: 'bundle-1',
         ordinal: 1,

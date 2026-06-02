@@ -11,10 +11,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { loadImportersRuntimeModule } from '@murphai/vault-usecases/runtime'
-import {
-  showAssessmentManifest,
-  showAssessmentRaw,
-} from './export-intake-read-helpers.js'
+import { showAssessmentManifest } from './export-intake-read-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const payloadSchema = z.record(z.string(), z.unknown())
@@ -43,16 +40,6 @@ const intakeManifestResultSchema = z.object({
   kind: z.literal('assessment'),
   manifestFile: pathSchema,
   manifest: rawImportManifestSchema,
-})
-
-const intakeRawResultSchema = z.object({
-  vault: pathSchema,
-  entityId: z.string().min(1),
-  lookupId: z.string().min(1),
-  kind: z.literal('assessment'),
-  rawFile: pathSchema,
-  mediaType: z.literal('application/json'),
-  raw: z.unknown(),
 })
 
 interface IntakeServices extends VaultServices {
@@ -181,21 +168,6 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
     output: intakeManifestResultSchema,
     async run({ args, options }) {
       return showAssessmentManifest(options.vault, args.id)
-    },
-  })
-
-  intake.command('raw', {
-    description: 'Show the immutable raw assessment payload captured during intake import.',
-    args: z.object({
-      id: z
-        .string()
-        .min(1)
-        .describe('Assessment response id to inspect.'),
-    }),
-    options: withBaseOptions(),
-    output: intakeRawResultSchema,
-    async run({ args, options }) {
-      return showAssessmentRaw(options.vault, args.id)
     },
   })
 

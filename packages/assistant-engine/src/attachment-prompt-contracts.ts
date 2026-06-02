@@ -1,21 +1,19 @@
 import { z } from 'zod'
-import {
-  pathSchema,
-} from '@murphai/operator-config/vault-cli-contracts'
+import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 
-export const inboxModelInputModeValues = ['text-only', 'multimodal'] as const
+export const attachmentPromptInputModeValues = ['text-only', 'multimodal'] as const
 
-export const inboxModelInputModeSchema = z.enum(inboxModelInputModeValues)
+export const attachmentPromptInputModeSchema = z.enum(attachmentPromptInputModeValues)
 
-export const inboxModelRoutingImageSchema = z.object({
+export const attachmentPromptRoutingImageSchema = z.object({
   eligible: z.boolean(),
   reason: z.enum(routingImageEligibilityReasonValues),
   mediaType: z.string().min(1).nullable(),
   extension: z.string().min(1).nullable(),
 })
 
-export const inboxModelTextFragmentSchema = z.object({
+export const attachmentPromptTextFragmentSchema = z.object({
   kind: z.enum([
     'capture_text',
     'attachment_metadata',
@@ -33,7 +31,7 @@ export const inboxModelTextFragmentSchema = z.object({
   truncated: z.boolean(),
 })
 
-export const inboxModelAttachmentBundleSchema = z.object({
+export const attachmentPromptBundleSchema = z.object({
   attachmentId: z.string().min(1),
   ordinal: z.number().int().positive(),
   kind: z.enum(['image', 'audio', 'video', 'document', 'other']),
@@ -42,12 +40,12 @@ export const inboxModelAttachmentBundleSchema = z.object({
   byteSize: z.number().int().nonnegative().nullable().optional(),
   storedPath: pathSchema.nullable(),
   parseState: z.enum(['pending', 'running', 'succeeded', 'failed', 'unsupported']).nullable(),
-  routingImage: inboxModelRoutingImageSchema,
-  fragments: z.array(inboxModelTextFragmentSchema),
+  routingImage: attachmentPromptRoutingImageSchema,
+  fragments: z.array(attachmentPromptTextFragmentSchema),
   combinedText: z.string(),
 })
 
-export type InboxModelAttachmentBundle = z.infer<
-  typeof inboxModelAttachmentBundleSchema
+export type AttachmentPromptBundle = z.infer<
+  typeof attachmentPromptBundleSchema
 >
-export type InboxModelInputMode = z.infer<typeof inboxModelInputModeSchema>
+export type AttachmentPromptInputMode = z.infer<typeof attachmentPromptInputModeSchema>

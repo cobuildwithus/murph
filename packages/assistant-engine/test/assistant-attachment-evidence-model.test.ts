@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  buildAssistantInputAttachmentModelBundle,
+  buildAssistantInputAttachmentPromptBundle,
   hasAssistantInputAttachmentEvidenceCandidate,
   prepareAssistantInputMultimodalUserMessageContent,
 } from '../src/assistant/attachment-evidence-model.ts'
@@ -33,7 +33,7 @@ describe('assistant input attachment evidence model materialization', () => {
     }))
     await writeVaultFile(vaultRoot, imagePath, imageBytes)
 
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
@@ -78,7 +78,7 @@ describe('assistant input attachment evidence model materialization', () => {
     const imagePath = 'raw/inbox/capture-1/attachments/001'
     await writeVaultFile(vaultRoot, imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: {
         ...createAttachmentEvidence({
           kind: 'image',
@@ -117,7 +117,7 @@ describe('assistant input attachment evidence model materialization', () => {
     const vaultRoot = await createTempVaultRoot()
     await writeVaultFile(vaultRoot, rawPath, Buffer.from([0xff, 0xd8, 0xff]))
 
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime,
@@ -148,7 +148,7 @@ describe('assistant input attachment evidence model materialization', () => {
     'raw/inbox/capture-1/attachments/01__scan.pdf',
   ])('keeps PDF raw artifact ref %s as inspectable local filesystem metadata without forcing multimodal input', async (pdfPath) => {
     const vaultRoot = await createTempVaultRoot()
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'document',
         mime: 'application/pdf',
@@ -175,7 +175,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('keeps raw inbox artifact paths even when filenames look sensitive', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'document',
         mime: 'application/pdf',
@@ -193,7 +193,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('preserves unsupported parse state in the materialized bundle metadata', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: {
         ...createAttachmentEvidence({
           kind: 'audio',
@@ -211,7 +211,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('falls back to text-only mode when image bytes are missing', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
@@ -247,7 +247,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('preserves input ids on attachment read failures for paired sources', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
@@ -285,7 +285,7 @@ describe('assistant input attachment evidence model materialization', () => {
     const vaultRoot = await createTempVaultRoot()
     const availablePath = 'raw/inbox/capture-1/attachments/01__meal.jpg'
     await writeVaultFile(vaultRoot, availablePath, Buffer.from([0xff, 0xd8, 0xff]))
-    const availableBundle = await buildAssistantInputAttachmentModelBundle({
+    const availableBundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
@@ -294,7 +294,7 @@ describe('assistant input attachment evidence model materialization', () => {
       }),
       vaultRoot,
     })
-    const missingBundle = await buildAssistantInputAttachmentModelBundle({
+    const missingBundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
@@ -345,7 +345,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('ignores invalid raw image paths before reading filesystem bytes', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: createAttachmentEvidence({
         kind: 'image',
         mime: 'image/jpeg',
@@ -407,7 +407,7 @@ describe('assistant input attachment evidence model materialization', () => {
       Buffer.from('Markdown parser text.'),
     )
 
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: {
         ...createAttachmentEvidence({
           kind: 'audio',
@@ -463,7 +463,7 @@ describe('assistant input attachment evidence model materialization', () => {
       Buffer.from('Inside allowed root markdown.'),
     )
 
-    const bundle = await buildAssistantInputAttachmentModelBundle({
+    const bundle = await buildAssistantInputAttachmentPromptBundle({
       attachment: {
         ...createAttachmentEvidence({
           kind: 'audio',

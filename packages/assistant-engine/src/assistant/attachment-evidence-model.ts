@@ -12,10 +12,10 @@ import {
   type AssistantUserMessageContentPart,
 } from './content-types.js'
 import {
-  inboxModelAttachmentBundleSchema,
-  type InboxModelAttachmentBundle,
-  type InboxModelInputMode,
-} from '../inbox-model-contracts.js'
+  attachmentPromptBundleSchema,
+  type AttachmentPromptBundle,
+  type AttachmentPromptInputMode,
+} from '../attachment-prompt-contracts.js'
 import {
   getRoutingImageEligibility,
   type RoutingImageEligibility,
@@ -54,17 +54,17 @@ interface PreparedRoutingImage {
 
 type PreparedRoutingEvidence = PreparedRoutingImage
 
-export type AssistantInputAttachmentModelBundle = InboxModelAttachmentBundle
+export type AssistantInputAttachmentPromptBundle = AttachmentPromptBundle
 
-export type AssistantInputAttachmentModelBundleSource =
-  | AssistantInputAttachmentModelBundle
+export type AssistantInputAttachmentPromptBundleSource =
+  | AssistantInputAttachmentPromptBundle
   | {
-      bundle: AssistantInputAttachmentModelBundle
+      bundle: AssistantInputAttachmentPromptBundle
       inputId: string
     }
 
-interface NormalizedAssistantInputAttachmentModelBundleSource {
-  bundle: AssistantInputAttachmentModelBundle
+interface NormalizedAssistantInputAttachmentPromptBundleSource {
+  bundle: AssistantInputAttachmentPromptBundle
   inputId: string | null
 }
 
@@ -76,11 +76,11 @@ export interface AssistantInputAttachmentEvidenceReadFailure {
   kind: 'image' | 'raw' | 'derived'
 }
 
-export async function buildAssistantInputAttachmentModelBundle(input: {
+export async function buildAssistantInputAttachmentPromptBundle(input: {
   attachment: AssistantInputAttachmentEvidenceItem
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
-}): Promise<AssistantInputAttachmentModelBundle> {
+}): Promise<AssistantInputAttachmentPromptBundle> {
   const rawPath = normalizeAssistantInputRawArtifactPath(input.attachment.raw?.path ?? null)
   const routingImage = getAttachmentEvidenceRoutingImageEligibility({
     attachment: input.attachment,
@@ -119,7 +119,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     .map((fragment) => `[${fragment.label}]\n${fragment.text}`)
     .join('\n\n')
 
-  return inboxModelAttachmentBundleSchema.parse({
+  return attachmentPromptBundleSchema.parse({
     attachmentId:
       input.attachment.sourceAttachmentId ??
       input.attachment.descriptorAttachmentId ??
@@ -137,14 +137,14 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
   })
 }
 
-export async function buildAssistantInputAttachmentModelBundles(input: {
+export async function buildAssistantInputAttachmentPromptBundles(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
-}): Promise<AssistantInputAttachmentModelBundle[]> {
+}): Promise<AssistantInputAttachmentPromptBundle[]> {
   return Promise.all(
     input.attachments.map((attachment) =>
-      buildAssistantInputAttachmentModelBundle({
+      buildAssistantInputAttachmentPromptBundle({
         attachment,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         vaultRoot: input.vaultRoot,
@@ -154,15 +154,15 @@ export async function buildAssistantInputAttachmentModelBundles(input: {
 }
 
 export function inferAssistantInputMultimodalInputMode(
-  attachments: readonly AssistantInputAttachmentModelBundle[],
-): InboxModelInputMode {
+  attachments: readonly AssistantInputAttachmentPromptBundle[],
+): AttachmentPromptInputMode {
   return attachments.some((attachment) => attachment.routingImage.eligible)
     ? 'multimodal'
     : 'text-only'
 }
 
 export function hasAssistantInputAttachmentEvidenceCandidate(
-  attachment: AssistantInputAttachmentEvidenceItem | AssistantInputAttachmentModelBundle,
+  attachment: AssistantInputAttachmentEvidenceItem | AssistantInputAttachmentPromptBundle,
 ): boolean {
   if ('routingImage' in attachment) {
     return attachment.routingImage.eligible
@@ -175,7 +175,7 @@ export function hasAssistantInputAttachmentEvidenceCandidate(
 }
 
 export async function prepareAssistantInputMultimodalUserMessageContent(input: {
-  attachmentSources: readonly AssistantInputAttachmentModelBundleSource[]
+  attachmentSources: readonly AssistantInputAttachmentPromptBundleSource[]
   fallbackContextLabel?: string
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
@@ -183,10 +183,10 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   vaultRoot: string
 }): Promise<{
   fallbackError: string | null
-  inputMode: InboxModelInputMode
+  inputMode: AttachmentPromptInputMode
   userMessageContent: AssistantUserMessageContentPart[] | null
 }> {
-  const attachmentSources = normalizeAttachmentModelBundleSources(
+  const attachmentSources = normalizeAttachmentPromptBundleSources(
     input.attachmentSources,
   )
   const preparedInputMode = inferAssistantInputMultimodalInputMode(
@@ -258,9 +258,9 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   }
 }
 
-function normalizeAttachmentModelBundleSources(
-  sources: readonly AssistantInputAttachmentModelBundleSource[],
-): NormalizedAssistantInputAttachmentModelBundleSource[] {
+function normalizeAttachmentPromptBundleSources(
+  sources: readonly AssistantInputAttachmentPromptBundleSource[],
+): NormalizedAssistantInputAttachmentPromptBundleSource[] {
   return sources.map((source) => {
     if ('bundle' in source) {
       return {
@@ -280,7 +280,7 @@ function buildMetadataFragment(
   attachment: AssistantInputAttachmentEvidenceItem,
   rawPath: string | null,
   routingImage: RoutingImageEligibility,
-  parseState: AssistantInputAttachmentModelBundle['parseState'],
+  parseState: AssistantInputAttachmentPromptBundle['parseState'],
 ) {
   const promptStoredPath = renderPromptStoredPath(rawPath)
   const metadataLines = [
@@ -422,7 +422,7 @@ async function buildDerivedTextSources(input: {
 }
 
 async function readPreparedRoutingEvidence(input: {
-  attachmentSources: readonly NormalizedAssistantInputAttachmentModelBundleSource[]
+  attachmentSources: readonly NormalizedAssistantInputAttachmentPromptBundleSource[]
   fallbackContextLabel?: string
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void

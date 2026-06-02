@@ -72,27 +72,28 @@ describe('Codex-only assistant hard-cut contracts', () => {
     }
   })
 
-  it('removes inbox model route contracts and model-route residue', async () => {
-    const deletedCliContractPath = path.join(
-      'packages',
-      'cli',
-      'src',
-      'inbox-model-contracts.ts',
-    )
+  it('removes old route contracts and model-route residue', async () => {
+    const oldContractFileName = ['inbox', 'model', 'contracts.ts'].join('-')
+    const deletedContractPaths = [
+      path.join('packages', 'cli', 'src', oldContractFileName),
+      path.join('packages', 'assistant-engine', 'src', oldContractFileName),
+    ]
     const contractPaths = [
-      path.join('packages', 'assistant-engine', 'src', 'inbox-model-contracts.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'attachment-prompt-contracts.ts'),
     ]
     const removedContractSymbols = [
       'assistantToolSpecSchema',
       'assistantExecutionPlanSchema',
-      'inboxModelRouteResultSchema',
+      ['inbox', 'Model', 'RouteResultSchema'].join(''),
       'AssistantToolExecutionResult',
       'AssistantExecutionPlan',
-      'InboxModelRouteResult',
+      ['Inbox', 'Model', 'RouteResult'].join(''),
       'providerMode',
     ]
 
-    expect(existsSync(resolveRepoPath(deletedCliContractPath))).toBe(false)
+    expect(
+      deletedContractPaths.filter((filePath) => existsSync(resolveRepoPath(filePath))),
+    ).toEqual([])
     for (const contractPath of contractPaths) {
       const source = await readFile(resolveRepoPath(contractPath), 'utf8')
       for (const symbol of removedContractSymbols) {
