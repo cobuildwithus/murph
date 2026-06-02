@@ -30,3 +30,6 @@ runtime recovery signals by themselves.
 - Focused web tests for recovery sweep and dirty connection store behavior.
 - Focused Temporal activity/reconciler tests for the recovery sweep contract.
 - `pnpm typecheck`
+Status: completed
+Updated: 2026-06-02
+Completed: 2026-06-02
