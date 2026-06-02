@@ -25,6 +25,10 @@
 - If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical vault records or explicit derived materializations, never in assistant runtime state.
 - No agent gets arbitrary write access to vault files as part of the public contract.
 
+## User-Facing Message Sends
+
+- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, and the first welcome. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
+
 ## Hosted Foreground Priority
 
 - User conversation messages are the highest-priority hosted runtime work.
