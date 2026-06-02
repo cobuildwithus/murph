@@ -339,11 +339,22 @@ function resolveLocalWorkspaceCliSourceEntryPath(): string | null {
   }
 }
 
+function resolveLocalWorkspaceCliSourceTsconfigPath(
+  sourceEntryPath: string,
+): string {
+  return path.resolve(path.dirname(sourceEntryPath), '../../..', 'tsconfig.base.json')
+}
+
 async function resolveLocalWorkspaceCliSourceLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher | null> {
   const sourceEntryPath = resolveLocalWorkspaceCliSourceEntryPath()
   if (!sourceEntryPath || !(await pathExists(sourceEntryPath))) {
+    return null
+  }
+
+  const tsconfigPath = resolveLocalWorkspaceCliSourceTsconfigPath(sourceEntryPath)
+  if (!(await pathExists(tsconfigPath))) {
     return null
   }
 
@@ -353,7 +364,7 @@ async function resolveLocalWorkspaceCliSourceLauncher(
   }
 
   return {
-    argvPrefix: [sourceEntryPath],
+    argvPrefix: ['--tsconfig', tsconfigPath, sourceEntryPath],
     command: tsxBinary,
   }
 }

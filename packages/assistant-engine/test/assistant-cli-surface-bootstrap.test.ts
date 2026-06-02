@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -15,10 +16,46 @@ import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
 
+function createManifestCommandChildProcess(output: unknown): EventEmitter & {
+  kill: () => void
+  stderr: EventEmitter
+  stdin: {
+    end: () => void
+    on: () => void
+  }
+  stdout: EventEmitter
+} {
+  const child = new EventEmitter() as EventEmitter & {
+    kill: () => void
+    stderr: EventEmitter
+    stdin: {
+      end: () => void
+      on: () => void
+    }
+    stdout: EventEmitter
+  }
+  child.stdout = new EventEmitter()
+  child.stderr = new EventEmitter()
+  child.stdin = {
+    end: () => undefined,
+    on: () => undefined,
+  }
+  child.kill = () => undefined
+
+  queueMicrotask(() => {
+    child.stdout.emit('data', JSON.stringify(output))
+    child.emit('close', 0, null)
+  })
+
+  return child
+}
+
 afterEach(async () => {
   vi.resetModules()
   vi.restoreAllMocks()
   vi.clearAllMocks()
+  vi.doUnmock('node:child_process')
+  vi.doUnmock('node:fs/promises')
   vi.doUnmock('../src/assistant/cli-surface-manifest.js')
   await Promise.all(
     cleanupPaths.splice(0).map((target) =>
@@ -359,6 +396,152 @@ test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free'
   assert.equal(env.LINQ_WEBHOOK_SECRET, undefined)
   assert.equal(env.MAPBOX_ACCESS_TOKEN, undefined)
   assert.equal(env.TELEGRAM_BOT_TOKEN, undefined)
+})
+
+test('readAssistantCliLlmsManifest launches workspace CLI source with base tsconfig', async () => {
+  vi.resetModules()
+
+  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
+  const spawnCalls: Array<{
+    args: string[]
+    command: string
+    cwd?: string
+    env?: NodeJS.ProcessEnv
+  }> = []
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async (targetPath: string) => {
+        if (
+          targetPath === fakeTsxBinary ||
+          targetPath.endsWith('tsconfig.base.json') ||
+          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts'))
+        ) {
+          return
+        }
+
+        throw new Error(`missing test executable: ${targetPath}`)
+      }),
+    }
+  })
+  vi.doMock('node:child_process', () => ({
+    spawn: vi.fn((
+      command: string,
+      args: string[],
+      options: {
+        cwd?: string
+        env?: NodeJS.ProcessEnv
+      },
+    ) => {
+      spawnCalls.push({
+        args: [...args],
+        command,
+        cwd: options.cwd,
+        env: options.env,
+      })
+
+      return createManifestCommandChildProcess({
+        commands: [
+          {
+            name: 'memory show',
+          },
+        ],
+        version: 'incur.v1',
+      })
+    }),
+  }))
+
+  const {
+    readAssistantCliLlmsManifest,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  const manifest = await readAssistantCliLlmsManifest({
+    cliEnv: {
+      HOME: path.join(path.sep, 'tmp', 'murph-test-home'),
+      PATH: path.dirname(fakeTsxBinary),
+    },
+    workingDirectory: path.join(path.sep, 'tmp', 'murph-workspace'),
+  })
+
+  assert.equal(manifest.commands[0]?.name, 'memory show')
+  assert.equal(spawnCalls.length, 1)
+
+  const spawnCall = spawnCalls[0]
+  assert.ok(spawnCall)
+  assert.equal(spawnCall.command, fakeTsxBinary)
+  assert.equal(spawnCall.args[0], '--tsconfig')
+  assert.match(spawnCall.args[1] ?? '', /tsconfig\.base\.json$/u)
+  assert.match(spawnCall.args[2] ?? '', /packages[\\/]cli[\\/]src[\\/]bin\.ts$/u)
+  assert.deepEqual(spawnCall.args.slice(3), ['--llms', '--format', 'json'])
+  assert.equal(spawnCall.cwd, path.join(path.sep, 'tmp', 'murph-workspace'))
+})
+
+test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig is missing', async () => {
+  vi.resetModules()
+
+  const fakeBinDirectory = path.join(path.sep, 'tmp', 'murph-test-bin')
+  const fakeVaultCliBinary = path.join(fakeBinDirectory, 'vault-cli')
+  const fakeTsxBinary = path.join(fakeBinDirectory, 'tsx')
+  const spawnCalls: Array<{
+    args: string[]
+    command: string
+  }> = []
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async (targetPath: string) => {
+        if (
+          targetPath === fakeVaultCliBinary ||
+          targetPath === fakeTsxBinary ||
+          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts'))
+        ) {
+          return
+        }
+
+        throw new Error(`missing test path: ${targetPath}`)
+      }),
+    }
+  })
+  vi.doMock('node:child_process', () => ({
+    spawn: vi.fn((command: string, args: string[]) => {
+      spawnCalls.push({
+        args: [...args],
+        command,
+      })
+
+      return createManifestCommandChildProcess({
+        commands: [
+          {
+            name: 'memory show',
+          },
+        ],
+      })
+    }),
+  }))
+
+  const {
+    readAssistantCliLlmsManifest,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  const manifest = await readAssistantCliLlmsManifest({
+    cliEnv: {
+      PATH: fakeBinDirectory,
+    },
+  })
+
+  assert.equal(manifest.commands[0]?.name, 'memory show')
+  assert.equal(spawnCalls.length, 1)
+
+  const spawnCall = spawnCalls[0]
+  assert.ok(spawnCall)
+  assert.equal(spawnCall.command, fakeVaultCliBinary)
+  assert.deepEqual(spawnCall.args, ['--llms', '--format', 'json'])
 })
 
 test('buildAssistantCliSurfaceContract renders required string option signatures when the schema provides them', async () => {
