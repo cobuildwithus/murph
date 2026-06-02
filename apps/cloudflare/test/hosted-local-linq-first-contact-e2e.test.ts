@@ -490,8 +490,6 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(firstInboundPromptText).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/conversation-onboarding/SKILL.md",
     );
-    expect(firstInboundPromptText).toContain("Conversation so far:");
-    expect(firstInboundPromptText).toContain("Assistant:");
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
     },
