@@ -3314,8 +3314,8 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
           reason: "available for rebuild test",
         };
       },
-        supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "audio";
+      supports(request) {
+        return (request.preparedKind ?? request.artifact.kind) === "audio";
       },
       async run() {
         return {
