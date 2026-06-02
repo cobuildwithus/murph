@@ -178,9 +178,13 @@ const MAPBOX_EGRESS_POLICY = [
 ] as const;
 
 interface ProviderBaseConfig {
-  acceptedBaseUrls: readonly URL[];
-  baseUrl: URL;
   knownHosts: readonly string[];
+  routes: readonly ProviderBaseRoute[];
+}
+
+interface ProviderBaseRoute {
+  acceptedBaseUrl: URL;
+  upstreamBaseUrl: URL;
 }
 
 interface ProviderPathMatch {
@@ -1855,65 +1859,78 @@ function readProviderBaseConfig(
   } = {},
 ): ProviderBaseConfig {
   const fallbackUrl = new URL(fallback);
-  const fallbackBaseUrls = withContainerHostAlias(fallbackUrl, env);
-  const fallbackHosts = fallbackBaseUrls.map((url) => url.hostname);
+  const fallbackRoutes = createIdentityProviderBaseRoutes(withContainerHostAlias(fallbackUrl, env));
+  const fallbackHosts = fallbackRoutes.map((route) => route.acceptedBaseUrl.hostname);
   const rawValue = typeof value === "string" && value.trim() ? value.trim() : null;
   if (!rawValue) {
     return {
-      acceptedBaseUrls: fallbackBaseUrls,
-      baseUrl: fallbackUrl,
       knownHosts: fallbackHosts,
+      routes: fallbackRoutes,
     };
   }
 
   try {
     const url = new URL(rawValue);
     if (isAllowedProviderBaseUrl(url)) {
-      const acceptedBaseUrls = uniqueProviderBaseUrls(
-        ...withContainerHostAlias(url, env),
-        ...(options.acceptFallbackBaseUrl ? fallbackBaseUrls : []),
+      const routes = uniqueProviderBaseRoutes(
+        ...createIdentityProviderBaseRoutes(withContainerHostAlias(url, env)),
+        ...(options.acceptFallbackBaseUrl
+          ? createProviderBaseRoutes(url, fallbackRoutes.map((route) => route.acceptedBaseUrl))
+          : []),
       );
       return {
-        acceptedBaseUrls,
-        baseUrl: url,
         knownHosts: uniqueProviderHosts(
-          ...acceptedBaseUrls.map((accepted) => accepted.hostname),
+          ...routes.map((route) => route.acceptedBaseUrl.hostname),
           fallbackUrl.hostname,
         ),
+        routes,
       };
     }
     return {
-      acceptedBaseUrls: fallbackBaseUrls,
-      baseUrl: fallbackUrl,
       knownHosts: uniqueProviderHosts(url.hostname, fallbackUrl.hostname),
+      routes: fallbackRoutes,
     };
   } catch {
     return {
-      acceptedBaseUrls: fallbackBaseUrls,
-      baseUrl: fallbackUrl,
       knownHosts: fallbackHosts,
+      routes: fallbackRoutes,
     };
   }
 }
 
-function uniqueProviderBaseUrls(...urls: URL[]): URL[] {
-  const seen = new Set<string>();
-  const unique: URL[] = [];
+function createProviderBaseRoutes(upstreamBaseUrl: URL, acceptedBaseUrls: readonly URL[]): ProviderBaseRoute[] {
+  return acceptedBaseUrls.map((acceptedBaseUrl) => ({
+    acceptedBaseUrl,
+    upstreamBaseUrl,
+  }));
+}
 
-  for (const url of urls) {
-    const key = url.origin + normalizedProviderBasePath(url);
+function createIdentityProviderBaseRoutes(acceptedBaseUrls: readonly URL[]): ProviderBaseRoute[] {
+  return acceptedBaseUrls.map((acceptedBaseUrl) => ({
+    acceptedBaseUrl,
+    upstreamBaseUrl: acceptedBaseUrl,
+  }));
+}
+
+function uniqueProviderBaseRoutes(...routes: ProviderBaseRoute[]): ProviderBaseRoute[] {
+  const seen = new Set<string>();
+  const unique: ProviderBaseRoute[] = [];
+
+  for (const route of routes) {
+    const key = route.acceptedBaseUrl.origin + normalizedProviderBasePath(route.acceptedBaseUrl);
     if (seen.has(key)) {
       continue;
     }
     seen.add(key);
-    unique.push(url);
+    unique.push(route);
   }
 
   return unique;
 }
 
 function readProviderPathMatch(url: URL, providerBase: ProviderBaseConfig): ProviderPathMatch | null {
-  for (const acceptedBaseUrl of providerBase.acceptedBaseUrls) {
+  for (const route of providerBase.routes) {
+    const acceptedBaseUrl = route.acceptedBaseUrl;
     if (url.origin !== acceptedBaseUrl.origin) {
       continue;
     }
@@ -1923,7 +1940,7 @@ function readProviderPathMatch(url: URL, providerBase: ProviderBaseConfig): Prov
     }
     return {
       pathnameSuffix: url.pathname.slice(prefix.length),
-      upstreamBaseUrl: providerBase.baseUrl,
+      upstreamBaseUrl: route.upstreamBaseUrl,
     };
   }
   return null;

@@ -1962,6 +1962,47 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
   });
 
+  it("preserves the hosted-local container host alias for configured Linq origins", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://host.docker.internal:4011/chats", {
+        body: JSON.stringify({
+          from: "+15550000000",
+          message: { parts: [{ type: "text", value: "hello" }] },
+          to: ["+15550000001"],
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+        LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("http://host.docker.internal:4011/chats");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("rejects default Linq provider host egress while a custom Linq base is configured", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -2230,7 +2271,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
   });
 
-  it("treats the hosted-local container host alias as the configured provider origin", async () => {
+  it("preserves the hosted-local container host alias for configured Telegram origins", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -2256,7 +2297,9 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.url).toBe(
+      "http://host.docker.internal:4011/bottelegram-worker-secret/sendMessage",
+    );
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
