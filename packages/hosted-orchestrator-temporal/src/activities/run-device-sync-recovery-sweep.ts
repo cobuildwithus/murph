@@ -11,19 +11,6 @@ import {
 
 export interface HostedDeviceSyncRecoverySweepResult {
   dueReconcileSweeper: HostedDeviceSyncDueReconcileSweeperResult;
-  sweeper: HostedDeviceSyncDirtySweeperResult;
-}
-
-export interface HostedDeviceSyncDirtySweeperResult {
-  dirtyConnections: number;
-  dirtyUsers: number;
-  recoveryAttempted: number;
-  recoveryFailed: number;
-  recoveryLimit: number;
-  recoveryNotRequested: number;
-  recoveryRequested: number;
-  skippedDirtyUsers: number;
-  staleAfterMs: number;
 }
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
@@ -68,43 +55,6 @@ function parseHostedDeviceSyncRecoverySweepResult(
     dueReconcileSweeper: parseDueReconcileSweeperResult(
       record.dueReconcileSweeper,
     ),
-    sweeper: parseDirtySweeperResult(record.sweeper),
-  };
-}
-
-function parseDirtySweeperResult(value: unknown): HostedDeviceSyncDirtySweeperResult {
-  const record = requireRecord(value, "Hosted device-sync dirty sweeper response");
-  return {
-    dirtyConnections: requireCount(record.dirtyConnections, "dirtyConnections"),
-    dirtyUsers: requireCount(
-      record.dirtyUsers ?? record.dirtyConnections,
-      "dirtyUsers",
-    ),
-    recoveryAttempted: requireCount(
-      record.recoveryAttempted ?? record.wakeAttempted,
-      "recoveryAttempted",
-    ),
-    recoveryFailed: requireCount(
-      record.recoveryFailed ?? record.wakeFailed,
-      "recoveryFailed",
-    ),
-    recoveryLimit: requireCount(
-      record.recoveryLimit ?? record.wakeLimit,
-      "recoveryLimit",
-    ),
-    recoveryNotRequested: requireCount(
-      record.recoveryNotRequested ?? record.wakeNotAppended,
-      "recoveryNotRequested",
-    ),
-    recoveryRequested: requireCount(
-      record.recoveryRequested ?? countLegacyRequestedRecoveries(record),
-      "recoveryRequested",
-    ),
-    skippedDirtyUsers: requireCount(
-      record.skippedDirtyUsers ?? record.skippedDirtyConnections,
-      "skippedDirtyUsers",
-    ),
-    staleAfterMs: requireCount(record.staleAfterMs, "staleAfterMs"),
   };
 }
 
@@ -117,26 +67,11 @@ function parseDueReconcileSweeperResult(
   );
   return {
     dueConnections: requireCount(record.dueConnections, "dueConnections"),
-    recoveryAttempted: requireCount(
-      record.recoveryAttempted ?? record.wakeAttempted,
-      "recoveryAttempted",
-    ),
-    recoveryFailed: requireCount(
-      record.recoveryFailed ?? record.wakeFailed,
-      "recoveryFailed",
-    ),
-    recoveryLimit: requireCount(
-      record.recoveryLimit ?? record.wakeLimit,
-      "recoveryLimit",
-    ),
-    recoveryNotRequested: requireCount(
-      record.recoveryNotRequested ?? record.wakeNotAppended,
-      "recoveryNotRequested",
-    ),
-    recoveryRequested: requireCount(
-      record.recoveryRequested ?? countLegacyRequestedRecoveries(record),
-      "recoveryRequested",
-    ),
+    recoveryAttempted: requireCount(record.recoveryAttempted, "recoveryAttempted"),
+    recoveryFailed: requireCount(record.recoveryFailed, "recoveryFailed"),
+    recoveryLimit: requireCount(record.recoveryLimit, "recoveryLimit"),
+    recoveryNotRequested: requireCount(record.recoveryNotRequested, "recoveryNotRequested"),
+    recoveryRequested: requireCount(record.recoveryRequested, "recoveryRequested"),
     skippedDueConnections: requireCount(
       record.skippedDueConnections,
       "skippedDueConnections",
@@ -167,14 +102,4 @@ function requireCount(value: unknown, label: string): number {
   }
 
   return value;
-}
-
-function countLegacyRequestedRecoveries(record: Record<string, unknown>): number | undefined {
-  if (record.wakeAppended === undefined && record.wakeDuplicate === undefined) {
-    return undefined;
-  }
-
-  const appended = requireCount(record.wakeAppended ?? 0, "wakeAppended");
-  const duplicate = requireCount(record.wakeDuplicate ?? 0, "wakeDuplicate");
-  return appended + duplicate;
 }

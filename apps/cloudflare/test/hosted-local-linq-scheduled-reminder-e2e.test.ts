@@ -28,9 +28,6 @@ const setupReplyText = "Done - I will remind you here in about five minutes.";
 const setupRequestText = "Remind me here in about five minutes to go to sleep.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
 const scheduledReminderLeadMs = 300_000;
-// Keep Temporal's owner recheck after local runner cold-start/bootstrap, while
-// still well before the reminder due time.
-const scheduledReminderIdleCheckpointDelayMs = 60_000;
 const scheduledReminderMinimumRunwayMs = 45_000;
 const scheduledReminderSendWaitMs = 120_000;
 const productionLikeAssistantModel = "gpt-5.5";
@@ -163,7 +160,6 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(scheduledReminderIdleCheckpointDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,

@@ -91,9 +91,7 @@ export interface SignalHostedRuntimePrewarmInput {
   userId: string;
 }
 
-export type HostedDeviceSyncRecoverySignalIntent =
-  | "device-sync-dirty-recovery"
-  | "device-sync-reconcile-recovery";
+export type HostedDeviceSyncRecoverySignalIntent = "device-sync-reconcile-recovery";
 
 export interface SignalHostedDeviceSyncMailboxInput {
   client?: HostedRuntimeTemporalSignalClient | null;
@@ -488,7 +486,6 @@ function shouldSignalHostedDeviceSyncRecovery(
   intent: HostedDeviceSyncRecoverySignalIntent | null,
 ): boolean {
   switch (intent) {
-    case "device-sync-dirty-recovery":
     case "device-sync-reconcile-recovery":
       return true;
     case null:

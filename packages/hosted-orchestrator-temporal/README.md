@@ -8,7 +8,8 @@ execution adapter. The workflow state and signals must stay pointer-only.
 The package also owns the global device-sync recovery reconciler workflow and
 Temporal Schedule helper. That reconciler calls a signed web command and stores
 only count/status metadata in Temporal history; web remains the owner of
-canonical dirty and due-reconcile facts.
+canonical dirty state and due-reconcile facts, and the reconciler selects only
+due-reconcile facts.
 
 ## Workflow Replay Discipline
 
@@ -124,12 +125,15 @@ The device-sync recovery cadence should be owned by a Temporal Schedule that
 starts `hostedDeviceSyncReconcilerWorkflow`. The Workflow runs one
 `runHostedDeviceSyncRecoverySweep` Activity and exits. The Activity signs an
 empty JSON request to the hosted web command at
-`/api/internal/device-sync/recovery-sweep`; web reads Postgres dirty/due facts,
-coalesces dirty recovery by user, records due-reconcile recovery markers,
-requests bounded background recovery nudges, and returns count-only summaries.
+`/api/internal/device-sync/recovery-sweep`; web reads due-reconcile facts,
+records due-reconcile recovery markers, requests bounded background recovery
+nudges, and returns count-only summaries.
 
-The Vercel dirty-sweeper cron is removed; Temporal is the only production owner
-of this recovery cadence. Do not move dirty resources, provider tokens, external
+Dirty state is not a scheduler. Webhook clean-to-dirty transitions may still
+best-effort nudge runtime immediately, and runtime maintenance drains pending
+dirty state when device-sync work runs, but the global recovery sweep must not
+wake runtimes only because dirty rows remain unacknowledged. Do not move dirty
+resources, provider tokens, external
 account state, or canonical dirty/reconcile facts into Temporal Workflow state.
 
 Create or update the schedule after configuring Temporal and hosted-web signing

@@ -292,7 +292,7 @@ export async function startHostedLocalDevHarness(input: {
           if (
             now >= nextRecoveryNudgeAt
             && (
-              hostedStatusHasRecoverableMailboxLag({
+              hostedStatusHasStaleMailboxLag({
                 firstObservedAt: mailboxLagFirstObservedAt,
                 now,
                 status,
@@ -610,7 +610,7 @@ function compareMailboxSeq(left: string, right: string): number {
   }
 }
 
-function hostedStatusHasRecoverableMailboxLag(input: {
+function hostedStatusHasStaleMailboxLag(input: {
   firstObservedAt: number | null;
   now: number;
   status: HostedRunnerStatusResponse;
@@ -620,7 +620,7 @@ function hostedStatusHasRecoverableMailboxLag(input: {
   }
 
   if (input.status.lastErrorCode) {
-    return true;
+    return false;
   }
 
   if (input.firstObservedAt === null) {

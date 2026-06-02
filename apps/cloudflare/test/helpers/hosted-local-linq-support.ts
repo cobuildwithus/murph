@@ -10,6 +10,9 @@ import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import type {
+  HostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedPhoneLookupKey } from "./hosted-contact-privacy.js";
 import {
@@ -35,6 +38,7 @@ export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boole
 
 const linqCreateChatPath = "/chats";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
+const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
 
 type HostedLinqInboundPartInput =
   | {
@@ -310,6 +314,7 @@ export async function startHostedLocalLinqStub(input: {
   }): Promise<ObservedLinqRequest[]> => {
     const startedAt = Date.now();
     let nextNudgeAt = startedAt;
+    let mailboxLagFirstObservedAt: number | null = null;
     let latestStatusReadError: string | null = null;
 
     while ((Date.now() - startedAt) < 60_000) {
@@ -343,7 +348,19 @@ export async function startHostedLocalLinqStub(input: {
             ]),
           );
         }
-        if (status === null || status.inFlight !== true) {
+        mailboxLagFirstObservedAt = updateHostedLocalLinqMailboxLagFirstObservedAt({
+          firstObservedAt: mailboxLagFirstObservedAt,
+          now,
+          status,
+        });
+        if (
+          status
+          && shouldNudgeHostedLocalLinqWaitForStatus({
+            mailboxLagFirstObservedAt,
+            now,
+            status,
+          })
+        ) {
           await input.scenario.harness.nudgeUserBestEffort(input.userId);
         }
       }
@@ -460,6 +477,49 @@ export async function startHostedLocalLinqStub(input: {
         })
       )[0]!,
   };
+}
+
+export function shouldNudgeHostedLocalLinqWaitForStatus(input: {
+  mailboxLagFirstObservedAt: number | null;
+  now: number;
+  status: HostedRunnerStatusResponse;
+}): boolean {
+  if (input.status.inFlight || input.status.lastErrorCode) {
+    return false;
+  }
+
+  if (!hostedLocalLinqStatusHasMailboxLag(input.status)) {
+    return false;
+  }
+
+  if (input.mailboxLagFirstObservedAt === null) {
+    return false;
+  }
+
+  return input.now - input.mailboxLagFirstObservedAt
+    >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
+}
+
+function updateHostedLocalLinqMailboxLagFirstObservedAt(input: {
+  firstObservedAt: number | null;
+  now: number;
+  status: HostedRunnerStatusResponse | null;
+}): number | null {
+  if (!input.status || !hostedLocalLinqStatusHasMailboxLag(input.status)) {
+    return null;
+  }
+
+  return input.firstObservedAt ?? input.now;
+}
+
+function hostedLocalLinqStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean {
+  return status.mailboxLag.some((lane) => {
+    try {
+      return BigInt(lane.lag) > 0n;
+    } catch {
+      return lane.lag !== "0";
+    }
+  });
 }
 
 export function buildHostedLinqInboundEvent(

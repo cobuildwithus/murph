@@ -43,17 +43,6 @@ describe("hosted device-sync recovery sweep route", () => {
         recoveryRequested: 1,
         skippedDueConnections: 0,
       },
-      sweeper: {
-        dirtyConnections: 1,
-        dirtyUsers: 1,
-        recoveryAttempted: 1,
-        recoveryFailed: 0,
-        recoveryLimit: 25,
-        recoveryNotRequested: 0,
-        recoveryRequested: 1,
-        skippedDirtyUsers: 0,
-        staleAfterMs: 30000,
-      },
     });
   });
 
@@ -85,30 +74,6 @@ describe("hosted device-sync recovery sweep route", () => {
         recoveryNotRequested: 0,
         recoveryRequested: 1,
         skippedDueConnections: 0,
-        wakeAppended: 1,
-        wakeAttempted: 1,
-        wakeDuplicate: 0,
-        wakeFailed: 0,
-        wakeLimit: 25,
-        wakeNotAppended: 0,
-      },
-      sweeper: {
-        dirtyConnections: 1,
-        dirtyUsers: 1,
-        recoveryAttempted: 1,
-        recoveryFailed: 0,
-        recoveryLimit: 25,
-        recoveryNotRequested: 0,
-        recoveryRequested: 1,
-        skippedDirtyUsers: 0,
-        skippedDirtyConnections: 0,
-        staleAfterMs: 30000,
-        wakeAppended: 1,
-        wakeAttempted: 1,
-        wakeDuplicate: 0,
-        wakeFailed: 0,
-        wakeLimit: 25,
-        wakeNotAppended: 0,
       },
     });
   });

@@ -211,16 +211,5 @@ function buildRecoverySweepResponse() {
       recoveryRequested: 2,
       skippedDueConnections: 0,
     },
-    sweeper: {
-      dirtyConnections: 1,
-      dirtyUsers: 1,
-      recoveryAttempted: 1,
-      recoveryFailed: 0,
-      recoveryLimit: 25,
-      recoveryNotRequested: 0,
-      recoveryRequested: 1,
-      skippedDirtyUsers: 0,
-      staleAfterMs: 30000,
-    },
   };
 }

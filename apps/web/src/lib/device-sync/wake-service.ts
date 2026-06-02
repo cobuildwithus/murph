@@ -18,10 +18,9 @@ import {
   sanitizeHostedRuntimeErrorText,
   type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
-import {
-  buildHostedExecutionDeviceSyncWake,
-  type HostedExecutionDeviceSyncWakeEvent,
-  type HostedExecutionWake,
+import type {
+  HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
@@ -613,89 +612,6 @@ export async function requestHostedDeviceSyncScheduledReconcileRecovery(input: {
   return buildHostedDeviceSyncRecoveryRequestedResult();
 }
 
-export interface HostedDeviceSyncDirtyWakeResult {
-  reason?: string;
-  wakeAccepted: boolean;
-  wakeAppended: boolean;
-  wakeDuplicate: boolean;
-  wakeInserted: boolean;
-}
-
-export function buildHostedDeviceSyncDirtyWakeDedupeKey(input: {
-  connectionId: string;
-  dirtyRevision: bigint;
-  provider: string;
-}): string {
-  return [
-    "device-sync",
-    "dirty",
-    "v1",
-    "provider",
-    normalizeHostedDeviceSyncDirtyWakeDedupeSegment(input.provider),
-    "connection",
-    sha256Hex(input.connectionId).slice(0, 16),
-    "revision",
-    input.dirtyRevision.toString(),
-  ].join(":");
-}
-
-export async function appendHostedDeviceSyncDirtyWake(input: {
-  connectionId: string;
-  dirtyRevision: bigint;
-  eventType?: string | null;
-  occurredAt: string;
-  provider: string;
-  resourceCategory?: string | null;
-  store?: PrismaDeviceSyncControlPlaneStore;
-  userId: string;
-}): Promise<HostedDeviceSyncDirtyWakeResult> {
-  // Legacy deploy-overlap path. New dirty recovery uses
-  // requestHostedDeviceSyncDirtyRecovery so device-sync recovery stays out of
-  // foreground mailbox work.
-  const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
-    prisma: getPrisma(),
-  });
-  const wake = buildHostedDeviceSyncDirtyWakeEnvelope({
-    occurredAt: input.occurredAt,
-    dedupeKey: buildHostedDeviceSyncDirtyWakeDedupeKey({
-      connectionId: input.connectionId,
-      dirtyRevision: input.dirtyRevision,
-      provider: input.provider,
-    }),
-    eventType: input.eventType ?? null,
-    resourceCategory: input.resourceCategory ?? null,
-    userId: input.userId,
-  });
-
-  const appendResult = await persistHostedDeviceSyncWake({
-    recoverySignalIntent: "device-sync-dirty-recovery",
-    signalFailureMode: "throw",
-    wake,
-    store,
-    persist: async () => {},
-  });
-  const wakeAccepted = appendResult.inserted
-    || (appendResult.duplicate && !appendResult.dedupeConflict);
-
-  return {
-    ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
-    wakeAccepted,
-    wakeAppended: appendResult.inserted,
-    wakeDuplicate: appendResult.duplicate && !appendResult.dedupeConflict,
-    wakeInserted: appendResult.inserted,
-  };
-}
-
-export async function requestHostedDeviceSyncDirtyRecovery(input: {
-  userId: string;
-}): Promise<HostedDeviceSyncRecoveryRequestResult> {
-  await startHostedDeviceSyncBackgroundMaintenanceWorkflow(input.userId, {
-    failureMode: "throw",
-  });
-
-  return buildHostedDeviceSyncRecoveryRequestedResult();
-}
-
 export interface HostedDeviceSyncRecoveryRequestResult {
   reason?: string;
   recoveryRequested: boolean;
@@ -960,54 +876,6 @@ function buildHostedDeviceSyncSignalPayload(input: {
     ...(input.hint?.occurredAt === undefined ? { occurredAt: input.occurredAt } : {}),
     ...(input.traceId && input.hint?.traceId === undefined ? { traceId: input.traceId } : {}),
   };
-}
-
-function buildHostedDeviceSyncDirtyWakeHint(input: {
-  eventType?: string | null;
-  occurredAt: string;
-  resourceCategory?: string | null;
-}): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
-  return {
-    occurredAt: input.occurredAt,
-    ...(normalizeNullableString(input.eventType)
-      ? { eventType: normalizeNullableString(input.eventType) }
-      : {}),
-    ...(normalizeNullableString(input.resourceCategory)
-      ? { resourceCategory: normalizeNullableString(input.resourceCategory) }
-      : {}),
-  };
-}
-
-function buildHostedDeviceSyncDirtyWakeEnvelope(input: {
-  dedupeKey: string;
-  eventType?: string | null;
-  occurredAt: string;
-  resourceCategory?: string | null;
-  userId: string;
-}): HostedExecutionWake {
-  const eventId = normalizeNullableString(input.dedupeKey);
-  if (!eventId) {
-    throw new TypeError("Hosted device-sync dirty wake dedupe key is required.");
-  }
-
-  return buildHostedExecutionDeviceSyncWake({
-    eventId,
-    hint: buildHostedDeviceSyncDirtyWakeHint(input),
-    occurredAt: input.occurredAt,
-    reason: "webhook_hint",
-    userId: input.userId,
-  });
-}
-
-function normalizeHostedDeviceSyncDirtyWakeDedupeSegment(value: string): string {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .slice(0, 64);
-
-  return normalized || "unknown";
 }
 
 function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): string {

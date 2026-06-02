@@ -299,11 +299,11 @@ it("nudges due scheduled recovery when the mailbox has no remaining lag", async 
   }
 });
 
-it("keeps nudging when a runner error still has mailbox lag", async () => {
+it("does not nudge a lagged runner error before scheduled recovery is due", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const laggedErrorStatus = {
     inFlight: false,
-    lastErrorCode: "TimeoutError",
+    lastErrorCode: "runtime_error",
     mailboxLag: [
       {
         importedSeq: "0",
@@ -312,8 +312,59 @@ it("keeps nudging when a runner error still has mailbox lag", async () => {
         maxSeq: "1",
       },
     ],
+    nextAlarmAt: "2999-05-10T11:55:51.119Z",
     recentLogs: [],
-    userId: "member_retryable_error",
+    userId: "member_lagged_error_wait",
+    workspace: null,
+  } satisfies HostedRunnerStatusResponse;
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).includes("/runtime/ensure-processing")) {
+      return Response.json({ accepted: true });
+    }
+    return Response.json(laggedErrorStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_lagged_error_wait", {
+      pollIntervalMs: 1,
+      timeoutMs: 50,
+    })).rejects.toThrow(/Timed out waiting for hosted completion/u);
+
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_lagged_error_wait/runtime/ensure-processing"
+      && init?.method === "POST"
+    )).toBe(false);
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("nudges due scheduled recovery when a runner error still has mailbox lag", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const laggedErrorStatus = {
+    inFlight: false,
+    lastErrorCode: "runtime_error",
+    mailboxLag: [
+      {
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    nextAlarmAt: "2026-05-10T11:55:51.119Z",
+    recentLogs: [],
+    userId: "member_lagged_error_recovery",
     workspace: null,
   } satisfies HostedRunnerStatusResponse;
   const completedStatus = {
@@ -336,7 +387,7 @@ it("keeps nudging when a runner error still has mailbox lag", async () => {
       redactedStatus: null,
       snapshotRef: null,
       updatedAt: "2026-05-08T00:00:00.000Z",
-      userId: "member_retryable_error",
+      userId: "member_lagged_error_recovery",
       version: "1",
     },
   } satisfies HostedRunnerStatusResponse;
@@ -359,16 +410,16 @@ it("keeps nudging when a runner error still has mailbox lag", async () => {
   });
 
   try {
-    await expect(harness.waitForHostedCompletion("member_retryable_error", {
+    await expect(harness.waitForHostedCompletion("member_lagged_error_recovery", {
       pollIntervalMs: 1,
       timeoutMs: 5_000,
     })).resolves.toMatchObject({
       lastErrorCode: null,
-      userId: "member_retryable_error",
+      userId: "member_lagged_error_recovery",
     });
 
     expect(fetch.mock.calls.some(([request, init]) =>
-      String(request) === "http://127.0.0.1:8787/internal/users/member_retryable_error/runtime/ensure-processing"
+      String(request) === "http://127.0.0.1:8787/internal/users/member_lagged_error_recovery/runtime/ensure-processing"
       && init?.method === "POST"
     )).toBe(true);
   } finally {

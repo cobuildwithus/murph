@@ -42,35 +42,5 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  return jsonOk(withLegacyRecoverySweepAliases(
-    await runHostedDeviceSyncRecoverySweep(),
-  ));
+  return jsonOk(await runHostedDeviceSyncRecoverySweep());
 });
-
-type HostedDeviceSyncRecoverySweepResult =
-  Awaited<ReturnType<typeof runHostedDeviceSyncRecoverySweep>>;
-
-function withLegacyRecoverySweepAliases(result: HostedDeviceSyncRecoverySweepResult) {
-  // Keep old count aliases while hosted web and Temporal deploy independently.
-  return {
-    dueReconcileSweeper: {
-      ...result.dueReconcileSweeper,
-      wakeAppended: result.dueReconcileSweeper.recoveryRequested,
-      wakeAttempted: result.dueReconcileSweeper.recoveryAttempted,
-      wakeDuplicate: 0,
-      wakeFailed: result.dueReconcileSweeper.recoveryFailed,
-      wakeLimit: result.dueReconcileSweeper.recoveryLimit,
-      wakeNotAppended: result.dueReconcileSweeper.recoveryNotRequested,
-    },
-    sweeper: {
-      ...result.sweeper,
-      skippedDirtyConnections: result.sweeper.skippedDirtyUsers,
-      wakeAppended: result.sweeper.recoveryRequested,
-      wakeAttempted: result.sweeper.recoveryAttempted,
-      wakeDuplicate: 0,
-      wakeFailed: result.sweeper.recoveryFailed,
-      wakeLimit: result.sweeper.recoveryLimit,
-      wakeNotAppended: result.sweeper.recoveryNotRequested,
-    },
-  };
-}

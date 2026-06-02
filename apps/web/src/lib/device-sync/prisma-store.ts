@@ -304,20 +304,6 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.listPendingDirtyConnectionsForUser(input);
   }
 
-  async listDirtyUsersForSweep(input: {
-    limit: number;
-    staleBefore: Date;
-  }) {
-    return this.dirtyConnections.listDirtyUsersForSweep(input);
-  }
-
-  async listDirtyConnectionsForSweep(input: {
-    limit: number;
-    staleBefore: Date;
-  }) {
-    return this.dirtyConnections.listDirtyConnectionsForSweep(input);
-  }
-
   async listDueReconcileConnectionsForSweep(input: {
     dueAt: Date;
     limit: number;

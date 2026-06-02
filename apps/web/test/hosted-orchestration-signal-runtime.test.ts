@@ -181,7 +181,7 @@ describe("hosted runtime Temporal signaling", () => {
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-dirty-recovery",
+      recoveryIntent: "device-sync-reconcile-recovery",
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -259,18 +259,13 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("dedupes durable device-sync recovery demands by source mailbox item and intent", async () => {
+  it("dedupes durable device-sync recovery demands by source mailbox item", async () => {
     const client = buildClient();
 
     await signalHostedDeviceSyncMailboxRuntime({
       client,
       mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-dirty-recovery",
-    });
-    await signalHostedDeviceSyncMailboxRuntime({
-      client,
-      mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-dirty-recovery",
+      recoveryIntent: "device-sync-reconcile-recovery",
     });
     await signalHostedDeviceSyncMailboxRuntime({
       client,
@@ -286,17 +281,13 @@ describe("hosted runtime Temporal signaling", () => {
     );
     expect(eventIds[0]).toBe(eventIds[1]);
     expect(eventIds[0]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
-    expect(eventIds[2]).toMatch(/^runtime-control:device-sync-recovery:[0-9a-f]{32}$/u);
-    expect(eventIds[2]).not.toBe(eventIds[0]);
     expect(occurredAts).toEqual([
-      "2026-03-26T12:00:00.000Z",
       "2026-03-26T12:00:00.000Z",
       "2026-03-26T12:00:00.000Z",
     ]);
     expect(mocks.signalWithStart.mock.calls.map(
       ([, options]) => options.signalArgs[0],
     )).toEqual([
-      { kind: "device_sync_recovery_requested" },
       { kind: "device_sync_recovery_requested" },
       { kind: "device_sync_recovery_requested" },
     ]);
@@ -319,7 +310,7 @@ describe("hosted runtime Temporal signaling", () => {
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
-      recoveryIntent: "device-sync-dirty-recovery",
+      recoveryIntent: "device-sync-reconcile-recovery",
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
