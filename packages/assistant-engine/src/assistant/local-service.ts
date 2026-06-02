@@ -87,7 +87,6 @@ import {
 } from './turn-progress.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
-  AssistantAcceptedTurnInputJournal,
   AssistantAcceptedTurnInputItemInput,
   AssistantAcceptedTurnInputTranscriptRef,
 } from './active-turn-input-journal.js'
@@ -104,7 +103,6 @@ import {
   steerAssistantActiveTurnInputWithStatus,
 } from './active-turn-input-controller.js'
 import { normalizeNullableString } from './shared.js'
-import { readAssistantInputEvent } from './input-store.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -118,10 +116,6 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 const MAX_ACTIVE_TURN_INPUT_CONTINUATIONS = 3
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
-const HOSTED_ATTACHMENT_PREFLIGHT_PROGRESS_SINGLE_TEXT =
-  "File received. I'm checking the attachment now."
-const HOSTED_ATTACHMENT_PREFLIGHT_PROGRESS_MULTIPLE_TEXT =
-  "Files received. I'm checking the attachments now."
 
 function resolveAssistantProgressDeliveryChannel(input: {
   session: AssistantSession
@@ -355,7 +349,6 @@ export async function sendAssistantMessageLocal(
             sessionId: resolved.session.sessionId,
             turnId: receipt.turnId,
           })
-        let currentAcceptedInputJournal = initialAcceptedInputJournal
         await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
           journal: initialAcceptedInputJournal,
           vault: input.vault,
@@ -515,14 +508,12 @@ export async function sendAssistantMessageLocal(
           })
           currentInput = nextInput
           acceptedInputIdsForNextProviderRequest = acceptedInputJournal.inputIds
-          currentAcceptedInputJournal = acceptedInputJournal
           return {
             acceptedInputJournal,
             acceptedInputItems,
             previousInput,
           }
         }
-        let hostedAttachmentPreflightProgressHandled = false
         providerLoop: for (
           let providerRequestOrdinal = 0;
           providerRequestOrdinal <= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS;
@@ -556,22 +547,6 @@ export async function sendAssistantMessageLocal(
             stage: 'assistant-pre-provider-ready',
             turnLockWaitMs,
           })
-          if (!hostedAttachmentPreflightProgressHandled) {
-            hostedAttachmentPreflightProgressHandled =
-              await sendHostedAttachmentPreflightProgressIfEligible({
-                hostedProgressDeliverySupported:
-                  executionContext?.hosted != null &&
-                  progressDelivery != null &&
-                  Boolean(executionContext.hosted.progressDeliveryDependencies?.sendLinq) &&
-                  resolveAssistantProgressDeliveryChannel({
-                    session: currentSession,
-                    sharedPlan,
-                  }) === 'linq',
-                journal: currentAcceptedInputJournal,
-                progressDelivery,
-                vault: currentInput.vault,
-              })
-          }
           let providerRequestJournal: Awaited<
             ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
           > = null
@@ -868,67 +843,6 @@ export async function sendAssistantMessageLocal(
       }
     },
   })
-}
-
-async function sendHostedAttachmentPreflightProgressIfEligible(input: {
-  hostedProgressDeliverySupported: boolean
-  journal: AssistantAcceptedTurnInputJournal
-  progressDelivery: AssistantProgressDelivery | null
-  vault: string
-}): Promise<boolean> {
-  if (!input.hostedProgressDeliverySupported || !input.progressDelivery) {
-    return true
-  }
-
-  const attachmentCount = await countAcceptedTurnAttachmentContext({
-    journal: input.journal,
-    vault: input.vault,
-  })
-  if (attachmentCount === 0) {
-    return false
-  }
-
-  await input.progressDelivery.send(
-    attachmentCount === 1
-      ? HOSTED_ATTACHMENT_PREFLIGHT_PROGRESS_SINGLE_TEXT
-      : HOSTED_ATTACHMENT_PREFLIGHT_PROGRESS_MULTIPLE_TEXT,
-    { source: 'model' },
-  )
-  return true
-}
-
-async function countAcceptedTurnAttachmentContext(input: {
-  journal: AssistantAcceptedTurnInputJournal
-  vault: string
-}): Promise<number> {
-  const seenInputEventIds = new Set<string>()
-  let attachmentCount = 0
-
-  for (const item of input.journal.inputs) {
-    if (item.contentRef?.kind !== 'assistant-input-event') {
-      continue
-    }
-    const inputId = item.contentRef.refId
-    if (seenInputEventIds.has(inputId)) {
-      continue
-    }
-    seenInputEventIds.add(inputId)
-
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vault,
-    })
-    if (!event) {
-      continue
-    }
-
-    attachmentCount += Math.max(
-      event.content.attachmentDescriptors.length,
-      event.attachmentEvidence.attachments.length,
-    )
-  }
-
-  return attachmentCount
 }
 
 export async function updateAssistantSessionOptionsLocal(input: {

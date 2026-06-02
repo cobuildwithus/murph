@@ -3384,7 +3384,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   )
 })
 
-test('sendAssistantMessageLocal preflights hosted attachment progress before provider execution', async () => {
+test('sendAssistantMessageLocal lets the provider own hosted attachment progress', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-attachment-progress-',
   )
@@ -3436,12 +3436,44 @@ test('sendAssistantMessageLocal preflights hosted attachment progress before pro
   }
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const session = createAssistantSession()
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
       ...sharedPlan,
       persistUserPromptOnFailure: false,
     },
     realAcceptedInputPersistence: true,
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(0)
+    await expect(
+      providerInput.progressDelivery?.send('Checking the saved context now.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
   })
 
   await sendAssistantMessageLocal({
@@ -3476,12 +3508,12 @@ test('sendAssistantMessageLocal preflights hosted attachment progress before pro
   expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
   expect(mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]).toMatchObject({
     dependencies: progressDeliveryDependencies,
-    text: "File received. I'm checking the attachment now.",
+    text: 'Checking the saved context now.',
   })
   expect(
-    mocks.deliverAssistantProgressUpdate.mock.invocationCallOrder[0],
-  ).toBeLessThan(
-    mocks.executeCodexTurnWithRecovery.mock.invocationCallOrder[0] ??
+    mocks.executeCodexTurnWithRecovery.mock.invocationCallOrder[0],
+  ).toBeLessThanOrEqual(
+    mocks.deliverAssistantProgressUpdate.mock.invocationCallOrder[0] ??
       Number.MAX_SAFE_INTEGER,
   )
 
@@ -3489,7 +3521,7 @@ test('sendAssistantMessageLocal preflights hosted attachment progress before pro
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   assert.ok(progressDelivery)
   await expect(
-    progressDelivery.send('Checking the saved context now.'),
+    progressDelivery.send('One more progress update.'),
   ).resolves.toEqual({
     kind: 'skipped',
     reason: 'limit',
