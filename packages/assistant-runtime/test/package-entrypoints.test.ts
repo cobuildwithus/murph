@@ -28,6 +28,7 @@ import {
 import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeasePublic,
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
+  stopHostedCliRuntimeBridge as stopHostedCliRuntimeBridgePublic,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
   checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
@@ -72,6 +73,7 @@ import {
 import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeaseDirect,
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
+  stopHostedCliRuntimeBridge as stopHostedCliRuntimeBridgeDirect,
 } from "../src/hosted-invocation.ts";
 import {
   checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
@@ -249,6 +251,7 @@ test("hosted-checkpoint-bridge subpath omits bundle bridge helpers", async () =>
 test("hosted-invocation subpath export stays wired to the package invocation source surface", () => {
   assert.equal(createHostedWorkspaceInvocationLeasePublic, createHostedWorkspaceInvocationLeaseDirect);
   assert.equal(runHostedWorkspaceInvocationPublic, runHostedWorkspaceInvocationDirect);
+  assert.equal(stopHostedCliRuntimeBridgePublic, stopHostedCliRuntimeBridgeDirect);
 });
 
 test("hosted-invocation subpath omits checkpoint bridge helpers", async () => {

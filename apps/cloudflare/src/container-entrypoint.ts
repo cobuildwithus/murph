@@ -30,6 +30,9 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  stopHostedCliRuntimeBridge,
+} from "@murphai/assistant-runtime/hosted-invocation";
+import {
   snapshotExpectedHostedCodexRootProcess,
   stopHostedWarmCodexAppServer,
 } from "@murphai/assistant-engine/hosted-codex-lifecycle";
@@ -139,6 +142,7 @@ interface HostedContainerRuntimeOptions {
   runCodexShellSmoke?: (
     options: { signal: AbortSignal },
   ) => Promise<HostedContainerCodexShellSmokeResult>;
+  stopCliRuntimeBridge?: (reason: string) => Promise<void>;
   snapshotExpectedCodexRootProcess?: () => Promise<HostedExpectedCodexRootProcess | null>;
   stopWarmCodex?: (reason: string) => Promise<void>;
   runOpenAiInterceptSmoke?: (
@@ -163,6 +167,7 @@ interface HostedContainerRuntimeDependencies {
     }) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
   runCodexShellSmoke:
     (options: { signal: AbortSignal }) => Promise<HostedContainerCodexShellSmokeResult>;
+  stopCliRuntimeBridge: (reason: string) => Promise<void>;
   snapshotExpectedCodexRootProcess: () => Promise<HostedExpectedCodexRootProcess | null>;
   stopWarmCodex: (reason: string) => Promise<void>;
   runOpenAiInterceptSmoke:
@@ -634,6 +639,16 @@ export async function startHostedContainerEntrypoint(input: {
   });
 
   server.once("close", () => {
+    void runtime.stopCliRuntimeBridge("container-server-close").catch((error) => {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: buildHostedContainerRunnerJobErrorMetadata(error),
+        level: "warn",
+        message: "Hosted container entrypoint failed to stop CLI runtime bridge on server close.",
+        phase: "failed",
+        userId: null,
+      });
+    });
     void runtime.stopWarmCodex("container-server-close").catch((error) => {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -929,6 +944,8 @@ function resolveHostedContainerRuntimeDependencies(
       runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
     runCodexShellSmoke:
       runtime?.runCodexShellSmoke ?? runHostedContainerCodexShellSmoke,
+    stopCliRuntimeBridge:
+      runtime?.stopCliRuntimeBridge ?? stopHostedCliRuntimeBridge,
     snapshotExpectedCodexRootProcess:
       runtime?.snapshotExpectedCodexRootProcess ?? snapshotExpectedHostedCodexRootProcess,
     stopWarmCodex:

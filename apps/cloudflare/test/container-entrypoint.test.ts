@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedHostedCodexRootProcess: vi.fn(),
+  stopHostedCliRuntimeBridge: vi.fn(),
   stopHostedWarmCodexAppServer: vi.fn(),
 }));
 
@@ -44,6 +45,16 @@ vi.mock("@murphai/assistant-engine/hosted-codex-lifecycle", () => ({
   stopHostedWarmCodexAppServer: mocks.stopHostedWarmCodexAppServer,
 }));
 
+vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-invocation")>(
+    "@murphai/assistant-runtime/hosted-invocation",
+  );
+  return {
+    ...actual,
+    stopHostedCliRuntimeBridge: mocks.stopHostedCliRuntimeBridge,
+  };
+});
+
 import {
   classifyRunnerJobError,
   createRequestAbortController,
@@ -62,6 +73,7 @@ beforeEach(() => {
   globalThis.fetch = nativeFetch;
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedHostedCodexRootProcess.mockResolvedValue(null);
+  mocks.stopHostedCliRuntimeBridge.mockResolvedValue(undefined);
   mocks.stopHostedWarmCodexAppServer.mockResolvedValue(undefined);
 });
 
@@ -341,10 +353,11 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("uses the default hosted Codex lifecycle hook when the server closes", async () => {
+  it("uses the default hosted process-lifetime shutdown hooks when the server closes", async () => {
     const server = await startHostedContainerEntrypoint({ port: 0 });
     servers.push(server);
 
+    mocks.stopHostedCliRuntimeBridge.mockClear();
     mocks.stopHostedWarmCodexAppServer.mockClear();
     server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
@@ -362,8 +375,96 @@ describe("startHostedContainerEntrypoint", () => {
       servers.splice(serverIndex, 1);
     }
 
+    expect(mocks.stopHostedCliRuntimeBridge).toHaveBeenCalledTimes(1);
+    expect(mocks.stopHostedCliRuntimeBridge).toHaveBeenCalledWith("container-server-close");
     expect(mocks.stopHostedWarmCodexAppServer).toHaveBeenCalledTimes(1);
     expect(mocks.stopHostedWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
+  });
+
+  it("logs metadata-only CLI runtime bridge stop failures on server close", async () => {
+    const cleanupError = Object.assign(
+      new Error("simulated CLI runtime bridge cleanup failure"),
+      { code: "E_CLI_BRIDGE_CLOSE" },
+    );
+    mocks.stopHostedCliRuntimeBridge.mockRejectedValueOnce(cleanupError);
+
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+        component: "container",
+        details: {
+          detailsPresent: false,
+          errorCodeDetail: "E_CLI_BRIDGE_CLOSE",
+          errorMessagePresent: true,
+          errorName: "Error",
+          stackPresent: true,
+        },
+        level: "warn",
+        message: "Hosted container entrypoint failed to stop CLI runtime bridge on server close.",
+        phase: "failed",
+        userId: null,
+      });
+    });
+    const cleanupLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input.message ===
+          "Hosted container entrypoint failed to stop CLI runtime bridge on server close."
+      );
+    expect(cleanupLog?.details).not.toBe(cleanupError);
+  });
+
+  it("does not stop the process-lifetime CLI runtime bridge during workspace invocations", async () => {
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    mocks.stopHostedCliRuntimeBridge.mockClear();
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_cli_bridge_process_lifetime",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response).toMatchObject({
+      status: 200,
+    });
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(mocks.stopHostedCliRuntimeBridge).not.toHaveBeenCalled();
   });
 
   it("accepts runtime wakes only after the active invocation reports readiness", async () => {

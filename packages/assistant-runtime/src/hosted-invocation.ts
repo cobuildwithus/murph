@@ -5,6 +5,9 @@ import {
   type HostedAssistantWorkspaceRuntimeJobResult,
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
+export {
+  stopHostedCliRuntimeBridge,
+} from "./hosted-runtime/cli-runtime-bridge.ts";
 import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
