@@ -408,8 +408,8 @@ export class DeviceSyncPublicIngress {
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
   readonly registry: DeviceSyncRegistry;
-  readonly store: DeviceSyncPublicIngressStore;
 
+  private readonly store: DeviceSyncPublicIngressStore;
   private readonly sessionTtlMs: number;
   private readonly hooks: DeviceSyncPublicIngressHooks;
   private readonly logger: DeviceSyncLogger;

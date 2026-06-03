@@ -7,8 +7,6 @@ import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murph
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
-import { disconnectDeviceSyncAccount, queueDeviceSyncManualReconcile } from "../src/service-controls.ts";
-import { getDeviceSyncServiceTestingHooks } from "../src/service-testing.ts";
 import { createDeviceSyncService } from "../src/service.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
@@ -31,6 +29,10 @@ import {
   setJobAttemptsForTesting,
 } from "./store-test-helpers.ts";
 
+import type {
+  DeviceSyncTickMutex,
+  DeviceSyncWorkerExecutor,
+} from "../src/service.ts";
 import type {
   DeviceConnectionHandler,
   DeviceJobBatchExecutor,
@@ -317,6 +319,18 @@ function requireCallback(callback: (() => void) | null, message: string): () => 
   return callback;
 }
 
+function createSkippingTickMutex(shouldSkip: () => boolean): DeviceSyncTickMutex {
+  return {
+    async runIfIdle(operation) {
+      if (shouldSkip()) {
+        return undefined;
+      }
+
+      return await operation();
+    },
+  };
+}
+
 function requireStoredOAuthCredential(
   account: StoredDeviceSyncAccount | null | undefined,
 ): Extract<StoredDeviceSyncAccount["credential"], { kind: "oauth_tokens" }> {
@@ -339,7 +353,7 @@ function assertStoredCredentialKind(
   assert.equal(account.credential.kind, kind);
 }
 
-test("device sync service facade does not expose privileged store or control methods", async () => {
+test("device sync service facade exposes explicit controls without exposing the store", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd");
   const { service, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -358,28 +372,36 @@ test("device sync service facade does not expose privileged store or control met
 
   try {
     assert.equal(Reflect.has(service, "store"), false);
-    assert.equal(Reflect.has(service, "queueManualReconcile"), false);
-    assert.equal(Reflect.has(service, "disconnectAccount"), false);
+    assert.equal(Reflect.has(service, "publicIngress"), false);
+    assert.equal(typeof service.queueManualReconcile, "function");
+    assert.equal(typeof service.disconnectAccount, "function");
   } finally {
     close();
   }
 });
 
-test("device sync service trusted helper ports reject unknown service objects", async () => {
-  const fakeService = {} as unknown as ReturnType<typeof createDeviceSyncService>;
+test("device sync service explicit account controls reject missing accounts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-controls-missing-account");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
 
   assert.throws(
-    () => getDeviceSyncServiceTestingHooks(fakeService),
-    /Unknown device sync service instance\./,
-  );
-  assert.throws(
-    () => queueDeviceSyncManualReconcile(fakeService, "acct_missing"),
-    /Unknown device sync service instance\./,
+    () => service.queueManualReconcile("acct_missing"),
+    /Device sync account acct_missing was not found\./,
   );
   await assert.rejects(
-    () => disconnectDeviceSyncAccount(fakeService, "acct_missing"),
-    /Unknown device sync service instance\./,
+    () => service.disconnectAccount("acct_missing"),
+    /Device sync account acct_missing was not found\./,
   );
+
+  close();
 });
 
 test("device sync service connects, imports, and deduplicates webhook traces", async () => {
@@ -440,7 +462,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   await service.runWorkerOnce();
   assert.equal(imports.length, 2);
 
-  const reconcile = queueDeviceSyncManualReconcile(service, connected.account.id);
+  const reconcile = service.queueManualReconcile(connected.account.id);
   assert.equal(reconcile.account.id, connected.account.id);
   assert.equal(reconcile.jobs.length, 1);
 
@@ -843,7 +865,7 @@ test("device sync service fails closed when stored token integrity validation fa
   });
   assert.ok(updated);
 
-  const reconcile = queueDeviceSyncManualReconcile(service, stored.id);
+  const reconcile = service.queueManualReconcile(stored.id);
   const processedJob = await service.runWorkerOnce();
 
   const failedJob = processedJob ? store.getJobById(processedJob.id) : null;
@@ -887,7 +909,7 @@ test("device sync service starts and stops its timers, closes owned stores, and 
         && error.httpStatus === 404,
     );
     assert.throws(
-      () => queueDeviceSyncManualReconcile(service, "missing-account"),
+      () => service.queueManualReconcile("missing-account"),
       (error: unknown) =>
         error instanceof DeviceSyncError
         && error.code === "ACCOUNT_NOT_FOUND"
@@ -1026,6 +1048,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
 test("device sync service scheduler logs failures once and skips reentrant ticks", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler-error");
   const schedulerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  let skipSchedulerTick = false;
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
@@ -1041,6 +1064,7 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
         },
       },
     },
+    schedulerMutex: createSkippingTickMutex(() => skipSchedulerTick),
     providers: [
       createFakeProvider({
         provider: "broken",
@@ -1075,11 +1099,9 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
 
   await service.runSchedulerOnce();
 
-  const testingHooks = getDeviceSyncServiceTestingHooks(service);
-  testingHooks.setSchedulerTickInFlight(true);
+  skipSchedulerTick = true;
   await service.runSchedulerOnce();
   assert.equal(schedulerErrors.length, 1);
-  testingHooks.setSchedulerTickInFlight(false);
 
   close();
 });
@@ -1087,44 +1109,71 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
 test("device sync service worker batch logs drain failures once and skips reentrant ticks", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-error");
   const workerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
-  const { service, store, close } = createServiceFixture({
+  let workerErrorLoggedResolve: (() => void) | null = null;
+  const workerErrorLogged = new Promise<void>((resolve) => {
+    workerErrorLoggedResolve = resolve;
+  });
+  let drainCalls = 0;
+  const drainLimits: number[] = [];
+  const failingWorkerExecutor: DeviceSyncWorkerExecutor = {
+    async drainWorker(limit) {
+      drainCalls += 1;
+      drainLimits.push(limit);
+      throw new Error("worker batch exploded");
+    },
+  };
+  const { service, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      workerBatchSize: 7,
       log: {
         error(message, context) {
           workerErrors.push({
             message,
             context: context as Record<string, unknown> | undefined,
           });
+          workerErrorLoggedResolve?.();
         },
+      },
+    },
+    workerExecutor: failingWorkerExecutor,
+    providers: [createFakeProvider()],
+  });
+
+  service.start();
+  await workerErrorLogged;
+  assert.equal(drainCalls, 1);
+  assert.deepEqual(drainLimits, [7]);
+  assert.equal(workerErrors.length, 1);
+  assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
+  close();
+
+  const skippedVaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-skip");
+  let skippedDrainCalls = 0;
+  const skipped = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot: skippedVaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(skippedVaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    workerMutex: createSkippingTickMutex(() => true),
+    workerExecutor: {
+      async drainWorker() {
+        skippedDrainCalls += 1;
+        return 0;
       },
     },
     providers: [createFakeProvider()],
   });
 
-  let drainCalls = 0;
-  const testingHooks = getDeviceSyncServiceTestingHooks(service);
-  const restoreDrainWorker = testingHooks.replaceDrainWorkerForTesting(async () => {
-    drainCalls += 1;
-    throw new Error("worker batch exploded");
-  });
-
-  await testingHooks.runWorkerBatchOnce();
-  assert.equal(drainCalls, 1);
-  assert.equal(workerErrors.length, 1);
-  assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
-
-  testingHooks.setWorkerTickInFlight(true);
-  await testingHooks.runWorkerBatchOnce();
-  assert.equal(drainCalls, 1);
-  assert.equal(workerErrors.length, 1);
-  testingHooks.setWorkerTickInFlight(false);
-  restoreDrainWorker();
-
-  close();
+  skipped.service.start();
+  await Promise.resolve();
+  assert.equal(skippedDrainCalls, 0);
+  skipped.close();
 });
 
 test("device sync service worker handles missing providers, disconnected jobs, and reauthorization-required jobs", async () => {
@@ -1949,7 +1998,7 @@ test("device sync service treats token refresh races as cancelled work instead o
 
   const workerPromise = service.runWorkerOnce();
   await refreshStarted;
-  await disconnectDeviceSyncAccount(service, connected.account.id);
+  await service.disconnectAccount(connected.account.id);
   requireCallback(releaseRefreshResolve, "refresh release callback was not initialized")();
   const processedJob = await workerPromise;
 
@@ -2785,10 +2834,10 @@ test("device sync service accepts and dedupes disconnected-account webhooks whil
     code: "xyz",
   });
 
-  await disconnectDeviceSyncAccount(service, connected.account.id);
+  await service.disconnectAccount(connected.account.id);
 
   assert.throws(
-    () => queueDeviceSyncManualReconcile(service, connected.account.id),
+    () => service.queueManualReconcile(connected.account.id),
     /Disconnected device sync accounts must be reconnected/u,
   );
 
@@ -2842,7 +2891,7 @@ test("device sync service rejects manual reconcile when the stored account provi
   });
 
   assert.throws(
-    () => queueDeviceSyncManualReconcile(service, account.id),
+    () => service.queueManualReconcile(account.id),
     (error: unknown) =>
       error instanceof DeviceSyncError
       && error.code === "PROVIDER_NOT_REGISTERED"
@@ -2878,7 +2927,7 @@ test("device sync service rejects manual reconcile for reauthorization-required 
   });
 
   assert.throws(
-    () => queueDeviceSyncManualReconcile(service, connected.account.id),
+    () => service.queueManualReconcile(connected.account.id),
     (error: unknown) =>
       error instanceof DeviceSyncError
       && error.code === "ACCOUNT_REAUTHORIZATION_REQUIRED"
@@ -3014,7 +3063,7 @@ test("manual reconcile queues every scheduled job and store claims only one job 
     code: "abc",
   });
 
-  const reconcile = queueDeviceSyncManualReconcile(service, connected.account.id);
+  const reconcile = service.queueManualReconcile(connected.account.id);
   assert.equal(reconcile.job.kind, "reconcile-summary");
   assert.deepEqual(
     reconcile.jobs.map((job) => job.kind),
@@ -3121,7 +3170,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   const workerPromise = service.runWorkerOnce();
   await providerStarted;
 
-  const disconnected = await disconnectDeviceSyncAccount(service, connected.account.id);
+  const disconnected = await service.disconnectAccount(connected.account.id);
   assert.equal(disconnected.account.status, "disconnected");
 
   requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
@@ -4478,7 +4527,7 @@ test("device sync service logs non-error revoke failures but still disconnects l
     code: "disconnect-warning",
   });
 
-  const disconnected = await disconnectDeviceSyncAccount(service, connected.account.id);
+  const disconnected = await service.disconnectAccount(connected.account.id);
 
   assert.equal(disconnected.account.status, "disconnected");
   assert.equal(warnEvents.length, 1);

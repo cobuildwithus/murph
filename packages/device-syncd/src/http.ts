@@ -14,7 +14,6 @@ import {
 } from "./callback-redirect.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
-import { disconnectDeviceSyncAccount, queueDeviceSyncManualReconcile } from "./service-controls.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 import { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "./types.ts";
@@ -376,7 +375,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     paramNames: ["accountId"],
     surface: "control",
     handle({ response, service, params }) {
-      const result = queueDeviceSyncManualReconcile(service, params.accountId ?? "");
+      const result = service.queueManualReconcile(params.accountId ?? "");
       sendJson(response, 202, result);
     },
   }),
@@ -386,7 +385,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     paramNames: ["accountId"],
     surface: "control",
     async handle({ response, service, params }) {
-      const result = await disconnectDeviceSyncAccount(service, params.accountId ?? "");
+      const result = await service.disconnectAccount(params.accountId ?? "");
       sendJson(response, 200, result);
     },
   }),

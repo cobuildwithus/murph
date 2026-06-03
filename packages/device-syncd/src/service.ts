@@ -10,7 +10,6 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
-import { registerDeviceSyncServiceInternals } from "./service-internals.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
@@ -110,6 +109,22 @@ export interface CreateDeviceSyncServiceInput {
   registry?: DeviceSyncRegistry;
   importer?: DeviceSyncImporterPort;
   store?: SqliteDeviceSyncStore;
+  clock?: DeviceSyncClock;
+  schedulerMutex?: DeviceSyncTickMutex;
+  workerMutex?: DeviceSyncTickMutex;
+  workerExecutor?: DeviceSyncWorkerExecutor;
+}
+
+export interface DeviceSyncClock {
+  now(): Date;
+}
+
+export interface DeviceSyncTickMutex {
+  runIfIdle<T>(operation: () => Promise<T>): Promise<T | undefined>;
+}
+
+export interface DeviceSyncWorkerExecutor {
+  drainWorker(limit: number): Promise<number>;
 }
 
 export interface DeviceSyncService {
@@ -117,7 +132,6 @@ export interface DeviceSyncService {
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
   readonly registry: DeviceSyncRegistry;
-  readonly publicIngress: DeviceSyncPublicIngress;
   describeProviders(): PublicProviderDescriptor[];
   describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor;
   summarize(): DeviceSyncServiceSummary;
@@ -131,6 +145,8 @@ export interface DeviceSyncService {
   handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
+  queueManualReconcile(accountId: string): QueueManualReconcileResult;
+  disconnectAccount(accountId: string): Promise<DisconnectAccountResult>;
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(): Promise<void>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
@@ -139,17 +155,45 @@ export interface DeviceSyncService {
   drainWorker(limit?: number): Promise<number>;
 }
 
+const defaultDeviceSyncClock: DeviceSyncClock = Object.freeze({
+  now: () => new Date(),
+});
+
+function createDeviceSyncTickMutex(): DeviceSyncTickMutex {
+  let inFlight = false;
+
+  return {
+    async runIfIdle(operation) {
+      if (inFlight) {
+        return undefined;
+      }
+
+      inFlight = true;
+
+      try {
+        return await operation();
+      } finally {
+        inFlight = false;
+      }
+    },
+  };
+}
+
 class DeviceSyncServiceController {
   readonly vaultRoot: string;
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
   readonly registry: DeviceSyncRegistry;
-  readonly publicIngress: DeviceSyncPublicIngress;
 
   private readonly logger: DeviceSyncLogger;
   private readonly importer: DeviceSyncImporterPort;
-  readonly store: SqliteDeviceSyncStore;
+  private readonly store: SqliteDeviceSyncStore;
+  private readonly publicIngress: DeviceSyncPublicIngress;
   private readonly codec: ReturnType<typeof createSecretCodec>;
+  private readonly clock: DeviceSyncClock;
+  private readonly schedulerMutex: DeviceSyncTickMutex;
+  private readonly workerMutex: DeviceSyncTickMutex;
+  private readonly workerExecutor: DeviceSyncWorkerExecutor;
   private readonly workerLeaseMs: number;
   private readonly workerPollMs: number;
   private readonly workerBatchSize: number;
@@ -159,8 +203,6 @@ class DeviceSyncServiceController {
   private readonly ownsStore: boolean;
   private workerTimer: NodeJS.Timeout | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
-  workerTickInFlight = false;
-  schedulerTickInFlight = false;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
 
   constructor(input: CreateDeviceSyncServiceInput) {
@@ -170,6 +212,12 @@ class DeviceSyncServiceController {
     this.registry = input.registry ?? createDeviceSyncRegistry(input.providers ?? []);
     this.importer = input.importer ?? createDefaultImporterPort();
     this.logger = input.config.log ?? console;
+    this.clock = input.clock ?? defaultDeviceSyncClock;
+    this.schedulerMutex = input.schedulerMutex ?? createDeviceSyncTickMutex();
+    this.workerMutex = input.workerMutex ?? createDeviceSyncTickMutex();
+    this.workerExecutor = input.workerExecutor ?? {
+      drainWorker: (limit) => this.drainWorker(limit),
+    };
     this.workerLeaseMs = Math.max(60_000, input.config.workerLeaseMs ?? 5 * 60_000);
     this.workerPollMs = Math.max(1_000, input.config.workerPollMs ?? 5_000);
     this.workerBatchSize = Math.max(1, input.config.workerBatchSize ?? 4);
@@ -288,9 +336,9 @@ class DeviceSyncServiceController {
 
   start(): void {
     if (!this.workerTimer) {
-      void this.runWorkerBatchOnceInternal();
+      void this.runWorkerBatchOnce();
       this.workerTimer = setInterval(() => {
-        void this.runWorkerBatchOnceInternal();
+        void this.runWorkerBatchOnce();
       }, this.workerPollMs);
     }
 
@@ -338,7 +386,7 @@ class DeviceSyncServiceController {
     return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
-  queueManualReconcileInternal(accountId: string): QueueManualReconcileResult {
+  queueManualReconcile(accountId: string): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
     if (account.status === "disconnected") {
@@ -360,7 +408,7 @@ class DeviceSyncServiceController {
     }
 
     const provider = this.requireProvider(account.provider);
-    const now = toIsoTimestamp(new Date());
+    const now = this.nowIso();
     const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(account, now).jobs ?? [];
     const jobs = scheduledJobs.length > 0 ? scheduledJobs : [{ kind: "reconcile", priority: 80 }];
     const queuedJobs = this.enqueueJobs(
@@ -392,10 +440,10 @@ class DeviceSyncServiceController {
     };
   }
 
-  async disconnectAccountInternal(accountId: string): Promise<DisconnectAccountResult> {
+  async disconnectAccount(accountId: string): Promise<DisconnectAccountResult> {
     const account = this.requireStoredAccount(accountId);
     const provider = this.requireProvider(account.provider);
-    const now = toIsoTimestamp(new Date());
+    const now = this.nowIso();
 
     if (account.status !== "disconnected") {
       try {
@@ -417,7 +465,7 @@ class DeviceSyncServiceController {
     };
   }
 
-  getNextWakeAt(_now = toIsoTimestamp(new Date())): string | null {
+  getNextWakeAt(_now = this.nowIso()): string | null {
     const nextWakeAt = earliestIsoTimestamp(
       this.store.readNextActiveReconcileAt(),
       this.store.readNextJobWakeAt(),
@@ -431,40 +479,35 @@ class DeviceSyncServiceController {
   }
 
   async runSchedulerOnce(): Promise<void> {
-    if (this.schedulerTickInFlight) {
-      return;
-    }
+    await this.schedulerMutex.runIfIdle(async () => {
+      const now = this.nowIso();
 
-    this.schedulerTickInFlight = true;
-    const now = toIsoTimestamp(new Date());
+      try {
+        for (const account of this.store.listAccounts()) {
+          if (account.status !== "active" || !account.nextReconcileAt || Date.parse(account.nextReconcileAt) > Date.parse(now)) {
+            continue;
+          }
 
-    try {
-      for (const account of this.store.listAccounts()) {
-        if (account.status !== "active" || !account.nextReconcileAt || Date.parse(account.nextReconcileAt) > Date.parse(now)) {
-          continue;
+          const provider = this.registry.get(account.provider);
+
+          const jobExecutor = provider ? resolveProviderJobExecutor(provider) : undefined;
+
+          if (!jobExecutor?.createScheduledJobs) {
+            continue;
+          }
+
+          const schedule = jobExecutor.createScheduledJobs(account, now);
+          this.enqueueJobs(account, schedule.jobs);
+          this.store.patchAccount(account.id, {
+            nextReconcileAt: schedule.nextReconcileAt ?? null,
+          });
         }
-
-        const provider = this.registry.get(account.provider);
-
-        const jobExecutor = provider ? resolveProviderJobExecutor(provider) : undefined;
-
-        if (!jobExecutor?.createScheduledJobs) {
-          continue;
-        }
-
-        const schedule = jobExecutor.createScheduledJobs(account, now);
-        this.enqueueJobs(account, schedule.jobs);
-        this.store.patchAccount(account.id, {
-          nextReconcileAt: schedule.nextReconcileAt ?? null,
+      } catch (error) {
+        this.logger.error?.("Device sync scheduler tick failed.", {
+          error: summarizeError(error),
         });
       }
-    } catch (error) {
-      this.logger.error?.("Device sync scheduler tick failed.", {
-        error: summarizeError(error),
-      });
-    } finally {
-      this.schedulerTickInFlight = false;
-    }
+    });
   }
 
   async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
@@ -492,9 +535,9 @@ class DeviceSyncServiceController {
       return null;
     }
 
-    const now = toIsoTimestamp(new Date());
+    const now = this.nowIso();
     const job = this.store.claimDueJob(this.workerId, now, this.workerLeaseMs);
-    const currentNow = (): string => toIsoTimestamp(new Date());
+    const currentNow = (): string => this.nowIso();
 
     if (!job) {
       return null;
@@ -1027,22 +1070,20 @@ class DeviceSyncServiceController {
     return [input.normalizedSeedJob, ...claimed];
   }
 
-  async runWorkerBatchOnceInternal(): Promise<void> {
-    if (this.workerTickInFlight) {
-      return;
-    }
+  private async runWorkerBatchOnce(): Promise<void> {
+    await this.workerMutex.runIfIdle(async () => {
+      try {
+        await this.workerExecutor.drainWorker(this.workerBatchSize);
+      } catch (error) {
+        this.logger.error?.("Device sync worker tick failed.", {
+          error: summarizeError(error),
+        });
+      }
+    });
+  }
 
-    this.workerTickInFlight = true;
-
-    try {
-      await this.drainWorker(this.workerBatchSize);
-    } catch (error) {
-      this.logger.error?.("Device sync worker tick failed.", {
-        error: summarizeError(error),
-      });
-    } finally {
-      this.workerTickInFlight = false;
-    }
+  private nowIso(): string {
+    return toIsoTimestamp(this.clock.now());
   }
 
   private requireProvider(providerName: string): DeviceSyncProvider {
@@ -1290,7 +1331,6 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     publicBaseUrl: controller.publicBaseUrl,
     allowedReturnOrigins: [...controller.allowedReturnOrigins],
     registry: controller.registry,
-    publicIngress: controller.publicIngress,
     describeProviders: () => controller.describeProviders(),
     describeProvider: (providerName) => controller.describeProvider(providerName),
     summarize: () => controller.summarize(),
@@ -1304,12 +1344,13 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     handleConnectionCallback: (callbackInput) => controller.handleConnectionCallback(callbackInput),
     handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
     handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
+    queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
+    disconnectAccount: (accountId) => controller.disconnectAccount(accountId),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
     runSchedulerOnce: () => controller.runSchedulerOnce(),
     runWorkerOnce: () => controller.runWorkerOnce(),
     drainWorker: (limit) => controller.drainWorker(limit),
   } satisfies DeviceSyncService);
-  registerDeviceSyncServiceInternals(service, controller);
   return service;
 }
 
