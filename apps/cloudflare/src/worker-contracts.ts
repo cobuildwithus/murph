@@ -11,7 +11,6 @@ export interface WorkerSendEmailBindingLike {
 
 export type WorkerActiveRuntimeWriteFenceValidationRejectReason =
   | "expired_write_fence"
-  | "invalid_runner_container_name"
   | "missing_runner_state"
   | "missing_write_fence"
   | "write_fence_mismatch";
@@ -49,6 +48,28 @@ export type WorkerProviderEgressTokenValidationResult =
       userId: string;
       workspaceVersion: string | null;
     };
+
+export type WorkerActiveRuntimeUserFenceResult =
+  | {
+      active: false;
+      reason: "no_active_runtime";
+    }
+  | {
+      active: true;
+      userId: string;
+    };
+
+export interface WorkerRunnerContainerStubLike {
+  readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
+}
+
+export interface WorkerRunnerContainerNamespaceLike<
+  TStub extends WorkerRunnerContainerStubLike = WorkerRunnerContainerStubLike,
+> {
+  get?(id: unknown): TStub;
+  getByName?(name: string): TStub;
+  idFromString?(id: string): unknown;
+}
 
 export interface WorkerUserRunnerStubLike {
   beginDeploySmokeRuntimeWriteFence?(input: {
@@ -89,7 +110,6 @@ export interface WorkerUserRunnerStubLike {
     workspaceVersion?: string | null;
   }): Promise<boolean>;
   validateActiveRuntimeWriteFence?(input: {
-    runnerContainerName: string;
     userId: string;
   }): Promise<WorkerActiveRuntimeWriteFenceValidationResult>;
   validateRuntimeProviderEgressToken?(input: {
@@ -162,6 +182,7 @@ export interface WorkerEnvironmentContract<
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
+  RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

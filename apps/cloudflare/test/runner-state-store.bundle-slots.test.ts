@@ -427,7 +427,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaRowCount(db)).toBe(0);
   });
 
-  it("validates active write fences by runner container name and returns runtime metadata", async () => {
+  it("validates active write fences by active user and returns runtime metadata", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
       expiresAt: "2030-04-27T00:30:00.000Z",
@@ -441,7 +441,6 @@ describe("RunnerStateStore schema guard", () => {
     });
 
     await expect(store.validateActiveWriteFence({
-      runnerContainerName: "user-write--v-worker-current",
       userId: "user-write",
     })).resolves.toMatchObject({
       attemptId: boundLease.attemptId,
@@ -457,8 +456,7 @@ describe("RunnerStateStore schema guard", () => {
     });
 
     await expect(store.validateActiveWriteFence({
-      runnerContainerName: "user-write--v-worker-stale",
-      userId: "user-write",
+      userId: "user-other",
     })).resolves.toMatchObject({
       owns: false,
       reason: "write_fence_mismatch",
@@ -475,7 +473,6 @@ describe("RunnerStateStore schema guard", () => {
     const { db, store } = createRunnerStateStoreHarness();
 
     await expect(store.validateActiveWriteFence({
-      runnerContainerName: "user-unbound",
       userId: "user-unbound",
     })).resolves.toEqual({
       owns: false,
@@ -484,7 +481,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaRowCount(db)).toBe(0);
   });
 
-  it("rejects active validation for legacy write fences without a runner container", async () => {
+  it("validates active fences without requiring runner container state", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
       expiresAt: "2030-04-27T00:30:00.000Z",
@@ -496,11 +493,9 @@ describe("RunnerStateStore schema guard", () => {
       .run();
 
     await expect(store.validateActiveWriteFence({
-      runnerContainerName: "user-legacy",
       userId: "user-legacy",
     })).resolves.toMatchObject({
-      owns: false,
-      reason: "write_fence_mismatch",
+      owns: true,
       record: {
         writeFence: {
           runnerContainerName: null,
@@ -539,7 +534,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readActiveRunnerContainerName(db)).toBe("user-write");
   });
 
-  it("rejects expired write fences during active-container validation without clearing state", async () => {
+  it("rejects expired write fences during active-user validation without clearing state", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
       expiresAt: "2000-04-27T00:30:00.000Z",
@@ -549,7 +544,6 @@ describe("RunnerStateStore schema guard", () => {
     });
 
     await expect(store.validateActiveWriteFence({
-      runnerContainerName: "user-active",
       userId: "user-active",
     })).resolves.toMatchObject({
       owns: false,

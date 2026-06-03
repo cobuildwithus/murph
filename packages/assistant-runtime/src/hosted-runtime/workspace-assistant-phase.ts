@@ -406,7 +406,7 @@ export async function runHostedWorkspaceAssistantPhase(
       await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
         wake,
-        input.runtimeEnv,
+        buildHostedAssistantAutomationBootstrapEnv(input),
         input.runtime.resolvedConfig,
         {
           operatorHomeRoot: input.restored.operatorHomeRoot,
@@ -2304,6 +2304,16 @@ function hasHostedDeviceSyncRuntimeConfigured(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return input.runtime.resolvedConfig.deviceSync !== null;
+}
+
+function buildHostedAssistantAutomationBootstrapEnv(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Record<string, string> {
+  return {
+    ...input.runtimeEnv,
+    ...input.runtime.forwardedEnv,
+    ...input.runtime.userEnv,
+  };
 }
 
 function resolveSkippedDeviceSyncWake(input: {

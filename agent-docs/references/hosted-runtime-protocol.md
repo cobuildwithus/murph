@@ -111,16 +111,18 @@ that hash, injects the Worker-owned provider credential on success, and strips
 the provider-egress token before forwarding upstream.
 Warm Codex App Server OpenAI egress may not be able to carry that
 per-invocation token because the app-server is a warm subprocess that makes its
-own HTTPS calls. Tokenless intercepted OpenAI egress may use active-container
-proof instead: the Worker derives the user from the intercepted runner container
-identity, requires any bound-user header to match that identity, and validates
-that UserRunner's active write fence stores the same runner container name
-before injecting the Worker-owned OpenAI credential. Missing runner state,
-missing write fence, stale fence, wrong user, wrong container, malformed
-container identity, or validator failure all fail closed without injecting a
-provider credential. Runtime-controlled provider integrations such as Linq,
-Telegram, WhatsApp, and Mapbox still use provider-egress token proof when exact
-runtime authority headers are absent.
+own HTTPS calls. Tokenless intercepted OpenAI egress uses active-user-fence
+proof instead: the Worker resolves the current container Durable Object from the
+intercept context, reads that container's active invocation user, requires any
+bound-user header to match that trusted active user, and validates that
+UserRunner still has an unexpired active write fence for the user before
+injecting the Worker-owned OpenAI credential. Missing current-container user,
+missing runner state, missing write fence, stale fence, wrong user, or validator
+failure all fail closed without injecting a provider credential.
+Runtime-controlled provider integrations such as Linq, Telegram, WhatsApp, and
+Mapbox still use provider-egress token proof when exact runtime authority
+headers are absent. Runner container names remain lifecycle/routing handles, not
+provider-egress authority.
 `workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
 stay on the checkpoint path rather than becoming generic side-effect
 authorization.

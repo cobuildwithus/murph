@@ -226,7 +226,6 @@ export class HostedUserRunner {
   }
 
   async validateActiveRuntimeWriteFence(input: {
-    runnerContainerName: string;
     userId: string;
   }): Promise<WorkerActiveRuntimeWriteFenceValidationResult> {
     const validation = await this.stateStore.validateActiveWriteFence(input);

@@ -38,6 +38,9 @@ import {
   type HostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
+import type {
+  WorkerActiveRuntimeUserFenceResult,
+} from "./worker-contracts.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -179,12 +182,15 @@ export interface HostedExecutionContainerStubLike {
   ): Promise<RunnerContainerPrewarmForProcessingResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
+  readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
   wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
+  get?(id: unknown): HostedExecutionContainerStubLike;
   getByName(name: string): HostedExecutionContainerStubLike;
+  idFromString?(id: string): unknown;
 }
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
@@ -348,6 +354,13 @@ export class RunnerContainer extends Container {
     await this.withLifecycleLock(async () => {
       await this.stopWarmContainer();
     });
+  }
+
+  async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
+    const active = this.workspaceInvocationActiveOperation;
+    return active
+      ? { active: true, userId: active.userId }
+      : { active: false, reason: "no_active_runtime" };
   }
 
   async ensureReadyForProcessing(

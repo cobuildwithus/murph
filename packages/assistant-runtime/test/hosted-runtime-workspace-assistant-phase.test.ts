@@ -403,11 +403,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
-    const runtimeEnv = {
+    const runtimeEnv = {};
+    const runtimeForwardedEnv = {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-    };
-    const runtimeForwardedEnv = {
       LINQ_API_BASE_URL: "https://linq.example.test",
     };
     const operatorHomeRoot = "/tmp/murph-operator-home-runtime";
@@ -443,7 +442,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         triggerKind: "runtime_timer",
         userId: "member_synthetic_phase",
       }),
-      runtimeEnv,
+      runtimeForwardedEnv,
       expect.objectContaining({
         channelCapabilities: expect.objectContaining({
           emailSendReady: false,

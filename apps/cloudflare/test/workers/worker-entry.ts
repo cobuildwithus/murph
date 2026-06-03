@@ -125,7 +125,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async validateActiveRuntimeWriteFence(input: {
-    runnerContainerName: string;
     userId: string;
   }): ReturnType<HostedUserRunner["validateActiveRuntimeWriteFence"]> {
     return await this.runner.validateActiveRuntimeWriteFence(input);
@@ -417,7 +416,6 @@ function getUserRunnerStub(userId: string) {
             userId: string;
           }): Promise<boolean>;
           validateActiveRuntimeWriteFence(input: {
-            runnerContainerName: string;
             userId: string;
           }): ReturnType<HostedUserRunner["validateActiveRuntimeWriteFence"]>;
           validateRuntimeProviderEgressToken(input: {

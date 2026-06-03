@@ -15,9 +15,6 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
-  readHostedRunnerContainerIdentity,
-} from "./hosted-runner-container-identity.ts";
-import {
   handleRunnerOutboundRequest,
 } from "./runner-outbound.ts";
 import {
@@ -207,7 +204,7 @@ interface HostedRunnerDiagnosticBodySource {
 }
 
 type HostedProviderEgressValidationMode =
-  | "active_container"
+  | "active_user_fence"
   | "exact_headers"
   | "missing_identity"
   | "provider_egress_token";
@@ -216,7 +213,6 @@ type HostedProviderEgressActiveContainerIdentitySource =
   | "container_name";
 const HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS = [
   "expired_write_fence",
-  "invalid_runner_container_name",
   "missing_runner_state",
   "missing_write_fence",
   "write_fence_mismatch",
@@ -236,12 +232,14 @@ type HostedProviderEgressTokenRejectReason =
 type HostedProviderEgressRejectReason =
   | HostedActiveWriteFenceRejectReason
   | HostedProviderEgressTokenRejectReason
+  | "active_user_context_missing"
+  | "active_user_context_mismatch"
+  | "active_user_context_read_error"
+  | "active_user_context_rpc_missing"
   | "active_validation_rpc_missing"
   | "active_write_fence_rejected"
   | "active_write_fence_validation_error"
   | "bound_user_missing"
-  | "container_identity_missing"
-  | "container_user_mismatch"
   | "exact_write_fence_rejected"
   | "provider_egress_token_missing"
   | "provider_egress_token_rejected"
@@ -2052,7 +2050,7 @@ async function authorizeHostedProviderEgress(input: {
     };
   }
 
-  return await authorizeHostedProviderEgressActiveContainer({
+  return await authorizeHostedProviderEgressActiveUserFence({
     ctx: input.ctx,
     env: input.env,
     providerEgressTokenPresent: providerEgressToken !== null,
@@ -2127,7 +2125,7 @@ async function authorizeHostedProviderEgressToken(input: {
   };
 }
 
-async function authorizeHostedProviderEgressActiveContainer(input: {
+async function authorizeHostedProviderEgressActiveUserFence(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   providerEgressTokenPresent: boolean;
@@ -2135,40 +2133,39 @@ async function authorizeHostedProviderEgressActiveContainer(input: {
   startedAt: number;
   userId: string | null;
 }): Promise<HostedProviderEgressAuthorization> {
-  const containerIdentity = readHostedRunnerContainerIdentity({
-    containerName: input.ctx?.containerId,
-    source: input.env,
+  const activeUser = await readHostedProviderEgressActiveUserFromCurrentContainer({
+    ctx: input.ctx,
+    env: input.env,
   });
-  const containerUserId = containerIdentity?.userId ?? null;
-  const activeUserId = input.userId ?? containerUserId;
-  const activeContainerIdentitySource =
-    readHostedProviderEgressActiveContainerIdentitySource({
-      containerUserId,
-      userId: input.userId,
-    });
-
-  if (!containerIdentity || !activeUserId) {
+  if (!activeUser.ok) {
     return {
-      activeContainerIdentitySource,
+      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
       mode: "missing_identity",
       providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: containerIdentity ? "bound_user_missing" : "container_identity_missing",
+      rejectReason: activeUser.rejectReason,
       runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: activeUserId,
+      userId: null,
+      ...(activeUser.validationErrorCode
+        ? { validationErrorCode: activeUser.validationErrorCode }
+        : {}),
+      ...(activeUser.validationErrorName
+        ? { validationErrorName: activeUser.validationErrorName }
+        : {}),
       writeFence: null,
     };
   }
 
-  if (containerUserId !== activeUserId) {
+  const activeUserId = activeUser.userId;
+  if (input.userId && input.userId !== activeUserId) {
     return {
-      activeContainerIdentitySource,
+      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
-      mode: "active_container",
+      mode: "active_user_fence",
       providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "container_user_mismatch",
+      rejectReason: "active_user_context_mismatch",
       runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
       userId: activeUserId,
       writeFence: null,
@@ -2178,10 +2175,10 @@ async function authorizeHostedProviderEgressActiveContainer(input: {
   const runner = input.env.USER_RUNNER.getByName(activeUserId);
   if (typeof runner.validateActiveRuntimeWriteFence !== "function") {
     return {
-      activeContainerIdentitySource,
+      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
-      mode: "active_container",
+      mode: "active_user_fence",
       providerEgressTokenPresent: input.providerEgressTokenPresent,
       rejectReason: "active_validation_rpc_missing",
       runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
@@ -2193,16 +2190,15 @@ async function authorizeHostedProviderEgressActiveContainer(input: {
   let rawValidation: unknown;
   try {
     rawValidation = await runner.validateActiveRuntimeWriteFence({
-      runnerContainerName: containerIdentity.runnerContainerName,
       userId: activeUserId,
     });
   } catch (error) {
     const validationErrorName = readHostedExecutionSafeErrorName(error);
     return {
-      activeContainerIdentitySource,
+      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
-      mode: "active_container",
+      mode: "active_user_fence",
       providerEgressTokenPresent: input.providerEgressTokenPresent,
       rejectReason: "active_write_fence_validation_error",
       runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
@@ -2215,10 +2211,10 @@ async function authorizeHostedProviderEgressActiveContainer(input: {
 
   const validation = normalizeActiveRuntimeWriteFenceValidationResult(rawValidation);
   return {
-    activeContainerIdentitySource,
+    activeContainerIdentitySource: null,
     authorized: validation.owns,
     durationMs: Date.now() - input.startedAt,
-    mode: "active_container",
+    mode: "active_user_fence",
     providerEgressTokenPresent: input.providerEgressTokenPresent,
     ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
     runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
@@ -2227,14 +2223,94 @@ async function authorizeHostedProviderEgressActiveContainer(input: {
   };
 }
 
-function readHostedProviderEgressActiveContainerIdentitySource(input: {
-  containerUserId: string | null;
-  userId: string | null;
-}): HostedProviderEgressActiveContainerIdentitySource | null {
-  if (input.userId) {
-    return "bound_user_header";
+async function readHostedProviderEgressActiveUserFromCurrentContainer(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+}): Promise<
+  | {
+      ok: false;
+      rejectReason: Extract<
+        HostedProviderEgressRejectReason,
+        | "active_user_context_missing"
+        | "active_user_context_read_error"
+        | "active_user_context_rpc_missing"
+      >;
+      validationErrorCode?: string;
+      validationErrorName?: string;
+    }
+  | {
+      ok: true;
+      userId: string;
+    }
+> {
+  const containerId = input.ctx?.containerId?.trim();
+  const runnerContainerNamespace = readHostedRunnerContainerNamespace(input.env);
+  if (
+    !containerId
+    || !runnerContainerNamespace
+    || typeof runnerContainerNamespace.idFromString !== "function"
+    || typeof runnerContainerNamespace.get !== "function"
+  ) {
+    return { ok: false, rejectReason: "active_user_context_missing" };
   }
-  return input.containerUserId ? "container_name" : null;
+
+  try {
+    const id = runnerContainerNamespace.idFromString(containerId);
+    const container = runnerContainerNamespace.get(id);
+    if (typeof container.readActiveRuntimeUserFence !== "function") {
+      return { ok: false, rejectReason: "active_user_context_rpc_missing" };
+    }
+    const result = await container.readActiveRuntimeUserFence();
+    if (isHostedActiveRuntimeUserFenceResult(result) && result.active) {
+      return { ok: true, userId: result.userId };
+    }
+    return { ok: false, rejectReason: "active_user_context_missing" };
+  } catch (error) {
+    const validationErrorName = readHostedExecutionSafeErrorName(error);
+    return {
+      ok: false,
+      rejectReason: "active_user_context_read_error",
+      validationErrorCode: deriveHostedExecutionErrorCode(error),
+      ...(validationErrorName ? { validationErrorName } : {}),
+    };
+  }
+}
+
+function readHostedRunnerContainerNamespace(
+  env: RunnerOutboundEnvironmentSource,
+): {
+  get?(id: unknown): {
+    readActiveRuntimeUserFence?: () => Promise<unknown>;
+  };
+  idFromString?(id: string): unknown;
+} | null {
+  const namespace = (env as { RUNNER_CONTAINER?: unknown }).RUNNER_CONTAINER;
+  if (!namespace || typeof namespace !== "object") {
+    return null;
+  }
+  return namespace as {
+    get?(id: unknown): {
+      readActiveRuntimeUserFence?: () => Promise<unknown>;
+    };
+    idFromString?(id: string): unknown;
+  };
+}
+
+function isHostedActiveRuntimeUserFenceResult(value: unknown): value is {
+  active: true;
+  userId: string;
+} | {
+  active: false;
+  reason?: unknown;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.active === true) {
+    return typeof record.userId === "string" && record.userId.length > 0;
+  }
+  return record.active === false;
 }
 
 function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {

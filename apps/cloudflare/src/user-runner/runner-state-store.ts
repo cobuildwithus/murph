@@ -53,7 +53,6 @@ export interface RunnerWriteFenceValidationResult {
 
 export type RunnerActiveWriteFenceValidationRejectReason =
   | "expired_write_fence"
-  | "invalid_runner_container_name"
   | "missing_runner_state"
   | "missing_write_fence"
   | "write_fence_mismatch";
@@ -470,17 +469,8 @@ export class RunnerStateStore {
   }
 
   async validateActiveWriteFence(input: {
-    runnerContainerName: string;
     userId: string;
   }): Promise<RunnerActiveWriteFenceValidationResult> {
-    const runnerContainerName = normalizeRunnerContainerNameOrNull(input.runnerContainerName);
-    if (!runnerContainerName) {
-      return {
-        owns: false,
-        reason: "invalid_runner_container_name",
-      };
-    }
-
     const meta = this.selectMetaRowSync();
     if (!meta) {
       return {
@@ -505,7 +495,6 @@ export class RunnerStateStore {
     }
     if (
       token.userId !== input.userId
-      || token.runnerContainerName !== runnerContainerName
     ) {
       return {
         owns: false,
