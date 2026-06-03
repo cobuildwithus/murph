@@ -2,17 +2,18 @@
 
 ## Default To Deletion And Simplicity
 
-Default to deletion and simplicity. Complexity is the enemy: every abstraction,
-service, dependency, state transition, permission check, bridge, config flag,
-retry path, and special case must justify its existence. Before adding
-anything, ask whether the requirement itself can be deleted, whether the design
-can be collapsed into an existing boundary, and whether the system can work
-with fewer moving parts. The best architecture is usually the one with the
-fewest concepts, the clearest ownership, and the smallest surface area for
-bugs. Do not optimize, automate, generalize, or harden a thing until you have
-first tried to remove it. If a component is only there to defend against
-complexity introduced elsewhere, prefer removing the upstream complexity
-instead.
+Default to deletion and radical simplicity. Before adding code, abstractions,
+dependencies, services, configuration, state, or process, first challenge the
+requirement itself: is this solving a real, current problem, or are we
+preserving complexity because it already exists or might be useful later?
+Prefer the smallest architecture that satisfies the actual requirement with
+the fewest moving parts, concepts, branches, and hidden behaviors. Delete
+obsolete code aggressively; collapse unnecessary layers; inline premature
+abstractions; remove speculative generality; and make data flow obvious. Only
+after the system has been reduced to what truly must exist should you
+simplify, optimize, speed up, or automate it. Add complexity back only when a
+failing test, measured bottleneck, security requirement, or concrete product
+need proves that the simpler design is insufficient.
 
 ## Purpose
 
