@@ -324,8 +324,8 @@ The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. A new
 v2 foreground lease restores from durable workspace snapshot truth and clears
 the legacy dirty live-runtime marker before restore; dirty local runtime files
-are valid only inside the currently owned child process and must not carry across
-leases. The
+are valid only inside the currently owned write-fenced invocation and must not
+carry across leases. The
 restored `.runtime/operations/assistant/hosted-mailbox.json` file is the
 authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.
