@@ -44,6 +44,7 @@ export interface RunnerWriteFenceRecord {
   expiresAt: string;
   generation: number;
   kind: RunnerWriteFenceKind;
+  runnerContainerName: string | null;
   startedAt: string;
   workspaceVersion: string | null;
 }

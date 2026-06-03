@@ -342,7 +342,9 @@ describe("startHostedContainerEntrypoint", () => {
       port: address.port,
     });
 
-    expect(response.status).toBe(200);
+    expect(response).toMatchObject({
+      status: 200,
+    });
     expect(response.json).toMatchObject({
       activeJobCount: 0,
       hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
@@ -707,7 +709,7 @@ describe("startHostedContainerEntrypoint", () => {
       port: address.port,
     });
 
-    expect(response.status).toBe(200);
+    expect(response).toMatchObject({ status: 200 });
     expect(response.json).toMatchObject({
       ok: true,
       runnerBundle: {
@@ -768,7 +770,7 @@ describe("startHostedContainerEntrypoint", () => {
       },
     });
 
-    expect(response.status).toBe(200);
+    expect(response).toMatchObject({ status: 200 });
     expect(response.json).toEqual({
       ok: true,
       openAiIntercept: {
@@ -2085,6 +2087,106 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(readdir).toHaveBeenCalled();
     expect(readFile).toHaveBeenCalled();
+  });
+
+  it("stops warm Codex before an invocation when a CLI bridge off-invocation violation is already pending", async () => {
+    const consumeCliBridgeOffInvocationViolation = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const stopWarmCodex = vi.fn(async () => undefined);
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        consumeCliBridgeOffInvocationViolation,
+        stopWarmCodex,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_cli_bridge_off_invocation_before",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
+    const stopCallOrder = stopWarmCodex.mock.invocationCallOrder.at(0);
+    const runnerCallOrder = runnerSpy.mock.invocationCallOrder.at(0);
+    if (stopCallOrder === undefined || runnerCallOrder === undefined) {
+      throw new Error("Expected warm Codex stop and runner invocation call order.");
+    }
+    expect(stopCallOrder).toBeLessThan(runnerCallOrder);
+  });
+
+  it("stops warm Codex after a consumed CLI bridge off-invocation violation", async () => {
+    const consumeCliBridgeOffInvocationViolation = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const stopWarmCodex = vi.fn(async () => undefined);
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        consumeCliBridgeOffInvocationViolation,
+        stopWarmCodex,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_cli_bridge_off_invocation_after",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
+    const runnerCallOrder = runnerSpy.mock.invocationCallOrder.at(0);
+    const stopCallOrder = stopWarmCodex.mock.invocationCallOrder.at(0);
+    if (runnerCallOrder === undefined || stopCallOrder === undefined) {
+      throw new Error("Expected runner invocation and warm Codex stop call order.");
+    }
+    expect(runnerCallOrder).toBeLessThan(stopCallOrder);
   });
 
   it("allows only the verified warm Codex root process during cleanup", async () => {

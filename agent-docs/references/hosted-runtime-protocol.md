@@ -102,6 +102,9 @@ writes, provider effects, and mailbox payload decode authorize the current
 runner by runtime write-fence identity (`attemptId`, `generation`, and
 `userId`). The transport still carries the generation in the historical
 `leaseGeneration` header until the 2026-05-25 compatibility deletion.
+Provider egress without runtime authority headers may use active-container
+validation only when the active write fence's stored runner container name
+matches the intercepted container id.
 `workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
 stay on the checkpoint path rather than becoming generic side-effect
 authorization.

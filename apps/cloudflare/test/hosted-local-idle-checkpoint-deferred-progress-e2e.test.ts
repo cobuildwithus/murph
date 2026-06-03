@@ -38,6 +38,7 @@ const secondUserText = "idle checkpoint deferred second input";
 const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
 const localRunnerIdleTtlMs = "300000";
+const linqApiToken = "linq-local-test-token";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -107,6 +108,35 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
 
+    const phoneNumbersBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: "/phone_numbers",
+    });
+    const postTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+      previousWorkspaceVersion: activationWorkspaceVersion,
+    });
+    expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
+    expect(requireWorkspaceVersion(postTurnPreCheckpointStatus)).toBe(activationWorkspaceVersion);
+    const providerProbe =
+      await requireScenario().harness.probeActiveContainerProviderEgressForTest(userId);
+    expect(providerProbe).toMatchObject({
+      ok: true,
+      probeOrigin: "container",
+      providerRequestOk: true,
+      providerRequestStatus: 200,
+      runtimeAuthorityHeadersPresent: false,
+      writeFenceValidationMode: "active_container",
+    });
+    expect(providerProbe.responseBodyBytes ?? -1).toBeGreaterThan(0);
+    const phoneNumberRequests = await requireLinqStub().waitForMatchingRequestCount({
+      expectedCount: phoneNumbersBaselineCount + 1,
+      expectedMethod: "GET",
+      expectedPath: "/phone_numbers",
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(phoneNumberRequests.at(-1)?.authorizationStatus).toBe("expected");
+
     const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
     expectWorkspaceBaseOnly(firstCompletionStatus);
@@ -152,6 +182,23 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
 
+    const secondPostTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+      previousWorkspaceVersion: idleWorkspaceVersion,
+    });
+    expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
+    expect(requireWorkspaceVersion(secondPostTurnPreCheckpointStatus)).toBe(idleWorkspaceVersion);
+    const secondProviderProbe =
+      await requireScenario().harness.probeActiveContainerProviderEgressForTest(userId);
+    expect(secondProviderProbe).toMatchObject({
+      ok: true,
+      probeOrigin: "container",
+      providerRequestOk: true,
+      providerRequestStatus: 200,
+      runtimeAuthorityHeadersPresent: false,
+      writeFenceValidationMode: "active_container",
+    });
+    expect(secondProviderProbe.responseBodyBytes ?? -1).toBeGreaterThan(0);
+
     const finalStatus = await waitForHostedInvocationIdleWithLogs();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expectMailboxLagDrained(finalStatus);
@@ -178,7 +225,9 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
 });
 
 async function startScenario(): Promise<void> {
-  linqStub = await startHostedLocalLinqStub();
+  linqStub = await startHostedLocalLinqStub({
+    expectedAuthorizationToken: linqApiToken,
+  });
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
@@ -188,7 +237,7 @@ async function startScenario(): Promise<void> {
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
-      LINQ_API_TOKEN: "linq-local-test-token",
+      LINQ_API_TOKEN: linqApiToken,
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -292,6 +341,42 @@ async function waitForIdleShutdownCheckpoint(input: {
       : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
+  ]));
+}
+
+async function waitForPostTurnPreIdleCheckpointWindow(input: {
+  previousWorkspaceVersion: string;
+}): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  let lastStatus: HostedRunnerStatusResponse | null = null;
+
+  while (Date.now() - startedAt < 30_000) {
+    const status = await readHostedRunnerStatusWithLogLimit(100);
+    lastStatus = status;
+
+    if (status.lastErrorCode) {
+      throw new Error(await requireScenario().buildFailureMessage(userId, [
+        "Hosted runner reported terminal error while waiting for post-turn pre-checkpoint window.",
+        `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
+      ]));
+    }
+
+    if (
+      status.workspace
+      && status.workspace.version === input.previousWorkspaceVersion
+      && isWorkspaceBaseOnly(status)
+    ) {
+      return status;
+    }
+
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for post-turn pre-checkpoint window.",
+    ...(lastStatus
+      ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`]
       : []),
   ]));
 }

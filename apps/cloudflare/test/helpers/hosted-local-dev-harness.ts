@@ -40,6 +40,16 @@ const hostedLocalCompletionRetryMs = 1_000;
 const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 const hostedLocalMailboxLagRecoveryNudgeAfterMs = 15_000;
 
+export interface HostedLocalActiveContainerProviderEgressProbeResult {
+  ok: true;
+  probeOrigin: "container";
+  providerRequestOk: boolean;
+  providerRequestStatus: number;
+  responseBodyBytes: number | null;
+  runtimeAuthorityHeadersPresent: false;
+  writeFenceValidationMode: "active_container";
+}
+
 export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   oidcToken: string;
@@ -49,6 +59,9 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
+  probeActiveContainerProviderEgressForTest(
+    userId: string,
+  ): Promise<HostedLocalActiveContainerProviderEgressProbeResult>;
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
@@ -183,6 +196,7 @@ export async function startHostedLocalDevHarness(input: {
       },
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
       expireRunnerActivityForTest,
+      probeActiveContainerProviderEgressForTest,
       runHostedManualInvocationForTest,
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
@@ -465,6 +479,22 @@ export async function startHostedLocalDevHarness(input: {
   async function expireRunnerActivityForTest(userId: string): Promise<{ ok: true }> {
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function probeActiveContainerProviderEgressForTest(
+    userId: string,
+  ): Promise<HostedLocalActiveContainerProviderEgressProbeResult> {
+    return await requestJsonForRuntime<HostedLocalActiveContainerProviderEgressProbeResult>(
+      `/__test/users/${encodeURIComponent(userId)}/provider-egress-active-container-probe`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

@@ -30,6 +30,7 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  consumeHostedCliRuntimeBridgeOffInvocationViolation,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
@@ -53,6 +54,9 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 import type {
   RunnerRuntimeWriteFenceToken,
 } from "./runner-outbound/write-fence.ts";
@@ -65,6 +69,8 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
   "/internal/deploy-codex-shell-smoke";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
   "/internal/direct-r2-presigned-put-smoke";
+const HOSTED_CONTAINER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_PATH =
+  "/internal/provider-egress-active-container-probe";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
@@ -125,6 +131,7 @@ interface HostedContainerStartupConfig {
 }
 
 interface HostedContainerRuntimeOptions {
+  consumeCliBridgeOffInvocationViolation?: () => Promise<boolean>;
   exitScheduler?: () => void;
   loadRuntimeContracts?:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
@@ -151,6 +158,7 @@ interface HostedContainerRuntimeOptions {
 }
 
 interface HostedContainerRuntimeDependencies {
+  consumeCliBridgeOffInvocationViolation: () => Promise<boolean>;
   exitScheduler: () => void;
   loadRuntimeContracts:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
@@ -236,8 +244,8 @@ type HostedAbortResponseLike = HostedAbortEmitterLike & {
 };
 
 class HostedRunnerShellIsolationError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "HostedRunnerShellIsolationError";
   }
 }
@@ -373,6 +381,9 @@ export async function startHostedContainerEntrypoint(input: {
       const isDirectR2PresignedPutSmokeRequest =
         request.method === "POST"
         && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
+      const isProviderEgressActiveContainerProbeRequest =
+        request.method === "POST"
+        && requestUrl.pathname === HOSTED_CONTAINER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_PATH;
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
 
@@ -381,10 +392,20 @@ export async function startHostedContainerEntrypoint(input: {
         && !isOpenAiInterceptSmokeRequest
         && !isCodexShellSmokeRequest
         && !isDirectR2PresignedPutSmokeRequest
+        && !isProviderEgressActiveContainerProbeRequest
       ) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
+        return;
+      }
+
+      if (isProviderEgressActiveContainerProbeRequest) {
+        discardUnreadRequestBody(request);
+        const result = await runHostedContainerProviderEgressActiveContainerProbe({
+          signal: requestAbort.signal,
+        }).catch((error) => createHostedContainerProviderEgressProbeFailure(error));
+        writeJsonResponse(response, result.ok === true ? 200 : 500, result);
         return;
       }
 
@@ -927,6 +948,9 @@ function resolveHostedContainerRuntimeDependencies(
 ): HostedContainerRuntimeDependencies {
   const startupConfig = createHostedContainerStartupConfig();
   return {
+    consumeCliBridgeOffInvocationViolation:
+      runtime?.consumeCliBridgeOffInvocationViolation
+      ?? consumeHostedCliRuntimeBridgeOffInvocationViolation,
     loadRuntimeContracts: createCachedHostedContainerLoader(
       runtime?.loadRuntimeContracts ?? loadHostedContainerRuntimeContracts,
     ),
@@ -1533,6 +1557,58 @@ function readHostedContainerPositiveNumber(value: unknown, label: string): numbe
     throw new TypeError(`${label} must be a positive number.`);
   }
   return value;
+}
+
+async function runHostedContainerProviderEgressActiveContainerProbe(input: {
+  signal: AbortSignal;
+}): Promise<Record<string, unknown>> {
+  const response = await fetch(createHostedContainerLinqPhoneNumbersUrl(), {
+    headers: {
+      authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+    },
+    method: "GET",
+    signal: input.signal,
+  });
+  const body = await response.arrayBuffer();
+  return {
+    ok: true,
+    probeOrigin: "container",
+    providerRequestOk: response.ok,
+    providerRequestStatus: response.status,
+    responseBodyBytes: body.byteLength,
+    runtimeAuthorityHeadersPresent: false,
+    writeFenceValidationMode: "active_container",
+  };
+}
+
+function createHostedContainerProviderEgressProbeFailure(error: unknown): Record<string, unknown> {
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
+  return {
+    ok: false,
+    probeOrigin: "container",
+    providerRequestOk: false,
+    providerRequestStatus: null,
+    responseBodyBytes: null,
+    runtimeAuthorityHeadersPresent: false,
+    writeFenceValidationMode: "active_container",
+    ...(details ? { details } : {}),
+    error: summarizeHostedExecutionError(error),
+    ...(errorName ? { errorName } : {}),
+  };
+}
+
+function createHostedContainerLinqPhoneNumbersUrl(): URL {
+  const baseUrl = process.env.LINQ_API_BASE_URL?.trim() ?? "";
+  if (!baseUrl) {
+    throw new Error("Hosted provider egress active-container probe requires LINQ_API_BASE_URL.");
+  }
+
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/phone_numbers`;
+  url.search = "";
+  url.hash = "";
+  return url;
 }
 
 async function runHostedContainerOpenAiInterceptSmoke(input: {
@@ -2288,6 +2364,8 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
+  await stopHostedWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
+
   let processBaseline: HostedContainerProcessSnapshot | null = null;
   if (runtime.processIsolation) {
     try {
@@ -2301,6 +2379,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   try {
     return await runHostedWorkspaceInvocation(input, runtime, options);
   } finally {
+    await stopHostedWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
     if (processBaseline) {
       try {
         const expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
@@ -2319,6 +2398,28 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
         throw error;
       }
     }
+  }
+}
+
+async function stopHostedWarmCodexAfterCliBridgeOffInvocationViolation(
+  runtime: HostedContainerRuntimeDependencies,
+  options?: {
+    onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
+  },
+): Promise<void> {
+  const violationPending = await runtime.consumeCliBridgeOffInvocationViolation();
+  if (!violationPending) {
+    return;
+  }
+
+  try {
+    await runtime.stopWarmCodex("cli-bridge-off-invocation-request");
+  } catch (error) {
+    options?.onCleanupStatus?.("failed");
+    throw new HostedRunnerShellIsolationError(
+      "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
+      { cause: error },
+    );
   }
 }
 

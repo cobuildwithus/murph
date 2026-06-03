@@ -1,6 +1,6 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 11;
+const RUNNER_STATE_SCHEMA_VERSION = 12;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -17,6 +17,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_attempt_id TEXT,
       active_generation INTEGER NOT NULL DEFAULT 0,
       active_kind TEXT,
+      active_runner_container_name TEXT,
       active_reason TEXT,
       active_started_at TEXT,
       active_expires_at TEXT,
@@ -36,6 +37,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
     active_kind: "TEXT",
+    active_runner_container_name: "TEXT",
     active_reason: "TEXT",
     active_started_at: "TEXT",
     active_expires_at: "TEXT",
@@ -61,6 +63,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_attempt_id",
       "active_generation",
       "active_kind",
+      "active_runner_container_name",
       "active_reason",
       "active_started_at",
       "active_expires_at",

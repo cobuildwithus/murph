@@ -298,13 +298,9 @@ describe("runHostedWorkspaceInvocation", () => {
       fetchMock.mock.calls[1],
       "direct invocation provider fetch",
     );
-    expect(providerRequest.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(
-      job.request.attemptId,
-    );
-    expect(providerRequest.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(
-      job.request.leaseGeneration,
-    );
-    expect(providerRequest.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe("10");
+    expect(providerRequest.headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(false);
+    expect(providerRequest.headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(false);
+    expect(providerRequest.headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(false);
     expect(providerRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
       job.request.userId,
     );

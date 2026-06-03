@@ -373,12 +373,17 @@ export class RuntimeProcessingController {
       });
     }
 
+    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: this.input.runnerRuntimeEnvSource,
+      userId: input.input.userId,
+    });
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({
         expiresAt: new Date(Date.now() + this.input.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
         reason: input.input.reason,
+        runnerContainerName,
         userId: input.input.userId,
       });
     } catch (error) {

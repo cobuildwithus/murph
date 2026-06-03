@@ -27,9 +27,9 @@ export interface RunnerWriteFenceToken {
   generation: string;
   leaseGeneration: string;
   reason: HostedWorkspaceInvocationReason;
+  runnerContainerName: string | null;
   startedAt: string;
   userId: string;
-  workerVersionId: string | null;
   workspaceVersion: string | null;
 }
 
@@ -49,6 +49,20 @@ export interface RunnerWriteFenceValidationResult {
   owns: boolean;
   record: RunnerStateRecord;
 }
+
+export type RunnerActiveWriteFenceValidationResult =
+  | {
+      owns: false;
+      record: RunnerStateRecord;
+    }
+  | {
+      attemptId: string;
+      leaseGeneration: string;
+      owns: true;
+      record: RunnerStateRecord;
+      userId: string;
+      workspaceVersion: string | null;
+    };
 
 export type RunnerExpiredActiveRunResult =
   | {
@@ -134,6 +148,7 @@ export class RunnerStateStore {
   async beginWriteFence(input: {
     kind?: RunnerWriteFenceKind;
     reason: HostedWorkspaceInvocationReason;
+    runnerContainerName: string;
     userId: string;
     expiresAt?: string | null;
   }): Promise<RunnerWriteFenceToken> {
@@ -155,6 +170,7 @@ export class RunnerStateStore {
     meta.active_generation = nextGeneration;
     meta.active_kind = input.kind ?? "runtime";
     meta.active_reason = input.reason;
+    meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
     if (meta.active_kind === "runtime") {
@@ -168,9 +184,9 @@ export class RunnerStateStore {
       generation: nextGeneration.toString(),
       leaseGeneration: nextGeneration.toString(),
       reason: input.reason,
+      runnerContainerName: meta.active_runner_container_name,
       startedAt,
       userId: input.userId,
-      workerVersionId: null,
       workspaceVersion: null,
     };
   }
@@ -424,15 +440,22 @@ export class RunnerStateStore {
   }
 
   async validateActiveWriteFence(input: {
+    runnerContainerName: string;
     userId: string;
-  }): Promise<RunnerWriteFenceValidationResult> {
+  }): Promise<RunnerActiveWriteFenceValidationResult> {
     let meta = this.requireMetaRowSync();
     if (this.clearExpiredActiveRunSync(meta, Date.now())) {
       this.writeMetaRowSync(meta);
       meta = this.requireMetaRowSync();
     }
     const token = this.readWriteFenceTokenSync(meta);
-    if (!token || token.userId !== input.userId) {
+    const runnerContainerName = normalizeRunnerContainerNameOrNull(input.runnerContainerName);
+    if (
+      !token
+      || token.userId !== input.userId
+      || !runnerContainerName
+      || token.runnerContainerName !== runnerContainerName
+    ) {
       return {
         owns: false,
         record: this.readStateFromMetaSync(meta),
@@ -440,8 +463,12 @@ export class RunnerStateStore {
     }
 
     return {
+      attemptId: token.attemptId,
+      leaseGeneration: token.leaseGeneration,
       owns: true,
       record: this.readStateFromMetaSync(meta),
+      userId: token.userId,
+      workspaceVersion: token.workspaceVersion,
     };
   }
 
@@ -515,6 +542,7 @@ export class RunnerStateStore {
         active_attempt_id,
         active_generation,
         active_kind,
+        active_runner_container_name,
         active_reason,
         active_started_at,
         active_expires_at,
@@ -545,6 +573,7 @@ export class RunnerStateStore {
         active_attempt_id,
         active_generation,
         active_kind,
+        active_runner_container_name,
         active_reason,
         active_started_at,
         active_expires_at,
@@ -555,13 +584,14 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.wake_at,
       meta.active_attempt_id,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
+      meta.active_runner_container_name,
       readHostedWorkspaceInvocationReasonOrNull(meta.active_reason),
       meta.active_started_at,
       meta.active_expires_at,
@@ -597,6 +627,7 @@ export class RunnerStateStore {
     meta.active_expires_at = null;
     meta.active_kind = null;
     meta.active_reason = null;
+    meta.active_runner_container_name = null;
     meta.active_started_at = null;
     meta.active_workspace_version = null;
   }
@@ -626,9 +657,9 @@ export class RunnerStateStore {
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       reason: readHostedWorkspaceInvocationReasonOrDefault(meta.active_reason),
+      runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),
       startedAt: meta.active_started_at,
       userId: meta.user_id,
-      workerVersionId: null,
       workspaceVersion: meta.active_workspace_version,
     };
   }
@@ -663,6 +694,18 @@ function requireWorkspaceVersion(value: string): string {
     throw new TypeError("Hosted runner workspace version must be a non-negative base-10 integer string.");
   }
   return value;
+}
+
+function requireRunnerContainerName(value: string): string {
+  const normalized = normalizeRunnerContainerNameOrNull(value);
+  if (!normalized) {
+    throw new TypeError("Hosted runner container name is required for the write fence.");
+  }
+  return normalized;
+}
+
+function normalizeRunnerContainerNameOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function createRuntimeWriteAttemptId(): string {

@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
-import { HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
@@ -1550,6 +1554,226 @@ describe('assistant codex runtime', () => {
       .toEqual([3, 5])
     expect(await snapshotExpectedHostedCodexRootProcess()).toBeNull()
   })
+
+  it('does not reuse hosted warm Codex after a CLI bridge off-invocation stop', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-cli-bridge-stop-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-cli-bridge-stop-work-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      const processNumber = spawnedChildren.length + 1
+      spawnedChild.pid = 34_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-warm-cli-bridge-stop-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-warm-cli-bridge-stop-${processNumber}`,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-warm-cli-bridge-stop-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
+      [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
+      CODEX_HOME: hostedCodexHome,
+      HOSTED_ASSISTANT_MODEL: 'gpt-warm-stop',
+      MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider',
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first warm stop turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-cli-bridge-stop-1',
+      turnId: 'turn-warm-cli-bridge-stop-1',
+    })
+
+    const firstChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+    await stopHostedWarmCodexAppServer('cli-bridge-off-invocation-request')
+    expect(process.kill).toHaveBeenCalledWith(-34_000, 'SIGTERM')
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second warm stop turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-cli-bridge-stop-2',
+      turnId: 'turn-warm-cli-bridge-stop-2',
+    })
+
+    const secondChild = requireMockChildProcess(spawnedChildren[1] ?? null)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(secondChild.pid).not.toBe(firstChild.pid)
+  })
+
+  it.each([
+    {
+      name: 'model',
+      secondEnv: {
+        HOSTED_ASSISTANT_MODEL: 'gpt-identity-two',
+      },
+      useSecondCodexHome: false,
+    },
+    {
+      name: 'provider',
+      secondEnv: {
+        MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-two',
+      },
+      useSecondCodexHome: false,
+    },
+    {
+      name: 'bridge token',
+      secondEnv: {
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
+      },
+      useSecondCodexHome: false,
+    },
+    {
+      name: 'Codex home',
+      secondEnv: {},
+      useSecondCodexHome: true,
+    },
+  ] as const)(
+    'starts a fresh hosted Codex app-server process when $name changes',
+    async (scenario) => {
+      const firstCodexHome = await createTempDir('assistant-codex-warm-identity-home-a-')
+      const secondCodexHome = scenario.useSecondCodexHome === true
+        ? await createTempDir('assistant-codex-warm-identity-home-b-')
+        : firstCodexHome
+      const workingDirectory = await createTempDir('assistant-codex-warm-identity-work-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const spawnedChild = new MockChildProcess()
+        spawnedChild.pid = 32_000 + spawnedChildren.length
+        spawnedChildren.push(spawnedChild)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+            spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+            const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+            const processNumber = spawnedChildren.length
+            spawnedChild.stdout.write(jsonLine({
+              id: thread.id,
+              result: {
+                thread: {
+                  id: `thread-warm-identity-${processNumber}`,
+                },
+              },
+            }))
+
+            const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+            spawnedChild.stdout.write(jsonLine({
+              id: turn.id,
+              result: {
+                turn: {
+                  id: `turn-warm-identity-${processNumber}`,
+                },
+              },
+            }))
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: `turn-warm-identity-${processNumber}`,
+                  status: 'completed',
+                },
+              },
+            }))
+          })()
+        })
+
+        return spawnedChild
+      })
+
+      const baseEnv = {
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-one',
+        [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
+        CODEX_HOME: firstCodexHome,
+        HOSTED_ASSISTANT_MODEL: 'gpt-identity-one',
+        MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-one',
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        NODE_ENV: 'test',
+        PATH: '/usr/bin',
+      }
+
+      await expect(
+        executeCodexAppServerTurn({
+          env: baseEnv,
+          prompt: 'first stable identity',
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-warm-identity-1',
+        turnId: 'turn-warm-identity-1',
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          env: {
+            ...baseEnv,
+            ...scenario.secondEnv,
+            CODEX_HOME: secondCodexHome,
+          },
+          prompt: 'second stable identity',
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-warm-identity-2',
+        turnId: 'turn-warm-identity-2',
+      })
+
+      expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(process.kill).toHaveBeenCalledWith(-32_000, 'SIGTERM')
+      expect(requireMockChildProcess(spawnedChildren[0] ?? null).pid)
+        .not.toBe(requireMockChildProcess(spawnedChildren[1] ?? null).pid)
+    },
+  )
 
   it('rejects stale hosted warm turn completion events', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-stale-complete-home-')

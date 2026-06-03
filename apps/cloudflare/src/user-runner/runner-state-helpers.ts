@@ -20,6 +20,7 @@ export interface RunnerMetaRow {
   active_generation: number;
   active_kind: string | null;
   active_reason: string | null;
+  active_runner_container_name: string | null;
   active_started_at: string | null;
   active_workspace_version: string | null;
   backoff_until: string | null;
@@ -39,6 +40,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_generation: 0,
     active_kind: null,
     active_reason: null,
+    active_runner_container_name: null,
     active_started_at: null,
     active_workspace_version: null,
     backoff_until: null,
@@ -65,6 +67,7 @@ export function projectRunnerStateRecord(input: {
           ?? input.meta.active_started_at,
         generation: writeFenceGeneration,
         kind: writeFenceKind,
+        runnerContainerName: readRunnerContainerNameOrNull(input.meta.active_runner_container_name),
         startedAt: input.meta.active_started_at,
         workspaceVersion: input.meta.active_workspace_version,
       }
@@ -136,6 +139,10 @@ function readHostedWorkspaceInvocationReasonOrNull(value: unknown): string | nul
     && HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)
     ? value
     : null;
+}
+
+function readRunnerContainerNameOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 export function normalizeNonNegativeInteger(value: number | null): number {

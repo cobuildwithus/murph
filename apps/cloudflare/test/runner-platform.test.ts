@@ -2262,9 +2262,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(response.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "external provider fetch");
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
@@ -2330,7 +2330,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(serializedRecord).not.toContain("/v1/messages");
   });
 
-  it("preserves Request init overrides and authority-binds external provider fetches", async () => {
+  it("preserves Request init overrides and bound-user provider identity", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const hostedFetch = createCloudflareHostedProviderFetch(
       "member_123",
@@ -2360,9 +2360,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const forwarded = requireFetchRequest(fetchMock.mock.calls[0], "external passthrough fetch");
     expect(forwarded.headers.get("x-test")).toBe("1");
-    expect(forwarded.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(forwarded.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(forwarded.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
     expect(forwarded.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(forwarded.method).toBe("PUT");
@@ -2394,7 +2394,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("authority-binds configured local provider base URLs", async () => {
+  it("passes configured local provider base URLs with bound-user identity", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const hostedFetch = createCloudflareHostedProviderFetch(
       "member_123",
@@ -2418,9 +2418,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(response.status).toBe(204);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "configured provider fetch");
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
@@ -2499,13 +2499,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "configured Linq provider fetch");
     expect(request.url).toBe("http://host.docker.internal:4011/api/partner/v3/chats");
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
-  it("rejects external provider fetches when the runtime write-fence lease is missing", async () => {
+  it("does not require external provider fetches to carry a runtime write-fence lease", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const hostedFetch = createCloudflareHostedProviderFetch(
       "member_123",
@@ -2515,15 +2515,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
 
-    await expect(
-      hostedFetch("https://api.openai.com/v1/responses"),
-    ).rejects.toThrow(
-      "Hosted provider request for api.openai.com is missing a runtime write-fence lease.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
+    const response = await hostedFetch("https://api.openai.com/v1/responses");
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "external provider fetch");
+    expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
-  it("authority-binds platform providerFetch without relying on proxy header opt-in", async () => {
+  it("passes platform providerFetch without exact write-fence headers", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -2545,9 +2548,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "platform provider fetch");
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 

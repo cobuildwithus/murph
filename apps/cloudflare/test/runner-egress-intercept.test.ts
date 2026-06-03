@@ -47,6 +47,9 @@ import {
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
+import type {
+  WorkerActiveRuntimeWriteFenceValidationResult,
+} from "../src/worker-contracts.ts";
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
@@ -71,6 +74,25 @@ const OPENAI_WEBSOCKET_HANDSHAKE_HEADERS = {
   upgrade: "websocket",
 } as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
+
+function createActiveWriteFenceValidationResult(input: {
+  userId: string;
+}): WorkerActiveRuntimeWriteFenceValidationResult {
+  return {
+    attemptId: "attempt_active",
+    leaseGeneration: "7",
+    owns: true,
+    userId: input.userId,
+    workspaceVersion: "4",
+  };
+}
+
+function createLegacyBooleanActiveWriteFenceValidationResult(
+  value: boolean,
+): WorkerActiveRuntimeWriteFenceValidationResult {
+  // Simulates an old Durable Object RPC payload crossing the runtime boundary.
+  return value as never;
+}
 
 function testByteLength(value: string): number {
   return TEST_TEXT_ENCODER.encode(value).byteLength;
@@ -113,6 +135,8 @@ describe("hostedRunnerIntercept", () => {
       .toBe(handleHostedRunnerWhatsAppOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
       .toBe(handleHostedRunnerInternalOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["host.docker.internal"])
+      .toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["unexpected.example.test"]).toBeUndefined();
   });
 
@@ -348,6 +372,19 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has("openai-project")).toBe(false);
     expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
     expect(forwardedRequest.headers.has("x-api-key")).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          activeContainerIdentitySource: null,
+          activeContainerSameUserOffTurnCaveat: false,
+          providerKind: "openai",
+          runtimeAuthorityHeadersPresent: true,
+          writeFenceMetadataPresent: true,
+          writeFenceValidationMode: "exact_headers",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
   });
 
   it("injects OpenAI authorization from an active container write fence without authority headers", async () => {
@@ -356,7 +393,10 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => {
       throw new Error("OpenAI without authority headers should use active write-fence validation.");
     });
-    const validateActiveRuntimeWriteFence = vi.fn(async () => true);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
@@ -376,12 +416,126 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
     const forwardedRequest = readForwardedRequest(fetchMock);
     expect(forwardedRequest.url).toBe("https://api.openai.com/v1/models");
     expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
     expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          activeContainerIdentitySource: "container_name",
+          activeContainerSameUserOffTurnCaveat: true,
+          providerKind: "openai",
+          runtimeAuthorityHeadersPresent: false,
+          writeFenceMetadataPresent: true,
+          writeFenceValidationMode: "active_container",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("uses active-container validation for bound-user provider egress without authority headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      validateActiveRuntimeWriteFence,
+    });
+    env.CF_VERSION_METADATA = { id: "version_1" };
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/models", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123--v-version_1",
+      userId: "member_123",
+    });
+  });
+
+  it("rejects bound-user provider egress from a stale same-user container write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) =>
+      input.runnerContainerName === "member_123--v-container-b"
+        ? createActiveWriteFenceValidationResult(input)
+        : { owns: false } as const
+    );
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      validateActiveRuntimeWriteFence,
+    });
+    env.CF_VERSION_METADATA = { id: "container-a" };
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/models", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+      { containerId: "member_123--v-container-a" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123--v-container-a",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy boolean active-container validation results for provider egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async () =>
+      createLegacyBooleanActiveWriteFenceValidationResult(true)
+    );
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      validateActiveRuntimeWriteFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/models", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+      { containerId: "member_123" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("injects OpenAI authorization for Responses WebSocket upgrades without body diagnostics", async () => {
@@ -758,6 +912,93 @@ describe("hostedRunnerIntercept", () => {
     expect(runtimeLogJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
       .not.toContain(syntheticHiddenText);
+  });
+
+  it("records OpenAI cache diagnostics with active-container write-fence metadata when authority headers are absent", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return new Response(JSON.stringify({ loggedCount: 1 }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI without authority headers should use active write-fence validation.");
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => ({
+      ...createActiveWriteFenceValidationResult(input),
+      attemptId: "attempt_active_container",
+      leaseGeneration: "11",
+      workspaceVersion: "9",
+    }));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "hello",
+          model: "gpt-5.5",
+          prompt_cache_retention: "24h",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateActiveRuntimeWriteFence,
+        validateRuntimeWriteFence,
+      }),
+      {
+        containerId: "member_123",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        attemptId?: string;
+        eventCode?: string;
+        leaseGeneration?: string;
+        redactedJson?: Record<string, unknown>;
+        workspaceVersion?: string;
+      }>;
+    };
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
+      attemptId: "attempt_active_container",
+      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
+      leaseGeneration: "11",
+      workspaceVersion: "9",
+    }));
+    expect(runtimeLogBody.entries?.[0]?.redactedJson).toEqual(expect.objectContaining({
+      endpointKind: "responses",
+      providerKind: "openai",
+    }));
   });
 
   it("records OpenAI cache diagnostics when background work is unavailable", async () => {
@@ -1438,7 +1679,10 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => {
       throw new Error("Mapbox without authority headers should use the active write fence.");
     });
-    const validateActiveRuntimeWriteFence = vi.fn(async () => true);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request(
@@ -1464,6 +1708,7 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -1482,7 +1727,7 @@ describe("hostedRunnerIntercept", () => {
   it("rejects Mapbox token injection without an active write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async () => false);
+    const validateActiveRuntimeWriteFence = vi.fn(async () => ({ owns: false } as const));
 
     const response = await hostedRunnerIntercept(
       new Request(
@@ -1498,6 +1743,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1821,6 +2067,58 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
+  it("injects Linq credentials from an active container write fence without authority headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Linq without authority headers should use active write-fence validation.");
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/chats/chat_1/messages", {
+        body: JSON.stringify({ text: "hello" }),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          cookie: "session=user-supplied-cookie",
+          "x-api-key": "user-supplied-api-key",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateActiveRuntimeWriteFence,
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "linq",
+          writeFenceValidationMode: "active_container",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
   });
 
   it("requires the active write fence before injecting Linq credentials for reads", async () => {
@@ -2488,6 +2786,56 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
+  it("rewrites Telegram sentinel tokens from an active container write fence without authority headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Telegram without authority headers should use active write-fence validation.");
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+        headers: {
+          authorization: "Bearer user-supplied-telegram-token",
+          cookie: "session=user-supplied-cookie",
+          "x-api-key": "user-supplied-api-key",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+        validateActiveRuntimeWriteFence,
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "telegram",
+          writeFenceValidationMode: "active_container",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
   it.each([
     {
       method: "POST",
@@ -2841,6 +3189,57 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
+  it("injects WhatsApp credentials from an active container write fence without authority headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("WhatsApp without authority headers should use active write-fence validation.");
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          cookie: "session=user-supplied-cookie",
+          "x-api-key": "user-supplied-api-key",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateActiveRuntimeWriteFence,
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://graph.facebook.com/v25.0/phone_123/messages");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer whatsapp-worker-secret");
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "whatsapp",
+          writeFenceValidationMode: "active_container",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
   it.each([
     {
       name: "missing",
@@ -3114,8 +3513,9 @@ function createInterceptEnv(input: {
     userId: string;
   }) => Promise<boolean>;
   validateActiveRuntimeWriteFence?: (input: {
+    runnerContainerName: string;
     userId: string;
-  }) => Promise<boolean>;
+  }) => Promise<WorkerActiveRuntimeWriteFenceValidationResult>;
 }): RunnerOutboundEnvironmentSource {
   return {
     ...createHostedExecutionTestEnv(),
@@ -3135,7 +3535,7 @@ function createInterceptEnv(input: {
     USER_RUNNER: {
       getByName: () => ({
         validateActiveRuntimeWriteFence:
-          input.validateActiveRuntimeWriteFence ?? (async () => false),
+          input.validateActiveRuntimeWriteFence ?? (async () => ({ owns: false })),
         validateRuntimeWriteFence: input.validateRuntimeWriteFence ?? (async () => false),
       }),
     },

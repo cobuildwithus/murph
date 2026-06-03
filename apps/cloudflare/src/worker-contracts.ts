@@ -9,6 +9,18 @@ export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
 
+export type WorkerActiveRuntimeWriteFenceValidationResult =
+  | {
+      owns: false;
+    }
+  | {
+      attemptId: string;
+      leaseGeneration: string;
+      owns: true;
+      userId: string;
+      workspaceVersion: string | null;
+    };
+
 export interface WorkerUserRunnerStubLike {
   beginRuntimeWriteFenceForSmoke?(input: {
     userId: string;
@@ -48,8 +60,9 @@ export interface WorkerUserRunnerStubLike {
     workspaceVersion?: string | null;
   }): Promise<boolean>;
   validateActiveRuntimeWriteFence?(input: {
+    runnerContainerName: string;
     userId: string;
-  }): Promise<boolean>;
+  }): Promise<WorkerActiveRuntimeWriteFenceValidationResult>;
 }
 
 export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {

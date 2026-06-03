@@ -123,6 +123,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     await stateStore.beginInvocation({
       expiresAt: "2999-01-01T00:00:00.000Z",
       reason: "manual",
+      runnerContainerName: "member_123--v-worker_version_current",
       userId: "member_123",
     });
     installOidcJwksFetch(async (input: RequestInfo | URL) => {

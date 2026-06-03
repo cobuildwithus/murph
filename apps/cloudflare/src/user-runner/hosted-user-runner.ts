@@ -24,6 +24,9 @@ import {
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
+import type {
+  WorkerActiveRuntimeWriteFenceValidationResult,
+} from "../worker-contracts.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
@@ -232,8 +235,9 @@ export class HostedUserRunner {
   }
 
   async validateActiveRuntimeWriteFence(input: {
+    runnerContainerName: string;
     userId: string;
-  }): Promise<boolean> {
+  }): Promise<WorkerActiveRuntimeWriteFenceValidationResult> {
     const validation = await this.stateStore.validateActiveWriteFence(input);
     if (!validation.owns) {
       const writeFence = validation.record.writeFence;
@@ -248,8 +252,15 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: input.userId,
       });
+      return { owns: false };
     }
-    return validation.owns;
+    return {
+      attemptId: validation.attemptId,
+      leaseGeneration: validation.leaseGeneration,
+      owns: true,
+      userId: validation.userId,
+      workspaceVersion: validation.workspaceVersion,
+    };
   }
 
   async createHostedWorkspaceSnapshotUploadSession(

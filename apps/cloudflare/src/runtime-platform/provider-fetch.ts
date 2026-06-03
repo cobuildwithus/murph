@@ -211,7 +211,7 @@ export function createCloudflareHostedProviderFetch(
   options: {
     injectBoundUserIdHeader?: boolean;
     providerFetchBaseUrls?: readonly string[];
-    readCurrentLease: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
+    readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   },
 ): typeof fetch {
   const internalFetch = createCloudflareHostedInternalFetch(boundUserId, fetchImpl, options);
@@ -224,13 +224,6 @@ export function createCloudflareHostedProviderFetch(
     assertCloudflareHostedProviderFetchUrl(url, options.providerFetchBaseUrls ?? []);
 
     const headers = new Headers(request.headers);
-    const lease = await options.readCurrentLease();
-    if (!lease) {
-      throw new Error(
-        `Hosted provider request for ${url.hostname} is missing a runtime write-fence lease.`,
-      );
-    }
-    writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
 
     const providerRequest = new Request(request, { headers });

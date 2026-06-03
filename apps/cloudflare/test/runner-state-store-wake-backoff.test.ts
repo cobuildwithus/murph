@@ -39,6 +39,7 @@ describe("RunnerStateStore execution lease authority", () => {
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
       reason: "nudge",
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
     const failed = await store.clearWriteFenceAfterTransportFailure({
@@ -64,6 +65,7 @@ describe("RunnerStateStore execution lease authority", () => {
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
       reason: "nudge",
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
 
@@ -93,6 +95,7 @@ describe("RunnerStateStore execution lease authority", () => {
       const token = await store.beginWriteFence({
         expiresAt: LATER_WAKE,
         reason,
+        runnerContainerName: "member_123",
         userId: "member_123",
       });
       const restartedStore = new RunnerStateStore(createDurableObjectState(db));
@@ -113,6 +116,7 @@ describe("RunnerStateStore execution lease authority", () => {
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
       reason: "browser_vault_refresh",
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
     expect(readActiveReason(db)).toBe("browser_vault_refresh");
@@ -136,6 +140,7 @@ describe("RunnerStateStore execution lease authority", () => {
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
       reason: "nudge",
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
 
@@ -170,6 +175,7 @@ describe("RunnerStateStore execution lease authority", () => {
       expiresAt: LATER_WAKE,
       kind: "runtime",
       reason: "manual",
+      runnerContainerName: "member_123",
       userId: "member_123",
     });
 

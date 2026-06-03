@@ -205,12 +205,25 @@ type HostedProviderEgressValidationMode =
   | "active_container"
   | "exact_headers"
   | "missing_identity";
+type HostedProviderEgressActiveContainerIdentitySource =
+  | "bound_user_header"
+  | "container_name";
 
 interface HostedProviderEgressAuthorization {
+  activeContainerIdentitySource: HostedProviderEgressActiveContainerIdentitySource | null;
   authorized: boolean;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
+  runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
+  writeFence: HostedProviderEgressWriteFenceMetadata | null;
+}
+
+interface HostedProviderEgressWriteFenceMetadata {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+  workspaceVersion: string | null;
 }
 
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
@@ -232,6 +245,9 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp]: handleHostedRunnerWhatsAppOutbound,
+  // Hosted-local rewrites loopback provider bases to this container-reachable
+  // host. Send it through the multiplexer so provider policy still applies.
+  "host.docker.internal": handleHostedRunnerOpenInternetOutbound,
 };
 
 export async function handleHostedRunnerOpenInternetOutbound(
@@ -516,6 +532,7 @@ async function maybeHandleOpenAiRequest(input: {
       request: input.request,
       upstreamRequestBody: upstreamRequest.clone(),
       userId: authorization.userId,
+      writeFence: authorization.writeFence,
     });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(diagnosticPromise);
@@ -565,6 +582,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   request: Request;
   upstreamRequestBody: HostedRunnerDiagnosticBodySource;
   userId: string | null;
+  writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
   let diagnostic: HostedRunnerDiagnosticJson;
   try {
@@ -612,6 +630,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
     env: input.env,
     request: input.request,
     userId: input.userId,
+    writeFence: input.writeFence,
   }).catch((error) => {
     emitHostedExecutionStructuredLog({
       component: "runner",
@@ -738,29 +757,25 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
+  writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
-  const attemptId = readRuntimeLogHeader(input.request.headers, HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
-  const leaseGeneration = readRuntimeLogHeader(
-    input.request.headers,
-    HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
-  );
-  const workspaceVersion = readRuntimeLogHeader(
-    input.request.headers,
-    HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
-  );
+  const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
+    headers: input.request.headers,
+    userId: input.userId,
+  });
   const response = await handleRunnerOutboundRequest(
     new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNTIME_LOG_PATH}`, {
       body: JSON.stringify({
         entries: [{
           at: new Date().toISOString(),
-          ...(attemptId ? { attemptId } : {}),
+          ...(writeFence ? { attemptId: writeFence.attemptId } : {}),
           component: "runner",
           eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
-          ...(leaseGeneration ? { leaseGeneration } : {}),
+          ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
           level: "debug",
           phase: "fetch",
           redactedJson: input.diagnostic,
-          ...(workspaceVersion ? { workspaceVersion } : {}),
+          ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
         }],
       }),
       headers: {
@@ -1485,6 +1500,29 @@ function readRuntimeLogHeader(headers: Headers, name: string): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function readRuntimeLogWriteFenceMetadata(input: {
+  headers: Headers;
+  userId: string;
+}): HostedProviderEgressWriteFenceMetadata | null {
+  const attemptId = readRuntimeLogHeader(input.headers, HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
+  const leaseGeneration = readRuntimeLogHeader(
+    input.headers,
+    HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  );
+  if (!attemptId || !leaseGeneration) {
+    return null;
+  }
+  return {
+    attemptId,
+    leaseGeneration,
+    userId: input.userId,
+    workspaceVersion: readRuntimeLogHeader(
+      input.headers,
+      HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+    ),
+  };
+}
+
 async function drainHostedRunnerMetadataResponse(response: Response): Promise<void> {
   if (response.body === null || response.bodyUsed) {
     return;
@@ -1888,7 +1926,14 @@ async function authorizeHostedProviderEgress(input: {
   userId: string | null;
 }): Promise<HostedProviderEgressAuthorization> {
   const startedAt = Date.now();
-  if (input.userId && hostedRuntimeAuthorityHeadersPresent(input.request.headers)) {
+  const runtimeAuthorityHeadersPresent = hostedRuntimeAuthorityHeadersPresent(
+    input.request.headers,
+  );
+  if (input.userId && runtimeAuthorityHeadersPresent) {
+    const writeFence = readRuntimeLogWriteFenceMetadata({
+      headers: input.request.headers,
+      userId: input.userId,
+    });
     try {
       await requireRunnerRuntimeWriteFenceWrite({
         env: input.env,
@@ -1896,59 +1941,120 @@ async function authorizeHostedProviderEgress(input: {
         userId: input.userId,
       });
       return {
+        activeContainerIdentitySource: null,
         authorized: true,
         durationMs: Date.now() - startedAt,
         mode: "exact_headers",
+        runtimeAuthorityHeadersPresent,
         userId: input.userId,
+        writeFence,
       };
     } catch (error) {
       if (error instanceof RunnerRuntimeWriteFenceError) {
         return {
+          activeContainerIdentitySource: null,
           authorized: false,
           durationMs: Date.now() - startedAt,
           mode: "exact_headers",
+          runtimeAuthorityHeadersPresent,
           userId: input.userId,
+          writeFence,
         };
       }
       throw error;
     }
   }
 
-  const activeUserId = input.userId ?? readHostedRunnerContainerUserId(input);
-  if (!activeUserId) {
+  const runnerContainerName = readHostedRunnerContainerName(input.ctx);
+  const containerUserId = readHostedRunnerContainerUserId(input);
+  const activeUserId = input.userId ?? containerUserId;
+  if (!activeUserId || !runnerContainerName || !containerUserId) {
     return {
+      activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
+        containerUserId,
+        userId: input.userId,
+      }),
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "missing_identity",
-      userId: null,
+      runtimeAuthorityHeadersPresent,
+      userId: activeUserId,
+      writeFence: null,
+    };
+  }
+  if (containerUserId !== activeUserId) {
+    return {
+      activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
+        containerUserId,
+        userId: input.userId,
+      }),
+      authorized: false,
+      durationMs: Date.now() - startedAt,
+      mode: "active_container",
+      runtimeAuthorityHeadersPresent,
+      userId: activeUserId,
+      writeFence: null,
     };
   }
 
   const runner = input.env.USER_RUNNER.getByName(activeUserId);
   if (typeof runner.validateActiveRuntimeWriteFence !== "function") {
     return {
+      activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
+        containerUserId,
+        userId: input.userId,
+      }),
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "active_container",
+      runtimeAuthorityHeadersPresent,
       userId: activeUserId,
+      writeFence: null,
     };
   }
 
+  const validation = normalizeActiveRuntimeWriteFenceValidationResult(
+    await runner.validateActiveRuntimeWriteFence({
+      runnerContainerName,
+      userId: activeUserId,
+    }),
+  );
   return {
-    authorized: await runner.validateActiveRuntimeWriteFence({ userId: activeUserId }),
+    activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
+      containerUserId,
+      userId: input.userId,
+    }),
+    authorized: validation.owns,
     durationMs: Date.now() - startedAt,
     mode: "active_container",
+    runtimeAuthorityHeadersPresent,
     userId: activeUserId,
+    writeFence: validation.writeFence,
   };
+}
+
+function readHostedProviderEgressActiveContainerIdentitySource(input: {
+  containerUserId: string | null;
+  userId: string | null;
+}): HostedProviderEgressActiveContainerIdentitySource | null {
+  if (input.userId) {
+    return "bound_user_header";
+  }
+  return input.containerUserId ? "container_name" : null;
+}
+
+function readHostedRunnerContainerName(ctx?: HostedRunnerOutboundContext): string | null {
+  const containerName = typeof ctx?.containerId === "string"
+    ? ctx.containerId.trim()
+    : "";
+  return containerName.length > 0 ? containerName : null;
 }
 
 function readHostedRunnerContainerUserId(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
 }): string | null {
-  const containerId = typeof input.ctx?.containerId === "string"
-    ? input.ctx.containerId.trim()
-    : "";
+  const containerId = readHostedRunnerContainerName(input.ctx);
   if (!containerId) {
     return null;
   }
@@ -1981,6 +2087,59 @@ function sanitizeRunnerContainerNameSegment(value: string): string | null {
     .slice(0, 80);
 
   return sanitized.length > 0 ? sanitized : null;
+}
+
+function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {
+  owns: boolean;
+  writeFence: HostedProviderEgressWriteFenceMetadata | null;
+} {
+  if (typeof value === "boolean") {
+    return {
+      owns: false,
+      writeFence: null,
+    };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      owns: false,
+      writeFence: null,
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.owns !== true) {
+    return {
+      owns: false,
+      writeFence: null,
+    };
+  }
+  if (
+    typeof record.attemptId !== "string"
+    || typeof record.leaseGeneration !== "string"
+    || typeof record.userId !== "string"
+    || (
+      record.workspaceVersion !== null
+      && record.workspaceVersion !== undefined
+      && typeof record.workspaceVersion !== "string"
+    )
+  ) {
+    return {
+      owns: false,
+      writeFence: null,
+    };
+  }
+
+  return {
+    owns: true,
+    writeFence: {
+      attemptId: record.attemptId,
+      leaseGeneration: record.leaseGeneration,
+      userId: record.userId,
+      workspaceVersion: typeof record.workspaceVersion === "string"
+        ? record.workspaceVersion
+        : null,
+    },
+  };
 }
 
 function unauthorizedProviderEgress(input: {
@@ -2061,7 +2220,12 @@ function emitHostedProviderEgressDiagnostic(input: {
       providerUpstreamDurationMs: input.upstreamDurationMs,
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
+      activeContainerIdentitySource: input.authorization.activeContainerIdentitySource,
+      activeContainerSameUserOffTurnCaveat:
+        input.authorization.mode === "active_container" && input.authorization.authorized,
+      runtimeAuthorityHeadersPresent: input.authorization.runtimeAuthorityHeadersPresent,
       userIdPresent: input.authorization.userId !== null,
+      writeFenceMetadataPresent: input.authorization.writeFence !== null,
       writeFenceValidationDurationMs: input.authorization.durationMs,
       writeFenceValidationMode: input.authorization.mode,
       ...(errorCode ? { errorCode } : {}),

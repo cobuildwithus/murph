@@ -44,6 +44,8 @@ const RUNNER_CODEX_SHELL_SMOKE_URL =
   "http://container/internal/deploy-codex-shell-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
+const RUNNER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_URL =
+  "http://container/internal/provider-egress-active-container-probe";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
@@ -175,6 +177,9 @@ export interface HostedExecutionContainerStubLike {
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
+  probeActiveContainerProviderEgressForTest?(
+    input: { userId: string },
+  ): Promise<RunnerContainerActiveContainerProviderEgressProbeResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
   wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
@@ -238,6 +243,24 @@ interface HostedExecutionContainerSmokeHealthInput {
   };
   openAiIntercept?: boolean;
   openAiInterceptAuthority?: RunnerRuntimeWriteFenceToken & { userId: string };
+}
+
+export interface RunnerContainerActiveContainerProviderEgressProbeResult {
+  ok: true;
+  probeOrigin: "container";
+  providerRequestOk: boolean;
+  providerRequestStatus: number;
+  responseBodyBytes: number | null;
+  runtimeAuthorityHeadersPresent: false;
+  writeFenceValidationMode: "active_container";
+}
+
+function readRunnerContainerProbeFailureDetails(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  const serialized = JSON.stringify(value);
+  return serialized ? ` details=${serialized.slice(0, 1_000)}` : "";
 }
 
 interface RunnerActivityTimeoutRenewable {
@@ -544,6 +567,51 @@ export class RunnerContainer extends Container {
   async expireActivityForTest(_input: { userId: string }): Promise<{ ok: true }> {
     await this.onActivityExpired();
     return { ok: true };
+  }
+
+  async probeActiveContainerProviderEgressForTest(
+    input: { userId: string },
+  ): Promise<RunnerContainerActiveContainerProviderEgressProbeResult> {
+    this.noteRunnerActivity("provider-egress-active-container-probe");
+    const probeSignal = AbortSignal.timeout(10_000);
+    const response = await this.containerFetch(
+      RUNNER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_URL,
+      {
+        method: "POST",
+        signal: probeSignal,
+      },
+    );
+    const payload = await readRunnerContainerMetadataJsonObject(response, {
+      signal: probeSignal,
+    });
+    if (!response.ok || payload.ok !== true) {
+      const error = typeof payload.error === "string" && payload.error.trim()
+        ? ` ${payload.error.trim()}`
+        : "";
+      const details = readRunnerContainerProbeFailureDetails(payload.details);
+      throw new Error(
+        `Hosted runner active-container provider egress probe failed with HTTP ${response.status}.${error}${details}`,
+      );
+    }
+    if (
+      payload.probeOrigin !== "container"
+      || typeof payload.providerRequestOk !== "boolean"
+      || typeof payload.providerRequestStatus !== "number"
+    ) {
+      throw new Error("Hosted runner active-container provider egress probe returned invalid metadata.");
+    }
+
+    return {
+      ok: true,
+      probeOrigin: "container",
+      providerRequestOk: payload.providerRequestOk,
+      providerRequestStatus: payload.providerRequestStatus,
+      responseBodyBytes: typeof payload.responseBodyBytes === "number"
+        ? payload.responseBodyBytes
+        : null,
+      runtimeAuthorityHeadersPresent: false,
+      writeFenceValidationMode: "active_container",
+    };
   }
 
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {

@@ -53,6 +53,7 @@ export class RunnerTestControls {
         expiresAt: new Date(Date.now() + this.input.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
         reason: "manual",
+        runnerContainerName: input.userId,
         userId: input.userId,
       });
     } catch (error) {
@@ -116,6 +117,7 @@ export class RunnerTestControls {
         expiresAt: new Date(Date.now() + this.input.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
         reason: input.reason,
+        runnerContainerName: input.userId,
         userId: input.userId,
       });
     } catch (error) {
@@ -162,6 +164,7 @@ export class RunnerTestControls {
         : "2000-01-01T00:00:00.000Z",
       kind: "runtime",
       reason: input.reason ?? "manual",
+      runnerContainerName: input.userId,
       userId: input.userId,
     });
     const record = typeof input.startedAgoMs === "number"

@@ -121,6 +121,19 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     name: "test-checkpoint-artifact-write-fence",
     wrongMethodResponse: "not-found",
   },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestProviderEgressActiveContainerProbeRoute(context, params.userId);
+    },
+    match: matchTestUserRoute("/__test/users/", "/provider-egress-active-container-probe"),
+    methods: ["POST"],
+    name: "test-provider-egress-active-container-probe",
+    wrongMethodResponse: "not-found",
+  },
 ];
 
 export async function handleTestRunUntilIdleRoute(
@@ -411,6 +424,37 @@ export async function handleTestCheckpointArtifactWriteFenceRoute(
       userId,
     });
   }
+}
+
+export async function handleTestProviderEgressActiveContainerProbeRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-provider-egress-active-container-probe",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (typeof stub.probeActiveContainerProviderEgressForTest !== "function") {
+    throw new Error("Hosted runner container test provider-egress probe RPC is unavailable.");
+  }
+  return json(await stub.probeActiveContainerProviderEgressForTest({ userId }));
 }
 
 export function parseTestWorkspaceInvocationReason(

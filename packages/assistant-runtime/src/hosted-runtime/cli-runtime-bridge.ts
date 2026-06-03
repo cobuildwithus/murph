@@ -26,7 +26,10 @@ export type HostedCliRuntimeBridgeMessagingReturnTargetSource =
   | (() => HostedRuntimeDeviceSyncMessagingReturnTarget | null | undefined);
 
 export interface HostedCliRuntimeBridge {
+  consumeOffInvocationViolation(): boolean;
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
+  readonly lastOffInvocationAuthenticatedRequestAt: string | null;
+  readonly offInvocationAuthenticatedRequestCount: number;
   runWithInvocation<T>(
     input: HostedCliRuntimeBridgeInvocationInput,
     operation: () => Promise<T>,
@@ -73,13 +76,29 @@ export async function stopHostedCliRuntimeBridge(): Promise<void> {
   }
 }
 
+export async function consumeHostedCliRuntimeBridgeOffInvocationViolation(): Promise<boolean> {
+  const bridgePromise = hostedCliRuntimeBridgePromise;
+  if (!bridgePromise) {
+    return false;
+  }
+
+  const bridge = await bridgePromise;
+  return bridge.consumeOffInvocationViolation();
+}
+
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
   const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
   let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
+  let offInvocationAuthenticatedRequestCount = 0;
+  let lastOffInvocationAuthenticatedRequestAt: string | null = null;
   const server = createServer((request, response) => {
     void handleHostedCliBridgeRequest({
       getActive: () => active,
+      recordOffInvocationAuthenticatedRequest: () => {
+        offInvocationAuthenticatedRequestCount += 1;
+        lastOffInvocationAuthenticatedRequestAt = new Date().toISOString();
+      },
       request,
       response,
       token,
@@ -110,9 +129,21 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
   }
 
   return {
+    consumeOffInvocationViolation() {
+      const pending = offInvocationAuthenticatedRequestCount > 0;
+      offInvocationAuthenticatedRequestCount = 0;
+      lastOffInvocationAuthenticatedRequestAt = null;
+      return pending;
+    },
     env: {
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
       [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
+    },
+    get lastOffInvocationAuthenticatedRequestAt() {
+      return lastOffInvocationAuthenticatedRequestAt;
+    },
+    get offInvocationAuthenticatedRequestCount() {
+      return offInvocationAuthenticatedRequestCount;
     },
     async runWithInvocation<T>(
       input: HostedCliRuntimeBridgeInvocationInput,
@@ -120,6 +151,11 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
     ): Promise<T> {
       if (active) {
         throw new TypeError("Hosted CLI bridge already has an active invocation.");
+      }
+      if (offInvocationAuthenticatedRequestCount > 0) {
+        throw new TypeError(
+          "Hosted CLI bridge has a pending authenticated off-invocation request.",
+        );
       }
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         deviceSyncPort: input.deviceSyncPort ?? null,
@@ -137,6 +173,8 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
     },
     async stop() {
       active = null;
+      offInvocationAuthenticatedRequestCount = 0;
+      lastOffInvocationAuthenticatedRequestAt = null;
       if (hostedCliRuntimeBridgePromise) {
         hostedCliRuntimeBridgePromise = null;
       }
@@ -147,6 +185,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
 
 async function handleHostedCliBridgeRequest(input: {
   getActive: () => HostedCliRuntimeBridgeActiveInvocation | null;
+  recordOffInvocationAuthenticatedRequest: () => void;
   request: IncomingMessage;
   response: ServerResponse;
   token: string;
@@ -200,6 +239,7 @@ async function handleHostedCliBridgeRequest(input: {
 
     const active = input.getActive();
     if (!active || active.signal?.aborted) {
+      input.recordOffInvocationAuthenticatedRequest();
       writeHostedCliBridgeError(
         input.response,
         503,

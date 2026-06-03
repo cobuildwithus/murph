@@ -103,6 +103,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }): Promise<RunnerInvocationLease> {
     const lease = await this.stateStore.beginInvocation({
       reason: input.reason ?? "manual",
+      runnerContainerName: input.userId,
       userId: input.userId,
     });
     if (!input.workspaceVersion) {
@@ -124,8 +125,9 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async validateActiveRuntimeWriteFence(input: {
+    runnerContainerName: string;
     userId: string;
-  }): Promise<boolean> {
+  }): ReturnType<HostedUserRunner["validateActiveRuntimeWriteFence"]> {
     return await this.runner.validateActiveRuntimeWriteFence(input);
   }
 
@@ -408,8 +410,9 @@ function getUserRunnerStub(userId: string) {
             userId: string;
           }): Promise<boolean>;
           validateActiveRuntimeWriteFence(input: {
+            runnerContainerName: string;
             userId: string;
-          }): Promise<boolean>;
+          }): ReturnType<HostedUserRunner["validateActiveRuntimeWriteFence"]>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
           runnerStatus(): Promise<HostedRunnerStatusResponse>;

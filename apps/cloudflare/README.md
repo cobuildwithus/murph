@@ -38,7 +38,7 @@ Internal control routes:
 The supported worker HTTP surface stops at those narrow control routes, the deploy smoke callback, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Mapbox, Linq, Telegram, and WhatsApp credentials stay in Worker env, while the direct runtime receives sentinel placeholder values for those keys. The Worker fails closed for known provider hosts unless the request matches the sentinel credential contract, validates the runtime write fence before mutating provider-effect secret injection, constrains Mapbox to read-only GET allowlisted path families, injects the real provider credential only into the upstream request, and strips runtime authority headers before that upstream request leaves Cloudflare. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Mapbox, Linq, Telegram, and WhatsApp credentials stay in Worker env, while the direct runtime receives sentinel placeholder values for those keys. The Worker fails closed for known provider hosts unless the request matches the sentinel credential contract, validates the runtime write fence before mutating provider-effect secret injection, constrains Mapbox to read-only GET allowlisted path families, injects the real provider credential only into the upstream request, and strips runtime authority headers before that upstream request leaves Cloudflare. When no runtime authority headers are present, provider egress may fall back to active-container validation only if the active write fence's stored runner container name matches the current intercepted container. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata.
 The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.
 
 Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into direct runtime env.
@@ -172,8 +172,10 @@ replacement, ambiguous-wake, and fresh-startup retry contract is documented in
 heartbeat and container-stopped RPC shims are retained only for deployed-caller
 compatibility until 2026-05-25 and return inert responses. Live runner side
 effects validate the runtime write fence by attempt, generation, and user
-identity. Workspace version remains a checkpoint/restore freshness guard, not
-generic side-effect authority.
+identity. Active-container provider egress fallback also validates the stored
+runner container name against the current intercepted container. Workspace
+version remains a checkpoint/restore freshness guard, not generic side-effect
+authority.
 
 ## Deploy Artifacts
 

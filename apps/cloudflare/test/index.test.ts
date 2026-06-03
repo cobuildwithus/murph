@@ -240,6 +240,7 @@ describe("cloudflare worker routes", () => {
       "test-container-activity-expired",
       "test-start-stuck-invocation",
       "test-checkpoint-artifact-write-fence",
+      "test-provider-egress-active-container-probe",
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
       "runtime-ensure-processing",
