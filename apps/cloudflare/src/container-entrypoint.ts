@@ -76,6 +76,8 @@ const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.4-mini";
+const HOSTED_CONTAINER_LINQ_DEFAULT_API_BASE_URL =
+  "https://api.linqapp.com/api/partner/v3";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -401,8 +403,16 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (isProviderEgressActiveContainerProbeRequest) {
+        const boundUserId = readSingleHeaderValue(request, HOSTED_RUNNER_BOUND_USER_ID_HEADER);
         discardUnreadRequestBody(request);
+        if (!boundUserId) {
+          writeJsonResponse(response, 401, {
+            error: "Hosted provider egress active-container probe requires a bound user.",
+          });
+          return;
+        }
         const result = await runHostedContainerProviderEgressActiveContainerProbe({
+          boundUserId,
           signal: requestAbort.signal,
         }).catch((error) => createHostedContainerProviderEgressProbeFailure(error));
         writeJsonResponse(response, result.ok === true ? 200 : 500, result);
@@ -1560,11 +1570,13 @@ function readHostedContainerPositiveNumber(value: unknown, label: string): numbe
 }
 
 async function runHostedContainerProviderEgressActiveContainerProbe(input: {
+  boundUserId: string;
   signal: AbortSignal;
 }): Promise<Record<string, unknown>> {
   const response = await fetch(createHostedContainerLinqPhoneNumbersUrl(), {
     headers: {
       authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+      [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: input.boundUserId,
     },
     method: "GET",
     signal: input.signal,
@@ -1599,12 +1611,7 @@ function createHostedContainerProviderEgressProbeFailure(error: unknown): Record
 }
 
 function createHostedContainerLinqPhoneNumbersUrl(): URL {
-  const baseUrl = process.env.LINQ_API_BASE_URL?.trim() ?? "";
-  if (!baseUrl) {
-    throw new Error("Hosted provider egress active-container probe requires LINQ_API_BASE_URL.");
-  }
-
-  const url = new URL(baseUrl);
+  const url = new URL(HOSTED_CONTAINER_LINQ_DEFAULT_API_BASE_URL);
   url.pathname = `${url.pathname.replace(/\/+$/u, "")}/phone_numbers`;
   url.search = "";
   url.hash = "";

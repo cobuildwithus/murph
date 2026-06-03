@@ -577,6 +577,9 @@ export class RunnerContainer extends Container {
     const response = await this.containerFetch(
       RUNNER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_URL,
       {
+        headers: {
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: input.userId,
+        },
         method: "POST",
         signal: probeSignal,
       },

@@ -1596,6 +1596,7 @@ async function maybeHandleLinqRequest(input: {
     input.env.LINQ_API_BASE_URL,
     DEFAULT_LINQ_API_BASE_URL,
     input.env,
+    { acceptFallbackBaseUrl: true },
   );
   const pathMatch = readProviderPathMatch(input.url, providerBase);
   if (!pathMatch) {

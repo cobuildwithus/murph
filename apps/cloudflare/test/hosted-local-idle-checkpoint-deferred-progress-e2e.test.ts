@@ -112,11 +112,6 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       expectedMethod: "GET",
       expectedPath: "/phone_numbers",
     });
-    const postTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
-      previousWorkspaceVersion: activationWorkspaceVersion,
-    });
-    expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
-    expect(requireWorkspaceVersion(postTurnPreCheckpointStatus)).toBe(activationWorkspaceVersion);
     const providerProbe =
       await requireScenario().harness.probeActiveContainerProviderEgressForTest(userId);
     expect(providerProbe).toMatchObject({
@@ -136,6 +131,11 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       userId,
     });
     expect(phoneNumberRequests.at(-1)?.authorizationStatus).toBe("expected");
+    const postTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+      previousWorkspaceVersion: activationWorkspaceVersion,
+    });
+    expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
+    expect(requireWorkspaceVersion(postTurnPreCheckpointStatus)).toBe(activationWorkspaceVersion);
 
     const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
@@ -182,11 +182,10 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
 
-    const secondPostTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
-      previousWorkspaceVersion: idleWorkspaceVersion,
+    const secondPhoneNumbersBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: "/phone_numbers",
     });
-    expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
-    expect(requireWorkspaceVersion(secondPostTurnPreCheckpointStatus)).toBe(idleWorkspaceVersion);
     const secondProviderProbe =
       await requireScenario().harness.probeActiveContainerProviderEgressForTest(userId);
     expect(secondProviderProbe).toMatchObject({
@@ -198,6 +197,19 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       writeFenceValidationMode: "active_container",
     });
     expect(secondProviderProbe.responseBodyBytes ?? -1).toBeGreaterThan(0);
+    const secondPhoneNumberRequests = await requireLinqStub().waitForMatchingRequestCount({
+      expectedCount: secondPhoneNumbersBaselineCount + 1,
+      expectedMethod: "GET",
+      expectedPath: "/phone_numbers",
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(secondPhoneNumberRequests.at(-1)?.authorizationStatus).toBe("expected");
+    const secondPostTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+      previousWorkspaceVersion: idleWorkspaceVersion,
+    });
+    expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
+    expect(requireWorkspaceVersion(secondPostTurnPreCheckpointStatus)).toBe(idleWorkspaceVersion);
 
     const finalStatus = await waitForHostedInvocationIdleWithLogs();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();

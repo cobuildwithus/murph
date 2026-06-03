@@ -2370,8 +2370,8 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
-  it("rejects default Linq provider host egress while a custom Linq base is configured", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+  it("routes default Linq provider host egress to the configured custom upstream", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -2392,9 +2392,54 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe(
+      "https://linq.example.test/custom/tenant/v3/chats/chat_1/messages",
+    );
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+  });
+
+  it("routes Linq provider egress through active-container bound-user validation", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      runnerContainerName: string;
+      userId: string;
+    }) => createActiveWriteFenceValidationResult(input));
+    const env = createInterceptEnv({
+      LINQ_API_BASE_URL: "https://linq.example.test/custom/tenant/v3",
+      LINQ_API_TOKEN: "linq-worker-secret",
+      validateActiveRuntimeWriteFence,
+    });
+    env.CF_VERSION_METADATA = { id: "version_1" };
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/phone_numbers", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      runnerContainerName: "member_123--v-version_1",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://linq.example.test/custom/tenant/v3/phone_numbers");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
   it("rejects Linq provider egress without the sentinel bearer token", async () => {
