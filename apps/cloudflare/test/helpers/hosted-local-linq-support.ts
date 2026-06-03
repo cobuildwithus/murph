@@ -39,6 +39,7 @@ export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boole
 const linqCreateChatPath = "/chats";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
 const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
+const hostedLocalLinqWaitNudgeAfterPendingDeliveryMs = 2_000;
 
 type HostedLinqInboundPartInput =
   | {
@@ -315,6 +316,7 @@ export async function startHostedLocalLinqStub(input: {
     const startedAt = Date.now();
     let nextNudgeAt = startedAt;
     let mailboxLagFirstObservedAt: number | null = null;
+    let pendingDeliveryFirstObservedAt: number | null = null;
     let latestStatusReadError: string | null = null;
 
     while ((Date.now() - startedAt) < 60_000) {
@@ -353,11 +355,18 @@ export async function startHostedLocalLinqStub(input: {
           now,
           status,
         });
+        pendingDeliveryFirstObservedAt =
+          updateHostedLocalLinqPendingDeliveryFirstObservedAt({
+            firstObservedAt: pendingDeliveryFirstObservedAt,
+            now,
+            status,
+          });
         if (
           status
           && shouldNudgeHostedLocalLinqWaitForStatus({
             mailboxLagFirstObservedAt,
             now,
+            pendingDeliveryFirstObservedAt,
             status,
           })
         ) {
@@ -482,22 +491,26 @@ export async function startHostedLocalLinqStub(input: {
 export function shouldNudgeHostedLocalLinqWaitForStatus(input: {
   mailboxLagFirstObservedAt: number | null;
   now: number;
+  pendingDeliveryFirstObservedAt?: number | null;
   status: HostedRunnerStatusResponse;
 }): boolean {
   if (input.status.inFlight || input.status.lastErrorCode) {
     return false;
   }
 
-  if (!hostedLocalLinqStatusHasMailboxLag(input.status)) {
-    return false;
-  }
+  const mailboxLagNudgeDue =
+    hostedLocalLinqStatusHasMailboxLag(input.status)
+    && input.mailboxLagFirstObservedAt !== null
+    && input.now - input.mailboxLagFirstObservedAt
+      >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
+  const pendingDeliveryNudgeDue =
+    hostedLocalLinqStatusHasPendingDelivery(input.status)
+    && input.pendingDeliveryFirstObservedAt !== null
+    && input.pendingDeliveryFirstObservedAt !== undefined
+    && input.now - input.pendingDeliveryFirstObservedAt
+      >= hostedLocalLinqWaitNudgeAfterPendingDeliveryMs;
 
-  if (input.mailboxLagFirstObservedAt === null) {
-    return false;
-  }
-
-  return input.now - input.mailboxLagFirstObservedAt
-    >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
+  return mailboxLagNudgeDue || pendingDeliveryNudgeDue;
 }
 
 function updateHostedLocalLinqMailboxLagFirstObservedAt(input: {
@@ -520,6 +533,37 @@ function hostedLocalLinqStatusHasMailboxLag(status: HostedRunnerStatusResponse):
       return lane.lag !== "0";
     }
   });
+}
+
+function updateHostedLocalLinqPendingDeliveryFirstObservedAt(input: {
+  firstObservedAt: number | null;
+  now: number;
+  status: HostedRunnerStatusResponse | null;
+}): number | null {
+  if (!input.status || !hostedLocalLinqStatusHasPendingDelivery(input.status)) {
+    return null;
+  }
+
+  return input.firstObservedAt ?? input.now;
+}
+
+function hostedLocalLinqStatusHasPendingDelivery(status: HostedRunnerStatusResponse): boolean {
+  const pendingDeliveryEffects =
+    status.workspace?.redactedStatus?.hostedOutboxPendingDeliveryEffects;
+
+  if (typeof pendingDeliveryEffects === "number") {
+    return pendingDeliveryEffects > 0;
+  }
+
+  if (typeof pendingDeliveryEffects === "string") {
+    try {
+      return BigInt(pendingDeliveryEffects) > 0n;
+    } catch {
+      return pendingDeliveryEffects !== "0";
+    }
+  }
+
+  return false;
 }
 
 export function buildHostedLinqInboundEvent(
