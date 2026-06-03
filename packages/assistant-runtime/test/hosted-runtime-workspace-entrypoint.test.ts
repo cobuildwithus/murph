@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createServer as createHttpsServer } from "node:https";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
@@ -130,6 +134,19 @@ const TEST_HOSTED_CODEX_FORWARDED_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   OPENAI_API_KEY: "test-vercel-key",
 } as const;
+const HOSTED_CONTAINER_CA_ENV_KEYS = [
+  "CODEX_CA_CERTIFICATE",
+  "CURL_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+  "REQUESTS_CA_BUNDLE",
+  "SSL_CERT_FILE",
+] as const;
+const HOSTED_UNSTABLE_PROCESS_ENV_KEYS = [
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+] as const;
+const execFileAsync = promisify(execFile);
 
 process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS ??= "0";
 
@@ -366,6 +383,192 @@ describe("hosted workspace runtime entrypoint", () => {
         process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
       }
       consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("passes stable container CA env into hosted Codex runtime env", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const containerCaPath = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+    const previousEnv = new Map([
+      ...HOSTED_CONTAINER_CA_ENV_KEYS,
+      ...HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
+    ].map((key) => [key, process.env[key]]));
+    const runtimeEnvs: Readonly<Record<string, string>>[] = [];
+
+    try {
+      for (const key of HOSTED_CONTAINER_CA_ENV_KEYS) {
+        process.env[key] = containerCaPath;
+      }
+      for (const key of HOSTED_UNSTABLE_PROCESS_ENV_KEYS) {
+        process.env[key] = `/tmp/synthetic-runtime-${key.toLowerCase()}-churn`;
+      }
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_container_ca_env",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "3".repeat(64) : "4".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-ca-env.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_container_ca_env",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            runtimeEnvs.push(input.runtimeEnv);
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(runtimeEnvs.length, 1);
+      for (const key of HOSTED_CONTAINER_CA_ENV_KEYS) {
+        assert.equal(runtimeEnvs[0]?.[key], containerCaPath);
+      }
+      for (const key of HOSTED_UNSTABLE_PROCESS_ENV_KEYS) {
+        assert.equal(runtimeEnvs[0]?.[key], undefined);
+      }
+    } finally {
+      for (const [key, value] of previousEnv) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("uses hosted Codex runtime CA env for intercepted OpenAI HTTPS requests", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const certRoot = await mkdtemp(path.join(tmpdir(), "murph-openai-ca-probe-"));
+    const certFiles = await createOpenAiProbeCertificateFiles(certRoot);
+    const previousEnv = new Map(HOSTED_CONTAINER_CA_ENV_KEYS.map((key) => [
+      key,
+      process.env[key],
+    ]));
+    const probeResults: OpenAiHttpsProbeResult[] = [];
+    let openAiServer: Awaited<ReturnType<typeof startOpenAiProbeServer>> | null = null;
+
+    try {
+      for (const key of HOSTED_CONTAINER_CA_ENV_KEYS) {
+        process.env[key] = certFiles.caCertPath;
+      }
+      const server = await startOpenAiProbeServer(certFiles);
+      openAiServer = server;
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          forwardedEnv: {
+            OPENAI_API_KEY: "__cloudflare_injected__",
+          },
+          request: {
+            attemptId: "attempt_synthetic_openai_https_ca_probe",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-openai-ca-probe.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_openai_https_ca_probe",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            probeResults.push(await runOpenAiHttpsProbe({
+              runtimeEnv: input.runtimeEnv,
+              url: `https://api.openai.com:${server.port}/v1/responses`,
+            }));
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(probeResults, [
+        {
+          body: "ok",
+          caConfigured: true,
+          ok: true,
+          status: 200,
+        },
+      ]);
+    } finally {
+      for (const [key, value] of previousEnv) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      await openAiServer?.close();
+      await removeTempRoot(certRoot);
       await removeTempRoot(vaultRoot);
     }
   });
@@ -7132,6 +7335,271 @@ describe("hosted workspace runtime entrypoint", () => {
     ).toThrow(/runDrain is no longer supported/u);
   });
 });
+
+interface OpenAiHttpsProbeResult {
+  body?: string;
+  caConfigured: boolean;
+  code?: string | null;
+  message?: string;
+  name?: string;
+  ok: boolean;
+  status?: number;
+}
+
+async function createOpenAiProbeCertificateFiles(root: string): Promise<{
+  caCertPath: string;
+  serverCertPath: string;
+  serverKeyPath: string;
+}> {
+  await mkdir(root, { recursive: true });
+  const caConfigPath = path.join(root, "openssl-ca.cnf");
+  const serverConfigPath = path.join(root, "openssl-server.cnf");
+  const caCertPath = path.join(root, "test-ca.crt");
+  const caKeyPath = path.join(root, "test-ca.key");
+  const serverCertPath = path.join(root, "api-openai-com.crt");
+  const serverKeyPath = path.join(root, "api-openai-com.key");
+  const serverCsrPath = path.join(root, "api-openai-com.csr");
+
+  await writeFile(caConfigPath, [
+    "[req]",
+    "distinguished_name = req_distinguished_name",
+    "prompt = no",
+    "x509_extensions = v3_ca",
+    "",
+    "[req_distinguished_name]",
+    "CN = Murph Hosted Runtime Test CA",
+    "",
+    "[v3_ca]",
+    "basicConstraints = critical,CA:TRUE",
+    "keyUsage = critical,keyCertSign,cRLSign",
+    "subjectKeyIdentifier = hash",
+    "authorityKeyIdentifier = keyid:always,issuer",
+    "",
+  ].join("\n"));
+  await writeFile(serverConfigPath, [
+    "[req]",
+    "distinguished_name = req_distinguished_name",
+    "req_extensions = v3_req",
+    "prompt = no",
+    "",
+    "[req_distinguished_name]",
+    "CN = api.openai.com",
+    "",
+    "[v3_req]",
+    "basicConstraints = CA:FALSE",
+    "keyUsage = digitalSignature,keyEncipherment",
+    "extendedKeyUsage = serverAuth",
+    "subjectAltName = @alt_names",
+    "",
+    "[alt_names]",
+    "DNS.1 = api.openai.com",
+    "IP.1 = 127.0.0.1",
+    "",
+  ].join("\n"));
+
+  await execFileAsync("openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-days",
+    "1",
+    "-sha256",
+    "-config",
+    caConfigPath,
+    "-keyout",
+    caKeyPath,
+    "-out",
+    caCertPath,
+  ], { cwd: root });
+  await execFileAsync("openssl", [
+    "req",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-sha256",
+    "-config",
+    serverConfigPath,
+    "-keyout",
+    serverKeyPath,
+    "-out",
+    serverCsrPath,
+  ], { cwd: root });
+  await execFileAsync("openssl", [
+    "x509",
+    "-req",
+    "-in",
+    serverCsrPath,
+    "-CA",
+    caCertPath,
+    "-CAkey",
+    caKeyPath,
+    "-CAcreateserial",
+    "-out",
+    serverCertPath,
+    "-days",
+    "1",
+    "-sha256",
+    "-extensions",
+    "v3_req",
+    "-extfile",
+    serverConfigPath,
+  ], { cwd: root });
+
+  return {
+    caCertPath,
+    serverCertPath,
+    serverKeyPath,
+  };
+}
+
+async function startOpenAiProbeServer(input: {
+  serverCertPath: string;
+  serverKeyPath: string;
+}): Promise<{
+  close: () => Promise<void>;
+  port: number;
+}> {
+  const server = createHttpsServer({
+    cert: await readFile(input.serverCertPath),
+    key: await readFile(input.serverKeyPath),
+  }, (request, response) => {
+    if (
+      request.method === "POST"
+      && request.url === "/v1/responses"
+      && request.headers.authorization === "Bearer __cloudflare_injected__"
+    ) {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("ok");
+      return;
+    }
+
+    response.writeHead(401, { "content-type": "text/plain" });
+    response.end("unexpected probe request");
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  return {
+    async close() {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+    port: (address as AddressInfo).port,
+  };
+}
+
+async function runOpenAiHttpsProbe(input: {
+  runtimeEnv: Readonly<Record<string, string>>;
+  url: string;
+}): Promise<OpenAiHttpsProbeResult> {
+  const childEnv: NodeJS.ProcessEnv = {
+    ...input.runtimeEnv,
+    TARGET_URL: input.url,
+  };
+  const child = spawn(process.execPath, ["-e", OPENAI_HTTPS_PROBE_SCRIPT], {
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+  child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code));
+  });
+  const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
+  const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+  assert.equal(exitCode, 0, stderr);
+
+  try {
+    return JSON.parse(stdout) as OpenAiHttpsProbeResult;
+  } catch (error) {
+    throw new Error(`OpenAI HTTPS probe did not emit JSON: ${stdout}`, {
+      cause: error,
+    });
+  }
+}
+
+const OPENAI_HTTPS_PROBE_SCRIPT = `
+const { readFileSync } = require("node:fs");
+const https = require("node:https");
+
+const targetUrl = process.env.TARGET_URL;
+const caPath = process.env.CODEX_CA_CERTIFICATE || process.env.SSL_CERT_FILE || null;
+const caConfigured = Boolean(
+  process.env.CODEX_CA_CERTIFICATE
+  || process.env.CURL_CA_BUNDLE
+  || process.env.NODE_EXTRA_CA_CERTS
+  || process.env.REQUESTS_CA_BUNDLE
+  || process.env.SSL_CERT_FILE
+);
+const options = {
+  headers: {
+    authorization: "Bearer " + (process.env.OPENAI_API_KEY || ""),
+    "content-type": "application/json",
+  },
+  lookup(hostname, lookupOptions, callback) {
+    if (lookupOptions && lookupOptions.all) {
+      callback(null, [{ address: "127.0.0.1", family: 4 }]);
+      return;
+    }
+    callback(null, "127.0.0.1", 4);
+  },
+  method: "POST",
+  servername: "api.openai.com",
+  ...(caPath ? { ca: readFileSync(caPath) } : {}),
+};
+
+const request = https.request(targetUrl, options, (response) => {
+  const chunks = [];
+  response.on("data", (chunk) => chunks.push(chunk));
+  response.on("end", () => {
+    process.stdout.write(JSON.stringify({
+      body: Buffer.concat(chunks).toString("utf8"),
+      caConfigured,
+      ok: true,
+      status: response.statusCode,
+    }));
+  });
+});
+request.setTimeout(2_000, () => {
+  request.destroy(Object.assign(new Error("OpenAI HTTPS probe timed out."), {
+    code: "PROBE_TIMEOUT",
+  }));
+});
+request.on("error", (error) => {
+  process.stdout.write(JSON.stringify({
+    caConfigured,
+    code: error.code || null,
+    message: error.message,
+    name: error.name,
+    ok: false,
+  }));
+});
+request.end(JSON.stringify({
+  input: "ping",
+  model: "gpt-synthetic",
+}));
+`;
 
 function createPlatform(input: {
   artifactBytesByHash?: ReadonlyMap<string, Uint8Array>;

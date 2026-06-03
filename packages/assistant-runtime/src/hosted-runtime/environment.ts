@@ -78,6 +78,14 @@ const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
   "TMPDIR",
   "TZ",
 ] as const;
+const HOSTED_RUNTIME_TRUST_STORE_PROCESS_ENV_NAMES = [
+  "CODEX_CA_CERTIFICATE",
+  "CURL_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+  "REQUESTS_CA_BUNDLE",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+] as const;
 export const HOSTED_RUNNER_EXECUTABLE_PATH_ENTRIES = [
   "/app/node_modules/.bin",
   "/usr/local/sbin",
@@ -256,6 +264,21 @@ export function projectHostedRuntimeProcessEnv(input: {
     ...buildHostedPlatformTransportProcessEnvironment(input.platformTransportEnv ?? {}),
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
   };
+}
+
+export function projectHostedRuntimeTrustStoreEnv(
+  ambientEnv: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of HOSTED_RUNTIME_TRUST_STORE_PROCESS_ENV_NAMES) {
+    const value = ambientEnv[key];
+    if (typeof value === "string") {
+      env[key] = value;
+    }
+  }
+
+  return env;
 }
 
 export function buildHostedRunnerExecutablePath(

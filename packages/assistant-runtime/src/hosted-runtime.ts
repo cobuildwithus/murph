@@ -22,6 +22,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   normalizeHostedAssistantRuntimeConfig,
+  projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
 import {
   prepareHostedCodexRuntimeEnvironment,
@@ -607,6 +608,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     const baseRuntimeEnv = {
+      ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
       ...hostedCliBridge.env,
