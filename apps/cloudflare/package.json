@@ -68,7 +68,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.3",
+    "@cloudflare/containers": "^0.3.6",
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistant-runtime": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
