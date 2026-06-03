@@ -4938,6 +4938,38 @@ describe('assistant auto-reply runtime', () => {
     expect(result.nextWakeAt).toBe('2026-05-08T16:00:00.000Z')
   })
 
+  it('schedules hosted cron catch-up when deferred cron is already due', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-08T16:00:00.000Z'))
+    try {
+      runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 1,
+        nextRunAt: '2026-05-08T15:59:00.000Z',
+      })
+      const runLoop = await vi.importActual<
+        typeof import('../src/assistant/automation/run-loop.ts')
+      >('../src/assistant/automation/run-loop.ts')
+
+      const result = await runLoop.runAssistantAutomationPass({
+        deliveryDispatchMode: 'queue-only',
+        executionContext: {
+          hosted: {
+            memberId: 'member-test',
+            userEnvKeys: [],
+          },
+        },
+        requestId: 'request-hosted-queue-only-due-cron',
+        vault: '/tmp/assistant-automation-vault',
+      })
+
+      expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+      expect(result.cronProcessed).toBe(0)
+      expect(result.nextWakeAt).toBe('2026-05-08T16:00:10.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('skips canonical automation branches for no-canonical-write automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')

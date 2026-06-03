@@ -57,6 +57,7 @@ import {
 } from '../shared.js'
 import {
   bridgeAbortSignals,
+  computeAssistantAutomationRetryAt,
   createAssistantAutomationWakeController,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
@@ -75,6 +76,7 @@ type AssistantAutomationLoopStateSnapshot = Pick<
 
 const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
   /^[A-Za-z0-9_.:-]{1,96}$/u
+const HOSTED_DEFERRED_CRON_CATCHUP_WAKE_DELAY_MS = 10_000
 export interface RunAssistantAutomationInput {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
@@ -941,7 +943,11 @@ export async function runAssistantAutomationPass(
     state,
   )
   const cronStatus = await getAssistantCronStatus(input.vault)
-  const cronNextRunAt = applyCanonicalWrites ? cronStatus.nextRunAt : null
+  const cronNextRunAt = resolveAssistantCronNextWakeAt({
+    applyCanonicalWrites,
+    cronStatus,
+    shouldDeferCronAfterHostedReply,
+  })
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
@@ -967,6 +973,27 @@ export async function runAssistantAutomationPass(
     replies,
     routing: scanResult.routing,
   }
+}
+
+function resolveAssistantCronNextWakeAt(input: {
+  applyCanonicalWrites: boolean
+  cronStatus: Awaited<ReturnType<typeof getAssistantCronStatus>>
+  shouldDeferCronAfterHostedReply: boolean
+}): string | null {
+  if (!input.applyCanonicalWrites) {
+    return null
+  }
+
+  if (
+    input.shouldDeferCronAfterHostedReply &&
+    (input.cronStatus.dueJobs ?? 0) > 0
+  ) {
+    return computeAssistantAutomationRetryAt(
+      HOSTED_DEFERRED_CRON_CATCHUP_WAKE_DELAY_MS,
+    )
+  }
+
+  return input.cronStatus.nextRunAt
 }
 
 function snapshotAssistantAutomationLoopState(
