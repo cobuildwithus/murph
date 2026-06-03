@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-05-09
+Last verified: 2026-06-02
 
 This doc is the durable workflow map behind `AGENTS.md`.
 Use it to classify the task, load only the relevant docs, and choose the right verification, audit, and commit path.
@@ -47,6 +47,7 @@ Then load only the task-relevant docs listed below.
 - Prefer narrow ledger rows and narrow plans.
 - Treat supplied patches as behavioral intent, not overwrite authority.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
+- Enforce the 1,000-line touch-time file limit from `agent-docs/references/giant-file-composability-seams.md`: do not create or extend oversized hand-authored files, and split a touched oversized file along composable ownership seams before adding behavior, tests, config, or docs there.
 - Required completion-workflow audit subagent passes are mandatory for the repo task classes that require them. Treat this workflow doc plus `AGENTS.md` as standing user approval and explicit repo instruction to spawn those required local Codex audit subagents when a repo task reaches that workflow, even if general agent guidance says not to spawn subagents without an explicit user request. Do not stop after implementation, verification, or commit, and do not pause only to ask for a second explicit "use subagents" instruction.
 - For user-facing `apps/web` UI changes, the completion workflow's `frontend-review` pass is a mandatory audit alongside any other required passes for the task class.
 - For changes that materially touch auth/session behavior, secrets, payments, external ingress/egress, public APIs/routes, trust boundaries, or persisted/uploaded/user-facing data exposure, the completion workflow's `security-privacy-review` pass is a mandatory audit alongside any other required passes for the task class.
@@ -90,5 +91,6 @@ Additional gate rules:
 
 - Mechanical/enforced rules live in scripts, tests, lint-like guards, or CI wherever possible.
 - `AGENTS.md` and this doc should point to those guards or to the durable policy doc, not duplicate large policy blobs.
+- The 1,000-line file limit is currently a touch-time policy rather than a whole-repo CI gate, so unrelated existing oversized files do not block narrow work. Add mechanical enforcement only when the guard can distinguish current-task hand-authored files from generated, vendored, lockfile, or tool-owned artifacts.
 - Keep `AGENTS.md` intentionally small. Treat roughly 100 lines as the soft ceiling and preserve the same stable shape: purpose, precedence, always-read set, task router, non-negotiable invariants, workflow defaults, and notes.
 - If a rule matters and keeps drifting, prefer encoding it into tooling over expanding `AGENTS.md`.

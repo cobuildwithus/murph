@@ -1,8 +1,32 @@
 # Giant File Composability Seams
 
-Last verified: 2026-04-14
+Last verified: 2026-06-02
 
 Murph is still greenfield, so the bias here is to cut cleaner module seams before compatibility glue, broad helper surfaces, and public re-export paths harden around accidental file shape.
+
+## 1,000-line touch-time rule
+
+No hand-authored repo file should be created or extended beyond 1,000 lines.
+For repo code, docs, tests, and config work, check the line count before adding
+to a file that is already large or known oversized. If the file is over 1,000
+lines, split it along a real ownership seam first, then make the intended
+change in the smaller owner module.
+
+This is a composability rule, not a request for arbitrary file chopping. A good
+split gives a responsibility a name, keeps public entrypoints narrow, preserves
+local invariants, and avoids compatibility shims unless they are temporary and
+legacy-facing. Prefer extracting one coherent helper or responsibility cluster
+at a time over creating broad utility barrels.
+
+Generated artifacts, vendored content, lockfiles, and tool-owned output are not
+manual split targets. If one of those grows past the limit, fix the owning
+generator/tooling or document the exception in the task handoff rather than
+editing the artifact into artificial pieces.
+
+Existing oversized hand-authored files are not an immediate repo-wide migration
+unless the task is explicitly a giant-file cleanup. The rule applies when a task
+touches the file: do not add more behavior, tests, config, or docs there until
+the file has been made smaller and more composable.
 
 ## Implemented in this patch
 
