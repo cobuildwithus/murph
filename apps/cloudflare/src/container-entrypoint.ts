@@ -1540,7 +1540,6 @@ async function runHostedContainerOpenAiInterceptSmoke(input: {
       "utf8",
     );
     const result = await runHostedContainerOpenAiInterceptCodexProbe({
-      authority: input.authority,
       codexHome,
       signal: input.signal,
       workspaceRoot,
@@ -1589,7 +1588,6 @@ function buildHostedContainerOpenAiInterceptSmokeCodexConfig(): string {
 }
 
 async function runHostedContainerOpenAiInterceptCodexProbe(input: {
-  authority: HostedContainerRuntimeAuthority;
   codexHome: string;
   signal: AbortSignal;
   workspaceRoot: string;
@@ -1664,7 +1662,6 @@ async function runHostedContainerOpenAiInterceptCodexProbe(input: {
 }
 
 function buildHostedContainerOpenAiInterceptSmokeProcessEnv(input: {
-  authority: HostedContainerRuntimeAuthority;
   codexHome: string;
   workspaceRoot: string;
 }): NodeJS.ProcessEnv {

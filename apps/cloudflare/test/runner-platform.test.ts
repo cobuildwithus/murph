@@ -4133,6 +4133,45 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
+  it("uses locally prepared artifact upload write-fence headers without transport restamping", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const readCurrentLease = vi.fn(() => {
+      const callCount = readCurrentLease.mock.calls.length;
+      return callCount === 1
+        ? {
+            attemptId: "attempt_local",
+            leaseGeneration: "9",
+            userId: "member_123",
+            workspaceVersion: "4",
+          }
+        : {
+            attemptId: "attempt_transport",
+            leaseGeneration: "10",
+            userId: "member_123",
+            workspaceVersion: "5",
+          };
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease,
+      },
+    });
+
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+
+    expect(readCurrentLease).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const artifactRequest = requireFetchRequest(fetchMock.mock.calls[0], "artifact upload");
+    expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_local");
+    expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+  });
+
   it("writes browser-vault replicas through the Cloudflare internal store with active lease headers", async () => {
     const sourceBundleHash = "b".repeat(64);
     const replica = {
