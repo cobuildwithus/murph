@@ -350,6 +350,40 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has("x-api-key")).toBe(false);
   });
 
+  it("injects OpenAI authorization from an active container write fence without authority headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI without authority headers should use active write-fence validation.");
+    });
+    const validateActiveRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/models", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateActiveRuntimeWriteFence,
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    const forwardedRequest = readForwardedRequest(fetchMock);
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/models");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("injects OpenAI authorization for Responses WebSocket upgrades without body diagnostics", async () => {
     const waitUntil = vi.fn();
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));

@@ -310,6 +310,30 @@ describe("runHostedWorkspaceInvocation", () => {
     );
   });
 
+  it("does not mutate warm state when the direct invocation signal is already aborted", async () => {
+    const abortController = new AbortController();
+    abortController.abort(new Error("direct invocation cancelled"));
+    const job = createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    });
+
+    await expect(runHostedWorkspaceInvocation(job, {
+      signal: abortController.signal,
+      supervisorEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    })).rejects.toThrow("direct invocation cancelled");
+
+    expect(mocks.clearHostedBrowserVaultWarmSourceStateHash).not.toHaveBeenCalled();
+    expect(mocks.runPackageHostedWorkspaceInvocation).not.toHaveBeenCalled();
+  });
+
   it("preserves former launcher compatibility roots for direct in-process invocations", async () => {
     const capturedInvocationInputs: Record<string, unknown>[] = [];
     mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: Record<string, unknown>) => {

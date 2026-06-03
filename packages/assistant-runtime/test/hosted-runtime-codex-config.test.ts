@@ -1582,7 +1582,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
   );
 });
 
-test("hosted Codex config TOML uses env var names rather than credential values", () => {
+test("hosted Codex config TOML omits credential values and runtime authority headers", () => {
   const config = buildHostedCodexConfigToml({
     model: null,
     provider: {

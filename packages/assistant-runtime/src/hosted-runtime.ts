@@ -1415,7 +1415,6 @@ type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
 const HOSTED_RUNTIME_PHASE_NAMES = [
   "browser_vault.refresh",
   "cli.bridge",
-  "cli.bridge.stop",
   "codex.prepare",
   "foreground.pass",
   "inbox.sidecar",

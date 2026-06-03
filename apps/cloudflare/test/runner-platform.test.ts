@@ -53,7 +53,13 @@ import {
   readHostedWorkspaceSnapshotRestoreStep,
 } from "../src/runtime-platform.ts";
 import {
+  fetchHostedWebControlPlaneJson,
+} from "../src/runtime-platform/web-control-transport.ts";
+import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
   buildHostedRunnerContainerEnv,
@@ -191,9 +197,40 @@ function buildTestHostedExecutionRuntimePlatform(
 }
 
 function expectDefaultRuntimeWriteFenceHeaders(request: Request): void {
-  expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-  expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-  expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+  expect(request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe("runtime_write_123");
+  expect(request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe("7");
+  expect(request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe("6");
+}
+
+async function fetchDirectHostedWorkspaceReadWithHeaders(input: {
+  fetchImpl: typeof fetch;
+  headers: Headers;
+}): Promise<unknown> {
+  const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+    HOSTED_WEB_BASE_URL: "https://web.example.test",
+  }));
+  return await fetchHostedWebControlPlaneJson({
+    boundUserId: "member_123",
+    description: "Hosted workspace read",
+    fetchImpl: input.fetchImpl,
+    headers: input.headers,
+    method: "GET",
+    path: "/api/internal/hosted-workspace",
+    timeoutMs: 1_000,
+    transport: {
+      callbackSigning: environment.webCallbackSigning,
+      mode: "direct",
+      webControlBaseUrl: "https://web.example.test",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    },
+  });
 }
 
 function createBrowserVaultReplicaRef(sourceBundleHash: string) {
@@ -2934,6 +2971,58 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
+  });
+
+  it("fails closed before direct web-control fetches with incomplete write-fence headers", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const headers = new Headers({
+      [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "runtime_write_123",
+    });
+    let thrown: unknown;
+
+    try {
+      await fetchDirectHostedWorkspaceReadWithHeaders({
+        fetchImpl: fetchMock as typeof fetch,
+        headers,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("Hosted workspace read request failed.");
+    expect((thrown as Error).cause).toBeInstanceOf(Error);
+    expect(((thrown as Error).cause as Error).message).toBe(
+      "Hosted workspace read has incomplete hosted runtime write-fence headers.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before direct web-control fetches with stale write-fence headers", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const headers = new Headers({
+      [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "runtime_write_stale",
+      [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "7",
+      [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "6",
+    });
+    let thrown: unknown;
+
+    try {
+      await fetchDirectHostedWorkspaceReadWithHeaders({
+        fetchImpl: fetchMock as typeof fetch,
+        headers,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("Hosted workspace read request failed.");
+    expect((thrown as Error).cause).toBeInstanceOf(Error);
+    expect(((thrown as Error).cause as Error).message).toBe(
+      "Hosted workspace read has stale hosted runtime write-fence headers.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps latency trace callbacks bound to their event attempt", async () => {

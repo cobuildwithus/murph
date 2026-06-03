@@ -27,6 +27,10 @@ import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
   HostedUserRunner,
 } from "../src/user-runner.ts";
+import {
+  parseTestPositiveInteger,
+  parseTestPositiveIntegerValue,
+} from "../src/worker/route-handlers/test-runner.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -1420,6 +1424,31 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("ignores malformed per-user status log limits instead of partially parsing them", async () => {
+    const stub = createUserRunnerStub({
+      runnerStatus: vi.fn(async () => ({
+        inFlight: false,
+        lastInvocationAt: "2026-04-16T10:05:00.000Z",
+        mailboxLag: [],
+        nextAlarmAt: null,
+        recentLogs: [],
+        userId: "member_123",
+        workspace: null,
+      })),
+    });
+
+    const statusResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=10abc", {
+        method: "GET",
+      })),
+      createWorkerEnv(stub),
+    );
+
+    expect(statusResponse.status).toBe(200);
+    expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
+    expect(stub.runnerStatus).toHaveBeenCalledWith(undefined);
+  });
+
   it("fails closed when canonical per-user status cannot be validated", async () => {
     const stub = createUserRunnerStub({
       runnerStatus: vi.fn(async () => {
@@ -1659,6 +1688,18 @@ describe("cloudflare worker routes", () => {
       error: "Unsupported test workspace invocation reason.",
     });
     expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-decimal positive integers on hosted-local test control helpers", () => {
+    expect(parseTestPositiveInteger("45000")).toBe(45_000);
+    expect(parseTestPositiveInteger("45e3")).toBe("invalid");
+    expect(parseTestPositiveInteger("45000ms")).toBe("invalid");
+    expect(parseTestPositiveInteger(" 45000")).toBe("invalid");
+    expect(parseTestPositiveIntegerValue(45_000)).toBe(45_000);
+    expect(parseTestPositiveIntegerValue("45000")).toBe(45_000);
+    expect(parseTestPositiveIntegerValue("45e3")).toBe("invalid");
+    expect(parseTestPositiveIntegerValue("45000ms")).toBe("invalid");
+    expect(parseTestPositiveIntegerValue("45000 ")).toBe("invalid");
   });
 
   describe("hosted runtime control", () => {

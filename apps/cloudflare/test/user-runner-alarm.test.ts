@@ -1980,7 +1980,7 @@ describe("HostedUserRunner execution coordination", () => {
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_next.snapshot.enc`;
     await bucket.put(orphanObjectKey, "orphan-encrypted-snapshot");
     await bucket.put(currentObjectKey, "current-encrypted-snapshot");
-    const { flushWaitUntil, runner } = createRunnerHarness({
+    const { flushWaitUntil, runner, storageValues } = createRunnerHarness({
       bucket,
       workspace: createWorkspaceState({
         snapshotRef: createWorkspaceSnapshotV2RefForTest({
@@ -2016,6 +2016,12 @@ describe("HostedUserRunner execution coordination", () => {
     expect(bucket.deleted).toContain(orphanObjectKey);
     expect(bucket.objects.has(orphanObjectKey)).toBe(false);
     expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_orphan"),
+    )).toBeUndefined();
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_current"),
+    )).toBeUndefined();
   });
 });
 
