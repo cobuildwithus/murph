@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,8 @@ import {
 } from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker from "../src/index.ts";
+import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
+import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
   HostedUserRunner,
 } from "../src/user-runner.ts";
@@ -97,6 +99,29 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
   use: "sig",
 };
 
+async function readWorkerEntrypointSource(): Promise<string> {
+  const sourceFiles = [
+    path.join(APP_DIR, "src/index.ts"),
+    ...await listTypeScriptFiles(path.join(APP_DIR, "src/worker")),
+  ];
+  const sources = await Promise.all(
+    sourceFiles.map((filePath) => readFile(filePath, "utf8")),
+  );
+  return sources.join("\n");
+}
+
+async function listTypeScriptFiles(rootDir: string): Promise<string[]> {
+  const entries = await readdir(rootDir, { withFileTypes: true });
+  const nestedFiles = await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      return listTypeScriptFiles(entryPath);
+    }
+    return entry.isFile() && entry.name.endsWith(".ts") ? [entryPath] : [];
+  }));
+  return nestedFiles.flat().sort();
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -107,7 +132,7 @@ afterEach(() => {
 describe("cloudflare worker routes", () => {
   it("keeps inbox email parsing isolated to the hosted email ingress module", async () => {
     const [workerSource, hostedEmailIngressSource] = await Promise.all([
-      readFile(path.join(APP_DIR, "src/index.ts"), "utf8"),
+      readWorkerEntrypointSource(),
       readFile(path.join(APP_DIR, "src/hosted-email/worker-ingress.ts"), "utf8"),
     ]);
 
@@ -122,7 +147,7 @@ describe("cloudflare worker routes", () => {
       readFile(path.join(APP_DIR, "scripts/deploy-automation.ts"), "utf8"),
       readFile(path.join(APP_DIR, "wrangler.jsonc"), "utf8"),
     ]);
-    const workerSource = await readFile(path.join(APP_DIR, "src/index.ts"), "utf8");
+    const workerSource = await readWorkerEntrypointSource();
 
     expect(worker).not.toHaveProperty("queue");
     expect(workerSource).not.toMatch(/\bqueue\s*\(/u);
@@ -136,7 +161,7 @@ describe("cloudflare worker routes", () => {
 
   it("keeps generated worker contracts free of Queue producer bindings", async () => {
     const [workerSource, workerContractsSource] = await Promise.all([
-      readFile(path.join(APP_DIR, "src/index.ts"), "utf8"),
+      readWorkerEntrypointSource(),
       readFile(path.join(APP_DIR, "src/worker-contracts.ts"), "utf8"),
     ]);
 
@@ -198,6 +223,27 @@ describe("cloudflare worker routes", () => {
     await expect(unknownResponse.json()).resolves.toEqual({
       error: "Not found",
     });
+  });
+
+  it("reassembles the Worker route tables in the stable route order", () => {
+    expect(workerPublicRoutes.map(({ name }) => name)).toEqual([
+      "service-banner",
+    ]);
+    expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
+      "test-artifact-seed",
+      "test-run-until-idle",
+      "test-run-alarm",
+      "test-container-activity-expired",
+      "test-start-stuck-invocation",
+      "test-checkpoint-artifact-write-fence",
+      "test-direct-r2-presigned-put",
+      "deploy-container-smoke",
+      "runtime-ensure-processing",
+      "runtime-prewarm",
+      "user-data-delete",
+      "browser-vault-session",
+      "user-status",
+    ]);
   });
 
   it("exposes the invoked Worker version when the version metadata binding is present", async () => {
@@ -699,6 +745,25 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
+  });
+
+  it("keeps wrong methods on enabled hosted-local test routes hidden before auth", async () => {
+    const stub = createUserRunnerStub();
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/__test/users/member_123/run-until-idle", {
+        method: "GET",
+      }),
+      createWorkerEnv(stub, {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
   });
 
   it("requires hosted-local test route callers to be bound to the target user", async () => {
@@ -2388,7 +2453,24 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("keeps auth-before-method ordering on protected user routes", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/status", {
+        method: "POST",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
   it("returns 405 before bound-user validation on user-bound routes", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
         method: "POST",
@@ -2402,6 +2484,13 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Method not allowed.",
     });
+
+    const serializedWarnLogs = warn.mock.calls
+      .map(([payload]) => String(payload))
+      .join("\n");
+    expect(serializedWarnLogs).toContain("wrong-method");
+    expect(serializedWarnLogs).toContain("/internal/users/<REDACTED_USER>/status");
+    expect(serializedWarnLogs).not.toContain("/internal/users/member_123/status");
   });
 
   it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {
