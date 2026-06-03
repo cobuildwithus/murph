@@ -784,6 +784,65 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
+  it("does not accept legacy runtime wake body shape without hard-cut headers", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const wakeResponse = new Response(JSON.stringify({ accepted: true }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 202,
+    });
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/runtime-wake")) {
+          return wakeResponse;
+        }
+
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest(),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_evt_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(wakeResponse.bodyUsed).toBe(true);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
   it("rejects runtime wakes when metadata response draining times out", async () => {
     vi.useFakeTimers();
 

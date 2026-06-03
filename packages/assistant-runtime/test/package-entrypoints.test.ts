@@ -124,6 +124,16 @@ test("package root export omits legacy run-drain job helpers", async () => {
   assert.equal("parseHostedAssistantRuntimeJobRequest" in root, false);
 });
 
+test("hosted runtime entrypoints omit legacy child process env alias", async () => {
+  const root = await import("@murphai/assistant-runtime");
+  const contracts = await import("@murphai/assistant-runtime/hosted-runtime-contracts");
+  const workerContracts = await import("@murphai/assistant-runtime/hosted-runtime-worker-contracts");
+
+  assert.equal("projectHostedRuntimeToChildEnv" in root, false);
+  assert.equal("projectHostedRuntimeToChildEnv" in contracts, false);
+  assert.equal("projectHostedRuntimeToChildEnv" in workerContracts, false);
+});
+
 test("hosted-runtime-contracts omits assistant-engine Codex lifecycle hooks", async () => {
   const contracts = await import("@murphai/assistant-runtime/hosted-runtime-contracts");
 
