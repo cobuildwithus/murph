@@ -915,6 +915,7 @@ export async function runAssistantAutomationPass(
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
         onEvent: input.onEvent,
+        onTraceEvent: input.onTraceEvent,
         vault: input.vault,
         signal: input.signal,
         turnEnvironment: input.turnEnvironment ?? null,

@@ -688,6 +688,34 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('passes hosted provider trace callbacks into scheduled notification sends', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-trace-callback-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'trace-callback')
+    const onTraceEvent = vi.fn()
+
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T08:00:00.000Z',
+      },
+    }))
+    await processDueAssistantCronJobsLocal({
+      limit: 1,
+      onTraceEvent,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onTraceEvent,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+  })
+
   it('persists the private summary when a scheduled notification turn returns no response', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-private-summary-',

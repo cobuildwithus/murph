@@ -7548,6 +7548,31 @@ describe('assistant automation run loop', () => {
     )
   })
 
+  it('passes hosted provider trace callbacks into due cron processing', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    const onTraceEvent = vi.fn()
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      onTraceEvent,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onTraceEvent,
+      }),
+    )
+  })
+
   it('can finish a document-preservation retry pass without replying or outbox work', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],

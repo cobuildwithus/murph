@@ -13,6 +13,7 @@ import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelop
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
+import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { errorMessage } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
@@ -228,6 +229,7 @@ export async function executeClaimedAssistantCronJob(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   job: ResolvedAssistantCronJob
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   paths: AssistantStatePaths
   signal?: AbortSignal
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -303,6 +305,7 @@ export async function executeClaimedAssistantCronJob(input: {
         allowBindingRebind: claimedJob.target.sessionId !== null,
         channel: claimedJob.target.channel,
         identityId: claimedJob.target.identityId,
+        onTraceEvent: input.onTraceEvent,
         participantId: claimedJob.target.participantId,
         threadId: claimedJob.target.threadId,
         deliveryTarget: claimedJob.target.deliveryTarget,
