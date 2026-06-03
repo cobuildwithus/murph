@@ -160,6 +160,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
+  operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -200,6 +201,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   try {
     const metrics = await executePendingHostedSystemMailboxItem({
       executionContext: input.executionContext ?? null,
+      operatorHomeRoot: input.operatorHomeRoot ?? undefined,
       pendingItem: prepared,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
@@ -353,6 +355,7 @@ export async function restoreHostedSystemMailboxCheckpointRollbackState(input: {
 
 async function executePendingHostedSystemMailboxItem(input: {
   executionContext: AssistantExecutionContext | null;
+  operatorHomeRoot?: string | null;
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
@@ -369,6 +372,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   return executeHostedMailboxEvent({
     executionContext,
     forceQueueOnlyAssistantNotification: true,
+    operatorHomeRoot: input.operatorHomeRoot ?? undefined,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldBackgroundMaintenance

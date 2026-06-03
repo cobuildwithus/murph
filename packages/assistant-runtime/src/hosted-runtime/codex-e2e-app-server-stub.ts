@@ -647,7 +647,7 @@ function callVaultCliCommand(command) {
   }
 }
 
-function callDynamicTool(toolCall) {
+function callDynamicTool(turn, toolCall) {
   return new Promise((resolve, reject) => {
     const id = ++serverRequestCounter;
     const timeout = setTimeout(() => {
@@ -665,7 +665,9 @@ function callDynamicTool(toolCall) {
       params: {
         arguments: toolCall.arguments,
         namespace: toolCall.namespace,
+        threadId: turn.threadId,
         tool: toolCall.tool,
+        turnId: turn.turnId,
       },
     });
   }).then((message) => {
@@ -728,11 +730,14 @@ async function completeTurn(turn) {
       callVaultCliCommand(command);
     }
     for (const toolCall of toolCalls) {
-      await callDynamicTool(toolCall);
+      await callDynamicTool(turn, toolCall);
     }
     appendThreadAssistantMessage(turn.threadId, text);
     writeRpc({
       type: "item.completed",
+      params: {
+        turnId: turn.turnId,
+      },
       item: {
         id: "msg_" + turn.turnId,
         type: "assistant.message",
@@ -752,6 +757,9 @@ async function completeTurn(turn) {
     const message = error instanceof Error ? error.message : String(error);
     writeRpc({
       type: "error",
+      params: {
+        turnId: turn.turnId,
+      },
       message,
     });
     writeRpc({

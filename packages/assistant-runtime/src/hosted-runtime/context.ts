@@ -95,6 +95,9 @@ export async function prepareHostedWakeContext(
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
     managedAutoReplyChannels?: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
   },
+  options: {
+    operatorHomeRoot?: string | null;
+  } = {},
 ): Promise<HostedBootstrapResult | null> {
   const isMemberActivation = wake.kind === "member.activated";
   const memberBootstrap = isMemberActivation
@@ -112,6 +115,7 @@ export async function prepareHostedWakeContext(
       enableAssistantChannelReconciliation:
         wake.kind === "member.activated"
         || wake.kind === "member.channels.updated",
+      operatorHomeRoot: options.operatorHomeRoot ?? null,
     },
   );
 
@@ -131,6 +135,9 @@ export async function prepareHostedAssistantAutoReplyForWake(
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
     managedAutoReplyChannels?: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
   },
+  options: {
+    operatorHomeRoot?: string | null;
+  } = {},
 ): Promise<void> {
   await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
@@ -139,6 +146,7 @@ export async function prepareHostedAssistantAutoReplyForWake(
     resolvedConfig,
     {
       enableAssistantChannelReconciliation: false,
+      operatorHomeRoot: options.operatorHomeRoot ?? null,
     },
   );
 }
@@ -179,11 +187,13 @@ async function bootstrapHostedAssistantRuntimeState(
   },
   options: {
     enableAssistantChannelReconciliation: boolean;
+    operatorHomeRoot?: string | null;
   },
 ): Promise<HostedAssistantRuntimeState> {
   const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
     allowMissing: true,
     env: runtimeEnv,
+    homeDirectory: options.operatorHomeRoot ?? undefined,
   });
   const assistantConfigStatus = normalizeHostedAssistantBootstrapStatus(assistantBootstrap)
 

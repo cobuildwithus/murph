@@ -27,6 +27,7 @@ import {
   prepareHostedWakeContext,
 } from "./context.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
+import { withHostedProcessEnvironment } from "./environment.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
   HostedMailboxEffect,
@@ -359,6 +360,7 @@ export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification?: boolean;
+  operatorHomeRoot?: string | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
@@ -372,29 +374,51 @@ export async function executeHostedMailboxEvent(input: {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
   }
 
-  const bootstrapResult = await prepareHostedWakeContext(
-    input.vaultRoot,
-    input.wake,
-    input.runtimeEnv,
-    input.runtime.resolvedConfig,
-  );
-  const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
-    input.executionContext,
-    {
-      runtimeEnv: input.runtimeEnv,
-    },
-  );
-  const mailboxEffect = await handleHostedMailboxEvent({
-    wake: input.wake,
-    executionContext: bootstrappedExecutionContext,
-    forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
-    runtime: input.runtime,
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
-      : {}),
-    sourceMailboxItemId: input.sourceMailboxItemId ?? null,
-    vaultRoot: input.vaultRoot,
-  });
+  const runMailboxExecution = async () => {
+    const bootstrapResult = await prepareHostedWakeContext(
+      input.vaultRoot,
+      input.wake,
+      input.runtimeEnv,
+      input.runtime.resolvedConfig,
+      {
+        operatorHomeRoot: input.operatorHomeRoot ?? null,
+      },
+    );
+    const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
+      input.executionContext,
+      {
+        homeDirectory: input.operatorHomeRoot ?? undefined,
+        runtimeEnv: input.runtimeEnv,
+      },
+    );
+    const mailboxEffect = await handleHostedMailboxEvent({
+      wake: input.wake,
+      executionContext: bootstrappedExecutionContext,
+      forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
+      runtime: input.runtime,
+      ...(input.shouldYieldDeviceSync
+        ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+        : {}),
+      sourceMailboxItemId: input.sourceMailboxItemId ?? null,
+      vaultRoot: input.vaultRoot,
+    });
+
+    return {
+      bootstrapResult,
+      mailboxEffect,
+    };
+  };
+  const { bootstrapResult, mailboxEffect } =
+    Object.keys(input.runtimeEnv).length > 0 && input.operatorHomeRoot
+    ? await withHostedProcessEnvironment(
+        {
+          envOverrides: { ...input.runtimeEnv },
+          operatorHomeRoot: input.operatorHomeRoot,
+          vaultRoot: input.vaultRoot,
+        },
+        runMailboxExecution,
+      )
+    : await runMailboxExecution();
 
   return {
     bootstrapResult,

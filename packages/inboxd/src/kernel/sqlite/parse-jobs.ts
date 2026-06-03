@@ -104,7 +104,7 @@ export function createAttachmentParseJobStore(input: {
             where (? is null or capture_id = ?)
               and (? is null or attachment_id = ?)
               and (? is null or state = ?)
-            order by created_at asc, job_id asc
+            order by created_at asc, attachment_id asc, job_id asc
             limit ?
           `,
         )
@@ -137,7 +137,7 @@ export function createAttachmentParseJobStore(input: {
                 )
                 and (? is null or capture_id = ?)
                 and (? is null or attachment_id = ?)
-              order by created_at asc, job_id asc
+              order by created_at asc, attachment_id asc, job_id asc
               limit 1
             `,
           )

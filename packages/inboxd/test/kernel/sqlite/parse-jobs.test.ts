@@ -112,6 +112,82 @@ describe("createAttachmentParseJobStore", () => {
     database.close();
   });
 
+  it("orders same-timestamp jobs by attachment id for listing and claiming", () => {
+    const database = createParseJobTestDatabase();
+    const insertAttachment = database.prepare(
+      `
+        insert into capture_attachment (
+          attachment_id,
+          kind,
+          parser_state,
+          parse_updated_at
+        ) values (?, ?, 'pending', ?)
+      `,
+    );
+    insertAttachment.run("attachment-a", "audio", "2026-04-15T12:00:00.000Z");
+    insertAttachment.run("attachment-b", "video", "2026-04-15T12:00:00.000Z");
+    database
+      .prepare(
+        `
+          insert into attachment_parse_job (
+            job_id,
+            capture_id,
+            attachment_id,
+            pipeline,
+            state,
+            attempts,
+            created_at
+          ) values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "job-z",
+        "capture-1",
+        "attachment-a",
+        "attachment_text",
+        "pending",
+        0,
+        "2026-04-15T12:00:00.000Z",
+      );
+    database
+      .prepare(
+        `
+          insert into attachment_parse_job (
+            job_id,
+            capture_id,
+            attachment_id,
+            pipeline,
+            state,
+            attempts,
+            created_at
+          ) values (?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "job-a",
+        "capture-1",
+        "attachment-b",
+        "attachment_text",
+        "pending",
+        0,
+        "2026-04-15T12:00:00.000Z",
+      );
+
+    const store = createAttachmentParseJobStore({
+      database,
+      refreshCaptureSearchIndex() {},
+    });
+
+    expect(store.listAttachmentParseJobs().map((job) => job.attachmentId)).toEqual([
+      "attachment-a",
+      "attachment-b",
+    ]);
+    expect(store.claimNextAttachmentParseJob()?.attachmentId).toBe("attachment-a");
+    expect(store.claimNextAttachmentParseJob()?.attachmentId).toBe("attachment-b");
+
+    database.close();
+  });
+
   it("does not process seeded legacy document parse jobs", () => {
     const database = createParseJobTestDatabase();
     database

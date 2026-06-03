@@ -33,6 +33,7 @@ const packageJson = require('../package.json') as { version?: string }
 const INCUR_ROOT_HELP_TIMEOUT_MS = 90_000
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
+let inProcessCliProcessStateQueue: Promise<void> = Promise.resolve()
 
 function withMachineJsonOutput(args: string[]): string[] {
   const nextArgs = [...args]
@@ -92,43 +93,45 @@ async function runSourceEntrypointRawFromCwd(
     env?: NodeJS.ProcessEnv
   },
 ): Promise<string> {
-  const previousCwd = process.cwd()
-  const previousEnv = { ...process.env }
-  const previousExitCode = process.exitCode
-  const originalStdoutWrite = process.stdout.write
-  const originalStderrWrite = process.stderr.write
-  const stdout: string[] = []
-  const stderr: string[] = []
-  let exitCode: number | undefined
+  return await withInProcessCliProcessStateLock(async () => {
+    const previousCwd = process.cwd()
+    const previousEnv = { ...process.env }
+    const previousExitCode = process.exitCode
+    const originalStdoutWrite = process.stdout.write
+    const originalStderrWrite = process.stderr.write
+    const stdout: string[] = []
+    const stderr: string[] = []
+    let exitCode: number | undefined
 
-  try {
-    replaceProcessEnvForEntrypointTest({
-      ...process.env,
-      ...options.env,
-    })
-    process.chdir(options.cwd)
-    process.stdout.write = createProcessWriteInterceptor(stdout)
-    process.stderr.write = createProcessWriteInterceptor(stderr)
+    try {
+      replaceProcessEnvForEntrypointTest({
+        ...process.env,
+        ...options.env,
+      })
+      process.chdir(options.cwd)
+      process.stdout.write = createProcessWriteInterceptor(stdout)
+      process.stderr.write = createProcessWriteInterceptor(stderr)
 
-    await runMurphCliEntrypoint(args, {
-      argv0: 'vault-cli',
-      exit(code = 0) {
-        exitCode = code
-      },
-    })
+      await runMurphCliEntrypoint(args, {
+        argv0: 'vault-cli',
+        exit(code = 0) {
+          exitCode = code
+        },
+      })
 
-    if (exitCode !== undefined && exitCode !== 0 && stdout.length === 0) {
-      throw new Error(stderr.join('').trim() || `CLI exited with code ${exitCode}.`)
+      if (exitCode !== undefined && exitCode !== 0 && stdout.length === 0) {
+        throw new Error(stderr.join('').trim() || `CLI exited with code ${exitCode}.`)
+      }
+    } finally {
+      process.stdout.write = originalStdoutWrite
+      process.stderr.write = originalStderrWrite
+      process.chdir(previousCwd)
+      replaceProcessEnvForEntrypointTest(previousEnv)
+      process.exitCode = previousExitCode
     }
-  } finally {
-    process.stdout.write = originalStdoutWrite
-    process.stderr.write = originalStderrWrite
-    process.chdir(previousCwd)
-    replaceProcessEnvForEntrypointTest(previousEnv)
-    process.exitCode = previousExitCode
-  }
 
-  return stdout.join('').trim()
+    return stdout.join('').trim()
+  })
 }
 
 function replaceProcessEnvForEntrypointTest(env: NodeJS.ProcessEnv): void {
@@ -176,27 +179,46 @@ async function runSourceCliRawFromCwd(
     env?: NodeJS.ProcessEnv
   },
 ): Promise<string> {
-  const previousCwd = process.cwd()
-  const cli = createVaultCli()
-  const output: string[] = []
+  return await withInProcessCliProcessStateLock(async () => {
+    const previousCwd = process.cwd()
+    const cli = createVaultCli()
+    const output: string[] = []
+
+    try {
+      process.chdir(options.cwd)
+      await cli.serve(args, {
+        env: {
+          ...process.env,
+          ...options.env,
+        },
+        exit: () => {},
+        stdout(chunk) {
+          output.push(chunk)
+        },
+      })
+    } finally {
+      process.chdir(previousCwd)
+    }
+
+    return output.join('').trim()
+  })
+}
+
+async function withInProcessCliProcessStateLock<T>(
+  run: () => Promise<T>,
+): Promise<T> {
+  const previous = inProcessCliProcessStateQueue
+  let release = () => {}
+  inProcessCliProcessStateQueue = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
 
   try {
-    process.chdir(options.cwd)
-    await cli.serve(args, {
-      env: {
-        ...process.env,
-        ...options.env,
-      },
-      exit: () => {},
-      stdout(chunk) {
-        output.push(chunk)
-      },
-    })
+    return await run()
   } finally {
-    process.chdir(previousCwd)
+    release()
   }
-
-  return output.join('').trim()
 }
 
 async function runJsonCli<TData>(
@@ -226,7 +248,7 @@ async function runJsonCli<TData>(
 }
 
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
-  const help = await runRawCli(['--help'])
+  const help = await runSourceCliRaw(['--help'])
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
@@ -261,6 +283,38 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
     const position = help.search(new RegExp(`^\\s+${command}\\s+`, 'mu'))
     assert.notEqual(position, -1, `expected root help to list ${command}`)
   }
+}, INCUR_ROOT_HELP_TIMEOUT_MS)
+
+test('built CLI discovery surfaces remain available', async () => {
+  const builtCliEnv = {
+    MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+  }
+  const help = await runRawCli(['--help'], { env: builtCliEnv })
+  const schema = JSON.parse(
+    await runRawCli(['search', 'query', '--schema', '--format', 'json'], {
+      env: builtCliEnv,
+    }),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+    }
+  }
+  const manifest = JSON.parse(
+    await runRawCli(['--llms-full', '--format', 'json'], { env: builtCliEnv }),
+  ) as {
+    commands: Array<{ name: string }>
+  }
+  const completions = await runRawCli(['completions', 'bash'], {
+    env: builtCliEnv,
+  })
+
+  assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
+  assert.equal('query' in schema.args.properties, true)
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'search query'),
+    true,
+  )
+  assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
 
 test('root config file can provide command option defaults', async () => {
@@ -773,7 +827,7 @@ test('read-only vault commands reject uninitialized vault roots before query rea
 
 test('search query schema exposes retrieval-specific filters', async () => {
   const schema = JSON.parse(
-    await runRawCli(['search', 'query', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['search', 'query', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, {
@@ -816,7 +870,7 @@ test('search query schema exposes retrieval-specific filters', async () => {
 
 test('audit list schema describes its filters and sort controls', async () => {
   const schema = JSON.parse(
-    await runRawCli(['audit', 'list', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['audit', 'list', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, {
@@ -843,7 +897,7 @@ test('audit list schema describes its filters and sort controls', async () => {
 
 test('route estimate schema exposes the Mapbox-backed routing inputs', async () => {
   const schema = JSON.parse(
-    await runRawCli(['route', 'estimate', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['route', 'estimate', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, { description?: string }>
@@ -889,7 +943,7 @@ test('route estimate schema exposes the Mapbox-backed routing inputs', async () 
   assert.equal('elevationSampleSpacingMeters' in schema.options.properties, true)
   assert.equal('maxElevationSamples' in schema.options.properties, true)
 
-  const help = await runRawCli(['route', 'estimate', '--help'])
+  const help = await runSourceCliRaw(['route', 'estimate', '--help'])
 
   assert.match(help, /More specific text can improve geocoding, but provider display labels may still stay broad/u)
   assert.match(
@@ -900,7 +954,7 @@ test('route estimate schema exposes the Mapbox-backed routing inputs', async () 
 
 test('model schema explains preset-gated non-interactive updates', async () => {
   const schema = JSON.parse(
-    await runRawCli(['model', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['model', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, {
@@ -930,7 +984,7 @@ test('model schema explains preset-gated non-interactive updates', async () => {
 
 test('blood-test list schema stays scoped to shared date-range and status filters', async () => {
   const schema = JSON.parse(
-    await runRawCli(['blood-test', 'list', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['blood-test', 'list', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -968,9 +1022,9 @@ test('query projection status schema stays scoped to projection-management optio
   assert.deepEqual(schema.options.required ?? [], [])
 })
 
-test('knowledge commands expose the expected schema at the built CLI boundary', async () => {
+test('knowledge commands expose the expected schema', async () => {
   const upsertSchema = JSON.parse(
-    await runRawCli(['knowledge', 'upsert', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['knowledge', 'upsert', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties?: Record<string, unknown>
@@ -982,7 +1036,7 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
     }
   }
   const searchSchema = JSON.parse(
-    await runRawCli(['knowledge', 'search', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['knowledge', 'search', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -994,7 +1048,7 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
     }
   }
   const showSchema = JSON.parse(
-    await runRawCli(['knowledge', 'show', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['knowledge', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -1006,7 +1060,7 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
     }
   }
   const logTailSchema = JSON.parse(
-    await runRawCli(['knowledge', 'log', 'tail', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['knowledge', 'log', 'tail', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties?: Record<string, unknown>
@@ -1277,13 +1331,13 @@ test('knowledge upsert rejects whitespace-only bodies through the CLI boundary',
 
 test('root chat alias keeps the same command schema as assistant chat', async () => {
   const rootSchema = JSON.parse(
-    await runRawCli(['chat', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['chat', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
   }
   const assistantSchema = JSON.parse(
-    await runRawCli(['assistant', 'chat', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'chat', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
@@ -1295,13 +1349,13 @@ test('root chat alias keeps the same command schema as assistant chat', async ()
 
 test('root run alias keeps the same command schema as assistant run', async () => {
   const rootSchema = JSON.parse(
-    await runRawCli(['run', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['run', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
   }
   const assistantSchema = JSON.parse(
-    await runRawCli(['assistant', 'run', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'run', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
@@ -1313,13 +1367,13 @@ test('root run alias keeps the same command schema as assistant run', async () =
 
 test('root status alias keeps the same command schema as assistant status', async () => {
   const rootSchema = JSON.parse(
-    await runRawCli(['status', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['status', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
   }
   const assistantSchema = JSON.parse(
-    await runRawCli(['assistant', 'status', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'status', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
@@ -1331,13 +1385,13 @@ test('root status alias keeps the same command schema as assistant status', asyn
 
 test('root doctor alias keeps the same command schema as assistant doctor', async () => {
   const rootSchema = JSON.parse(
-    await runRawCli(['doctor', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['doctor', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
   }
   const assistantSchema = JSON.parse(
-    await runRawCli(['assistant', 'doctor', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'doctor', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
@@ -1349,13 +1403,13 @@ test('root doctor alias keeps the same command schema as assistant doctor', asyn
 
 test('root stop alias keeps the same command schema as assistant stop', async () => {
   const rootSchema = JSON.parse(
-    await runRawCli(['stop', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['stop', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
   }
   const assistantSchema = JSON.parse(
-    await runRawCli(['assistant', 'stop', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'stop', '--schema', '--format', 'json']),
   ) as {
     args: unknown
     options: unknown
@@ -1367,7 +1421,7 @@ test('root stop alias keeps the same command schema as assistant stop', async ()
 
 test('automation save schema exposes typed automation fields and a separate JSON import fallback', async () => {
   const saveSchema = JSON.parse(
-    await runRawCli(['automation', 'save', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['automation', 'save', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -1405,7 +1459,7 @@ test('automation save schema exposes typed automation fields and a separate JSON
   }
 
   const importJsonSchema = JSON.parse(
-    await runRawCli(['automation', 'import-json', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['automation', 'import-json', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1419,7 +1473,7 @@ test('automation save schema exposes typed automation fields and a separate JSON
 
 test('automation show schema accepts an id-or-slug lookup', async () => {
   const schema = JSON.parse(
-    await runRawCli(['automation', 'show', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['automation', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -1438,7 +1492,7 @@ test('automation show schema accepts an id-or-slug lookup', async () => {
 
 test('memory upsert schema exposes create-only canonical memory fields', async () => {
   const schema = JSON.parse(
-    await runRawCli(['memory', 'upsert', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['memory', 'upsert', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, {
@@ -1464,7 +1518,7 @@ test('memory upsert schema exposes create-only canonical memory fields', async (
 
 test('memory update schema requires a memory id and text, with an optional replacement section', async () => {
   const schema = JSON.parse(
-    await runRawCli(['memory', 'update', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['memory', 'update', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, {
@@ -1491,7 +1545,7 @@ test('memory update schema requires a memory id and text, with an optional repla
 
 test('memory show schema accepts an optional memory id', async () => {
   const schema = JSON.parse(
-    await runRawCli(['memory', 'show', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['memory', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, {
@@ -1516,7 +1570,7 @@ test('memory show schema accepts an optional memory id', async () => {
 
 test('assistant session list schema emits the normalized session output shape', async () => {
   const schema = JSON.parse(
-    await runRawCli(['assistant', 'session', 'list', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'session', 'list', '--schema', '--format', 'json']),
   ) as {
     output: {
       properties: Record<string, unknown>
@@ -1544,7 +1598,7 @@ test('assistant session list schema emits the normalized session output shape', 
 
 test('assistant session show schema emits the normalized session output shape', async () => {
   const schema = JSON.parse(
-    await runRawCli(['assistant', 'session', 'show', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['assistant', 'session', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -1575,9 +1629,9 @@ test('assistant session show schema emits the normalized session output shape', 
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation help points operators at canonical automations', async () => {
-  const saveHelp = await runRawCli(['automation', 'save', '--help'])
-  const importJsonHelp = await runRawCli(['automation', 'import-json', '--help'])
-  const scaffoldHelp = await runRawCli(['automation', 'scaffold', '--help'])
+  const saveHelp = await runSourceCliRaw(['automation', 'save', '--help'])
+  const importJsonHelp = await runSourceCliRaw(['automation', 'import-json', '--help'])
+  const scaffoldHelp = await runSourceCliRaw(['automation', 'scaffold', '--help'])
 
   assert.match(saveHelp, /Create or update one automation from typed command fields\./u)
   assert.match(saveHelp, /automation import-json/u)
@@ -1647,7 +1701,7 @@ test('inbox command group is not exposed', async () => {
 })
 
 test('goal show help exposes only the global format flag', async () => {
-  const help = await runRawCli(['goal', 'show', '--help'])
+  const help = await runSourceCliRaw(['goal', 'show', '--help'])
 
   assert.match(help, /Usage: vault-cli goal show <id> \[options\]/u)
   assert.doesNotMatch(help, /Options:[\s\S]*--format <json\|md>/u)
@@ -1655,7 +1709,7 @@ test('goal show help exposes only the global format flag', async () => {
 })
 
 test('wearables day help keeps the date positional and omits the old --date flag', async () => {
-  const help = await runRawCli(['wearables', 'day', '--help'])
+  const help = await runSourceCliRaw(['wearables', 'day', '--help'])
 
   assert.match(help, /Usage: vault-cli wearables day <date> \[options\]/u)
   assert.match(help, /Calendar date in YYYY-MM-DD form\./u)
@@ -1663,13 +1717,13 @@ test('wearables day help keeps the date positional and omits the old --date flag
 })
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
-  const goalImportJsonHelp = await runRawCli(['goal', 'import-json', '--help'])
-  const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])
-  const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
-  const supplementSaveHelp = await runRawCli(['supplement', 'save', '--help'])
-  const supplementStopHelp = await runRawCli(['supplement', 'stop', '--help'])
-  const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
-  const regimenStopHelp = await runRawCli(['regimen', 'stop', '--help'])
+  const goalImportJsonHelp = await runSourceCliRaw(['goal', 'import-json', '--help'])
+  const journalLinkHelp = await runSourceCliRaw(['journal', 'link', '--help'])
+  const foodRenameHelp = await runSourceCliRaw(['food', 'rename', '--help'])
+  const supplementSaveHelp = await runSourceCliRaw(['supplement', 'save', '--help'])
+  const supplementStopHelp = await runSourceCliRaw(['supplement', 'stop', '--help'])
+  const supplementCompoundListHelp = await runSourceCliRaw(['supplement', 'compound', 'list', '--help'])
+  const regimenStopHelp = await runSourceCliRaw(['regimen', 'stop', '--help'])
 
   assert.match(
     goalImportJsonHelp,
@@ -1719,9 +1773,9 @@ test('health command help surfaces examples and hints through Incur metadata', a
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('health list help preserves command-family option shapes', async () => {
-  const providerHelp = await runRawCli(['provider', 'list', '--help'])
-  const eventHelp = await runRawCli(['event', 'list', '--help'])
-  const documentHelp = await runRawCli(['document', 'list', '--help'])
+  const providerHelp = await runSourceCliRaw(['provider', 'list', '--help'])
+  const eventHelp = await runSourceCliRaw(['event', 'list', '--help'])
+  const documentHelp = await runSourceCliRaw(['document', 'list', '--help'])
 
   assert.match(providerHelp, /^\s+--status\b/mu)
   assert.doesNotMatch(providerHelp, /^\s+--from\b/mu)
@@ -1752,9 +1806,9 @@ test('health list help preserves command-family option shapes', async () => {
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('owned date-range list help reuses consistent date and limit descriptions', async () => {
-  const journalListHelp = await runRawCli(['journal', 'list', '--help'])
-  const workoutListHelp = await runRawCli(['workout', 'list', '--help'])
-  const eventListHelp = await runRawCli(['event', 'list', '--help'])
+  const journalListHelp = await runSourceCliRaw(['journal', 'list', '--help'])
+  const workoutListHelp = await runSourceCliRaw(['workout', 'list', '--help'])
+  const eventListHelp = await runSourceCliRaw(['event', 'list', '--help'])
 
   for (const help of [journalListHelp, workoutListHelp, eventListHelp]) {
     assert.match(
@@ -1774,7 +1828,7 @@ test('owned date-range list help reuses consistent date and limit descriptions',
 
 test('command schema reflects only domain-specific options', async () => {
   const schema = JSON.parse(
-    await runRawCli(['init', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['init', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1788,7 +1842,7 @@ test('command schema reflects only domain-specific options', async () => {
 
 test('health command schema remains JSON-Schema-safe', async () => {
   const schema = JSON.parse(
-    await runRawCli(['goal', 'import-json', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['goal', 'import-json', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1841,7 +1895,7 @@ test('health command metadata exposes Incur-native CTA suggestions', async () =>
 
 test('compact llms json manifest remains available', async () => {
   const manifest = JSON.parse(
-    await runRawCli(['--llms', '--format', 'json']),
+    await runSourceCliRaw(['--llms', '--format', 'json']),
   ) as {
     version: string
     commands: Array<{ name: string }>
@@ -1878,7 +1932,7 @@ test('compact llms json manifest remains available', async () => {
 
 test('full llms json manifest remains available for schema-rich commands', async () => {
   const manifest = JSON.parse(
-    await runRawCli(['--llms-full', '--format', 'json']),
+    await runSourceCliRaw(['--llms-full', '--format', 'json']),
   ) as {
     commands: Array<{
       description?: string
@@ -1949,7 +2003,7 @@ test('full llms json manifest remains available for schema-rich commands', async
 })
 
 test('bash completions remain available', async () => {
-  const script = await runRawCli(['completions', 'bash'])
+  const script = await runSourceCliRaw(['completions', 'bash'])
 
   assert.match(script, /_incur_complete_vault_cli/u)
   assert.match(
@@ -1959,7 +2013,7 @@ test('bash completions remain available', async () => {
 })
 
 test('goal scaffold help surfaces factory-provided example and hint text', async () => {
-  const help = await runRawCli(['goal', 'scaffold', '--help'])
+  const help = await runSourceCliRaw(['goal', 'scaffold', '--help'])
 
   assert.match(
     help,

@@ -18,11 +18,18 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   prepareHostedWakeContext: vi.fn(),
   sendAssistantNotification: vi.fn(),
+  withHostedProcessEnvironment: vi.fn(
+    async (_input: unknown, run: () => Promise<unknown>) => await run(),
+  ),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
   prepareHostedWakeContext: mocks.prepareHostedWakeContext,
+}));
+
+vi.mock("../src/hosted-runtime/environment.ts", () => ({
+  withHostedProcessEnvironment: mocks.withHostedProcessEnvironment,
 }));
 
 vi.mock("@murphai/assistant-engine", async () => {
@@ -86,6 +93,9 @@ afterEach(() => {
   mocks.emitHostedExecutionStructuredLog.mockReset();
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
+  mocks.withHostedProcessEnvironment.mockImplementation(
+    async (_input: unknown, run: () => Promise<unknown>) => await run(),
+  );
 });
 
 describe("executeHostedMailboxEvent", () => {
@@ -1184,6 +1194,9 @@ describe("executeHostedMailboxEvent", () => {
         OPENAI_API_KEY: "secret",
       },
       runtime.resolvedConfig,
+      {
+        operatorHomeRoot: null,
+      },
     );
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
       actorId: "hid_linq_actor_123",
@@ -1409,21 +1422,56 @@ describe("executeHostedMailboxEvent", () => {
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
+    const operatorHomeRoot = "/tmp/assistant-runtime-events-home";
+    const runtimeEnv = {
+      CODEX_HOME: "/tmp/assistant-runtime-events-home/.codex-hosted",
+    };
+    const runtime = createRuntime();
+    let preparedInsideHostedEnvironment = false;
+    mocks.withHostedProcessEnvironment.mockImplementationOnce(async (_input, run) => {
+      expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
+      expect(mocks.hydrateHostedExecutionDefaultTarget).not.toHaveBeenCalled();
+      const result = await run();
+      preparedInsideHostedEnvironment =
+        mocks.prepareHostedWakeContext.mock.calls.length === 1
+        && mocks.hydrateHostedExecutionDefaultTarget.mock.calls.length === 1;
+      return result;
+    });
 
     await executeHostedMailboxEvent({
       wake,
       executionContext,
-      runtime: createRuntime(),
-      runtimeEnv: {},
+      operatorHomeRoot,
+      runtime,
+      runtimeEnv,
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
+    expect(mocks.prepareHostedWakeContext).toHaveBeenCalledWith(
+      "/tmp/assistant-runtime-events",
+      wake,
+      runtimeEnv,
+      runtime.resolvedConfig,
+      {
+        operatorHomeRoot,
+      },
+    );
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       executionContext,
       {
-        runtimeEnv: {},
+        homeDirectory: operatorHomeRoot,
+        runtimeEnv,
       },
     );
+    expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
+      {
+        envOverrides: runtimeEnv,
+        operatorHomeRoot,
+        vaultRoot: "/tmp/assistant-runtime-events",
+      },
+      expect.any(Function),
+    );
+    expect(preparedInsideHostedEnvironment).toBe(true);
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
       actorId: "hid_linq_actor_123",
       bindingDeliveryTarget: "thread_123",

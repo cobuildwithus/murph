@@ -418,6 +418,9 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
           text: "shim response",
           type: "assistant.message",
         },
+        params: {
+          turnId: "turn_hosted_local_1",
+        },
         type: "item.completed",
       },
     );
@@ -442,6 +445,68 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
       code: "ENOENT",
     });
     assert.doesNotMatch(rolloutLog, /hello hosted local/u);
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
+test("hosted Codex runtime local E2E app-server stub correlates dynamic tool calls to the active turn", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseText: JSON.stringify({
+      __murphE2eToolCalls: [
+        {
+          arguments: {
+            text: "Checking the current iMessage thread now.",
+          },
+          namespace: "murph",
+          tool: "send_progress_update",
+        },
+      ],
+      text: "I checked that and can keep helping from here.",
+    }),
+  });
+
+  try {
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "",
+        OPENAI_API_KEY: "secret-openai-key",
+      },
+    });
+    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const messages = await runHostedLocalCodexStubTurn(child);
+    const threadId = readHostedLocalCodexStubThreadId(messages);
+    const toolCall = messages.find((message) => message.method === "item/tool/call");
+
+    assert.deepEqual(toolCall, {
+      id: 1000001,
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          text: "Checking the current iMessage thread now.",
+        },
+        namespace: "murph",
+        threadId,
+        tool: "send_progress_update",
+        turnId: "turn_hosted_local_1",
+      },
+    });
+    assert.equal(requests.length, 1);
   } finally {
     await closeHttpServer(server);
   }
@@ -2179,6 +2244,21 @@ async function runHostedLocalCodexStubTurn(
             prompts[0]!,
             activeThreadId,
           );
+        }
+        if (parsed.method === "item/tool/call" && parsedId !== null) {
+          childStdin.write(`${JSON.stringify({
+            id: parsedId,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: "inputText",
+                  text: "progress update sent",
+                },
+              ],
+            },
+          })}\n`);
+          continue;
         }
         if (parsed.method === "turn/completed") {
           const completedTurns = messages.filter((message) =>

@@ -315,6 +315,63 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
+  it("passes the restored operator home to hosted assistant bootstrap before mailbox execution", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+      const parentRoot = path.dirname(vaultRoot);
+      const ambientHomeRoot = path.join(parentRoot, "ambient-home");
+      const operatorHomeRoot = path.join(parentRoot, "operator-home");
+      await Promise.all([
+        mkdir(ambientHomeRoot, { recursive: true }),
+        mkdir(operatorHomeRoot, { recursive: true }),
+      ]);
+      process.env.HOME = ambientHomeRoot;
+      const runtimeEnv = {
+        HOSTED_ASSISTANT_MODEL: "gpt-5.4",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+      };
+
+      await prepareHostedWakeContext(
+        vaultRoot,
+        buildLegacyWake({
+          event: {
+            kind: "device-sync.wake",
+            reason: "connected",
+            userId: "member_123",
+          },
+          eventId: "evt_operator_home",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        }),
+        runtimeEnv,
+        createHostedRuntimeResolvedConfig(),
+        {
+          operatorHomeRoot,
+        },
+      );
+
+      expect(mocks.ensureHostedAssistantOperatorDefaults).toHaveBeenCalledWith({
+        allowMissing: true,
+        env: runtimeEnv,
+        homeDirectory: operatorHomeRoot,
+      });
+      expect(mocks.ensureHostedAssistantOperatorDefaults).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          homeDirectory: ambientHomeRoot,
+        }),
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await cleanup();
+    }
+  });
+
   it("normalizes activation bootstrap to unready when defaults are present but not configured", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 

@@ -1313,6 +1313,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   const phaseInput = input.input;
   const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
     executionContext: input.executionContext,
+    operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
     runtime: phaseInput.runtime,
     runtimeEnv: phaseInput.runtimeEnv,
     shouldYieldBackgroundMaintenance: phaseInput.shouldYieldBackgroundMaintenance ?? null,
