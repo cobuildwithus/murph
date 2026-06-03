@@ -32,7 +32,7 @@ import {
 import {
   snapshotExpectedHostedCodexRootProcess,
   stopHostedWarmCodexAppServer,
-} from "@murphai/assistant-engine/assistant-codex";
+} from "@murphai/assistant-engine/hosted-codex-lifecycle";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";

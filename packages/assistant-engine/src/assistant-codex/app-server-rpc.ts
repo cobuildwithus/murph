@@ -179,8 +179,25 @@ export async function stopCodexAppServerChild(input: {
   }
 
   terminateCodexAppServerChild(input.child, processGroupPid, 'SIGKILL')
-  await waitForCodexChildExit(input.child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)
+  const stoppedAfterKill = await waitForCodexChildExit(
+    input.child,
+    CODEX_APP_SERVER_STOP_TIMEOUT_MS,
+  )
   killCodexProcessGroupBestEffort(processGroupPid, 'SIGKILL')
+
+  if (
+    !stoppedAfterKill &&
+    input.child.exitCode === null &&
+    input.child.signalCode === null
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
+      'Codex app-server did not exit after SIGKILL.',
+      {
+        retryable: false,
+      },
+    )
+  }
 
   if (stdinCloseError) {
     throw stdinCloseError

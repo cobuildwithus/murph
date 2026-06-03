@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,6 +23,7 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
     const launcherDirectories = await createHostedRunnerSmokeLauncherDirectories(launcherRoot);
     const childEntry = resolveHostedRunnerSmokeChildEntry();
     const isTypeScriptChild = childEntry.endsWith(".ts");
+    const ambientEnv = Object.freeze({ ...process.env });
     const child = spawn(
       process.execPath,
       isTypeScriptChild
@@ -32,6 +33,7 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
         cwd: launcherRoot,
         detached: process.platform !== "win32",
         env: createHostedRunnerSmokeProcessEnv({
+          ambientEnv,
           forwardedEnv: {},
           isTypeScriptChild,
           launcherDirectories,
@@ -121,23 +123,25 @@ async function createHostedRunnerSmokeLauncherDirectories(
   } satisfies HostedRunnerSmokeLauncherDirectories;
 
   await Promise.all(
-    Object.values(directories).map((directory) => mkdir(directory, { recursive: true })),
+    Object.values(directories).map(async (directory) => {
+      await mkdir(directory, { mode: 0o700, recursive: true });
+      await chmod(directory, 0o700);
+    }),
   );
 
   return directories;
 }
 
 function createHostedRunnerSmokeProcessEnv(input: {
-  ambientEnv?: Readonly<Record<string, string | undefined>>;
+  ambientEnv: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Record<string, string>;
   isTypeScriptChild: boolean;
   launcherDirectories: HostedRunnerSmokeLauncherDirectories;
 }): Record<string, string> {
-  const ambientEnv = input.ambientEnv ?? process.env;
   const env = projectHostedRuntimeProcessEnv({
-    ambientEnv,
+    ambientEnv: input.ambientEnv,
     forwardedEnv: input.forwardedEnv,
-    platformTransportEnv: ambientEnv,
+    platformTransportEnv: input.ambientEnv,
   });
 
   Object.assign(env, {

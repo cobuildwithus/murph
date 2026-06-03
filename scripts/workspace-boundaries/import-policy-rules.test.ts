@@ -90,13 +90,30 @@ import path from "node:path";
 import {
   snapshotExpectedHostedCodexRootProcess,
   stopHostedWarmCodexAppServer,
-} from "@murphai/assistant-engine/assistant-codex";
+} from "@murphai/assistant-engine/hosted-codex-lifecycle";
       `,
       sourceMember: "apps/cloudflare",
-      specifier: "@murphai/assistant-engine/assistant-codex",
+      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
     });
 
     expect(failure).toBeNull();
+  });
+
+  it("rejects Cloudflare hosted Codex process hook imports outside the container entrypoint", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/runner-container.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: `
+import {
+  snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer,
+} from "@murphai/assistant-engine/hosted-codex-lifecycle";
+      `,
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+    });
+
+    expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
   });
 
   it("rejects unrelated direct Cloudflare imports from assistant-engine", () => {

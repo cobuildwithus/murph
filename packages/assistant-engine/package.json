@@ -75,6 +75,10 @@
       "types": "./dist/child-process-env.d.ts",
       "default": "./dist/child-process-env.js"
     },
+    "./hosted-codex-lifecycle": {
+      "types": "./dist/hosted-codex-lifecycle.d.ts",
+      "default": "./dist/hosted-codex-lifecycle.js"
+    },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"

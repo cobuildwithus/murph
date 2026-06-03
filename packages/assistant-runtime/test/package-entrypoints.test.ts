@@ -124,6 +124,13 @@ test("package root export omits legacy run-drain job helpers", async () => {
   assert.equal("parseHostedAssistantRuntimeJobRequest" in root, false);
 });
 
+test("hosted-runtime-contracts omits assistant-engine Codex lifecycle hooks", async () => {
+  const contracts = await import("@murphai/assistant-runtime/hosted-runtime-contracts");
+
+  assert.equal("snapshotExpectedHostedCodexRootProcess" in contracts, false);
+  assert.equal("stopHostedWarmCodexAppServer" in contracts, false);
+});
+
 test("hosted-assistant-env subpath stays wired to the hosted env source surface", () => {
   assert.equal(HOSTED_ASSISTANT_CONFIG_ENV_NAMES_PUBLIC, HOSTED_ASSISTANT_CONFIG_ENV_NAMES_DIRECT);
   assert.equal(

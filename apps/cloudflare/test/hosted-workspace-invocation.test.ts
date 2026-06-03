@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -198,7 +198,11 @@ describe("runHostedWorkspaceInvocation", () => {
       "cache",
       "tmp",
       "hf-home",
-    ].map((directoryName) => access(path.join(launcherRoot, directoryName))));
+    ].map(async (directoryName) => {
+      const directoryPath = path.join(launcherRoot, directoryName);
+      await access(directoryPath);
+      expect((await stat(directoryPath)).mode & 0o777).toBe(0o700);
+    }));
   });
 });
 

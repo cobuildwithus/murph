@@ -1176,7 +1176,7 @@ describe('assistant codex runtime', () => {
           await waitForRpcMethod(child, 'initialize')
           const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
           error.code = 'ENOENT'
-          child.emit('error', error)
+          emitProcessErrorAndExit(child, error)
         })()
       })
 
@@ -1318,7 +1318,7 @@ describe('assistant codex runtime', () => {
             await waitForRpcMethod(child, 'initialize')
             const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
             error.code = 'ENOENT'
-            child.emit('error', error)
+            emitProcessErrorAndExit(child, error)
           })()
         })
 
@@ -1380,7 +1380,7 @@ describe('assistant codex runtime', () => {
             await waitForRpcMethod(child, 'initialize')
             const error = new Error(`spawn ${scenario.command} ENOENT`) as NodeJS.ErrnoException
             error.code = 'ENOENT'
-            child.emit('error', error)
+            emitProcessErrorAndExit(child, error)
           })()
         })
 
@@ -2148,6 +2148,103 @@ describe('assistant codex runtime', () => {
       .toHaveLength(1)
   })
 
+  it('does not replace a stale hosted warm Codex process when stop cannot prove exit', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-stop-fail-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-stop-fail-work-')
+    await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "first"\n')
+    const spawnedChildren: MockChildProcess[] = []
+
+    vi.mocked(process.kill).mockImplementation(() => true)
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 31_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          const processNumber = spawnedChildren.length
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-warm-stop-fail-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-warm-stop-fail-${processNumber}`,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-warm-stop-fail-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first stop failure identity',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-stop-fail-1',
+      turnId: 'turn-warm-stop-fail-1',
+    })
+
+    await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "second"\n')
+
+    vi.useFakeTimers()
+    try {
+      const replacementAttempt = executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second stop failure identity',
+        workingDirectory,
+      })
+      const replacementExpectation = expect(replacementAttempt).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
+        context: {
+          retryable: false,
+        },
+      })
+      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      await replacementExpectation
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(process.kill).toHaveBeenCalledWith(-31_000, 'SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-31_000, 'SIGKILL')
+  })
+
   it('poisons hosted warm Codex when an aborted turn later completes', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-abort-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-abort-work-')
@@ -2731,7 +2828,7 @@ describe('assistant codex runtime', () => {
           await waitForRpcMethod(child, 'initialize')
           const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
           error.code = 'ENOENT'
-          child.emit('error', error)
+          emitProcessErrorAndExit(child, error)
         })()
       })
 
@@ -4910,6 +5007,46 @@ describe('assistant codex runtime', () => {
     expect(child.kill).not.toHaveBeenCalled()
   })
 
+  it('fails closed when Codex app-server ignores SIGKILL during shutdown', async () => {
+    const child = new MockChildProcess()
+    child.pid = 434_343
+    child.kill.mockImplementation((signal?: NodeJS.Signals) => {
+      child.killed = true
+      void signal
+      return true
+    })
+
+    vi.useFakeTimers()
+    try {
+      const stopped = stopCodexAppServerChild({
+        child,
+        closeStdin: () => null,
+        processGroupPid: process.platform === 'win32' ? null : child.pid,
+      })
+      const stopExpectation = expect(stopped).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
+        context: {
+          retryable: false,
+        },
+      })
+      await vi.advanceTimersByTimeAsync(6_000)
+      await stopExpectation
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(child.exitCode).toBeNull()
+    expect(child.signalCode).toBeNull()
+    if (process.platform === 'win32') {
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    } else {
+      expect(process.kill).toHaveBeenCalledWith(-434_343, 'SIGTERM')
+      expect(process.kill).toHaveBeenCalledWith(-434_343, 'SIGKILL')
+      expect(child.kill).not.toHaveBeenCalled()
+    }
+  })
+
   it('registers parent-exit and signal cleanup for detached Codex app-server groups', () => {
     if (process.platform === 'win32') {
       return
@@ -6053,6 +6190,15 @@ function createErrnoException(
   return error
 }
 
+function emitProcessErrorAndExit(
+  child: MockChildProcess,
+  error: Error,
+): void {
+  child.emit('error', error)
+  child.emit('exit', null, null)
+  child.emit('close', null, null)
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     return value as Record<string, unknown>
@@ -6135,6 +6281,24 @@ async function waitForProcessKill(
       return
     }
     await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  throw new Error(`Expected process.kill(${pid}, ${signal}) to be called.`)
+}
+
+async function waitForProcessKillWithFakeTimers(
+  pid: number,
+  signal: NodeJS.Signals,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (
+      vi.mocked(process.kill).mock.calls.some(
+        (call) => call[0] === pid && call[1] === signal,
+      )
+    ) {
+      return
+    }
+    await vi.advanceTimersByTimeAsync(1)
   }
 
   throw new Error(`Expected process.kill(${pid}, ${signal}) to be called.`)

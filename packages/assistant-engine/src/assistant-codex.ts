@@ -731,18 +731,28 @@ class CodexAppServerProcess {
 
     this.normalShutdown = true
     this.state = 'stopping'
+    let stopped = false
     try {
       await stopCodexAppServerChild({
         child: this.child,
         closeStdin: () => this.closeStdin(),
         processGroupPid: this.processGroupPid,
       })
+      stopped = true
     } finally {
       this.cleanupProcessExitListener()
-      this.state = 'stopped'
-      this.stopCompleted = true
       this.activeTurn = null
       this.ignoredResponseIds.clear()
+      if (
+        stopped ||
+        this.child.exitCode !== null ||
+        this.child.signalCode !== null
+      ) {
+        this.state = 'stopped'
+        this.stopCompleted = true
+      } else {
+        this.poisoned = true
+      }
     }
   }
 
@@ -972,7 +982,7 @@ async function getOrStartHostedWarmCodexProcess(
     }
 
     if (hostedWarmCodexProcess) {
-      await hostedWarmCodexProcess.stop('identity-or-health-mismatch').catch(() => undefined)
+      await hostedWarmCodexProcess.stop('identity-or-health-mismatch')
       hostedWarmCodexProcess = null
     }
 
@@ -987,7 +997,8 @@ function clearHostedWarmCodexProcessIfUnusable(
   const identityDigest = processInstance.identityDigest
   if (
     hostedWarmCodexProcess === processInstance &&
-    (!identityDigest || !processInstance.isReusableFor(identityDigest))
+    (!identityDigest || !processInstance.isReusableFor(identityDigest)) &&
+    (processInstance.child.exitCode !== null || processInstance.child.signalCode !== null)
   ) {
     hostedWarmCodexProcess = null
   }
@@ -998,8 +1009,14 @@ export async function stopHostedWarmCodexAppServer(
 ): Promise<void> {
   await withHostedWarmCodexSlotLock(async () => {
     const processInstance = hostedWarmCodexProcess
-    hostedWarmCodexProcess = null
-    await processInstance?.stop(reason).catch(() => undefined)
+    if (!processInstance) {
+      return
+    }
+
+    await processInstance.stop(reason)
+    if (hostedWarmCodexProcess === processInstance) {
+      hostedWarmCodexProcess = null
+    }
   })
 }
 

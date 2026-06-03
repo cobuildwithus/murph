@@ -44,7 +44,4 @@ export * from "./hosted-email.ts";
 export * from "./observability.ts";
 export * from "./orchestration-control.ts";
 export * from "./routes.ts";
-export type {
-  HostedExpectedCodexRootProcess,
-} from "./runtime-control.ts";
 export * from "./side-effects.ts";
