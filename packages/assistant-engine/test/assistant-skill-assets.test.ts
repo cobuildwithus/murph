@@ -89,6 +89,7 @@ describe('assistant skill assets', () => {
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
     )
     expect(raw).toContain('# First-session prep reminders')
+    expect(raw).toContain('Ask a direct, lightweight reminder setup question')
     expect(raw).toContain('vault-cli experiment start <slug>')
     expect(raw).toContain('vault-cli experiment edit <id>')
     expect(raw).toContain('vault-cli automation save <title>')
