@@ -51,7 +51,7 @@ vault-cli memory upsert <text> --vault <path> --section <section>
 vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]
 vault-cli memory forget <memoryId> --vault <path>
 vault-cli automation scaffold --vault <path>
-vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> --channel <channel> [...]
+vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
 vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
 vault-cli automation import-json --vault <path> --input @payload.json|-
