@@ -56,11 +56,6 @@ class HostedRunnerUserDataDeletionR2CleanupFailedError extends Error {
   }
 }
 
-export {
-  HostedRunnerUserDataDeletionRunnerStillActiveError
-    as HostedUserRunnerDataDeletionRunnerStillActiveError,
-};
-
 export interface HostedRunnerUserDataDeletionServiceInput {
   bucket: R2BucketLike;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;

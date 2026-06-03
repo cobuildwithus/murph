@@ -2137,6 +2137,12 @@ function createAbortGuardedHostedRuntimePlatform(
             guard(() => platform.publicInternetFetch!(request, init))) as typeof fetch,
         }
       : {}),
+    ...(platform.providerFetch
+      ? {
+          providerFetch: (async (request, init) =>
+            guard(() => platform.providerFetch!(request, init))) as typeof fetch,
+        }
+      : {}),
     ...(platform.usageRecordPort
       ? {
           usageRecordPort: {

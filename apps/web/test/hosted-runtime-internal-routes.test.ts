@@ -1066,6 +1066,26 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toMatch(/payloadCiphertext|message|email|phone|token/u);
   });
 
+  it("rejects partial numeric hosted runtime status log limits", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: null,
+      version: "0",
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([]);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=10abc",
+      { method: "GET" },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledWith({
+      limit: 20,
+      userId: "member_routes_1",
+    });
+  });
+
   it("does not treat foreground mailbox import logs as checkpointed progress", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: null,

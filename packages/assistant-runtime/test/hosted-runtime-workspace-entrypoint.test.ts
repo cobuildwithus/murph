@@ -315,14 +315,14 @@ describe("hosted workspace runtime entrypoint", () => {
         ["workspace.read", "done"],
         ["workspace.restore", "start"],
         ["workspace.restore", "done"],
+        ["cli.bridge", "start"],
+        ["cli.bridge", "done"],
         ["codex.prepare", "start"],
         ["codex.prepare", "done"],
         ["mailbox.import.initial", "start"],
         ["mailbox.import.initial", "done"],
         ["inbox.sidecar", "start"],
         ["inbox.sidecar", "done"],
-        ["cli.bridge", "start"],
-        ["cli.bridge", "done"],
         ["foreground.pass", "start"],
         ["foreground.pass", "done"],
         ["runtime.return", "done"],
@@ -343,7 +343,10 @@ describe("hosted workspace runtime entrypoint", () => {
         actualWorkspaceVersion: "0",
         workspacePresent: true,
       }));
-      expect(phaseLogs[7]?.details).toEqual(expect.objectContaining({
+      expect(phaseLogs.find((entry) =>
+        entry.details.runtimePhase === "mailbox.import.initial"
+        && entry.details.runtimePhaseStatus === "done"
+      )?.details).toEqual(expect.objectContaining({
         fetchedCount: 0,
         importedCount: 0,
       }));
@@ -1006,8 +1009,6 @@ describe("hosted workspace runtime entrypoint", () => {
         ["cli.bridge", "done"],
         ["workspace.checkpoint.idle_shutdown", "start"],
         ["workspace.checkpoint.idle_shutdown", "done"],
-        ["cli.bridge.stop", "start"],
-        ["cli.bridge.stop", "done"],
         ["runtime.return", "done"],
       ]));
       expect(

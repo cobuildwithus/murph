@@ -22,7 +22,7 @@ import {
 
 import {
   buildHostedExecutionRuntimePlatform,
-  createCloudflareHostedProviderFetch,
+  createCloudflareHostedTrustedInternalFetch,
   readCloudflareHostedProviderFetchBaseUrls,
 } from "./runtime-platform.ts";
 import {
@@ -157,12 +157,11 @@ export async function runHostedWorkspaceInvocation(
       },
     },
   });
-  const webControlFetch = createCloudflareHostedProviderFetch(
+  const webControlFetch = createCloudflareHostedTrustedInternalFetch(
     boundUserId,
     fetch,
     {
       injectBoundUserIdHeader: true,
-      readCurrentLease: () => currentLease,
     },
   );
   const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({

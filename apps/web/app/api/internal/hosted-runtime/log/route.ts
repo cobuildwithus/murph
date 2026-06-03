@@ -19,9 +19,12 @@ import {
 
 const ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE = "runner.accepted_attempt_failed";
 const ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS = 30_000;
+const HOSTED_RUNTIME_LOG_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_RUNTIME_LOG_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
 
   const records = await Promise.all(body.entries.map((entry) => recordHostedRuntimeLog({

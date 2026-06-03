@@ -19,11 +19,15 @@ import {
   resolveDecodedRouteParam,
 } from "@/src/lib/http";
 
+const HOSTED_ORCHESTRATION_DEMAND_CALLBACK_BODY_LIMIT_BYTES = 0;
+
 export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ userId: string }> },
 ) => {
-  const authenticatedUserId = await requireHostedCloudflareCallbackRequest(request);
+  const authenticatedUserId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_ORCHESTRATION_DEMAND_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const routeUserId = await resolveDecodedRouteParam(context.params, "userId");
   assertHostedOrchestrationUserMatches({
     authenticatedUserId,

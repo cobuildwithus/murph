@@ -40,6 +40,9 @@ import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
 import {
+  withHostedProcessEnvironment,
+} from "./environment.ts";
+import {
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane,
 } from "./maintenance.ts";
@@ -363,6 +366,7 @@ export async function runHostedWorkspaceAssistantPhase(
       },
     },
     {
+      homeDirectory: input.restored.operatorHomeRoot,
       runtimeEnv: input.runtimeEnv,
     },
   );
@@ -400,24 +404,37 @@ export async function runHostedWorkspaceAssistantPhase(
     const preferredInputIds = hasFreshConversationInput
       ? foregroundReplayInputIds
       : input.initialMailboxImport.importResult.assistantInputIds ?? [];
-    const assistantMetrics = await runHostedAssistantAutomationLane({
-      executionContext,
-      foregroundReplayInputIds,
-      foregroundReplayPromptInputIds,
-      preferredInputIds,
-      requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
-      runtime: {
-        commitTimeoutMs: input.runtime.commitTimeoutMs,
-        forwardedEnv: input.runtime.forwardedEnv,
-        platform: input.platform,
-        platformEnv: input.runtime.platformEnv,
-        resolvedConfig: input.runtime.resolvedConfig,
-      },
-      runtimeAttemptId: input.request.attemptId,
-      signal: input.signal ?? undefined,
-      vaultRoot: input.restored.vaultRoot,
-      wake,
-    });
+    const runAutomationLane = async () =>
+      await runHostedAssistantAutomationLane({
+        executionContext,
+        foregroundReplayInputIds,
+        foregroundReplayPromptInputIds,
+        preferredInputIds,
+        requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
+        runtime: {
+          commitTimeoutMs: input.runtime.commitTimeoutMs,
+          forwardedEnv: input.runtime.forwardedEnv,
+          platform: input.platform,
+          platformEnv: input.runtime.platformEnv,
+          resolvedConfig: input.runtime.resolvedConfig,
+        },
+        runtimeAttemptId: input.request.attemptId,
+        signal: input.signal ?? undefined,
+        vaultRoot: input.restored.vaultRoot,
+        wake,
+      });
+    const assistantMetrics = Object.keys(input.runtimeEnv).length === 0
+      ? await runAutomationLane()
+      : await withHostedProcessEnvironment(
+          {
+            envOverrides: {
+              ...input.runtimeEnv,
+            },
+            operatorHomeRoot: input.restored.operatorHomeRoot,
+            vaultRoot: input.restored.vaultRoot,
+          },
+          runAutomationLane,
+        );
     const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
       deviceSyncMaintenanceRan: systemMailboxMaintenance.deviceSyncMaintenanceRan,
       input,

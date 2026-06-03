@@ -1,6 +1,7 @@
 export {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
+  createCloudflareHostedTrustedInternalFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
   HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,

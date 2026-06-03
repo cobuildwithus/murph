@@ -13,8 +13,12 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
+const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
+
 export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const [itemsResult, maxSeqByLane] = await Promise.all([
     fetchHostedMailboxItemsAfterLaneCursors({

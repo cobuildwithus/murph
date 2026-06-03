@@ -1054,6 +1054,35 @@ describe("cloudflare worker routes", () => {
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(bundleBytes);
   });
 
+  it.each(["10abc", "1e3", "0x10"])(
+    "rejects malformed hosted-local test bundle ref size %s",
+    async (size) => {
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+      });
+      const url = "https://runner.example.test/__test/artifacts"
+        + "?userId=member_123"
+        + "&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b"
+        + "&key=cloudflare-workspace-snapshots%2Ffec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b.bundle"
+        + `&size=${encodeURIComponent(size)}`;
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(url, {
+          method: "GET",
+        }), {
+          boundUserId: "member_123",
+        }),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "size is required.",
+      });
+    },
+  );
+
   it("reads artifact-backed hosted-local workspace snapshot bundle refs", async () => {
     const snapshotBytes = Buffer.from("workspace-snapshot-payload\n", "utf8");
     const snapshotSha256 = createHash("sha256").update(snapshotBytes).digest("hex");
@@ -1895,6 +1924,8 @@ describe("cloudflare worker routes", () => {
       vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
 
       for (const invalidTimeout of [
+        "10000ms",
+        "10e3",
         "not-a-timeout",
         String(HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS),
       ]) {

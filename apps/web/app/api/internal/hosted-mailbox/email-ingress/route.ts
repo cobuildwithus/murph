@@ -23,7 +23,9 @@ const HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES = 16 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const boundedRequest = await readBoundedHostedEmailIngressRequest(request);
-  const userId = await requireHostedCloudflareCallbackRequest(boundedRequest);
+  const userId = await requireHostedCloudflareCallbackRequest(boundedRequest, {
+    maxBodyBytes: HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES,
+  });
   const body = parseHostedEmailIngressWakeAppendRequest(await readOptionalJsonObject(boundedRequest));
   const envelope = buildHostedExecutionEmailConversationMessageWake({
     ...(body.attachmentSummaries === undefined ? {} : { attachmentSummaries: body.attachmentSummaries }),

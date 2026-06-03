@@ -352,18 +352,20 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
 }
 
 export async function readHostedAssistantExecutionDefaultTarget(input: {
+  homeDirectory?: string;
   runtimeEnv?: Readonly<Record<string, string | undefined>>;
 } = {}): Promise<AssistantModelTarget | null> {
   if (input.runtimeEnv) {
     await ensureHostedAssistantOperatorDefaults({
       allowMissing: true,
       env: input.runtimeEnv,
+      homeDirectory: input.homeDirectory,
     });
   }
 
-  const operatorConfig = await readOperatorConfig();
+  const operatorConfig = await readOperatorConfig(input.homeDirectory);
   const hostedAssistantConfig = operatorConfig?.hostedAssistant
-    ?? (await resolveHostedAssistantConfig());
+    ?? (await resolveHostedAssistantConfig(input.homeDirectory));
 
   const target = createAssistantModelTarget(
     resolveHostedAssistantProviderConfig(hostedAssistantConfig),
@@ -381,6 +383,7 @@ export async function readHostedAssistantExecutionDefaultTarget(input: {
 export async function hydrateHostedExecutionDefaultTarget(
   executionContext: AssistantExecutionContext,
   input: {
+    homeDirectory?: string;
     runtimeEnv?: Readonly<Record<string, string | undefined>>;
   } = {},
 ): Promise<AssistantExecutionContext> {
@@ -389,6 +392,7 @@ export async function hydrateHostedExecutionDefaultTarget(
   }
 
   const defaultTarget = await readHostedAssistantExecutionDefaultTarget({
+    homeDirectory: input.homeDirectory,
     runtimeEnv: input.runtimeEnv,
   });
   if (!defaultTarget) {

@@ -16,8 +16,12 @@ import {
   readHostedWorkspace,
 } from "@/src/lib/hosted-workspace/store";
 
+const HOSTED_RUNTIME_STATUS_CALLBACK_BODY_LIMIT_BYTES = 0;
+
 export const GET = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_RUNTIME_STATUS_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const logLimit = readStatusLogLimit(request);
   const [workspace, maxSeqByLane, recentLogs] = await Promise.all([
     readHostedWorkspace({ userId }),
@@ -75,7 +79,11 @@ function readStatusLogLimit(request: Request): number {
     return 20;
   }
 
-  const parsed = Number.parseInt(rawLimit, 10);
+  if (!/^[0-9]+$/u.test(rawLimit)) {
+    return 20;
+  }
+
+  const parsed = Number(rawLimit);
 
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 20;
 }

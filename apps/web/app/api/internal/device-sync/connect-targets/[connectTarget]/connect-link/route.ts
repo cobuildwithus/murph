@@ -29,6 +29,7 @@ const HOSTED_DEVICE_CONNECT_DIAGNOSTIC_PROVIDER_IDS = new Set<string>(
   configuredDeviceSyncProviderKeys,
 );
 const HOSTED_DEVICE_CONNECT_DIAGNOSTIC_ERROR_CODE_MAX_LENGTH = 96;
+const HOSTED_DEVICE_CONNECT_CALLBACK_BODY_LIMIT_BYTES = 4 * 1024;
 
 type HostedDeviceConnectLinkSetupPhase =
   | "callback_verification_setup"
@@ -123,7 +124,9 @@ type HostedDeviceConnectLinkRouteStage =
 
 async function requireHostedDeviceConnectCallbackRequest(request: Request): Promise<string> {
   try {
-    return await requireHostedCloudflareCallbackRequest(request);
+    return await requireHostedCloudflareCallbackRequest(request, {
+      maxBodyBytes: HOSTED_DEVICE_CONNECT_CALLBACK_BODY_LIMIT_BYTES,
+    });
   } catch (error) {
     remapHostedDeviceConnectBackendSetupError(error, "callback_verification_setup");
   }

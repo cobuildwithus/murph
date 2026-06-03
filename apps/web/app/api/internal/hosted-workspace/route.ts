@@ -8,8 +8,12 @@ import {
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
+const HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES = 0;
+
 export const GET = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const workspace = await readHostedWorkspace({ userId });
 
   return jsonOk(parseHostedWorkspaceReadResponse({

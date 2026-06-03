@@ -26,8 +26,12 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getPrisma } from "@/src/lib/prisma";
 
+const HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
+
 export const POST = withJsonError(async (request: Request) => {
-  const callbackUserId = await requireHostedCloudflareCallbackRequest(request);
+  const callbackUserId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_BODY_LIMIT_BYTES,
+  });
 
   if (callbackUserId !== HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID) {
     throw hostedOnboardingError({

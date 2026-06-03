@@ -15,7 +15,6 @@ import {
 } from "./internal-request-nonces";
 
 const DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_KEY_ID = "v1";
-const DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_MAX_BODY_BYTES = 256 * 1024;
 const HOSTED_CLOUDFLARE_CALLBACK_MAX_TIMESTAMP_SKEW_MS = 60_000;
 const HOSTED_CLOUDFLARE_CALLBACK_NONCE_MIN_LENGTH = 16;
 const HOSTED_CLOUDFLARE_CALLBACK_SIGNING_ALGORITHM: EcKeyImportParams = {
@@ -48,12 +47,12 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 export async function requireHostedCloudflareCallbackRequest(
   request: Request,
   options: {
+    maxBodyBytes: number;
     maxTimestampSkewMs?: number;
-    maxBodyBytes?: number;
     nonceStore?: HostedCallbackRequestNonceStore;
     nowMs?: number;
     payloadText?: string;
-  } = {},
+  },
 ): Promise<string> {
   const verification = requireHostedCloudflareCallbackVerificationEnvironment(process.env);
   const userId = requireHostedExecutionUserId(request);
@@ -61,8 +60,7 @@ export async function requireHostedCloudflareCallbackRequest(
   const { keyId, nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
   const normalizedNonce = normalizeOptionalString(nonce);
   const normalizedKeyId = normalizeOptionalString(keyId);
-  const maxBodyBytes =
-    options.maxBodyBytes ?? DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_MAX_BODY_BYTES;
+  const maxBodyBytes = options.maxBodyBytes;
   const maxTimestampSkewMs =
     options.maxTimestampSkewMs ?? HOSTED_CLOUDFLARE_CALLBACK_MAX_TIMESTAMP_SKEW_MS;
 

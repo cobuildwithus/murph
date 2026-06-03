@@ -157,6 +157,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
 
     await expect(
       requireHostedCloudflareCallbackRequest(request, {
+        maxBodyBytes: 256 * 1024,
         nonceStore,
         nowMs: FIXED_NOW_MS,
       }),
@@ -173,6 +174,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
 
     await expect(
       requireHostedCloudflareCallbackRequest(replayedRequest, {
+        maxBodyBytes: 256 * 1024,
         nonceStore,
         nowMs: FIXED_NOW_MS,
       }),
@@ -214,6 +216,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
 
     await expect(
       requireHostedCloudflareCallbackRequest(new Request(request, { headers }), {
+        maxBodyBytes: 0,
         nonceStore: new MemoryNonceStore(),
         nowMs: FIXED_NOW_MS,
       }),

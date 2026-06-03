@@ -11,6 +11,10 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -379,6 +383,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       },
       {
+        homeDirectory: "/tmp/murph-operator-home",
         runtimeEnv: {},
       },
     );
@@ -391,6 +396,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       }),
     );
+  });
+
+  it("runs assistant automation inside the prepared hosted process environment", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-phase-vault-"));
+    const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "hosted-phase-home-"));
+    const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
+    const codexShimPath = path.join(codexHome, "bin/codex");
+    const previousCommand = process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV];
+    const previousCodexHome = process.env.CODEX_HOME;
+    const previousHostedMarker = process.env[HOSTED_RUNTIME_PROCESS_ENV];
+    const previousVault = process.env.VAULT;
+    const restoreEnv = (key: string, value: string | undefined) => {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    };
+
+    process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV] = "ambient-command";
+    process.env.CODEX_HOME = "ambient-codex-home";
+    process.env[HOSTED_RUNTIME_PROCESS_ENV] = "0";
+    process.env.VAULT = "ambient-vault";
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]).toBe(codexShimPath);
+      expect(process.env.CODEX_HOME).toBe(codexHome);
+      expect(process.env.HOME).toBe(operatorHomeRoot);
+      expect(process.env[HOSTED_RUNTIME_PROCESS_ENV]).toBe("1");
+      expect(process.env.VAULT).toBe(vaultRoot);
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    try {
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        operatorHomeRoot,
+        runtimeEnv: {
+          CODEX_HOME: codexHome,
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: codexShimPath,
+          [HOSTED_RUNTIME_PROCESS_ENV]: "1",
+          NODE_ENV: "test",
+          PATH: "/usr/bin",
+        },
+        vaultRoot,
+      }));
+
+      expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV])
+        .toBe("ambient-command");
+      expect(process.env.CODEX_HOME).toBe("ambient-codex-home");
+      expect(process.env[HOSTED_RUNTIME_PROCESS_ENV]).toBe("0");
+      expect(process.env.VAULT).toBe("ambient-vault");
+    } finally {
+      restoreEnv(HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV, previousCommand);
+      restoreEnv("CODEX_HOME", previousCodexHome);
+      restoreEnv(HOSTED_RUNTIME_PROCESS_ENV, previousHostedMarker);
+      restoreEnv("VAULT", previousVault);
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(operatorHomeRoot, { force: true, recursive: true });
+    }
   });
 
   it("installs a direct hosted usage recorder from the runtime platform", async () => {
@@ -3850,6 +3918,8 @@ function createPhaseInput(input: {
   source?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["source"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
+  runtimeEnv?: Record<string, string>;
+  operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -3928,7 +3998,7 @@ function createPhaseInput(input: {
     },
     restored: {
       assistantStateRoot: "/tmp/murph-assistant-state",
-      operatorHomeRoot: "/tmp/murph-operator-home",
+      operatorHomeRoot: input.operatorHomeRoot ?? "/tmp/murph-operator-home",
       vaultRoot: input.vaultRoot ?? "/tmp/murph-vault",
     },
     runtime: {
@@ -3969,7 +4039,7 @@ function createPhaseInput(input: {
       },
       userEnv: input.runtimeUserEnv ?? {},
     },
-    runtimeEnv: {},
+    runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,
   };

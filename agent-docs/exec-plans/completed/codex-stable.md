@@ -458,3 +458,6 @@ Codex process:
 ```
 
 This is the smallest clean architecture that satisfies the goal: reliable Codex app-server reuse across messages, provider tools still authorized, device-connect CLI still works, and no extra provider bridge or second intercept layer.
+Status: completed
+Updated: 2026-06-03
+Completed: 2026-06-03

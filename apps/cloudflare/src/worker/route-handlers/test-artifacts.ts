@@ -92,8 +92,8 @@ export async function handleTestArtifactRoute(
   });
   if (context.request.method === "GET") {
     if (bundleKey) {
-      const parsedBundleSize = Number(bundleSize);
-      if (!Number.isSafeInteger(parsedBundleSize) || parsedBundleSize < 0) {
+      const parsedBundleSize = parseStrictNonNegativeInteger(bundleSize);
+      if (parsedBundleSize === null) {
         return json({ error: "size is required." }, 400);
       }
 
@@ -184,4 +184,13 @@ export function isArtifactBackedHostedWorkspaceBundleKey(
   return key === `cloudflare-workspace-snapshots/${sha256}.bundle`
     || key === `cloudflare-workspace-deltas/${sha256}.bundle`
     || key === `cloudflare-workspace-hot-state/${sha256}.bundle`;
+}
+
+function parseStrictNonNegativeInteger(value: string): number | null {
+  if (!/^[0-9]+$/u.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }

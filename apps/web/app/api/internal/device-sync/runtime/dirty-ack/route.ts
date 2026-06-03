@@ -4,6 +4,8 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 
+const HOSTED_DEVICE_SYNC_DIRTY_ACK_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
+
 export async function GET(): Promise<Response> {
   return Response.json({
     error: {
@@ -21,7 +23,9 @@ export async function GET(): Promise<Response> {
 }
 
 export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_DEVICE_SYNC_DIRTY_ACK_CALLBACK_BODY_LIMIT_BYTES,
+  });
   return jsonOk(await ackHostedDeviceSyncDirtyStateProcessed({
     request,
     trustedUserId: userId,

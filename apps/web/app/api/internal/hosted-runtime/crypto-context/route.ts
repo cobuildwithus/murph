@@ -3,8 +3,12 @@ import { readHostedRuntimeCryptoContextForWorker } from "@/src/lib/hosted-crypto
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
+const HOSTED_RUNTIME_CRYPTO_CONTEXT_CALLBACK_BODY_LIMIT_BYTES = 4 * 1024;
+
 export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_RUNTIME_CRYPTO_CONTEXT_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const prisma = getPrisma();
   const member = await prisma.hostedMember.findUnique({
     select: { billingStatus: true, suspendedAt: true },

@@ -131,13 +131,6 @@ export function readHostedRuntimeControlPlaneFetchFailureDiagnostics(
 
   return null;
 }
-export function combineAbortSignals(
-  first: AbortSignal | null,
-  second: AbortSignal,
-): AbortSignal {
-  return combineAbortSignalsWithCleanup(first, second).signal;
-}
-
 export function combineAbortSignalsWithCleanup(
   first: AbortSignal | null,
   second: AbortSignal,

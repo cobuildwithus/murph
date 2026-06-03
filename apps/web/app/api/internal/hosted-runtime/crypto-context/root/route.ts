@@ -8,9 +8,12 @@ import { jsonError, jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/ht
 import { getPrisma } from "@/src/lib/prisma";
 
 type HostedRuntimeCryptoRootDomain = "ingress" | "runtime";
+const HOSTED_RUNTIME_CRYPTO_ROOT_CALLBACK_BODY_LIMIT_BYTES = 4 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    maxBodyBytes: HOSTED_RUNTIME_CRYPTO_ROOT_CALLBACK_BODY_LIMIT_BYTES,
+  });
   const body = parseHostedRuntimeCryptoRootRequest(await request.json());
   const prisma = getPrisma();
   const member = await prisma.hostedMember.findUnique({
