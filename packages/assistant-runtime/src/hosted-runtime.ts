@@ -1059,7 +1059,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return "finished";
     };
-    try {
       result = await runForegroundPass({
         initialMailboxImport,
         requestId,
@@ -1333,7 +1332,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         return invocationResult;
       }
-    }
     assertRuntimeNotAborted();
     const projection = buildHostedWorkspaceInvocationProjection({
       mailboxBudgetExhausted: mailboxBudgetExhausted(),
