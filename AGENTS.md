@@ -1,5 +1,19 @@
 # AGENTS.md
 
+## Default To Deletion And Simplicity
+
+Default to deletion and simplicity. Complexity is the enemy: every abstraction,
+service, dependency, state transition, permission check, bridge, config flag,
+retry path, and special case must justify its existence. Before adding
+anything, ask whether the requirement itself can be deleted, whether the design
+can be collapsed into an existing boundary, and whether the system can work
+with fewer moving parts. The best architecture is usually the one with the
+fewest concepts, the clearest ownership, and the smallest surface area for
+bugs. Do not optimize, automate, generalize, or harden a thing until you have
+first tried to remove it. If a component is only there to defend against
+complexity introduced elsewhere, prefer removing the upstream complexity
+instead.
+
 ## Purpose
 
 This file is the compact routing map for agent work in this repository.
