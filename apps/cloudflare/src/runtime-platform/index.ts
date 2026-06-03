@@ -1,17 +1,38 @@
 export {
   buildHostedExecutionRuntimePlatform,
+} from "./platform-factory.ts";
+
+export {
   createCloudflareHostedProviderFetch,
+  readCloudflareHostedProviderFetchBaseUrls,
+} from "./provider-fetch.ts";
+
+export {
   createHostedBrowserVaultReplicaWriteHeaders,
+} from "./browser-vault-replica-port.ts";
+
+export {
   HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,
-  readCloudflareHostedProviderFetchBaseUrls,
+} from "./authority-headers.ts";
+
+export {
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
+} from "./control-plane-fetch.ts";
+
+export {
   readHostedWorkspaceSnapshotRestoreStep,
-} from "./runtime-platform/index.ts";
+} from "./diagnostics.ts";
+
+export type {
+  HostedWorkspaceCheckpointBridgeAuthority,
+} from "./authority-headers.ts";
 
 export type {
   HostedRuntimeControlPlaneFetchCauseKind,
   HostedRuntimeControlPlaneFetchFailureDiagnostics,
-  HostedWorkspaceCheckpointBridgeAuthority,
+} from "./control-plane-fetch.ts";
+
+export type {
   HostedWorkspaceSnapshotRestoreStep,
-} from "./runtime-platform/index.ts";
+} from "./diagnostics.ts";

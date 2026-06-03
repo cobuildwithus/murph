@@ -38,6 +38,9 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.ts";
 import {
+  workspaceSnapshotOrphanCandidateStorageKey,
+} from "../src/user-runner/workspace-snapshot-sessions.ts";
+import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
   type HostedWorkspaceSnapshotUploadSession,
@@ -1922,7 +1925,7 @@ describe("HostedUserRunner execution coordination", () => {
 
   it("records the previous workspace snapshot object when replacing the active upload session", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const { runner } = createRunnerHarness({ bucket });
+    const { runner, storageValues } = createRunnerHarness({ bucket });
     const previousObjectKey =
       `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_previous.snapshot.enc`;
     const nextObjectKey =
@@ -1935,10 +1938,6 @@ describe("HostedUserRunner execution coordination", () => {
         snapshotId: "snapshot_previous",
       }),
     );
-    const recordOrphanCandidate = vi.spyOn(
-      runner,
-      "recordHostedWorkspaceSnapshotOrphanCandidate",
-    );
     await runner.createHostedWorkspaceSnapshotUploadSession(
       createWorkspaceSnapshotUploadSessionForTest({
         objectKey: nextObjectKey,
@@ -1946,7 +1945,10 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     );
 
-    expect(recordOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_previous"),
+    )).toEqual(expect.objectContaining({
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
       objectKey: previousObjectKey,
       snapshotId: "snapshot_previous",
       userId: TEST_USER_ID,
@@ -2125,6 +2127,7 @@ function createRunnerHarness(input: {
     invoke,
     runner,
     sql: durable.sql,
+    storageValues: durable.storageValues,
     waitUntilPromises: durable.waitUntilPromises,
   };
 }
@@ -2206,6 +2209,7 @@ function createDurableObjectState(input: {
   alarms: string[];
   state: DurableObjectStateLike;
   waitUntilPromises: Promise<unknown>[];
+  storageValues: Map<string, unknown>;
   sql: TestSqlStorageLike;
 } {
   const alarms: string[] = [];
@@ -2252,6 +2256,7 @@ function createDurableObjectState(input: {
       },
     },
     waitUntilPromises,
+    storageValues: values,
     sql,
   };
 }

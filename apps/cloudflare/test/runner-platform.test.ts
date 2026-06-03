@@ -20,6 +20,9 @@ import {
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
+  HostedRuntimeBridgeCheckpointLeaseError,
+} from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -4308,19 +4311,28 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    const result = await platform.workspacePort!.checkpoint({
-      attemptId: "attempt_1",
-      expectedWorkspaceVersion: "4",
-      leaseGeneration: "9",
-      nextWakeAt: null,
-      nextWakeReason: null,
-      reason: "canonical_runtime_commit",
-      redactedStatus: {},
-      snapshotRef: null,
-    });
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        reason: "canonical_runtime_commit",
+        redactedStatus: {},
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
 
-    expect(result.checkpointed).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rejected).toBeInstanceOf(HostedRuntimeBridgeCheckpointLeaseError);
+    expect(rejected).toMatchObject({
+      code: "stale_workspace_version",
+      stage: "before_web_checkpoint",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reads workspace state through the web callback route", async () => {

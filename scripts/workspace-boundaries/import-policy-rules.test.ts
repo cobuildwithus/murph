@@ -93,6 +93,90 @@ import /* keep */ {
     expect(failure).toContain("@murphai/assistant-runtime/hosted-invocation");
   });
 
+  it("rejects Cloudflare source imports of bridge construction from the hosted invocation facade", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedWorkspaceRuntimeBridgeJobOptions } from "@murphai/assistant-runtime/hosted-invocation";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime/hosted-invocation",
+    });
+
+    expect(failure).toContain("runHostedWorkspaceInvocation");
+  });
+
+  it("rejects Cloudflare source imports of checkpoint lease types from the hosted invocation facade", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/runtime-platform/authority-headers.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import type { HostedRuntimeBridgeCheckpointLease } from "@murphai/assistant-runtime/hosted-invocation";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime/hosted-invocation",
+    });
+
+    expect(failure).toContain("focused capability subpaths");
+  });
+
+  it("rejects Cloudflare source imports from the hosted invocation testkit", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedWorkspaceRuntimeBridgeJobOptions } from "@murphai/assistant-runtime/hosted-invocation-testkit";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime/hosted-invocation-testkit",
+    });
+
+    expect(failure).toContain("testkit is for focused tests only");
+  });
+
+  it("rejects non-test imports from the hosted invocation testkit outside Cloudflare", () => {
+    const filePath = path.join(repoRoot, "apps/web/app/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedWorkspaceRuntimeBridgeJobOptions } from "@murphai/assistant-runtime/hosted-invocation-testkit";',
+      sourceMember: "apps/web",
+      specifier: "@murphai/assistant-runtime/hosted-invocation-testkit",
+    });
+
+    expect(failure).toContain("testkit is for focused tests only");
+  });
+
+  it("allows test imports from the hosted invocation testkit", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/test/runtime-bridge-workspace.test.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedWorkspaceRuntimeBridgeJobOptions } from "@murphai/assistant-runtime/hosted-invocation-testkit";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime/hosted-invocation-testkit",
+    });
+
+    expect(failure).toBeNull();
+  });
+
+  it("rejects Cloudflare source re-exports of hosted invocation internals from assistant-runtime root", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'export { runHostedWorkspaceRuntimeJobInProcess } from "@murphai/assistant-runtime";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime",
+    });
+
+    expect(failure).toContain("@murphai/assistant-runtime/hosted-invocation");
+  });
+
+  it("rejects Cloudflare source re-exports of bridge construction from the hosted invocation facade", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'export { createHostedWorkspaceRuntimeBridgeJobOptions } from "@murphai/assistant-runtime/hosted-invocation";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime/hosted-invocation",
+    });
+
+    expect(failure).toContain("runHostedWorkspaceInvocation");
+  });
+
   it("rejects Cloudflare source imports of old app-local runtime bridge files", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
     const failure = verifyWorkspaceImportPolicy({

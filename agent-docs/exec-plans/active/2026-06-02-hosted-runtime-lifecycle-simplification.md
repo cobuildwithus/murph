@@ -90,13 +90,13 @@ Temporal hosted workflow
 
 - Milestone 2 warm-Codex process ownership now stays in
   `packages/assistant-engine`: `apps/cloudflare` imports the concrete snapshot
-  and stop hooks from `@murphai/assistant-engine/assistant-codex`, while the
-  expected-root process shape lives as a neutral hosted contract in
+  and stop hooks from `@murphai/assistant-engine/hosted-codex-lifecycle`, while
+  the expected-root process shape lives as a neutral hosted contract in
   `@murphai/hosted-execution/runtime-control`.
-- Review follow-up in progress: hard-cut remaining legacy runtime-wake result
-  compatibility, rename the hosted process-env projection helper away from
-  child terminology with explicit ambient env input, and pin direct invocation
-  launcher-root side effects in focused tests.
+- The prior review follow-up for legacy runtime-wake result compatibility,
+  hosted env projection naming, and direct invocation launcher-root side-effect
+  tests has landed in current code/tests. Remaining lifecycle work should be
+  tracked by new concrete findings rather than that completed follow-up note.
 
 ## First-Principles Corrections
 

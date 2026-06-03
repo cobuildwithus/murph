@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-02
+Last verified: 2026-06-03
 
 ## Decision
 
@@ -105,6 +105,10 @@ runner by runtime write-fence identity (`attemptId`, `generation`, and
 `workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
 stay on the checkpoint path rather than becoming generic side-effect
 authorization.
+Package-owned hosted checkpoint bridges must validate the current lease's
+`attemptId`, `leaseGeneration`, `userId`, and `workspaceVersion` against the
+checkpoint request before snapshot creation, direct snapshot upload, and web
+checkpoint publication.
 Legacy active-invocation heartbeat and container-stopped methods are inert
 compatibility shims, not lifecycle policy, and must be deleted after
 2026-05-25. Live lifecycle control is the runtime write fence plus the Durable
@@ -423,7 +427,10 @@ producers, Worker-body snapshot uploads, or artifact-sidecar v2 producers.
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
 during the broad snapshot walk so stale idle shutdown can abort before direct
-R2 upload.
+R2 upload. `packages/assistant-runtime` owns the hosted invocation bridge,
+snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies
+only explicit platform capabilities such as mailbox payload decode, direct-R2
+ports, and the local encrypted archive writer.
 
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser

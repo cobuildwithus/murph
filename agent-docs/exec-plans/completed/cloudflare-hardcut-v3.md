@@ -14,6 +14,14 @@ Leave packages/assistant-engine as the Warm Codex process owner.
 
 This is a hard-cut ownership cleanup, not a new lifecycle subsystem.
 
+Completion note: the hard cut is landed. Cloudflare calls the package-owned
+hosted invocation facade, bridge construction is internal/test-only,
+runtime wake and current-lease boundaries are required, and checkpoint lease
+validation includes workspace version. Verification passed with focused
+assistant-runtime tests, full Cloudflare node tests, Cloudflare
+`verify:parallel`, workspace boundary checks, repo `pnpm typecheck`, and
+`git diff --check`.
+
 ---
 
 ## Current architecture on `main`
@@ -185,7 +193,7 @@ export interface HostedWorkspaceInvocationInput {
   vaultRoot: string;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
   runtimeWakeSignal: RuntimeWakeSignal;
-  readCurrentLease?: (() =>
+  readCurrentLease: (() =>
     | HostedInvocationLease
     | null
     | Promise<HostedInvocationLease | null>);
@@ -245,22 +253,23 @@ runtime wake interruption during snapshot/checkpoint
 localWorkspaceCleanForWarmReuse behavior
 ```
 
-The package-owned `runHostedWorkspaceInvocation(...)` should:
+The package-owned `runHostedWorkspaceInvocation(...)` owns the bridge option
+assembly. The public invocation facade stays narrow; bridge construction stays
+internal, with test-only access through a dedicated testkit subpath.
 
 ```ts
 export async function runHostedWorkspaceInvocation(
   input: HostedWorkspaceInvocationInput,
 ): Promise<HostedWorkspaceInvocationResult> {
   const jobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+    consumePendingRuntimeWake: () => input.runtimeWakeSignal.consumePending(),
     platform: input.platform,
     request: input.job.request,
     runtime: input.job.runtime ?? {},
     vaultRoot: input.vaultRoot,
     decodeMailboxPayload: input.mailboxPayloadDecoder,
-    readCurrentLease:
-      input.readCurrentLease ??
-      (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request)),
-    runtimeWakeSignal: input.runtimeWakeSignal,
+    readCurrentLease: input.readCurrentLease,
+    snapshotArchiveBuilder: input.snapshotArchiveBuilder,
     snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
   });
 
@@ -500,6 +509,8 @@ Add:
 packages/assistant-runtime/src/hosted-runtime/invocation.ts
 packages/assistant-runtime/src/hosted-invocation.ts       // public re-export if preferred
 package.json export "./hosted-invocation"
+package.json export "./hosted-checkpoint-bridge"          // web checkpoint bridge only
+package.json export "./hosted-invocation-testkit"         // bridge construction tests only; blocked in non-test files
 ```
 
 Keep the first implementation thin and tested.
@@ -650,3 +661,6 @@ Delete or shrink the Cloudflare runtime bridge owner.
 ```
 
 This is worthwhile because it removes the last major ownership ambiguity left after direct runtime and Warm Codex. It is not worthwhile if it becomes a framework rewrite, a second lifecycle owner, or a broad Cloudflare/runtime service abstraction.
+Status: completed
+Updated: 2026-06-02
+Completed: 2026-06-02

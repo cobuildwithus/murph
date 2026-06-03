@@ -14,7 +14,7 @@ import {
   type HostedRuntimeBridgeCheckpointLeaseError,
   type HostedRuntimeBridgeCheckpointContext,
   type HostedRuntimeBridgeCheckpointLease,
-} from "@murphai/assistant-runtime/hosted-invocation";
+} from "@murphai/assistant-runtime/hosted-invocation-testkit";
 
 const BASE_LEASE: HostedRuntimeBridgeCheckpointLease = {
   attemptId: "attempt_1",
@@ -203,7 +203,7 @@ describe("checkpointHostedRuntimeBridgeWorkspace", () => {
     expect(checkpointWorkspace).not.toHaveBeenCalled();
   });
 
-  it("allows a newer workspace version lease after snapshot before bundle upload", async () => {
+  it("rejects a newer workspace version lease after snapshot before bundle upload", async () => {
     const readCurrentLease = vi.fn()
       .mockReturnValue({
         ...BASE_LEASE,
@@ -224,19 +224,23 @@ describe("checkpointHostedRuntimeBridgeWorkspace", () => {
       })
     );
 
-    const result = await checkpointHostedRuntimeBridgeWorkspace({
-      checkpointWorkspace,
-      readCurrentLease,
-      request: BASE_REQUEST,
-      snapshotWorkspace,
-      userId: "member_123",
-      writeBundle,
-    });
+    await expect(
+      checkpointHostedRuntimeBridgeWorkspace({
+        checkpointWorkspace,
+        readCurrentLease,
+        request: BASE_REQUEST,
+        snapshotWorkspace,
+        userId: "member_123",
+        writeBundle,
+      }),
+    ).rejects.toMatchObject({
+      code: "stale_workspace_version",
+      stage: "before_bundle_write",
+    } satisfies Partial<HostedRuntimeBridgeCheckpointLeaseError>);
 
-    expect(result.checkpointed).toBe(true);
     expect(snapshotWorkspace).toHaveBeenCalledTimes(1);
-    expect(writeBundle).toHaveBeenCalledTimes(1);
-    expect(checkpointWorkspace).toHaveBeenCalledTimes(1);
+    expect(writeBundle).not.toHaveBeenCalled();
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
   });
 
   it("rejects a lease that becomes stale after upload before web checkpoint", async () => {

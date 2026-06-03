@@ -2,9 +2,11 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
 } from "./internal-hosts.ts";
 import type {
-  HostedRuntimeBridgeCheckpointLease,
   HostedWorkspaceMailboxPayloadDecoder,
 } from "@murphai/assistant-runtime/hosted-invocation";
+import type {
+  HostedRuntimeBridgeCheckpointLease,
+} from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
   parseHostedMailboxPayloadDecodeResponse,

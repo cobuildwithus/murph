@@ -17,6 +17,7 @@ export type HostedRuntimeBridgeCheckpointLeaseErrorCode =
   | "missing_lease"
   | "stale_attempt"
   | "stale_lease_generation"
+  | "stale_workspace_version"
   | "stale_user"
   | "workspace_user_mismatch";
 
@@ -188,6 +189,9 @@ function requireCheckpointLeaseMatchesRequest(input: {
   }
   if (input.lease.leaseGeneration !== input.request.leaseGeneration) {
     throw new HostedRuntimeBridgeCheckpointLeaseError("stale_lease_generation", input.stage);
+  }
+  if (input.lease.workspaceVersion !== input.request.expectedWorkspaceVersion) {
+    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", input.stage);
   }
 
   return input.lease;

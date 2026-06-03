@@ -8,7 +8,7 @@ import {
   createHostedWorkspaceRuntimeBridgeJobOptions as createPackageHostedWorkspaceRuntimeBridgeJobOptions,
   type HostedWorkspaceMailboxPayloadDecoder,
   type HostedWorkspaceRuntimeBridgeOptionsInput,
-} from "@murphai/assistant-runtime/hosted-invocation";
+} from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceReadResponse,

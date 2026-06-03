@@ -23,8 +23,16 @@ import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestPublic,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspacePublic,
+} from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
+import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeasePublic,
+  runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
 } from "@murphai/assistant-runtime/hosted-invocation";
+import {
+  checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
+  createHostedWorkspaceRuntimeBridgeJobOptions as createHostedWorkspaceRuntimeBridgeJobOptionsPublic,
+} from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import {
   sendHostedProviderTelegramMessage as sendHostedProviderTelegramMessagePublic,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
@@ -56,8 +64,19 @@ import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestDirect,
 } from "../src/hosted-email.ts";
 import {
+  checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspaceDirect,
+} from "../src/hosted-checkpoint-bridge.ts";
+import {
+  checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspaceSource,
+} from "../src/hosted-runtime/checkpoint-bridge.ts";
+import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeaseDirect,
+  runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "../src/hosted-invocation.ts";
+import {
+  checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
+  createHostedWorkspaceRuntimeBridgeJobOptions as createHostedWorkspaceRuntimeBridgeJobOptionsDirect,
+} from "../src/hosted-invocation-testkit.ts";
 import {
   sendHostedProviderTelegramMessage as sendHostedProviderTelegramMessageDirect,
 } from "../src/hosted-provider-effects.ts";
@@ -82,8 +101,10 @@ const expectedAssistantRuntimePublicExportKeys = [
   ".",
   "./hosted-assistant-env",
   "./hosted-assistant-env-constants",
+  "./hosted-checkpoint-bridge",
   "./hosted-email",
   "./hosted-invocation",
+  "./hosted-invocation-testkit",
   "./hosted-provider-effects",
   "./hosted-runtime-contracts",
   "./hosted-runtime-worker-contracts",
@@ -207,8 +228,46 @@ test("hosted-email subpath export stays wired to the hosted email source surface
   assert.equal(parseHostedEmailSendRequestPublic, parseHostedEmailSendRequestDirect);
 });
 
+test("hosted-checkpoint-bridge subpath export stays wired to the checkpoint source surface", () => {
+  assert.equal(
+    checkpointHostedRuntimeBridgeWebWorkspacePublic,
+    checkpointHostedRuntimeBridgeWebWorkspaceDirect,
+  );
+  assert.equal(
+    checkpointHostedRuntimeBridgeWebWorkspaceDirect,
+    checkpointHostedRuntimeBridgeWebWorkspaceSource,
+  );
+});
+
+test("hosted-checkpoint-bridge subpath omits bundle bridge helpers", async () => {
+  const checkpointBridge = await import("@murphai/assistant-runtime/hosted-checkpoint-bridge");
+
+  assert.equal("checkpointHostedRuntimeBridgeWorkspace" in checkpointBridge, false);
+  assert.equal("snapshotHostedRuntimeBridgeWorkspaceBundle" in checkpointBridge, false);
+});
+
 test("hosted-invocation subpath export stays wired to the package invocation source surface", () => {
   assert.equal(createHostedWorkspaceInvocationLeasePublic, createHostedWorkspaceInvocationLeaseDirect);
+  assert.equal(runHostedWorkspaceInvocationPublic, runHostedWorkspaceInvocationDirect);
+});
+
+test("hosted-invocation subpath omits checkpoint bridge helpers", async () => {
+  const hostedInvocation = await import("@murphai/assistant-runtime/hosted-invocation");
+
+  assert.equal("checkpointHostedRuntimeBridgeWebWorkspace" in hostedInvocation, false);
+  assert.equal("checkpointHostedRuntimeBridgeWorkspace" in hostedInvocation, false);
+  assert.equal("createHostedWorkspaceRuntimeBridgeJobOptions" in hostedInvocation, false);
+});
+
+test("hosted-invocation-testkit subpath export stays wired to bridge option construction", () => {
+  assert.equal(
+    createHostedWorkspaceRuntimeBridgeJobOptionsPublic,
+    createHostedWorkspaceRuntimeBridgeJobOptionsDirect,
+  );
+  assert.equal(
+    checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
+    checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
+  );
 });
 
 test("hosted-provider-effects subpath stays wired to the hosted provider effects source surface", () => {

@@ -36,10 +36,11 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
+  HostedRuntimeBridgeCheckpointLeaseError,
   createHostedWorkspaceRuntimeBridgeJobOptions as createPackageHostedWorkspaceRuntimeBridgeJobOptions,
   type HostedWorkspaceMailboxPayloadDecoder,
   type HostedWorkspaceRuntimeBridgeOptionsInput,
-} from "@murphai/assistant-runtime/hosted-invocation";
+} from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
@@ -156,7 +157,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
   });
 
-  it("lets web CAS own workspace version conflicts", async () => {
+  it("rejects stale workspace versions before snapshot work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -183,15 +184,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    let rejected: unknown = null;
+    try {
+      await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    } catch (error) {
+      rejected = error;
+    }
 
-    expect(snapshotRef).toEqual(expect.objectContaining({
-      archive: expect.objectContaining({
-        encryptedObjectSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      }),
-      schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
-    }));
+    expect(rejected).toBeInstanceOf(HostedRuntimeBridgeCheckpointLeaseError);
+    expect(rejected).toMatchObject({
+      code: "stale_workspace_version",
+      stage: "before_snapshot",
+    });
     expect(putArtifact).not.toHaveBeenCalled();
   });
 

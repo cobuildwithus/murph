@@ -271,6 +271,15 @@
       "@murphai/assistant-runtime/hosted-email": [
         "packages/assistant-runtime/src/hosted-email.ts"
       ],
+      "@murphai/assistant-runtime/hosted-checkpoint-bridge": [
+        "packages/assistant-runtime/src/hosted-checkpoint-bridge.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-invocation": [
+        "packages/assistant-runtime/src/hosted-invocation.ts"
+      ],
+      "@murphai/assistant-runtime/hosted-invocation-testkit": [
+        "packages/assistant-runtime/src/hosted-invocation-testkit.ts"
+      ],
       "@murphai/assistant-runtime/hosted-provider-effects": [
         "packages/assistant-runtime/src/hosted-provider-effects.ts"
       ],

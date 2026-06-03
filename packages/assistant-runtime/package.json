@@ -41,6 +41,16 @@
       "import": "./dist/hosted-invocation.js",
       "default": "./dist/hosted-invocation.js"
     },
+    "./hosted-checkpoint-bridge": {
+      "types": "./dist/hosted-checkpoint-bridge.d.ts",
+      "import": "./dist/hosted-checkpoint-bridge.js",
+      "default": "./dist/hosted-checkpoint-bridge.js"
+    },
+    "./hosted-invocation-testkit": {
+      "types": "./dist/hosted-invocation-testkit.d.ts",
+      "import": "./dist/hosted-invocation-testkit.js",
+      "default": "./dist/hosted-invocation-testkit.js"
+    },
     "./hosted-provider-effects": {
       "types": "./dist/hosted-provider-effects.d.ts",
       "import": "./dist/hosted-provider-effects.js",

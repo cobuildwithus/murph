@@ -414,6 +414,29 @@ export function verifyWorkspaceImportPolicy({
   if (
     sourceMember === "apps/cloudflare"
     && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
+    && specifier === "@murphai/assistant-runtime/hosted-invocation"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedWorkspaceRuntimeJobOptions",
+      "HostedRuntimeBridgeCheckpointLease",
+      "createHostedWorkspaceRuntimeBridgeJobOptions",
+      "checkpointHostedRuntimeBridgeWorkspace",
+      "checkpointHostedRuntimeBridgeWebWorkspace",
+      "snapshotHostedRuntimeBridgeWorkspaceBundle",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted workspace bridge internals from ${JSON.stringify(specifier)}; apps/cloudflare/src must call runHostedWorkspaceInvocation from the invocation facade and use focused capability subpaths for non-invocation bridge ports.`;
+  }
+
+  if (
+    !isTestFile
+    && specifier === "@murphai/assistant-runtime/hosted-invocation-testkit"
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}; the hosted invocation testkit is for focused tests only and must not become a production bridge-construction surface.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
     && (
       specifier.includes("runtime-bridge-workspace")
       || specifier.includes("runtime-bridge-checkpoint")
@@ -806,7 +829,7 @@ function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
     .join("|");
 
   if (new RegExp(
-    String.raw`^\s*import\s+type\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']|^\s*import\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']`,
+    String.raw`^\s*(?:import|export)\s+type\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']|^\s*(?:import|export)\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']`,
     "mu",
   ).test(source)) {
     return true;

@@ -880,6 +880,9 @@ function assertHostedWorkspaceBridgeCheckpointLease(input: {
   if (input.lease.leaseGeneration !== input.request.leaseGeneration) {
     throw new HostedRuntimeBridgeCheckpointLeaseError("stale_lease_generation", stage);
   }
+  if (input.lease.workspaceVersion !== input.request.expectedWorkspaceVersion) {
+    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", stage);
+  }
 }
 
 function resolveWorkspaceDurableRoot(vaultRoot: string): string {
