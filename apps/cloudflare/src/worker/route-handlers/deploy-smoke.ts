@@ -261,10 +261,27 @@ export async function readDeployContainerOpenAiInterceptSmokeUserId(
 }
 
 export function resolveDeployContainerSmokeObjectName(
-  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA">,
+  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA" | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID">,
 ): string {
-  const workerVersionId = readWorkerVersionId(env);
-  return workerVersionId
-    ? `__deploy-smoke-${workerVersionId}`
+  const objectIdentity = readWorkerVersionId(env)
+    ?? readHostedLocalRunnerBuildIdSegment(env);
+  return objectIdentity
+    ? `__deploy-smoke-${objectIdentity}`
     : "__deploy-smoke";
+}
+
+function readHostedLocalRunnerBuildIdSegment(
+  env: Pick<WorkerEnvironmentSource, "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID">,
+): string | null {
+  const raw = env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID;
+  if (typeof raw !== "string") {
+    return null;
+  }
+
+  const normalized = raw
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return normalized.length > 0 ? normalized : null;
 }

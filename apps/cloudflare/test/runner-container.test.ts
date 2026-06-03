@@ -1122,6 +1122,104 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it.each([
+    {
+      label: "health",
+      failingUrlSuffix: "/health",
+      smokeInput: {},
+    },
+    {
+      label: "Codex shell",
+      failingUrlSuffix: "/internal/deploy-codex-shell-smoke",
+      smokeInput: {},
+    },
+    {
+      label: "OpenAI intercept",
+      failingUrlSuffix: "/internal/deploy-openai-intercept-smoke",
+      smokeInput: {
+        openAiIntercept: true,
+        openAiInterceptAuthority: {
+          attemptId: "attempt_smoke",
+          leaseGeneration: "17",
+          userId: "member_smoke",
+          workspaceVersion: "42",
+        },
+      },
+    },
+    {
+      label: "direct R2",
+      failingUrlSuffix: "/internal/direct-r2-presigned-put-smoke",
+      smokeInput: {
+        directR2PresignedPut: {
+          byteLength: 4096,
+          presignedPutUrl:
+            "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=sensitive-signature",
+        },
+      },
+    },
+  ])("reports non-JSON deploy smoke $label responses as sanitized metadata errors", async ({
+    failingUrlSuffix,
+    smokeInput,
+  }) => {
+    const sensitiveBody = "Failed with sensitive-signature and private diagnostic text";
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith(failingUrlSuffix)) {
+          return new Response(sensitiveBody, {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+    });
+
+    const error = await container.smokeHealth(smokeInput).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      details: expect.objectContaining({
+        errorStatus: 503,
+        responseBodyPreviewOmitted: true,
+        responseContentType: "text/plain",
+        responseJsonParseFailed: true,
+        responseStatus: 503,
+      }),
+      message: "Hosted runner container returned HTTP 503 with non-JSON metadata response.",
+      name: "HostedRunnerContainerMetadataResponseError",
+      statusCode: 503,
+    });
+    expect(JSON.stringify(error)).not.toContain("sensitive-signature");
+    expect(JSON.stringify(error)).not.toContain("private diagnostic text");
+  });
+
   it("recycles any warm deploy smoke shell before checking container health", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",
@@ -1131,6 +1229,83 @@ describe("RunnerContainer", () => {
 
     expect(destroy).toHaveBeenCalledTimes(2);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("cold-starts deploy smoke after recycle even when status still reports running", async () => {
+    let containerRef: RunnerContainer | null = null;
+    const destroy = vi.fn(async () => {
+      containerRef?.onStop({ exitCode: 137, reason: "runtime_signal" });
+    });
+    let healthChecks = 0;
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status: "running",
+    }));
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+      destroy,
+      getState,
+      initialStatus: "running",
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          healthChecks += 1;
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+    });
+    containerRef = container;
+
+    await expect(container.smokeHealth()).resolves.toMatchObject({
+      ok: true,
+      runnerBundle: {
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      },
+    });
+
+    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(healthChecks).toBe(1);
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          lifecycleStage: "destroyed",
+          settleReason: "onStop",
+          stopObservedAfterDestroy: true,
+        }),
+        message: "Hosted execution container destroy completed.",
+        phase: "container.ready",
+      }),
+    );
   });
 
   it("starts the container without operator-only control-plane secrets in supervisor env", async () => {
@@ -2096,6 +2271,149 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("waits for a destroyed warm shell to report stopped before cold restart", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+
+    try {
+      const settleRunningObserved = createDeferred<void>();
+      let healthChecks = 0;
+      let statusReads = 0;
+      const getState = vi.fn(async () => {
+        statusReads += 1;
+        if (statusReads === 3) {
+          settleRunningObserved.resolve();
+          return {
+            lastChange: Date.now(),
+            status: "running",
+          };
+        }
+
+        return {
+          lastChange: Date.now(),
+          status: statusReads < 3 ? "running" : "stopped",
+        };
+      });
+      const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+        destroy: vi.fn(async () => {}),
+        getState,
+        initialStatus: "running",
+        startAndWaitForPorts: vi.fn(async () => {}),
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            healthChecks += 1;
+            return new Response(JSON.stringify(healthChecks === 1 ? { error: "stale shell" } : createRunnerHealthResult()), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: healthChecks === 1 ? 503 : 200,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+
+      const invokePromise = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_wait_for_destroy_settle"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+
+      await settleRunningObserved.promise;
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(invokePromise).resolves.toEqual(createRunnerResult());
+
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      const destroyCompletedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([log]) => log)
+        .find((log) => log.message === "Hosted execution container destroy completed.");
+      expect(destroyCompletedLog?.details).toEqual(expect.objectContaining({
+        destroySettleTimeoutMs: 5_000,
+        lifecycleStage: "destroyed",
+        observedStatusesAfterDestroy: ["running", "stopped"],
+        statusAfterDestroy: "stopped",
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports non-JSON warm health responses as sanitized metadata errors", async () => {
+    let healthChecks = 0;
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          healthChecks += 1;
+          if (healthChecks === 1) {
+            return new Response("Failed to connect to local container transport", {
+              headers: {
+                "content-type": "text/plain; charset=utf-8",
+              },
+              status: 503,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_non_json_warm_health"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(healthChecks).toBe(2);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    const warmFailureLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([log]) => log)
+      .find((log) => log.message === "Hosted execution container warm health check failed; restarting shell.");
+    expect(warmFailureLog?.error).toMatchObject({
+      details: expect.objectContaining({
+        errorStatus: 503,
+        responseBodyPreviewOmitted: true,
+        responseContentType: "text/plain",
+        responseJsonParseFailed: true,
+        responseStatus: 503,
+      }),
+      name: "HostedRunnerContainerMetadataResponseError",
+      statusCode: 503,
+    });
+    expect(warmFailureLog?.error).toMatchObject({
+      message: "Hosted runner container returned HTTP 503 with non-JSON metadata response.",
+    });
+    expect(JSON.stringify(warmFailureLog?.error)).not.toContain("Failed to connect");
+  });
+
   it("restarts a warm shell when health reports it is poisoned", async () => {
     let healthChecks = 0;
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
@@ -2824,7 +3142,7 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("returns after destroy resolves without post-destroy status polling", async () => {
+  it("fails closed when destroy resolves but the container never reports stopped", async () => {
     vi.useFakeTimers();
 
     try {
@@ -2843,21 +3161,28 @@ describe("RunnerContainer", () => {
         initialStatus: "running",
       });
 
-      const destroyPromise = container.destroyInstance();
-      await vi.advanceTimersByTimeAsync(300);
+      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
 
-      await expect(destroyPromise).resolves.toBeUndefined();
+      await expect(destroyPromise).resolves.toMatchObject({
+        message: "Hosted runner container did not report stopped after destroy.",
+      });
       expect(destroy).toHaveBeenCalledTimes(1);
-      expect(getState).toHaveBeenCalledTimes(1);
+      expect(getState.mock.calls.length).toBeGreaterThan(1);
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
           details: expect.objectContaining({
-            lifecycleStage: "destroyed",
+            destroySettleTimeoutMs: 5_000,
+            failClosed: true,
+            lifecycleStage: "destroy-settle",
+            observedStatusesAfterDestroy: ["destroying"],
+            statusAfterDestroy: "destroying",
             statusBeforeDestroy: "running",
           }),
-          message: "Hosted execution container destroy completed.",
-          phase: "container.ready",
+          level: "error",
+          message: "Hosted execution container destroy did not settle to stopped.",
+          phase: "failed",
         }),
       );
     } finally {
@@ -2910,6 +3235,71 @@ describe("RunnerContainer", () => {
       vi.useRealTimers();
     }
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before reusing a warm shell after best-effort cleanup does not settle", async () => {
+    const destroy = vi.fn(async () => {});
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status: "running",
+    }));
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+
+    vi.useFakeTimers();
+    try {
+      const cleanupPromise = container.onActivityExpired();
+      await vi.advanceTimersByTimeAsync(5_500);
+      await expect(cleanupPromise).resolves.toBeUndefined();
+
+      const invokeResult = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_after_unsettled_best_effort_destroy"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(invokeResult).resolves.toMatchObject({
+        message: "Hosted runner container did not report stopped after destroy.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        message: "Hosted execution container warm shell was invalidated; destroying before reuse.",
+        phase: "container.starting",
+      }),
+    );
   });
 
   it("treats missing containers as already destroyed during explicit cleanup", async () => {

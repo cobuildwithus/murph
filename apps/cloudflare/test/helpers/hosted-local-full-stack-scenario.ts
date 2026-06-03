@@ -29,6 +29,7 @@ import {
   buildHostLoopbackStubBaseUrl,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   mergeRequiredEnvProfile,
+  reserveLocalTemporalTcpPort,
   reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
   resolveHostedAssistantProviderMode,
@@ -189,7 +190,9 @@ export async function startHostedLocalFullStackScenario(input: {
         : {};
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
-    const temporalPort = await reserveLocalTcpPort();
+    const temporalPort = await reserveLocalTemporalTcpPort({
+      excludedPorts: [webPort, workerPort],
+    });
     const runnerBundleCacheKey = buildHostedLocalRunnerBundleCacheKey({
       ...baseEnvironment,
       ...(input.additionalEnv ?? {}),

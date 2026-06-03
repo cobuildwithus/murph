@@ -574,6 +574,40 @@ describe("cloudflare worker routes", () => {
     expect(runnerGetByName).not.toHaveBeenCalled();
   });
 
+  it("uses a local-build-specific deploy smoke Durable Object name without version metadata", async () => {
+    const baseEnv = createWorkerEnv();
+    const runnerGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const env = {
+      ...baseEnv,
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
+      RUNNER_CONTAINER: {
+        getByName: runnerGetByName,
+      },
+      RUNNER_CONTAINER_SMOKE: {
+        getByName: smokeGetByName,
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-local-build-123");
+    expect(runnerGetByName).not.toHaveBeenCalled();
+  });
+
   it("rejects unsigned deploy container smoke requests", async () => {
     const response = await worker.fetch(
       new Request("https://runner.example.test/internal/deploy/container-smoke", {

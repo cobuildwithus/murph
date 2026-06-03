@@ -1,3 +1,4 @@
+import { createServer as createNetServer } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
@@ -9,7 +10,9 @@ import {
   buildHostLoopbackStubBaseUrl,
   HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
+  isLocalTemporalTcpPortCandidateUsable,
   mergeRequiredEnvProfile,
+  reserveLocalTemporalTcpPort,
   resolveHostedAssistantLocalDevEnv,
   startAssistantProviderStubServer,
   stopHttpStubServer,
@@ -18,6 +21,8 @@ import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
 } from "@murphai/hosted-local-harness/e2e";
+
+const temporalDevUiPortOffset = 1_000;
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
@@ -32,6 +37,32 @@ describe("mergeRequiredEnvProfile", () => {
     expect(
       mergeRequiredEnvProfile("device-sync,hosted-email,linq,mapbox,telegram", "linq"),
     ).toBe("assistant,device-sync,hosted-email,linq,mapbox,telegram");
+  });
+});
+
+describe("reserveLocalTemporalTcpPort", () => {
+  it("reserves a frontend port with an available Temporal UI companion port", async () => {
+    const port = await reserveLocalTemporalTcpPort();
+
+    expect(port).toBeGreaterThanOrEqual(10_000);
+    expect(port).toBeLessThanOrEqual(65_535 - temporalDevUiPortOffset);
+    await expect(canBindLocalTcpPort(port)).resolves.toBe(true);
+    await expect(canBindLocalTcpPort(port + temporalDevUiPortOffset)).resolves.toBe(true);
+  });
+
+  it("rejects candidates that collide with planned scenario ports", () => {
+    expect(isLocalTemporalTcpPortCandidateUsable({
+      excludedPorts: [40_000],
+      port: 40_000,
+    })).toBe(false);
+    expect(isLocalTemporalTcpPortCandidateUsable({
+      excludedPorts: [41_000],
+      port: 40_000,
+    })).toBe(false);
+    expect(isLocalTemporalTcpPortCandidateUsable({
+      excludedPorts: [42_000],
+      port: 40_000,
+    })).toBe(true);
   });
 });
 
@@ -272,3 +303,17 @@ describe("hosted local e2e scenario registration", () => {
     })]);
   });
 });
+
+async function canBindLocalTcpPort(port: number): Promise<boolean> {
+  const server = createNetServer();
+  return await new Promise<boolean>((resolve) => {
+    server.once("error", () => {
+      resolve(false);
+    });
+    server.listen(port, "127.0.0.1", () => {
+      server.close((error) => {
+        resolve(!error);
+      });
+    });
+  });
+}

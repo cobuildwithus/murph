@@ -14,6 +14,10 @@ const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedLocalE2eRunnerTimeoutMs = "600000";
 const hostedLocalContextCompactionSummary = "local-offline-context-compaction-summary";
 const hostedLocalResponsesCompactionSummary = "local-offline-compaction-summary";
+const temporalDevUiPortOffset = 1_000;
+const minTemporalDevFrontendPort = 10_000;
+const maxTemporalDevFrontendPort = 65_535 - temporalDevUiPortOffset;
+const maxTemporalDevPortReservationAttempts = 1_000;
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;
@@ -741,6 +745,60 @@ export async function reserveLocalTcpPort(): Promise<number> {
         }
 
         resolve(port);
+      });
+    });
+  });
+}
+
+export async function reserveLocalTemporalTcpPort(input: {
+  excludedPorts?: Iterable<number>;
+} = {}): Promise<number> {
+  const excludedPorts = new Set(input.excludedPorts ?? []);
+  const candidateCount = maxTemporalDevFrontendPort - minTemporalDevFrontendPort + 1;
+  const firstOffset = Math.floor(Math.random() * candidateCount);
+  const attempts = Math.min(candidateCount, maxTemporalDevPortReservationAttempts);
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const port = minTemporalDevFrontendPort + ((firstOffset + attempt) % candidateCount);
+    if (!isLocalTemporalTcpPortCandidateUsable({ excludedPorts, port })) {
+      continue;
+    }
+
+    const uiPort = port + temporalDevUiPortOffset;
+    if (await canBindLocalTcpPort(port) && await canBindLocalTcpPort(uiPort)) {
+      return port;
+    }
+  }
+
+  throw new Error("Unable to reserve a local Temporal TCP port with an available UI companion port.");
+}
+
+export function isLocalTemporalTcpPortCandidateUsable(input: {
+  excludedPorts?: Iterable<number>;
+  port: number;
+}): boolean {
+  if (
+    !Number.isSafeInteger(input.port)
+    || input.port <= 0
+    || input.port > maxTemporalDevFrontendPort
+  ) {
+    return false;
+  }
+
+  const excludedPorts = new Set(input.excludedPorts ?? []);
+  return !excludedPorts.has(input.port)
+    && !excludedPorts.has(input.port + temporalDevUiPortOffset);
+}
+
+async function canBindLocalTcpPort(port: number): Promise<boolean> {
+  const server = createNetServer();
+  return await new Promise<boolean>((resolve) => {
+    server.once("error", () => {
+      resolve(false);
+    });
+    server.listen(port, "127.0.0.1", () => {
+      server.close((error) => {
+        resolve(!error);
       });
     });
   });

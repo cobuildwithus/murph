@@ -16,6 +16,8 @@ Key decisions:
 - Treat orphan E2E runner proxy containers as cleanup targets only under the E2E runner naming pattern.
 - Guard Linq E2E wait nudges so tests do not amplify provider/runtime failures into retry storms.
 - Treat due `workspace_wake` demand behind an active Cloudflare write fence as a wait-for-owner condition, not as a reason to poke the already-active runner.
+- Treat hosted runner container destroy as a fail-closed lifecycle boundary for deploy smoke and subsequent warm reuse.
+- Key hosted-local deploy-smoke R2 objects by the local runner build id when Cloudflare version metadata is unavailable.
 
 State:
 - Active.
@@ -33,38 +35,38 @@ Done:
 - Preserved the structured hosted parser toolchain through the Cloudflare workspace bridge into conversation import.
 - Added retry-later backoff coverage for stale retry timestamps.
 - Fresh-bundle hosted-local `linq-webhook` E2E passed 6/6.
+- Deploy smoke now forces a cold container after warm-container teardown, sanitizes non-JSON metadata failures, and marks unsettled best-effort cleanup as non-reusable.
+- Hosted-local Temporal port reservation now excludes the UI sidecar port as well as the server port.
+- Local deploy-smoke object keys now include `MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID`, preventing stale smoke success across runner bundle rebuilds.
+- Focused `linq-webhook` E2E passed again after the local build-id smoke key fix.
+- Fixed the bounded Temporal port allocator so aggregate E2E no longer starves on OS-assigned ephemeral ports whose UI companion would exceed the Temporal limit.
+- Aggregate `pnpm hosted-local e2e` passed all three batches on the final diff.
+- Final focused runner-container, hosted-local support/index, dev-hosted-local environment tests, Cloudflare typecheck, root typecheck, and diff check passed.
+- Completion audits ran on the final diff: security/privacy no findings; task-finish no findings; simplify only low cleanup suggestions that were intentionally left unpatched to preserve the canonical hosted-local E2E proof on the exact code diff.
 
 Now:
-- Holding broad hosted-local matrix while an interactive `pnpm dev` stack is active to avoid competing local state.
+- Preparing the scoped `scripts/finish-task` commit and plan archive.
 
 Next:
-- Re-run aggregate hosted-local E2E in a clean window, or keep validation scoped to fresh-bundle Linq webhook plus focused unit/build/type checks.
-- Complete scoped reviews and handoff.
+- Commit the scoped hosted-local lifecycle/smoke changes through the active-plan finish path.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: whether the aggregate hosted-local default matrix is green after the latest changes; the broad run was interrupted intentionally because an interactive dev stack was active.
+- None.
 
 Working set (files/ids/commands):
-- `packages/hosted-local-harness/src/e2e.ts`
-- `scripts/hosted-local-e2e.test.ts`
-- `apps/cloudflare/test/run-hosted-local-e2e-runner.test.ts`
-- `apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts`
-- `apps/cloudflare/test/helpers/hosted-local-linq-support.ts`
-- `scripts/dev-hosted-local/runtime.ts`
-- `scripts/dev-hosted-local/runtime.cleanup.test.ts`
-- `packages/assistant-runtime/src/hosted-runtime/events/linq.ts`
-- `packages/assistant-runtime/src/hosted-runtime/events/conversation.ts`
-- `packages/assistant-runtime/test/hosted-runtime-linq-event.test.ts`
-- `packages/assistant-runtime/test/hosted-runtime-conversation-event.test.ts`
-- `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts`
-- `packages/assistant-runtime/src/hosted-runtime/workspace-runner.ts`
-- `packages/assistant-runtime/test/hosted-runtime-mailbox-conversation-import.test.ts`
-- `packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts`
-- `apps/cloudflare/src/runtime-bridge-workspace.ts`
-- `apps/cloudflare/test/helpers/hosted-local-wake.test.ts`
-- `packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts`
-- `packages/hosted-orchestrator-temporal/src/activities/ensure-runtime-processing.ts`
-- `packages/hosted-orchestrator-temporal/test/hosted-user-runtime-workflow.test.ts`
-- `packages/hosted-orchestrator-temporal/test/ensure-runtime-processing.test.ts`
-- `apps/cloudflare/src/user-runner.ts`
-- `apps/cloudflare/test/user-runner-alarm.test.ts`
+- `apps/cloudflare/src/runner-container.ts`
+- `apps/cloudflare/src/worker-contracts.ts`
+- `apps/cloudflare/src/worker/route-handlers/deploy-smoke.ts`
+- `apps/cloudflare/test/helpers/hosted-local-e2e-support.ts`
+- `apps/cloudflare/test/helpers/hosted-local-full-stack-scenario.ts`
+- `apps/cloudflare/test/hosted-local-e2e-support.test.ts`
+- `apps/cloudflare/test/index.test.ts`
+- `apps/cloudflare/test/runner-container.test.ts`
+- `scripts/dev-hosted-local/constants.ts`
+- `pnpm hosted-local e2e` passed: `.artifacts/hosted-local/2026-06-03T07-53-12-464Z-e2e-stub-all-0a343d6a56/state.json`.
+- `pnpm hosted-local e2e linq-webhook` passed after the local build-id smoke key fix.
+- `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm typecheck` passed.
+Status: completed
+Updated: 2026-06-03
+Completed: 2026-06-03

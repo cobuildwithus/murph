@@ -47,6 +47,7 @@ const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
+const RUNNER_DESTROY_SETTLE_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
@@ -91,6 +92,22 @@ class HostedRunnerContainerPoisonedError extends Error {
     super("Hosted runner container is poisoned.");
     this.name = "HostedRunnerContainerPoisonedError";
     this.lastCleanupStatus = input.lastCleanupStatus;
+  }
+}
+
+class HostedRunnerContainerMetadataResponseError extends Error {
+  readonly code = "runner_http_error";
+  readonly details: HostedExecutionStructuredLogDetails;
+  readonly statusCode: number;
+
+  constructor(input: {
+    details: HostedExecutionStructuredLogDetails;
+    statusCode: number;
+  }) {
+    super(`Hosted runner container returned HTTP ${input.statusCode} with non-JSON metadata response.`);
+    this.name = "HostedRunnerContainerMetadataResponseError";
+    this.details = input.details;
+    this.statusCode = input.statusCode;
   }
 }
 
@@ -298,7 +315,10 @@ export class RunnerContainer extends Container {
   private lifecycleLockPendingCount = 0;
   private prewarmAbortController: AbortController | null = null;
   private currentLogContext: RunnerContainerLogContext | null = null;
+  private stopGeneration = 0;
+  private stopObservers = new Set<() => void>();
   private successfulWarmInvocationCount = 0;
+  private warmShellInvalidatedByUnsettledDestroy = false;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
 
@@ -531,22 +551,23 @@ export class RunnerContainer extends Container {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
 
       try {
-        await this.stopWarmContainer({ failClosed: false });
-        await this.ensureSmokeContainerReady(readyTimeoutMs);
+        const containerSettledForSmoke = await this.stopWarmContainer({ failClosed: false });
+        if (!containerSettledForSmoke) {
+          throw new Error("Hosted runner container smoke could not recycle the existing shell.");
+        }
+        await this.ensureSmokeContainerReady(readyTimeoutMs, {
+          forceColdStart: true,
+        });
+        const smokeSignal = AbortSignal.timeout(readyTimeoutMs);
         const response = await this.containerFetch(
           RUNNER_HEALTH_URL,
           {
-            signal: AbortSignal.timeout(readyTimeoutMs),
+            signal: smokeSignal,
           },
         );
-        const payload = await response.json() as {
-          hostedRuntimeArchitectureVersion?: unknown;
-          lastCleanupStatus?: unknown;
-          ok?: unknown;
-          poisoned?: unknown;
-          runnerBundle?: unknown;
-          service?: unknown;
-        };
+        const payload = await readRunnerContainerMetadataJsonObject(response, {
+          signal: smokeSignal,
+        });
 
         if (!response.ok || payload.ok !== true) {
           throw new Error(`Hosted runner container smoke health failed with HTTP ${response.status}.`);
@@ -594,29 +615,21 @@ export class RunnerContainer extends Container {
   private async smokeCodexShell(
     readyTimeoutMs: number,
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["codexShell"]>> {
+    const smokeSignal = AbortSignal.timeout(readyTimeoutMs);
     const response = await this.containerFetch(
       RUNNER_CODEX_SHELL_SMOKE_URL,
       {
         method: "POST",
-        signal: AbortSignal.timeout(readyTimeoutMs),
+        signal: smokeSignal,
       },
     );
-    const payload = await response.json() as {
-      codexShell?: {
-        client?: unknown;
-        murphPathBytes?: unknown;
-        noteAddBytes?: unknown;
-        stderrBytes?: unknown;
-        vaultCliLlmsBytes?: unknown;
-        vaultCliPathBytes?: unknown;
-        vaultShowBytes?: unknown;
-      } | null;
-      ok?: unknown;
-    };
+    const payload = await readRunnerContainerMetadataJsonObject(response, {
+      signal: smokeSignal,
+    });
     if (!response.ok || payload.ok !== true) {
       throw new Error(`Hosted runner container Codex shell smoke failed with HTTP ${response.status}.`);
     }
-    const result = payload.codexShell ?? {};
+    const result = readRunnerContainerMetadataRecordProperty(payload.codexShell);
     return {
       client: typeof result.client === "string" ? result.client : null,
       murphPathBytes: typeof result.murphPathBytes === "number" ? result.murphPathBytes : null,
@@ -632,6 +645,10 @@ export class RunnerContainer extends Container {
     readyTimeoutMs: number,
     input: NonNullable<HostedExecutionContainerSmokeHealthInput["directR2PresignedPut"]>,
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["directR2PresignedPut"]>> {
+    const smokeSignal = AbortSignal.timeout(Math.max(
+      readyTimeoutMs,
+      300_000,
+    ));
     const response = await this.containerFetch(
       RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL,
       {
@@ -646,29 +663,18 @@ export class RunnerContainer extends Container {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-        signal: AbortSignal.timeout(Math.max(
-          readyTimeoutMs,
-          300_000,
-        )),
+        signal: smokeSignal,
       },
     );
-    const payload = await response.json() as {
-      directR2PresignedPut?: {
-        byteLength?: unknown;
-        durationMs?: unknown;
-        ok?: unknown;
-        payloadSha256?: unknown;
-        responseBodyBytes?: unknown;
-        status?: unknown;
-      };
-      ok?: unknown;
-    };
+    const payload = await readRunnerContainerMetadataJsonObject(response, {
+      signal: smokeSignal,
+    });
 
     if (!response.ok || payload.ok !== true) {
       throw new Error(`Hosted runner direct R2 presigned PUT smoke failed with HTTP ${response.status}.`);
     }
 
-    const result = payload.directR2PresignedPut ?? {};
+    const result = readRunnerContainerMetadataRecordProperty(payload.directR2PresignedPut);
     return {
       byteLength: typeof result.byteLength === "number" ? result.byteLength : null,
       durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
@@ -691,32 +697,27 @@ export class RunnerContainer extends Container {
     const headers = new Headers();
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, authority.userId);
     writeRunnerRuntimeWriteFenceHeaders(headers, authority);
+    const smokeSignal = AbortSignal.timeout(Math.max(
+      readyTimeoutMs,
+      130_000,
+    ));
     const response = await this.containerFetch(
       RUNNER_OPENAI_INTERCEPT_SMOKE_URL,
       {
         headers,
         method: "POST",
-        signal: AbortSignal.timeout(Math.max(
-          readyTimeoutMs,
-          130_000,
-        )),
+        signal: smokeSignal,
       },
     );
-    const payload = await response.json() as {
-      ok?: unknown;
-      openAiIntercept?: {
-        client?: unknown;
-        model?: unknown;
-        stderrBytes?: unknown;
-        stdoutBytes?: unknown;
-      };
-    };
+    const payload = await readRunnerContainerMetadataJsonObject(response, {
+      signal: smokeSignal,
+    });
 
     if (!response.ok || payload.ok !== true) {
       throw new Error(`Hosted runner OpenAI intercept smoke failed with HTTP ${response.status}.`);
     }
 
-    const result = payload.openAiIntercept ?? {};
+    const result = readRunnerContainerMetadataRecordProperty(payload.openAiIntercept);
     return {
       client: typeof result.client === "string" ? result.client : null,
       model: typeof result.model === "string" ? result.model : null,
@@ -775,6 +776,10 @@ export class RunnerContainer extends Container {
   override onStop(params: StopParams): void {
     const context = this.currentLogContext;
     const cleanExit = params.exitCode === 0;
+    this.stopGeneration += 1;
+    this.successfulWarmInvocationCount = 0;
+    this.warmShellInvalidatedByUnsettledDestroy = false;
+    this.resolveStopObservers();
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -1003,7 +1008,23 @@ export class RunnerContainer extends Container {
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
 
-    if (!isRunnerContainerStopped(status)) {
+    if (isRunnerContainerStopped(status)) {
+      this.warmShellInvalidatedByUnsettledDestroy = false;
+    } else if (this.warmShellInvalidatedByUnsettledDestroy) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          readinessLatencyMs: Date.now() - readinessStartedAt,
+          startMode: "warm",
+          statusBeforeStart: status,
+        },
+        level: "warn",
+        message: "Hosted execution container warm shell was invalidated; destroying before reuse.",
+        phase: "container.starting",
+        userId: input.userId,
+      });
+      await this.stopWarmContainer({ failClosed: true });
+    } else if (!isRunnerContainerStopped(status)) {
       try {
         await assertRunnerHealthy(
           this,
@@ -1126,12 +1147,18 @@ export class RunnerContainer extends Container {
     return "started";
   }
 
-  private async ensureSmokeContainerReady(timeoutMs: number): Promise<void> {
-    const status = readContainerStatus(await this.getState());
-
-    if (!isRunnerContainerStopped(status)) {
-      await assertRunnerHealthy(this, timeoutMs);
-      return;
+  private async ensureSmokeContainerReady(
+    timeoutMs: number,
+    options: {
+      forceColdStart?: boolean;
+    } = {},
+  ): Promise<void> {
+    if (!options.forceColdStart) {
+      const status = readContainerStatus(await this.getState());
+      if (!isRunnerContainerStopped(status)) {
+        await assertRunnerHealthy(this, timeoutMs);
+        return;
+      }
     }
 
     await this.startAndWaitForPorts({
@@ -1173,6 +1200,7 @@ export class RunnerContainer extends Container {
     }
 
     const destroyStartedAt = Date.now();
+    const stopGenerationBeforeDestroy = this.stopGeneration;
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -1187,19 +1215,6 @@ export class RunnerContainer extends Container {
 
     try {
       await this.destroy();
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          destroyLatencyMs: Date.now() - destroyStartedAt,
-          failClosed,
-          lifecycleStage: "destroyed",
-          statusBeforeDestroy,
-        },
-        message: "Hosted execution container destroy completed.",
-        phase: "container.ready",
-        userId: context?.userId,
-      });
-      return true;
     } catch (error) {
       if (isSettledRunnerContainerDestroyRaceError(error)) {
         return true;
@@ -1218,15 +1233,185 @@ export class RunnerContainer extends Container {
       }
       return false;
     }
+
+    const settled = await this.waitForDestroyedContainerStopped({
+      destroyStartedAt,
+      failClosed,
+      statusBeforeDestroy,
+      stopGenerationBeforeDestroy,
+    });
+    if (!settled.ok) {
+      return false;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        destroyLatencyMs: Date.now() - destroyStartedAt,
+        destroySettleLatencyMs: settled.settleLatencyMs,
+        destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+        failClosed,
+        lifecycleStage: "destroyed",
+        observedStatusesAfterDestroy: settled.observedStatuses,
+        settleReason: settled.settleReason,
+        statusAfterDestroy: settled.statusAfterDestroy,
+        stopObservedAfterDestroy: settled.stopObservedAfterDestroy,
+        statusBeforeDestroy,
+      },
+      message: "Hosted execution container destroy completed.",
+      phase: "container.ready",
+      userId: context?.userId,
+    });
+    return true;
+  }
+
+  private async waitForDestroyedContainerStopped(input: {
+    destroyStartedAt: number;
+    failClosed: boolean;
+    statusBeforeDestroy: string | null;
+    stopGenerationBeforeDestroy: number;
+  }): Promise<
+    | {
+        ok: true;
+        observedStatuses: string[];
+        settleReason: "onStop" | "status";
+        settleLatencyMs: number;
+        statusAfterDestroy: string | null;
+        stopObservedAfterDestroy: boolean;
+      }
+    | {
+        ok: false;
+      }
+  > {
+    const context = this.currentLogContext;
+    const deadlineMs = Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
+    const observedStatuses: string[] = [];
+    let lastError: unknown = null;
+    let statusAfterDestroy: string | null = null;
+
+    while (true) {
+      if (this.stopGeneration > input.stopGenerationBeforeDestroy) {
+        return {
+          ok: true,
+          observedStatuses,
+          settleLatencyMs: Date.now() - input.destroyStartedAt,
+          settleReason: "onStop",
+          statusAfterDestroy,
+          stopObservedAfterDestroy: true,
+        };
+      }
+
+      try {
+        statusAfterDestroy = await readRunnerContainerStatus(this);
+        appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
+        if (isRunnerContainerStopped(statusAfterDestroy)) {
+          return {
+            ok: true,
+            observedStatuses,
+            settleReason: "status",
+            settleLatencyMs: Date.now() - input.destroyStartedAt,
+            statusAfterDestroy,
+            stopObservedAfterDestroy: this.stopGeneration > input.stopGenerationBeforeDestroy,
+          };
+        }
+      } catch (error) {
+        lastError = error;
+        appendObservedRunnerContainerStatus(observedStatuses, "status_error");
+      }
+
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        const error = lastError
+          ? new Error("Hosted runner container did not report stopped after destroy.", {
+              cause: lastError,
+            })
+          : new Error("Hosted runner container did not report stopped after destroy.");
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            destroyLatencyMs: Date.now() - input.destroyStartedAt,
+            destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+            failClosed: input.failClosed,
+            lifecycleStage: "destroy-settle",
+            observedStatusesAfterDestroy: observedStatuses,
+            statusAfterDestroy,
+            statusBeforeDestroy: input.statusBeforeDestroy,
+          },
+          error,
+          level: input.failClosed ? "error" : "warn",
+          message: "Hosted execution container destroy did not settle to stopped.",
+          phase: "failed",
+          userId: context?.userId,
+        });
+        if (input.failClosed) {
+          throw error;
+        }
+        return { ok: false };
+      }
+
+      await this.waitForStopOrDelay(
+        input.stopGenerationBeforeDestroy,
+        Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
+      );
+    }
   }
 
   private async stopWarmContainer(input?: {
     failClosed?: boolean;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const failClosed = input?.failClosed ?? true;
-    const destroyed = await this.destroyIfRunning({ failClosed });
+    let destroyed: boolean;
+    try {
+      destroyed = await this.destroyIfRunning({ failClosed });
+    } catch (error) {
+      this.successfulWarmInvocationCount = 0;
+      this.warmShellInvalidatedByUnsettledDestroy = true;
+      throw error;
+    }
     if (destroyed) {
       this.successfulWarmInvocationCount = 0;
+      this.warmShellInvalidatedByUnsettledDestroy = false;
+    } else {
+      this.successfulWarmInvocationCount = 0;
+      this.warmShellInvalidatedByUnsettledDestroy = true;
+    }
+    return destroyed;
+  }
+
+  private async waitForStopOrDelay(
+    observedStopGeneration: number,
+    delayMs: number,
+  ): Promise<void> {
+    if (this.stopGeneration > observedStopGeneration) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.stopObservers.delete(finish);
+        resolve();
+      };
+      this.stopObservers.add(finish);
+      timeout = setTimeout(finish, delayMs);
+      if (this.stopGeneration > observedStopGeneration) {
+        finish();
+      }
+    });
+  }
+
+  private resolveStopObservers(): void {
+    const observers = [...this.stopObservers];
+    this.stopObservers.clear();
+    for (const observer of observers) {
+      observer();
     }
   }
 
@@ -2085,11 +2270,35 @@ async function readRunnerContainerMetadataJsonObject(
     return {};
   }
 
-  const parsed = JSON.parse(text) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new HostedRunnerContainerMetadataResponseError({
+      details: sanitizeHostedExecutionStructuredLogDetails({
+        errorStatus: response.status,
+        responseJsonParseFailed: true,
+        responseStatus: response.status,
+        ...buildHostedRunnerContainerNonJsonResponseMetadata(response),
+      }) ?? {
+        errorStatus: response.status,
+        responseJsonParseFailed: true,
+        responseStatus: response.status,
+      },
+      statusCode: response.status,
+    });
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new TypeError("Runner container metadata response body must be a JSON object.");
   }
   return parsed as Record<string, unknown>;
+}
+
+function readRunnerContainerMetadataRecordProperty(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
 }
 
 async function readRunnerContainerMetadataResponseText(
