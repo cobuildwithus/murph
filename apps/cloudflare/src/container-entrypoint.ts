@@ -261,6 +261,7 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
 interface HostedContainerProcessState {
   commandLineDigest: string | null;
   ppid: number | null;
+  processGroupId: number | null;
   startTimeTicksFromProcStat: string | null;
   state: string | null;
   uid: number | null;
@@ -269,6 +270,11 @@ interface HostedContainerProcessState {
 interface HostedContainerProcessSnapshot {
   pids: Set<number>;
   rootUid: number | null;
+}
+
+interface HostedContainerProcessIsolationResult {
+  killedExpectedCodexRoot: boolean;
+  killedPids: number[];
 }
 
 type HostedContainerCleanupStatus = "not_run" | "passed" | "failed";
@@ -1693,9 +1699,12 @@ async function enforceHostedContainerProcessIsolation(
   processApi: HostedContainerProcessApi,
   baseline: HostedContainerProcessSnapshot,
   expectedCodexRoot: HostedExpectedCodexRootProcess | null,
-): Promise<void> {
+): Promise<HostedContainerProcessIsolationResult> {
   if (process.platform === "win32") {
-    return;
+    return {
+      killedExpectedCodexRoot: false,
+      killedPids: [],
+    };
   }
 
   const firstPass = await listUnexpectedHostedContainerProcessIds(
@@ -1705,8 +1714,14 @@ async function enforceHostedContainerProcessIsolation(
     expectedCodexRoot,
   );
   if (firstPass.length === 0) {
-    return;
+    return {
+      killedExpectedCodexRoot: false,
+      killedPids: [],
+    };
   }
+
+  const killedExpectedCodexRoot =
+    expectedCodexRoot !== null && firstPass.includes(expectedCodexRoot.pid);
 
   for (const pid of firstPass) {
     try {
@@ -1729,6 +1744,11 @@ async function enforceHostedContainerProcessIsolation(
       `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
     );
   }
+
+  return {
+    killedExpectedCodexRoot,
+    killedPids: firstPass,
+  };
 }
 
 async function snapshotHostedContainerProcesses(
@@ -1854,6 +1874,13 @@ function isExpectedHostedCodexRootProcess(
   }
 
   if (
+    expectedCodexRoot.processGroupId !== null
+    && state.processGroupId !== expectedCodexRoot.processGroupId
+  ) {
+    return false;
+  }
+
+  if (
     state.startTimeTicksFromProcStat !== expectedCodexRoot.startTimeTicksFromProcStat
   ) {
     return false;
@@ -1868,6 +1895,7 @@ async function readHostedContainerProcessState(
 ): Promise<HostedContainerProcessState> {
   let commandLineDigest: string | null = null;
   let ppid: number | null = null;
+  let processGroupId: number | null = null;
   let startTimeTicksFromProcStat: string | null = null;
   let state: string | null = null;
   let uid: number | null = null;
@@ -1889,8 +1917,12 @@ async function readHostedContainerProcessState(
       const statFields = remainder.split(/\s+/u);
       const [stateRaw, ppidRaw] = statFields;
       const parsedPpid = Number.parseInt(ppidRaw ?? "", 10);
+      const parsedProcessGroupId = Number.parseInt(statFields[2] ?? "", 10);
 
       ppid = Number.isInteger(parsedPpid) ? parsedPpid : null;
+      processGroupId = Number.isInteger(parsedProcessGroupId)
+        ? parsedProcessGroupId
+        : null;
       state = typeof stateRaw === "string" && stateRaw.length > 0 ? stateRaw : null;
       const startTimeRaw = statFields[19];
       startTimeTicksFromProcStat =
@@ -1910,7 +1942,14 @@ async function readHostedContainerProcessState(
     // UID is only needed for the daemonized-orphan cleanup path.
   }
 
-  return { commandLineDigest, ppid, startTimeTicksFromProcStat, state, uid };
+  return {
+    commandLineDigest,
+    ppid,
+    processGroupId,
+    startTimeTicksFromProcStat,
+    state,
+    uid,
+  };
 }
 
 function readHostedContainerProcessUid(status: string): number | null {
@@ -2231,11 +2270,14 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     if (processBaseline) {
       try {
         const expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
-        await enforceHostedContainerProcessIsolation(
+        const cleanupResult = await enforceHostedContainerProcessIsolation(
           runtime.processApi,
           processBaseline,
           expectedCodexRoot,
         );
+        if (cleanupResult.killedExpectedCodexRoot) {
+          await runtime.stopWarmCodex("expected-root-rejected").catch(() => undefined);
+        }
         options?.onCleanupStatus?.("passed");
       } catch (error) {
         await runtime.stopWarmCodex("process-isolation-failed").catch(() => undefined);

@@ -17,6 +17,10 @@ export interface PendingCodexRpcRequest {
   resolve: (result: unknown) => void
 }
 
+export type ResolvePendingCodexRpcRequestResult =
+  | 'resolved'
+  | 'unknown_response_id'
+
 interface StoppableCodexAppServerChild {
   exitCode: number | null
   kill(signal?: NodeJS.Signals): boolean
@@ -278,10 +282,10 @@ export function resolvePendingCodexRpcRequest(input: {
   message: CodexRpcMessage
   pendingRequests: Map<CodexRpcId, PendingCodexRpcRequest>
   responseId: CodexRpcId
-}): void {
+}): ResolvePendingCodexRpcRequestResult {
   const pending = input.pendingRequests.get(input.responseId)
   if (!pending) {
-    return
+    return 'unknown_response_id'
   }
   input.pendingRequests.delete(input.responseId)
 
@@ -293,10 +297,11 @@ export function resolvePendingCodexRpcRequest(input: {
         method: pending.method,
       }),
     )
-    return
+    return 'resolved'
   }
 
   pending.resolve(input.message.result)
+  return 'resolved'
 }
 
 export function rejectPendingCodexRpcRequests(

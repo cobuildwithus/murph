@@ -563,6 +563,7 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private cleanupProcessExitListener: () => void
+  private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
   private nextRequestId = 1
   private normalShutdown = false
@@ -715,11 +716,16 @@ class CodexAppServerProcess {
   sendUntrackedRequest(method: string, params: Record<string, unknown>): void {
     const id = this.nextRequestId
     this.nextRequestId += 1
+    this.ignoredResponseIds.add(id)
     void this.writeRpcMessage({
       id,
       method,
       params: stripUndefinedRpcParams(params),
     })
+  }
+
+  consumeIgnoredResponseId(id: CodexRpcId): boolean {
+    return this.ignoredResponseIds.delete(id)
   }
 
   signal(signal: NodeJS.Signals): void {
@@ -748,6 +754,7 @@ class CodexAppServerProcess {
       this.state = 'stopped'
       this.stopCompleted = true
       this.activeTurn = null
+      this.ignoredResponseIds.clear()
     }
   }
 
@@ -1166,6 +1173,7 @@ async function runCodexAppServerTurnOnProcess(
   let terminationSignalSent: NodeJS.Signals | null = null
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
+  let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
   let rolloutRelativePath: string | null = null
@@ -1437,6 +1445,74 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  const buildUnknownRpcResponseError = (): VaultCliError =>
+    new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_LATE_RESPONSE',
+      'Codex app-server emitted a response for an unknown request id.',
+      {
+        retryable: true,
+      },
+    )
+
+  const buildStaleTurnEventError = (input: {
+    eventMethod: string | null
+    eventTurnId: string | null
+  }): VaultCliError =>
+    new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
+      'Codex app-server emitted an event that does not match the active turn.',
+      {
+        eventMethod: input.eventMethod,
+        eventTurnIdPresent: input.eventTurnId !== null,
+        expectedTurnIdPresent: expectedTurnId !== null,
+        retryable: true,
+      },
+    )
+
+  const bindExpectedTurnId = (
+    candidateTurnId: string | null,
+    eventMethod: string | null,
+  ): VaultCliError | null => {
+    if (!candidateTurnId) {
+      return null
+    }
+
+    if (expectedTurnId === null) {
+      expectedTurnId = candidateTurnId
+      return null
+    }
+
+    if (candidateTurnId === expectedTurnId) {
+      return null
+    }
+
+    return buildStaleTurnEventError({
+      eventMethod,
+      eventTurnId: candidateTurnId,
+    })
+  }
+
+  const validateWarmTurnEventCorrelation = (
+    message: CodexRpcMessage,
+    eventMethod: string | null,
+  ): VaultCliError | null => {
+    if (!options.keepProcessWarm) {
+      return null
+    }
+
+    const eventTurnId = extractCodexTurnIdFromMessage(message)
+    if (!eventTurnId) {
+      return expectedTurnId === null
+        ? null
+        : buildStaleTurnEventError({
+          eventMethod,
+          eventTurnId: null,
+        })
+    }
+
+    return bindExpectedTurnId(eventTurnId, eventMethod)
+  }
+
   const handleParsedMessage = (message: CodexRpcMessage) => {
     jsonEvents.push(message)
 
@@ -1447,18 +1523,39 @@ async function runCodexAppServerTurnOnProcess(
         codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
       }
       if (pending?.method === 'turn/start') {
-        turnId = extractCodexTurnIdFromResult(message.result) ?? turnId
+        const resultTurnId = extractCodexTurnIdFromResult(message.result)
+        const correlationError = bindExpectedTurnId(resultTurnId, 'turn/start')
+        if (correlationError) {
+          rejectOnce(correlationError)
+          return
+        }
+        turnId = resultTurnId ?? turnId
       }
-      resolvePendingCodexRpcRequest({
+      const resolveResult = resolvePendingCodexRpcRequest({
         message,
         pendingRequests: codexProcess.pendingRequests,
         responseId,
       })
+      if (
+        resolveResult === 'unknown_response_id' &&
+        !codexProcess.consumeIgnoredResponseId(responseId)
+      ) {
+        if (options.keepProcessWarm) {
+          rejectOnce(buildUnknownRpcResponseError())
+        }
+      }
       return
     }
 
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
+      const requestMethod = typeof message.method === 'string' ? message.method : null
+      const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
+      if (correlationError) {
+        rejectOnce(correlationError)
+        return
+      }
+
       const dynamicToolRequest = readMurphDynamicToolRequest(message)
       if (!dynamicToolRequest) {
         denyUnsupportedCodexServerRequest({
@@ -1553,6 +1650,11 @@ async function runCodexAppServerTurnOnProcess(
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     const method = typeof message.method === 'string' ? message.method : null
+    const correlationError = validateWarmTurnEventCorrelation(message, method)
+    if (correlationError) {
+      rejectOnce(correlationError)
+      return
+    }
     if (method === 'turn/started') {
       turnId = extractCodexTurnIdFromMessage(message) ?? turnId
     }
