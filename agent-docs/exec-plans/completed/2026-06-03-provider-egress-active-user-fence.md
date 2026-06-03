@@ -39,3 +39,6 @@ runtime-controlled provider integrations.
 5. Update docs to describe the new trust model.
 6. Run focused tests, typecheck/verification, required audits, and a local
    runtime log proof when feasible.
+Status: completed
+Updated: 2026-06-03
+Completed: 2026-06-03
