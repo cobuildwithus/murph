@@ -1568,7 +1568,7 @@ export class HostedUserRunner {
         ) {
           return result;
         }
-        return { kind: "wake-unconfirmed", reason: "legacy-wake-result" };
+        return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
@@ -2401,15 +2401,12 @@ function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResu
         kind: "unknown",
         reason: isRunnerRuntimeWakeUnknownReason(value.reason)
           ? value.reason
-          : "legacy-wake-result",
+          : "container-rpc-error",
       };
-    }
-    if ("accepted" in value) {
-      return { kind: "unknown", reason: "legacy-wake-result" };
     }
   }
 
-  return { kind: "unknown", reason: "legacy-wake-result" };
+  return { kind: "unknown", reason: "container-rpc-error" };
 }
 
 function isRunnerRuntimeWakeUnknownReason(
@@ -2418,7 +2415,6 @@ function isRunnerRuntimeWakeUnknownReason(
   return value === "active-child-rejected"
     || value === "container-rpc-error"
     || value === "container-rpc-timeout"
-    || value === "legacy-wake-result"
     || value === "missing-container-binding"
     || value === "missing-wake-method";
 }
@@ -2592,7 +2588,6 @@ function mapRunnerProcessingRetryReason(
       return "container_rpc_timeout";
     case "missing-container-binding":
       return "missing_container_binding";
-    case "legacy-wake-result":
     case "missing-wake-method":
       return "container_rpc_error";
   }

@@ -612,8 +612,13 @@ export function verifyWorkspaceImportPolicy({
   if (
     sourceMember === "apps/cloudflare"
     && (
-      specifier === "@murphai/assistant-engine"
-      || specifier.startsWith("@murphai/assistant-engine/")
+      (
+        (
+          specifier === "@murphai/assistant-engine"
+          || specifier.startsWith("@murphai/assistant-engine/")
+        )
+        && !isAllowedCloudflareAssistantEngineOwnerImport(source, specifier)
+      )
       || specifier === "@murphai/operator-config"
       || specifier.startsWith("@murphai/operator-config/")
     )
@@ -692,6 +697,16 @@ function isWorkspacePackageSpecifier(specifier) {
   return specifier.startsWith("@murphai/");
 }
 
+function isAllowedCloudflareAssistantEngineOwnerImport(source, specifier) {
+  return (
+    specifier === "@murphai/assistant-engine/assistant-codex"
+    && importsOnlyNamedBindingsFromSpecifier(source, specifier, [
+      "snapshotExpectedHostedCodexRootProcess",
+      "stopHostedWarmCodexAppServer",
+    ])
+  );
+}
+
 function importsEmptyBindingsFromSpecifier(source, specifier) {
   const optionalTrivia = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n\r]*(?:\r?\n|$))*`;
 
@@ -699,6 +714,50 @@ function importsEmptyBindingsFromSpecifier(source, specifier) {
     String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?\{${optionalTrivia}\}${optionalTrivia}from${optionalTrivia}["']${escapeRegExp(specifier)}["']`,
     "mu",
   ).test(source);
+}
+
+function importsOnlyNamedBindingsFromSpecifier(source, specifier, allowedBindingNames) {
+  const optionalTrivia = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n\r]*(?:\r?\n|$))*`;
+  const specifierPattern = escapeRegExp(specifier);
+
+  if (new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?(?:[A-Za-z_$][\w$]*${optionalTrivia},${optionalTrivia})?\*${optionalTrivia}as${optionalTrivia}[A-Za-z_$][\w$]*${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "mu",
+  ).test(source)) {
+    return false;
+  }
+
+  if (new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?[A-Za-z_$][\w$]*(?:${optionalTrivia},${optionalTrivia}\{[^}]*\})?${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "mu",
+  ).test(source)) {
+    return false;
+  }
+
+  const allowed = new Set(allowedBindingNames);
+  const namedImportPattern = new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?\{(?<bindings>[^}]*)\}${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "gmu",
+  );
+  const matches = [...source.matchAll(namedImportPattern)];
+
+  if (matches.length === 0) {
+    return false;
+  }
+
+  return matches.every((match) => {
+    const bindings = stripImportBindingComments(match.groups?.bindings ?? "")
+      .split(",")
+      .map((binding) => binding.trim())
+      .filter(Boolean)
+      .map((binding) => binding.split(/\s+as\s+/iu)[0]?.trim())
+      .filter(Boolean);
+
+    return (
+      bindings.length > 0
+      && bindings.every((binding) => allowed.has(binding))
+    );
+  });
 }
 
 function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
@@ -730,6 +789,12 @@ function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
       ).test(source)
     ),
   );
+}
+
+function stripImportBindingComments(value) {
+  return value
+    .replace(/\/\*[\s\S]*?\*\//gu, "")
+    .replace(/\/\/[^\n\r]*(?:\r?\n|$)/gu, "\n");
 }
 
 function extractNamespaceImportAliasesFromSpecifier(source, specifier) {

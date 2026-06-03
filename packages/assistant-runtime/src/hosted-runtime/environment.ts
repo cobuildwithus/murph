@@ -246,13 +246,13 @@ export function buildHostedPlatformBackedRuntimeEnv(input: {
   };
 }
 
-export function projectHostedRuntimeToChildEnv(input: {
-  ambientEnv?: Readonly<Record<string, string | undefined>>;
+export function projectHostedRuntimeProcessEnv(input: {
+  ambientEnv: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
   platformTransportEnv?: Readonly<Record<string, string | undefined>>;
 }): Record<string, string> {
   return {
-    ...buildHostedBaseProcessEnvironment(input.ambientEnv ?? process.env),
+    ...buildHostedBaseProcessEnvironment(input.ambientEnv),
     ...buildHostedPlatformTransportProcessEnvironment(input.platformTransportEnv ?? {}),
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
   };

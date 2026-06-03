@@ -2001,7 +2001,7 @@ describe("startHostedContainerEntrypoint", () => {
       }
 
       if (String(filePath).endsWith(`/${codexPid}/stat`)) {
-        return `${codexPid} (codex) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${codexPid} (codex) S ${process.pid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       if (String(filePath).endsWith(`/${codexPid}/cmdline`)) {
@@ -2014,7 +2014,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       if (String(filePath).endsWith(`/${codexChildPid}/stat`)) {
         const state = childKilled ? "Z" : "S";
-        return `${codexChildPid} (sh) ${state} ${codexPid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${codexChildPid} (sh) ${state} ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       if (String(filePath).endsWith(`/${codexChildPid}/status`)) {
@@ -2036,9 +2036,7 @@ describe("startHostedContainerEntrypoint", () => {
         processApi: { kill, readFile, readdir },
         processIsolation: true,
         snapshotExpectedCodexRootProcess: vi.fn(async () => ({
-          commandDigest: "command_digest",
           commandLineDigest: codexCmdlineDigest,
-          identityDigest: "identity_digest",
           owner: "codex-app-server" as const,
           pid: codexPid,
           processGroupId: codexPid,
@@ -2106,7 +2104,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       if (String(filePath).endsWith(`/${codexPid}/stat`)) {
         const state = codexKilled ? "Z" : "S";
-        return `${codexPid} (python) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${codexPid} (python) ${state} ${process.pid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       if (String(filePath).endsWith(`/${codexPid}/status`)) {
@@ -2121,6 +2119,7 @@ describe("startHostedContainerEntrypoint", () => {
         return buildWorkspaceRunnerResult();
       },
     );
+    const stopWarmCodex = vi.fn(async () => undefined);
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -2128,18 +2127,16 @@ describe("startHostedContainerEntrypoint", () => {
         processApi: { kill, readFile, readdir },
         processIsolation: true,
         snapshotExpectedCodexRootProcess: vi.fn(async () => ({
-          commandDigest: "command_digest",
           commandLineDigest: createHash("sha256")
             .update("codex\u0000-a\u0000never\u0000app-server\u0000")
             .digest("hex"),
-          identityDigest: "identity_digest",
           owner: "codex-app-server" as const,
           pid: codexPid,
           processGroupId: codexPid,
           startTimeTicksFromProcStat: codexStartTime,
           uid: 1000,
         })),
-        stopWarmCodex: vi.fn(async () => undefined),
+        stopWarmCodex,
       },
     });
     servers.push(server);
@@ -2165,6 +2162,8 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(kill).toHaveBeenCalledWith(codexPid, "SIGKILL");
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("expected-root-rejected");
   });
 
   it("runs warm-container cleanup after a failed runner job", async () => {

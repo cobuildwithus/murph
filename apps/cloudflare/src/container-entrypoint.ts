@@ -22,13 +22,17 @@ import {
   summarizeHostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExpectedCodexRootProcess,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNNER_EXECUTABLE_PATH,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   snapshotExpectedHostedCodexRootProcess,
   stopHostedWarmCodexAppServer,
-  type HostedExpectedCodexRootProcess,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
@@ -302,6 +306,9 @@ export async function startHostedContainerEntrypoint(input: {
     let runtimeWakeForRequest: (() => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
+    let cleanupPassedForRequest = false;
+    let directInvocationReturned = false;
+    let resultDelivered = false;
 
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -546,12 +553,14 @@ export async function startHostedContainerEntrypoint(input: {
         },
         onCleanupStatus(status) {
           lastCleanupStatus = status;
+          cleanupPassedForRequest = status === "passed";
           if (status === "failed") {
             hostedContainerPoisoned = true;
           }
         },
         signal: requestAbort.signal,
       });
+      directInvocationReturned = true;
 
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -569,6 +578,7 @@ export async function startHostedContainerEntrypoint(input: {
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
+      resultDelivered = true;
     } catch (error) {
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -589,6 +599,27 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
+      if (
+        job
+        && !resultDelivered
+        && (requestAbort.signal.aborted || response.destroyed)
+        && !(directInvocationReturned && cleanupPassedForRequest)
+      ) {
+        hostedContainerPoisoned = true;
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            cleanupPassed: cleanupPassedForRequest,
+            directInvocationReturned,
+            resultDelivered,
+          },
+          level: "error",
+          message: "Hosted container entrypoint poisoned after an ambiguous aborted runner job.",
+          phase: "failed",
+          userId: readHostedExecutionRunnerJobUserId(job),
+        });
+        runtime.exitScheduler();
+      }
       stopActiveJobDiagnostics?.();
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;

@@ -55,9 +55,11 @@ The current implementation imports its local-only assistant runtime plus the can
 Hosted runtime env/config helpers that Cloudflare needs at the app boundary export from
 `@murphai/assistant-runtime/hosted-assistant-env` and
 `@murphai/assistant-runtime/hosted-runtime-contracts`, so hosted apps do not need
-to reach into lower owner packages directly. Host apps may still decide which env
-profiles are enabled and how transport-specific URL rewriting works, but the
-profile key sets and runtime manifest shape come from this package.
+to reach into lower owner packages for runtime launch/profile contracts. Concrete
+Codex app-server process lifecycle hooks remain owned by `@murphai/assistant-engine/assistant-codex`.
+Host apps may still decide which env profiles are enabled and how
+transport-specific URL rewriting works, but the profile key sets and runtime
+manifest shape come from this package.
 
 Hosted runner executable lookup is also package-owned: `PATH` is projected from
 the canonical runner image entries plus absolute ambient extras, while forwarded

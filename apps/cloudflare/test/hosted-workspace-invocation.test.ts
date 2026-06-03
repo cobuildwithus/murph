@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -161,6 +162,43 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(capturedJob.runtime?.parserToolchain?.tools.ffmpeg?.command).toBe(
       "/usr/bin/ffmpeg",
     );
+  });
+
+  it("preserves former launcher roots for direct in-process invocations", async () => {
+    mocks.runHostedWorkspaceRuntimeJobInProcess.mockResolvedValue({
+      nextWakeAt: null,
+      redactedStatus: {
+        importedCount: 0,
+      },
+      status: "idle" as const,
+    });
+    const job = createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+      userEnv: {
+        OPENAI_API_KEY: "fixture-user-openai-key",
+      },
+    });
+
+    await runHostedWorkspaceInvocation(job, {
+      supervisorEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    });
+
+    const vaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(job.request.userId);
+    const launcherRoot = path.dirname(path.dirname(vaultRoot));
+    await Promise.all([
+      "home",
+      "cache",
+      "tmp",
+      "hf-home",
+    ].map((directoryName) => access(path.join(launcherRoot, directoryName))));
   });
 });
 

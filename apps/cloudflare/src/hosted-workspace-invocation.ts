@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -58,6 +58,12 @@ import {
 
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
 const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
+const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
+  "home",
+  "cache",
+  "tmp",
+  "hf-home",
+] as const;
 
 export interface HostedWorkspaceInvocationOptions {
   onRuntimeWakeReady?: (sendWake: () => boolean) => void;
@@ -218,13 +224,28 @@ async function resolveHostedRunnerWarmLauncherRoot(
   const workspaceId = path.basename(root);
   const cached = hostedRunnerWarmLauncherRoots.get(workspaceId);
   if (cached) {
-    await mkdir(cached, { mode: 0o700, recursive: true });
+    await ensureHostedRunnerWarmLauncherDirectories(cached);
     return cached;
   }
 
-  await mkdir(root, { mode: 0o700, recursive: true });
+  await ensureHostedRunnerWarmLauncherDirectories(root);
   hostedRunnerWarmLauncherRoots.set(workspaceId, root);
   return root;
+}
+
+async function ensureHostedRunnerWarmLauncherDirectories(root: string): Promise<void> {
+  const directories = [
+    root,
+    ...HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES.map((name) =>
+      path.join(root, name)
+    ),
+  ];
+  await Promise.all(
+    directories.map(async (directory) => {
+      await mkdir(directory, { mode: 0o700, recursive: true });
+      await chmod(directory, 0o700);
+    }),
+  );
 }
 
 function resolveHostedRunnerWarmLauncherRootPath(userId: string): string {

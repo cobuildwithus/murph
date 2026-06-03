@@ -80,4 +80,34 @@ import /* keep */ {
 
     expect(failure).toBeNull();
   });
+
+  it("allows Cloudflare to import hosted Codex process hooks from the assistant-engine owner", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: `
+import path from "node:path";
+import {
+  snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer,
+} from "@murphai/assistant-engine/assistant-codex";
+      `,
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-engine/assistant-codex",
+    });
+
+    expect(failure).toBeNull();
+  });
+
+  it("rejects unrelated direct Cloudflare imports from assistant-engine", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { executeCodexAppServerTurn } from "@murphai/assistant-engine/assistant-codex";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-engine/assistant-codex",
+    });
+
+    expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
+  });
 });

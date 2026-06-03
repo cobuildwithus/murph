@@ -12,7 +12,7 @@ import {
   buildHostedPlatformBackedRuntimeEnv,
   HOSTED_RUNNER_EXECUTABLE_PATH,
   normalizeHostedAssistantRuntimeConfig,
-  projectHostedRuntimeToChildEnv,
+  projectHostedRuntimeProcessEnv,
   withHostedProcessEnvironment,
 } from "../src/hosted-runtime/environment.ts";
 import {
@@ -219,8 +219,8 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
   });
 });
 
-test("hosted runtime child env does not project typed parser toolchain into process env", () => {
-  const childEnv = projectHostedRuntimeToChildEnv({
+test("hosted runtime process env does not project typed parser toolchain into process env", () => {
+  const childEnv = projectHostedRuntimeProcessEnv({
     ambientEnv: {
       CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
@@ -280,9 +280,9 @@ test("hosted runtime child env does not project typed parser toolchain into proc
   assert.equal("WHISPER_MODEL_PATH" in childEnv, false);
 });
 
-test("hosted runtime child env omits parser path env when no typed toolchain is present", () => {
+test("hosted runtime process env omits parser path env when no typed toolchain is present", () => {
   assert.deepEqual(
-    projectHostedRuntimeToChildEnv({
+    projectHostedRuntimeProcessEnv({
       ambientEnv: {},
       forwardedEnv: {
         FFMPEG_COMMAND: "/stale/ffmpeg",
@@ -299,9 +299,9 @@ test("hosted runtime child env omits parser path env when no typed toolchain is 
   );
 });
 
-test("hosted runtime child env omits ambient proxy env unless platform transport is supplied", () => {
+test("hosted runtime process env omits ambient proxy env unless platform transport is supplied", () => {
   assert.deepEqual(
-    projectHostedRuntimeToChildEnv({
+    projectHostedRuntimeProcessEnv({
       ambientEnv: {
         HTTP_PROXY: "http://ambient-proxy.example.test:8080",
         HTTPS_PROXY: "http://ambient-proxy.example.test:8080",
@@ -315,8 +315,8 @@ test("hosted runtime child env omits ambient proxy env unless platform transport
   );
 });
 
-test("hosted runtime child env strips spoofed hosted CLI bridge and local daemon env", () => {
-  const childEnv = projectHostedRuntimeToChildEnv({
+test("hosted runtime process env strips spoofed hosted CLI bridge and local daemon env", () => {
+  const childEnv = projectHostedRuntimeProcessEnv({
     ambientEnv: {
       PATH: "/usr/bin:/bin",
     },

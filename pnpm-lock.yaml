@@ -53,6 +53,9 @@ importers:
       '@cloudflare/containers':
         specifier: ^0.3.3
         version: 0.3.3
+      '@murphai/assistant-engine':
+        specifier: workspace:*
+        version: link:../../packages/assistant-engine
       '@murphai/assistant-runtime':
         specifier: workspace:*
         version: link:../../packages/assistant-runtime

@@ -86,6 +86,18 @@ Temporal hosted workflow
 - Milestone 1 deploy skew is handled by an architecture/version handshake and
   warm-container reset, not by request-shape compatibility branches.
 
+## Current State
+
+- Milestone 2 warm-Codex process ownership now stays in
+  `packages/assistant-engine`: `apps/cloudflare` imports the concrete snapshot
+  and stop hooks from `@murphai/assistant-engine/assistant-codex`, while the
+  expected-root process shape lives as a neutral hosted contract in
+  `@murphai/hosted-execution/runtime-control`.
+- Review follow-up in progress: hard-cut remaining legacy runtime-wake result
+  compatibility, rename the hosted process-env projection helper away from
+  child terminology with explicit ambient env input, and pin direct invocation
+  launcher-root side effects in focused tests.
+
 ## First-Principles Corrections
 
 Five focused review passes found that the original draft still preserved too
@@ -634,13 +646,12 @@ Warm-Codex cleanup rule:
 - if descendants remain after cleanup, poison the Codex process and destroy the
   warm container
 
-Expected warm process identity must not be PID-only. For the intentional warm
-survivor, store and verify at least:
+Expected warm process proof must not be PID-only. For the intentional warm
+survivor, expose only process facts the container can verify:
 
 ```ts
 interface HostedExpectedCodexRootProcess {
-  commandDigest: string;
-  identityDigest: string;
+  commandLineDigest: string;
   owner: "codex-app-server";
   pid: number;
   processGroupId: number | null;
@@ -649,10 +660,13 @@ interface HostedExpectedCodexRootProcess {
 }
 ```
 
-Health checks must verify that the registered pid still refers to the same
-process. PID reuse should never make an unrelated process look expected. The
-existing simpler PID snapshot logic can remain for unregistered leak cleanup,
-because those checks run over short cleanup windows.
+Container cleanup must verify that the registered pid still refers to the same
+process. PID reuse should never make an unrelated process look expected.
+Assistant-engine identity digests remain internal reuse state; do not include
+them in the container-facing proof unless the container can verify them through
+a real assistant-engine health check. The existing simpler PID snapshot logic
+can remain for unregistered leak cleanup, because those checks run over short
+cleanup windows.
 
 ### Warm Roots
 
@@ -1197,8 +1211,8 @@ These are required only for Milestone 2:
   necessarily poisoning
 - malformed request, bad framing, bad JSON, impossible correlation, or
   unhandled unknown request poisons
-- expected root process identity verifies pid, uid, process-group id,
-  `/proc/stat` start time, command digest, owner, and identity digest
+- expected root process proof verifies pid, uid, process-group id,
+  `/proc/stat` start time, command-line digest, and owner
 - cleanup preserves only the verified Codex root process
 - cleanup kills leaked descendants even if they share the Codex process group
 - cleanup rejects stale, missing, wrong-identity, PID-reused, or unhealthy

@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
-  projectHostedRuntimeToChildEnv,
+  projectHostedRuntimeProcessEnv,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
@@ -134,7 +134,7 @@ function createHostedRunnerSmokeProcessEnv(input: {
   launcherDirectories: HostedRunnerSmokeLauncherDirectories;
 }): Record<string, string> {
   const ambientEnv = input.ambientEnv ?? process.env;
-  const env = projectHostedRuntimeToChildEnv({
+  const env = projectHostedRuntimeProcessEnv({
     ambientEnv,
     forwardedEnv: input.forwardedEnv,
     platformTransportEnv: ambientEnv,

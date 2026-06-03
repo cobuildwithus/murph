@@ -8,6 +8,9 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import type {
+  HostedExpectedCodexRootProcess,
+} from '@murphai/hosted-execution/runtime-control'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -123,17 +126,6 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
-
-export interface HostedExpectedCodexRootProcess {
-  commandDigest: string
-  commandLineDigest: string
-  identityDigest: string
-  owner: 'codex-app-server'
-  pid: number
-  processGroupId: number | null
-  startTimeTicksFromProcStat: string
-  uid: number | null
-}
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -466,7 +458,7 @@ function resolveCodexAppServerCommand(input: {
   hostedRuntimeProcess: boolean
 }): string {
   if (input.hostedRuntimeProcess) {
-    return resolveHostedCodexAppServerCommand(input.env ?? process.env)
+    return resolveHostedCodexAppServerCommand(input.env ?? {})
   }
 
   return input.codexCommand?.trim() || 'codex'
@@ -484,7 +476,7 @@ function resolveCodexAppServerCodexHome(input: {
 }
 
 function isHostedCodexAppServerRuntime(env: NodeJS.ProcessEnv | undefined): boolean {
-  return isHostedRuntimeProcessEnv(process.env) || isHostedRuntimeProcessEnv(env)
+  return isHostedRuntimeProcessEnv(env)
 }
 
 function isHostedRuntimeProcessEnv(env: NodeJS.ProcessEnv | undefined): boolean {
@@ -508,11 +500,7 @@ function resolveHostedCodexAppServerCommand(env: NodeJS.ProcessEnv): string {
 }
 
 function projectHostedCodexAppServerChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const ambientHostedCodexHome = normalizeNullableString(process.env.CODEX_HOME)
-  const providedHostedCodexHome = normalizeNullableString(env.CODEX_HOME)
-  const codexHome = isHostedRuntimeProcessEnv(process.env)
-    ? ambientHostedCodexHome ?? providedHostedCodexHome
-    : providedHostedCodexHome
+  const codexHome = normalizeNullableString(env.CODEX_HOME)
 
   return {
     ...env,
@@ -792,8 +780,6 @@ class CodexAppServerProcess {
 
     const procState = await readCodexProcState(pid)
     if (
-      !this.commandDigest ||
-      !this.identityDigest ||
       !procState?.commandLineDigest ||
       !procState?.startTimeTicksFromProcStat
     ) {
@@ -801,9 +787,7 @@ class CodexAppServerProcess {
     }
 
     return {
-      commandDigest: this.commandDigest,
       commandLineDigest: procState.commandLineDigest,
-      identityDigest: this.identityDigest,
       owner: 'codex-app-server',
       pid,
       processGroupId: this.processGroupPid,
@@ -893,7 +877,7 @@ class CodexAppServerProcess {
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
       } else if (line.trim().length > 0) {
-        this.poisoned = true
+        void this.poison('off-turn-output')
       }
       return
     }
@@ -902,8 +886,13 @@ class CodexAppServerProcess {
       return
     }
 
-    this.poisoned = true
-    this.activeTurn?.onFramingError(line)
+    if (this.activeTurn) {
+      this.poisoned = true
+      this.activeTurn.onFramingError(line)
+      return
+    }
+
+    void this.poison('off-turn-framing-error')
   }
 
   private handleClose(code: number | null, signal: NodeJS.Signals | null): void {
@@ -1087,6 +1076,40 @@ function hashCodexRawString(value: string): string {
   return createHash('sha256')
     .update(value)
     .digest('hex')
+}
+
+function readCodexEventMethod(message: CodexRpcMessage): string | null {
+  return typeof message.method === 'string'
+    ? message.method
+    : typeof message.type === 'string'
+      ? message.type
+      : null
+}
+
+function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean {
+  const normalizedMethod = normalizeNullableString(method)
+  if (!normalizedMethod) {
+    return true
+  }
+
+  return (
+    normalizedMethod === 'error' ||
+    normalizedMethod === 'thread/compacted' ||
+    normalizedMethod.startsWith('turn/') ||
+    normalizedMethod.startsWith('item/') ||
+    normalizedMethod.startsWith('rawResponseItem/') ||
+    normalizedMethod.startsWith('command/exec/') ||
+    normalizedMethod.startsWith('process/') ||
+    normalizedMethod.startsWith('model/') ||
+    normalizedMethod.startsWith('turn.') ||
+    normalizedMethod.startsWith('item.') ||
+    normalizedMethod.startsWith('rawResponseItem.') ||
+    normalizedMethod.startsWith('command.exec.') ||
+    normalizedMethod.startsWith('process.') ||
+    normalizedMethod.startsWith('model.') ||
+    normalizedMethod.includes('assistant.message.delta') ||
+    normalizedMethod.includes('agent.message.delta')
+  )
 }
 
 function stableCodexIdentityStringify(value: unknown): string {
@@ -1501,16 +1524,16 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const eventTurnId = extractCodexTurnIdFromMessage(message)
-    if (!eventTurnId) {
-      return expectedTurnId === null
-        ? null
-        : buildStaleTurnEventError({
-          eventMethod,
-          eventTurnId: null,
-        })
+    if (eventTurnId) {
+      return bindExpectedTurnId(eventTurnId, eventMethod)
     }
 
-    return bindExpectedTurnId(eventTurnId, eventMethod)
+    return codexEventMethodRequiresTurnCorrelation(eventMethod)
+      ? buildStaleTurnEventError({
+        eventMethod,
+        eventTurnId: null,
+      })
+      : null
   }
 
   const handleParsedMessage = (message: CodexRpcMessage) => {
@@ -1550,12 +1573,6 @@ async function runCodexAppServerTurnOnProcess(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       const requestMethod = typeof message.method === 'string' ? message.method : null
-      const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
-      if (correlationError) {
-        rejectOnce(correlationError)
-        return
-      }
-
       const dynamicToolRequest = readMurphDynamicToolRequest(message)
       if (!dynamicToolRequest) {
         denyUnsupportedCodexServerRequest({
@@ -1592,6 +1609,12 @@ async function runCodexAppServerTurnOnProcess(
             ],
           },
         })
+        return
+      }
+
+      const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
+      if (correlationError) {
+        rejectOnce(correlationError)
         return
       }
 
@@ -1649,7 +1672,7 @@ async function runCodexAppServerTurnOnProcess(
 
     codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
-    const method = typeof message.method === 'string' ? message.method : null
+    const method = readCodexEventMethod(message)
     const correlationError = validateWarmTurnEventCorrelation(message, method)
     if (correlationError) {
       rejectOnce(correlationError)

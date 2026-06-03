@@ -69,6 +69,7 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.3",
+    "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistant-runtime": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",

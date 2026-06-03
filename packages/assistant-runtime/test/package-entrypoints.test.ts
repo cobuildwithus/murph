@@ -30,7 +30,7 @@ import {
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecPublic,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputPublic,
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponsePublic,
-  projectHostedRuntimeToChildEnv as projectHostedRuntimeToChildEnvPublic,
+  projectHostedRuntimeProcessEnv as projectHostedRuntimeProcessEnvPublic,
   readHostedRunnerCommitTimeoutMs as readHostedRunnerCommitTimeoutMsPublic,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -64,7 +64,7 @@ import {
   buildHostedRuntimeLaunchSpec as buildHostedRuntimeLaunchSpecDirect,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputDirect,
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseDirect,
-  projectHostedRuntimeToChildEnv as projectHostedRuntimeToChildEnvDirect,
+  projectHostedRuntimeProcessEnv as projectHostedRuntimeProcessEnvDirect,
   readHostedRunnerCommitTimeoutMs as readHostedRunnerCommitTimeoutMsDirect,
 } from "../src/hosted-runtime-contracts.ts";
 import {
@@ -201,7 +201,7 @@ test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted run
   assert.equal(readHostedRunnerCommitTimeoutMsPublic, readHostedRunnerCommitTimeoutMsDirect);
   assert.equal(buildHostedRuntimeForwardedEnvPublic, buildHostedRuntimeForwardedEnvDirect);
   assert.equal(buildHostedRuntimeLaunchSpecPublic, buildHostedRuntimeLaunchSpecDirect);
-  assert.equal(projectHostedRuntimeToChildEnvPublic, projectHostedRuntimeToChildEnvDirect);
+  assert.equal(projectHostedRuntimeProcessEnvPublic, projectHostedRuntimeProcessEnvDirect);
   assert.equal(
     parseHostedRuntimeLatencyTraceResponsePublic,
     parseHostedRuntimeLatencyTraceResponseDirect,

@@ -53,7 +53,7 @@ export {
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {
-  projectHostedRuntimeToChildEnv,
+  projectHostedRuntimeProcessEnv,
 } from "./hosted-runtime/environment.ts";
 export {
   buildHostedRuntimeChildEnv,

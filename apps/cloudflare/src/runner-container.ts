@@ -159,11 +159,7 @@ export interface HostedExecutionContainerStubLike {
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
-  /**
-   * Legacy boolean wake result is deploy-skew compatibility only. Delete after
-   * old accepted-only containers are gone.
-   */
-  wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult | { accepted: boolean }>;
+  wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -255,7 +251,6 @@ export type RunnerRuntimeWakeResult =
         | "active-child-rejected"
         | "container-rpc-error"
         | "container-rpc-timeout"
-        | "legacy-wake-result"
         | "missing-container-binding"
         | "missing-wake-method";
     };

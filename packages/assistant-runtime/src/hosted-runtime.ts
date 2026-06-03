@@ -178,7 +178,7 @@ export type {
 } from "./hosted-runtime/platform.ts";
 export {
   normalizeHostedAssistantRuntimeConfig,
-  projectHostedRuntimeToChildEnv,
+  projectHostedRuntimeProcessEnv,
   sanitizeHostedAssistantRuntimeForwardedEnv,
 } from "./hosted-runtime/environment.ts";
 export {
