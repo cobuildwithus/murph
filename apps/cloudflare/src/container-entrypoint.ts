@@ -284,6 +284,10 @@ export async function startHostedContainerEntrypoint(input: {
   runtime?: HostedContainerRuntimeOptions;
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
+  const runnerBundle = await readHostedRunnerBundleManifestSummary(
+    runtime.processApi,
+    runtime.startupConfig.runnerBundleManifestPath,
+  );
   let activeHostedRunnerJobCount = 0;
   let hostedContainerPoisoned = false;
   let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
@@ -303,10 +307,6 @@ export async function startHostedContainerEntrypoint(input: {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
 
       if (request.method === "GET" && requestUrl.pathname === "/health") {
-        const runnerBundle = await readHostedRunnerBundleManifestSummary(
-          runtime.processApi,
-          runtime.startupConfig.runnerBundleManifestPath,
-        );
         response.statusCode = 200;
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({

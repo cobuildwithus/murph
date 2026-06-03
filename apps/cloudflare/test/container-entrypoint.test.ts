@@ -542,20 +542,21 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("includes runner bundle metadata on the health endpoint when the manifest is present", async () => {
+    const readFile = vi.fn(async (filePath: string) => {
+      expect(filePath.endsWith(".murph-runner-bundle-manifest.json")).toBe(true);
+      return JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        generatedAt: "2026-04-24T00:00:00.000Z",
+        schemaVersion: 2,
+        sourceFingerprint: "source-fingerprint",
+      });
+    });
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
         processApi: {
-          async readFile(filePath: string) {
-            expect(filePath.endsWith(".murph-runner-bundle-manifest.json")).toBe(true);
-            return JSON.stringify({
-              buildSkipped: false,
-              bundleFingerprint: "bundle-fingerprint",
-              generatedAt: "2026-04-24T00:00:00.000Z",
-              schemaVersion: 2,
-              sourceFingerprint: "source-fingerprint",
-            });
-          },
+          readFile,
         },
       },
     });
@@ -583,6 +584,21 @@ describe("startHostedContainerEntrypoint", () => {
       },
       service: "cloudflare-hosted-runner-node",
     });
+
+    const secondResponse = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+
+    expect(secondResponse.status).toBe(200);
+    expect(secondResponse.json).toMatchObject({
+      ok: true,
+      runnerBundle: {
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      },
+    });
+    expect(readFile).toHaveBeenCalledTimes(1);
   });
 
   it("runs the managed-container OpenAI intercept smoke through the Codex client hook", async () => {
