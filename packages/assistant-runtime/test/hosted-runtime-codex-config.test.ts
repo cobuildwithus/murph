@@ -23,6 +23,9 @@ import {
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   buildHostedRuntimeForwardedEnv,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
@@ -109,6 +112,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "medium");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_APPROVAL_POLICY, "never");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_SANDBOX, "danger-full-access");
+  assert.equal(result.runtimeEnv[HOSTED_RUNTIME_PROCESS_ENV], "1");
   assert.equal(result.runtimeEnv.PATH, HOSTED_RUNNER_EXECUTABLE_PATH);
 
   const config = await readFile(result.codexConfigPath, "utf8");

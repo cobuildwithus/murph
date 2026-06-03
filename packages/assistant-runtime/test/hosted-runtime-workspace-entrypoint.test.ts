@@ -209,6 +209,63 @@ function readCapturedRuntimePhaseLogs(input: {
 }
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("rejects a blocked runtime when the host signal aborts", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host request aborted");
+    const workspaceReadStarted = createDeferred<void>();
+    const workspaceReadRelease = createDeferred<HostedWorkspaceReadResponse>();
+    const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+      request: {
+        attemptId: "attempt_synthetic_host_abort",
+        leaseGeneration: "7",
+        reason: "nudge",
+        userId: TEST_USER_ID,
+        workspaceVersion: "0",
+      },
+    }), {
+      async createCheckpointSnapshot() {
+        throw new Error("Host abort test should not checkpoint.");
+      },
+      async importItem() {
+        throw new Error("Host abort test should not import mailbox items.");
+      },
+      platform: createPlatform({
+        mailboxPort: createMailboxPort({ events: [], items: [] }),
+        workspacePort: {
+          async read() {
+            workspaceReadStarted.resolve();
+            return await workspaceReadRelease.promise;
+          },
+          async checkpoint() {
+            throw new Error("Host abort test should not checkpoint workspace.");
+          },
+        },
+      }),
+      signal: hostAbortController.signal,
+      vaultRoot,
+    }).catch((error: unknown) => error);
+
+    try {
+      await workspaceReadStarted.promise;
+      hostAbortController.abort(hostAbortReason);
+
+      const timeout = new Error("Timed out waiting for host abort propagation.");
+      const outcome = await Promise.race([
+        resultPromise,
+        new Promise<unknown>((resolve) => setTimeout(() => resolve(timeout), 250)),
+      ]);
+      assert.equal(outcome, hostAbortReason);
+    } finally {
+      workspaceReadRelease.resolve({
+        fetchedAt: TEST_NOW,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+      await resultPromise.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("emits metadata-only phase boundary logs for runtime startup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;

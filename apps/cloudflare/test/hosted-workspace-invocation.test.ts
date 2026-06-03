@@ -27,6 +27,9 @@ import {
   HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV,
 } from "../src/runner-native-parser-toolchain.ts";
 import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../src/runner-injected-credential.ts";
+import {
   buildHostedExecutionJobRuntime,
   clearHostedRunnerWarmLauncherRootsForTests,
   resolveHostedRunnerWarmWorkspaceVaultRoot,
@@ -53,7 +56,7 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(source).not.toContain("runner-child");
   });
 
-  it("builds runtime config from explicit supervisor env and rebinds parser tools from that snapshot", () => {
+  it("builds runtime config from explicit supervisor env while sentinelizing provider credentials", () => {
     const runtime = buildHostedExecutionJobRuntime({
       requestedRuntime: {},
       supervisorEnv: {
@@ -63,8 +66,12 @@ describe("runHostedWorkspaceInvocation", () => {
         [HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV]: "1",
         NODE_ENV: "production",
         OPENAI_API_KEY: "fixture-openai-key",
+        TELEGRAM_API_BASE_URL: "https://telegram.example.test",
+        TELEGRAM_BOT_TOKEN: "fixture-telegram-token",
         WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
         WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+        WHATSAPP_ACCESS_TOKEN: "fixture-whatsapp-token",
+        WHATSAPP_PHONE_NUMBER_ID: "fixture-whatsapp-phone-number-id",
       },
     });
 
@@ -72,8 +79,18 @@ describe("runHostedWorkspaceInvocation", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       NODE_ENV: "production",
-      OPENAI_API_KEY: "fixture-openai-key",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
+    expect(JSON.stringify(runtime.forwardedEnv)).not.toContain("fixture-openai-key");
+    expect(runtime.platformEnv).toMatchObject({
+      TELEGRAM_API_BASE_URL: "https://telegram.example.test",
+      TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      WHATSAPP_ACCESS_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      WHATSAPP_PHONE_NUMBER_ID: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+    });
+    expect(JSON.stringify(runtime.platformEnv)).not.toContain("fixture-telegram-token");
+    expect(JSON.stringify(runtime.platformEnv)).not.toContain("fixture-whatsapp-token");
+    expect(JSON.stringify(runtime.platformEnv)).not.toContain("fixture-whatsapp-phone-number-id");
     expect(runtime.parserToolchain?.tools.ffmpeg?.command).toBe(
       "/app/test-parser-toolchain/ffmpeg",
     );
@@ -100,6 +117,7 @@ describe("runHostedWorkspaceInvocation", () => {
       },
     );
     const onRuntimeWakeReady = vi.fn();
+    const abortController = new AbortController();
     const job = createWorkspaceJob({
       forwardedEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-job",
@@ -113,6 +131,7 @@ describe("runHostedWorkspaceInvocation", () => {
 
     await expect(runHostedWorkspaceInvocation(job, {
       onRuntimeWakeReady,
+      signal: abortController.signal,
       supervisorEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
         HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -131,6 +150,7 @@ describe("runHostedWorkspaceInvocation", () => {
     });
     expect(capturedOptions.vaultRoot).toBe(expectedVaultRoot);
     expect(capturedOptions.runtimeWakeSignal).toBeTruthy();
+    expect(capturedOptions.signal).toBe(abortController.signal);
     expect(onRuntimeWakeReady).toHaveBeenCalledTimes(1);
     expect(onRuntimeWakeReady.mock.calls[0]?.[0]()).toBe(true);
     expect(capturedJob.runtime?.forwardedEnv).toMatchObject({

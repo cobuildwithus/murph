@@ -30,9 +30,9 @@ import {
   createCloudflareHostedMailboxPayloadDecoder,
 } from "./runtime-bridge-mailbox-payload-decode.ts";
 import {
-  buildHostedRunnerAmbientEnv,
+  buildHostedRunnerContainerEnv,
+  buildHostedRunnerContainerPlatformEnv,
   buildHostedRunnerJobRuntime,
-  buildHostedRunnerPlatformEnv,
 } from "./runner-env.ts";
 import {
   assertHostedExecutionRunnerJobResult,
@@ -71,11 +71,11 @@ export function buildHostedExecutionJobRuntime(input: {
 }): HostedAssistantRuntimeConfig {
   const requestedRuntime = input.requestedRuntime;
   const forwardedEnv = requestedRuntime.forwardedEnv === undefined
-    ? buildHostedRunnerAmbientEnv(input.supervisorEnv)
+    ? buildHostedRunnerContainerEnv(input.supervisorEnv)
     : { ...requestedRuntime.forwardedEnv };
   const platformEnv = requestedRuntime.platformEnv === undefined
     ? requestedRuntime.forwardedEnv === undefined
-      ? buildHostedRunnerPlatformEnv(input.supervisorEnv)
+      ? buildHostedRunnerContainerPlatformEnv(input.supervisorEnv)
       : {}
     : { ...requestedRuntime.platformEnv };
   const configSource = requestedRuntime.forwardedEnv === undefined
@@ -192,6 +192,7 @@ export async function runHostedWorkspaceInvocation(
   const result = await runHostedWorkspaceRuntimeJobInProcess(job, {
     ...jobOptions,
     runtimeWakeSignal,
+    signal: options.signal ?? null,
   });
   return assertHostedExecutionRunnerJobResult(result, job);
 }

@@ -327,6 +327,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
   platform: HostedRuntimePlatform;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }
 
@@ -384,6 +385,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   assertHostedWorkspaceRuntimeBudgetSupported(input.request.budget?.maxRuntimeMs);
 
   const runtimeAbortController = new AbortController();
+  const hostAbortSignal = options.signal ?? null;
+  const abortFromHost = () => {
+    if (!hostAbortSignal || runtimeAbortController.signal.aborted) {
+      return;
+    }
+    runtimeAbortController.abort(readHostedRuntimeAbortReason(hostAbortSignal));
+  };
+  if (hostAbortSignal?.aborted) {
+    abortFromHost();
+  } else {
+    hostAbortSignal?.addEventListener("abort", abortFromHost, { once: true });
+  }
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
   const runtimeLogContext = {
     attemptId: input.request.attemptId,
@@ -1407,6 +1420,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "fail",
     });
     throw error;
+  } finally {
+    hostAbortSignal?.removeEventListener("abort", abortFromHost);
   }
 }
 

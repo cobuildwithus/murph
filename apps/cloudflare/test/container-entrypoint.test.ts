@@ -461,14 +461,14 @@ describe("startHostedContainerEntrypoint", () => {
       ]);
   });
 
-  it("does not mark runtime wakes accepted when the ready child cannot receive IPC", async () => {
-    const childReady = createDeferred();
+  it("does not mark runtime wakes accepted when the active invocation cannot consume them", async () => {
+    const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
-    let childCanReceiveWake = false;
+    let invocationCanReceiveWake = false;
     vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
-        options?.onRuntimeWakeReady?.(() => childCanReceiveWake);
-        childReady.resolve();
+        options?.onRuntimeWakeReady?.(() => invocationCanReceiveWake);
+        invocationReady.resolve();
         await releaseInvocation.promise;
         return buildWorkspaceRunnerResult();
       },
@@ -496,12 +496,12 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
-    await childReady.promise;
+    await invocationReady.promise;
 
     const rejectedWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
-    childCanReceiveWake = true;
+    invocationCanReceiveWake = true;
     const acceptedWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
@@ -1280,6 +1280,53 @@ describe("startHostedContainerEntrypoint", () => {
         },
         error: "Invalid request.",
         errorName: "TypeError",
+      });
+      expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+    } finally {
+      runHostedWorkspaceInvocation.mockRestore();
+    }
+  });
+
+  it("rejects stale architecture-version requests before direct invocation", async () => {
+    const runHostedWorkspaceInvocation = vi
+      .spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
+      .mockResolvedValue(buildWorkspaceRunnerResult());
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const requestBody = {
+        ...buildJobBody({
+          wake: {
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+            eventId: "evt_runtime_architecture_mismatch",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        }),
+        hostedRuntimeArchitectureVersion: "legacy-child-v0",
+      };
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+        body: JSON.stringify(requestBody),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        actualVersion: "legacy-child-v0",
+        code: "runtime_architecture_mismatch",
+        error: "Hosted runtime architecture mismatch.",
+        expectedVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
       });
       expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
     } finally {

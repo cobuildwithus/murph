@@ -63,6 +63,7 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
 ]);
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
+const DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT = 25;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE =
@@ -302,6 +303,7 @@ export class RunnerContainer extends Container {
   private lifecycleLockPendingCount = 0;
   private prewarmAbortController: AbortController | null = null;
   private currentLogContext: RunnerContainerLogContext | null = null;
+  private successfulWarmInvocationCount = 0;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
 
@@ -956,11 +958,22 @@ export class RunnerContainer extends Container {
     } finally {
       try {
         if (activeOperationAcquired) {
-          const shouldKeepWarm = (
-            completedSuccessfully
-            || isWorkspaceInvocationPreemptedAbort(operationAbortController.signal.reason)
-          );
-          if (!shouldKeepWarm) {
+          if (!completedSuccessfully) {
+            await this.stopWarmContainer({
+              failClosed: true,
+            });
+          } else if (this.recordSuccessfulWarmInvocationShouldRecycle()) {
+            emitHostedExecutionStructuredLog({
+              component: "container",
+              details: {
+                recycleAfterSuccessCount:
+                  readRunnerContainerRecycleAfterSuccessCount(this.environment),
+                successfulWarmInvocationCount: this.successfulWarmInvocationCount,
+              },
+              message: "Hosted execution container reached warm success recycle limit.",
+              phase: "container.ready",
+              userId: routeUserId,
+            });
             await this.stopWarmContainer({
               failClosed: true,
             });
@@ -1216,7 +1229,16 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
-    await this.destroyIfRunning({ failClosed });
+    const destroyed = await this.destroyIfRunning({ failClosed });
+    if (destroyed) {
+      this.successfulWarmInvocationCount = 0;
+    }
+  }
+
+  private recordSuccessfulWarmInvocationShouldRecycle(): boolean {
+    this.successfulWarmInvocationCount += 1;
+    return this.successfulWarmInvocationCount
+      >= readRunnerContainerRecycleAfterSuccessCount(this.environment);
   }
 
   private startRunnerActivityRenewal(): () => void {
@@ -1414,11 +1436,6 @@ async function raceRunnerContainerOperationAbort<T>(
   } finally {
     removeAbortListener();
   }
-}
-
-function isWorkspaceInvocationPreemptedAbort(reason: unknown): boolean {
-  return reason instanceof Error
-    && reason.message === WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE;
 }
 
 function isRunnerContainerAbortHardTimeout(reason: unknown): boolean {
@@ -2271,6 +2288,31 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
   if (!Number.isSafeInteger(parsed) || parsed < MIN_RUNNER_IDLE_TTL_MS) {
     throw new TypeError(
       `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be an integer greater than or equal to ${MIN_RUNNER_IDLE_TTL_MS}.`,
+    );
+  }
+
+  return parsed;
+}
+
+function readRunnerContainerRecycleAfterSuccessCount(
+  source: RunnerContainerEnvironmentSource,
+): number {
+  const raw = source.HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT;
+
+  if (raw === undefined || raw === null || raw === "") {
+    return DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT;
+  }
+
+  if (typeof raw !== "string") {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT must be a string when configured.",
+    );
+  }
+
+  const parsed = readStrictPositiveIntegerEnv(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT must be a positive integer.",
     );
   }
 

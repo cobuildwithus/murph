@@ -104,6 +104,8 @@ Defaulted worker vars:
   window before a dirty invocation checkpoints and returns
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000` for the native container shell
   activity-expiry cleanup lifecycle
+- `HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT=25` to recycle the
+  native container shell after a bounded number of clean invocations
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`
@@ -147,7 +149,7 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 The native Cloudflare container is a warm per-user shell. Successful workspace
 invocations keep the same Durable Object write fence while the runtime waits for
 `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or the
-write-fence deadline. If local runtime state is dirty, direct invocation checkpoints
+write-fence deadline. If local runtime state is dirty, the direct invocation checkpoints
 with reason `idle_shutdown` before returning success. When Cloudflare reports
 the container `sleepAfter` lifecycle expiry, the container only yields to an
 active foreground operation or tears down the warm shell.

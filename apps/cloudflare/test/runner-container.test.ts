@@ -134,6 +134,46 @@ describe("RunnerContainer", () => {
     expect(secondBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
   });
 
+  it("recycles a warm shell after the configured successful invocation count", async () => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT: "2",
+      },
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recycle_first"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    expect(destroy).not.toHaveBeenCalled();
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recycle_second"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recycle_after_reset"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+  });
+
   it("posts a payloadless runtime wake to the active workspace invocation", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();
@@ -1867,6 +1907,73 @@ describe("RunnerContainer", () => {
       message: "workspace invocation preempted",
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("destroys a warm shell after preempting an active workspace invocation", async () => {
+    const runnerRequestSignal = createDeferred<AbortSignal>();
+    let status: "running" | "stopped" = "running";
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (!url.endsWith("/internal/workspace-invocation")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("Expected active invocation request to receive an abort signal.");
+      }
+      runnerRequestSignal.resolve(signal);
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(signal.reason instanceof Error
+            ? signal.reason
+            : new Error("workspace invocation request aborted"));
+        }, { once: true });
+      });
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_preempt_active_warm_shell");
+    const invokeResultPromise = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    const signal = await runnerRequestSignal.promise;
+    expect(signal.aborted).toBe(false);
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      userId: "member_123",
+    })).resolves.toBeUndefined();
+
+    await expect(invokeResultPromise).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 

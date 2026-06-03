@@ -6,6 +6,9 @@ import {
   resolveAssistantSkillsRoot,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   HostedAssistantConfigurationError,
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -117,6 +120,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
+    [HOSTED_RUNTIME_PROCESS_ENV]: "1",
     [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
     ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:

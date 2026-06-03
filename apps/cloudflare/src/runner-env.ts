@@ -123,7 +123,7 @@ export function buildHostedRunnerChannelPlatformEnv(
   return channelEnv;
 }
 
-function buildHostedRunnerContainerRuntimePlatformEnv(
+export function buildHostedRunnerContainerPlatformEnv(
   source: Readonly<Record<string, unknown>>,
   options: {
     rewriteLoopbackUrlsForContainer?: boolean;
@@ -143,7 +143,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerContainerRuntimePlatformEnv(configSource, {
+  const platformEnv = buildHostedRunnerContainerPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
   const localE2eParserToolchain =
@@ -168,7 +168,7 @@ export function buildHostedRunnerIdleCheckpointRuntimeConfig(input: {
   rewritePlatformUrlsForContainer?: boolean;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerContainerRuntimePlatformEnv(configSource, {
+  const platformEnv = buildHostedRunnerContainerPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
 
