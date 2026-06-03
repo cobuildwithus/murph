@@ -31,3 +31,6 @@ additional dirty batches before the normal durable checkpoint.
   runtime/device-sync pass behavior.
 - `pnpm typecheck`
 - Scoped diff or owner coverage command covering touched files.
+Status: completed
+Updated: 2026-06-03
+Completed: 2026-06-03

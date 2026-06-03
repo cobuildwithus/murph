@@ -34,3 +34,6 @@ Fix the important post-review issues from the dense raw retention and hosted del
 
 - Preserve all unrelated dirty work.
 - Keep new behavior explicit and fail-closed.
+Status: completed
+Updated: 2026-06-03
+Completed: 2026-06-03

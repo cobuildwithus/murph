@@ -26,5 +26,5 @@ Bridge the average-submitter safe confirmation packet to the real lab/wearable r
 - `pnpm test:diff` when practical.
 - Scoped diff, identifier, credential, and aggregate-egress checks.
 Status: completed
-Updated: 2026-05-18
-Completed: 2026-05-18
+Updated: 2026-06-03
+Completed: 2026-06-03

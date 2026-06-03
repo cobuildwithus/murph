@@ -1562,3 +1562,6 @@ Milestone 2: introduce warm Codex only after Milestone 1 is stable.
 - No weakening of secret/env projection.
 - No broad hosted protocol redesign.
 - No product behavior changes.
+Status: completed
+Updated: 2026-06-03
+Completed: 2026-06-03
