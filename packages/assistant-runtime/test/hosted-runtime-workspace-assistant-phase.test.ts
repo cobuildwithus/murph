@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   hasPendingAssistantAutoReplyInput: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
+  prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   readAssistantAutomationState: vi.fn(),
@@ -92,6 +93,8 @@ vi.mock("../src/hosted-runtime/channel-activity.ts", () => ({
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
+  prepareHostedAssistantAutomationForWake:
+    mocks.prepareHostedAssistantAutomationForWake,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -260,6 +263,7 @@ beforeEach(() => {
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
+  mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.readAssistantAutomationState.mockResolvedValue({
@@ -396,6 +400,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       }),
     );
+  });
+
+  it("prepares hosted assistant automation state before running scheduled automation", async () => {
+    const runtimeEnv = {
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+    };
+    const runtimeForwardedEnv = {
+      LINQ_API_BASE_URL: "https://linq.example.test",
+    };
+    const operatorHomeRoot = "/tmp/murph-operator-home-runtime";
+    const vaultRoot = "/tmp/murph-vault-runtime";
+    const callOrder: string[] = [];
+
+    mocks.prepareHostedAssistantAutomationForWake.mockImplementationOnce(
+      async () => {
+        callOrder.push("prepare");
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("run");
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      operatorHomeRoot,
+      runtimeEnv,
+      runtimeForwardedEnv,
+      vaultRoot,
+    }));
+
+    expect(mocks.prepareHostedAssistantAutomationForWake).toHaveBeenCalledWith(
+      vaultRoot,
+      expect.objectContaining({
+        kind: "runtime.timer",
+        triggerKind: "runtime_timer",
+        userId: "member_synthetic_phase",
+      }),
+      runtimeEnv,
+      expect.objectContaining({
+        channelCapabilities: expect.objectContaining({
+          emailSendReady: false,
+        }),
+      }),
+      {
+        operatorHomeRoot,
+      },
+    );
+    expect(callOrder).toEqual(["prepare", "run"]);
   });
 
   it("passes hosted runtime environment explicitly without mutating process globals", async () => {

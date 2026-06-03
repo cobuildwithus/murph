@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
+  prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
@@ -72,6 +73,8 @@ vi.mock("../src/hosted-runtime/channel-activity.ts", () => ({
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
+  prepareHostedAssistantAutomationForWake:
+    mocks.prepareHostedAssistantAutomationForWake,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -119,6 +122,7 @@ beforeEach(() => {
   });
   mocks.hasPendingAssistantAutoReplyInput.mockResolvedValue(false);
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
+  mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({

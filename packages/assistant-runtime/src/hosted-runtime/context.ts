@@ -7,6 +7,7 @@ import {
   emitHostedExecutionStructuredLog,
   type HostedExecutionMemberChannels,
   type HostedExecutionWake,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import type { AssistantModelTarget } from "@murphai/operator-config/assistant-backend";
@@ -127,9 +128,9 @@ export async function prepareHostedWakeContext(
     : null;
 }
 
-export async function prepareHostedAssistantAutoReplyForWake(
+export async function prepareHostedAssistantAutomationForWake(
   vaultRoot: string,
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   runtimeEnv: Readonly<Record<string, string>>,
   resolvedConfig: {
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
@@ -148,6 +149,27 @@ export async function prepareHostedAssistantAutoReplyForWake(
       enableAssistantChannelReconciliation: false,
       operatorHomeRoot: options.operatorHomeRoot ?? null,
     },
+  );
+}
+
+export async function prepareHostedAssistantAutoReplyForWake(
+  vaultRoot: string,
+  wake: HostedExecutionWake,
+  runtimeEnv: Readonly<Record<string, string>>,
+  resolvedConfig: {
+    channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
+    managedAutoReplyChannels?: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
+  },
+  options: {
+    operatorHomeRoot?: string | null;
+  } = {},
+): Promise<void> {
+  await prepareHostedAssistantAutomationForWake(
+    vaultRoot,
+    wake,
+    runtimeEnv,
+    resolvedConfig,
+    options,
   );
 }
 
@@ -179,7 +201,7 @@ export async function bootstrapHostedMemberContext(
 
 async function bootstrapHostedAssistantRuntimeState(
   vaultRoot: string,
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   runtimeEnv: Readonly<Record<string, string>>,
   resolvedConfig: {
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
@@ -218,7 +240,9 @@ async function bootstrapHostedAssistantRuntimeState(
   });
 
   const reconciledChannelCapabilities = options.enableAssistantChannelReconciliation
-    ? await reconcileHostedAssistantChannelState(
+    ? wake.kind === "runtime.timer"
+      ? EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE
+      : await reconcileHostedAssistantChannelState(
         vaultRoot,
         resolveHostedWakeMemberChannels(wake),
         resolveHostedManagedAutoReplyChannels(resolvedConfig),
@@ -258,7 +282,7 @@ function resolveHostedManagedAutoReplyChannels(resolvedConfig: {
 
 async function ensureHostedAssistantAutoReplyChannelForWake(
   vaultRoot: string,
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[],
   assistantConfigured: boolean,
 ): Promise<HostedAssistantAutoReplyChannelState> {
@@ -498,7 +522,7 @@ export async function reconcileHostedAssistantChannelState(
 }
 
 function resolveHostedAutoReplySelfHealTarget(
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[],
 ): HostedAssistantRuntimeManagedAutoReplyChannel | null {
   if (wake.kind !== "conversation.message") {

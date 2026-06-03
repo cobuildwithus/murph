@@ -38,6 +38,7 @@ import {
 } from "./provider-fetch.ts";
 import {
   hydrateHostedExecutionDefaultTarget,
+  prepareHostedAssistantAutomationForWake,
 } from "./context.ts";
 import {
   runHostedAssistantAutomationLane,
@@ -401,8 +402,17 @@ export async function runHostedWorkspaceAssistantPhase(
     const preferredInputIds = hasFreshConversationInput
       ? foregroundReplayInputIds
       : input.initialMailboxImport.importResult.assistantInputIds ?? [];
-    const runAutomationLane = async () =>
-      await runHostedAssistantAutomationLane({
+    const runAutomationLane = async () => {
+      await prepareHostedAssistantAutomationForWake(
+        input.restored.vaultRoot,
+        wake,
+        input.runtimeEnv,
+        input.runtime.resolvedConfig,
+        {
+          operatorHomeRoot: input.restored.operatorHomeRoot,
+        },
+      );
+      return await runHostedAssistantAutomationLane({
         executionContext,
         foregroundReplayInputIds,
         foregroundReplayPromptInputIds,
@@ -422,6 +432,7 @@ export async function runHostedWorkspaceAssistantPhase(
         vaultRoot: input.restored.vaultRoot,
         wake,
       });
+    };
     const assistantMetrics = await runAutomationLane();
     const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
       deviceSyncMaintenanceRan: systemMailboxMaintenance.deviceSyncMaintenanceRan,
