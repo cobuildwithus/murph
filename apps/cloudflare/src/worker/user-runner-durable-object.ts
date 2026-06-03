@@ -19,11 +19,11 @@ import {
 } from "../json.ts";
 import {
   HostedUserRunner,
-  type DurableObjectStateLike,
 } from "../user-runner.ts";
 import type {
+  DurableObjectStateLike,
   HostedRunnerStuckInvocationTestResult,
-} from "../user-runner/test-controls.ts";
+} from "../user-runner.ts";
 import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";

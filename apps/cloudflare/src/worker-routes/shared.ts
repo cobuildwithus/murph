@@ -15,8 +15,10 @@ import type {
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { readRequestBodyText } from "../json.ts";
-import type { HostedRunnerStuckInvocationTestResult } from "../user-runner/test-controls.js";
-import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
+import type {
+  HostedRunnerStuckInvocationTestResult,
+  HostedRunnerUserDataDeletionResult,
+} from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,

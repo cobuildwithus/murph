@@ -29,7 +29,7 @@ import {
 } from "../../runner-outbound/write-fence.ts";
 import type {
   HostedRunnerStuckInvocationTestResult,
-} from "../../user-runner/test-controls.ts";
+} from "../../user-runner.ts";
 import type {
   UserRunnerDurableObjectStubLike,
   WorkerRouteContext,
