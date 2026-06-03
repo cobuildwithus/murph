@@ -700,7 +700,7 @@ function resolveAssistantCronDueReason(job: AssistantCronJob, nowIso: string): s
     return 'no_next_run'
   }
 
-  return job.state.nextRunAt <= nowIso ? 'due' : 'not_due'
+  return isAssistantCronJobDue(job, nowIso) ? 'due' : 'not_due'
 }
 
 function assistantCronJobHasDeliveryRoute(job: AssistantCronJob): boolean {

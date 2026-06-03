@@ -299,12 +299,16 @@ export function isAssistantCronJobDue(
   job: AssistantCronJob,
   nowIso: string,
 ): boolean {
+  const nextRunAtMs = parseAssistantCronTimestampMs(job.state.nextRunAt)
+  const nowMs = parseAssistantCronTimestampMs(nowIso)
+
   return (
     job.enabled &&
     job.state.runningAt === null &&
     (job.state.pendingDeliveryIntentId ?? null) === null &&
-    job.state.nextRunAt !== null &&
-    job.state.nextRunAt <= nowIso
+    Number.isFinite(nextRunAtMs) &&
+    Number.isFinite(nowMs) &&
+    nextRunAtMs <= nowMs
   )
 }
 
@@ -408,7 +412,17 @@ function compareNullableIsoTimestamps(
     return -1
   }
 
+  const leftMs = parseAssistantCronTimestampMs(left)
+  const rightMs = parseAssistantCronTimestampMs(right)
+  if (Number.isFinite(leftMs) && Number.isFinite(rightMs)) {
+    return leftMs - rightMs
+  }
+
   return left.localeCompare(right)
+}
+
+function parseAssistantCronTimestampMs(timestamp: string | null): number {
+  return timestamp === null ? Number.NaN : Date.parse(timestamp)
 }
 
 function isForeignAssistantCronProcessRunning(pid: number): boolean {

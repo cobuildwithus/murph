@@ -267,6 +267,20 @@ describe('assistant cron store helpers', () => {
       'gamma',
     ])
     expect(
+      sortAssistantCronJobs([
+        createCronJob({
+          jobId: 'cron_later_mixed_precision',
+          name: 'later mixed precision',
+          nextRunAt: '2026-06-03T20:32:59.291Z',
+        }),
+        createCronJob({
+          jobId: 'cron_earlier_mixed_precision',
+          name: 'earlier mixed precision',
+          nextRunAt: '2026-06-03T20:32:59Z',
+        }),
+      ]).map((job) => job.name),
+    ).toEqual(['earlier mixed precision', 'later mixed precision'])
+    expect(
       isAssistantCronJobDue(
         createCronJob({
           jobId: 'cron_due',
@@ -274,6 +288,16 @@ describe('assistant cron store helpers', () => {
           nextRunAt: '2026-04-08T08:00:00.000Z',
         }),
         '2026-04-08T08:00:00.000Z',
+      ),
+    ).toBe(true)
+    expect(
+      isAssistantCronJobDue(
+        createCronJob({
+          jobId: 'cron_due_mixed_precision',
+          name: 'due mixed precision',
+          nextRunAt: '2026-06-03T20:32:59Z',
+        }),
+        '2026-06-03T20:32:59.291Z',
       ),
     ).toBe(true)
     expect(
