@@ -64,13 +64,25 @@ export function resolveAssistantDeliveryRouteWithCurrentDefaults(
   input: AssistantDeliveryRouteFields,
   env: NodeJS.ProcessEnv = process.env,
 ): NormalizedAssistantDeliveryRouteFields {
-  const currentRoute = readAssistantCurrentDeliveryRouteEnv(env)
+  return resolveAssistantDeliveryRouteWithCurrentRoute(
+    input,
+    readAssistantCurrentDeliveryRouteEnv(env),
+  )
+}
+
+export function resolveAssistantDeliveryRouteWithCurrentRoute(
+  input: AssistantDeliveryRouteFields,
+  currentRoute: AssistantCurrentDeliveryRoute | null | undefined,
+): NormalizedAssistantDeliveryRouteFields {
+  const normalizedCurrentRoute = normalizeAssistantCurrentDeliveryRoute(currentRoute)
   const channel = normalizeAssistantRouteString(input.channel)
+    ?? normalizedCurrentRoute?.channel
+    ?? null
   const explicitDeliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
   const deliveryTarget =
     explicitDeliveryTarget ??
-    (channel && currentRoute?.channel === channel
-      ? currentRoute.deliveryTarget
+    (channel && normalizedCurrentRoute?.channel === channel
+      ? normalizedCurrentRoute.deliveryTarget
       : null)
 
   return {
@@ -79,6 +91,20 @@ export function resolveAssistantDeliveryRouteWithCurrentDefaults(
     identityId: normalizeAssistantRouteString(input.identityId),
     participantId: normalizeAssistantRouteString(input.participantId),
     threadId: normalizeAssistantRouteString(input.threadId),
+  }
+}
+
+function normalizeAssistantCurrentDeliveryRoute(
+  currentRoute: AssistantCurrentDeliveryRoute | null | undefined,
+): AssistantCurrentDeliveryRoute | null {
+  const channel = normalizeAssistantRouteString(currentRoute?.channel)
+  const deliveryTarget = normalizeAssistantRouteString(currentRoute?.deliveryTarget)
+  if (!channel || !deliveryTarget) {
+    return null
+  }
+  return {
+    channel,
+    deliveryTarget,
   }
 }
 

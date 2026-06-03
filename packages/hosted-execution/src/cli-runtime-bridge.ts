@@ -7,6 +7,7 @@ export const HOSTED_CLI_BRIDGE_URL_ENV = "MURPH_HOSTED_CLI_BRIDGE_URL";
 export const HOSTED_CLI_BRIDGE_TOKEN_ENV = "MURPH_HOSTED_CLI_BRIDGE_TOKEN";
 export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
   "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND";
+export const HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH = "/assistant/current-route";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
 export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
@@ -36,6 +37,17 @@ const hostedCliDeviceConnectLinkRequestSchema = z.object({
 const hostedCliDeviceAccountListRequestSchema = z.object({
   provider: z.string().trim().min(1).nullable().optional(),
   sourceProvider: z.string().trim().min(1).nullable().optional(),
+}).strict();
+
+const hostedCliAssistantCurrentRouteRequestSchema = z.object({}).strict();
+
+const hostedCliAssistantCurrentRouteSchema = z.object({
+  channel: z.string().trim().min(1),
+  deliveryTarget: z.string().trim().min(1),
+}).strict();
+
+const hostedCliAssistantCurrentRouteResponseSchema = z.object({
+  route: hostedCliAssistantCurrentRouteSchema.nullable(),
 }).strict();
 
 const hostedCliDeviceSyncAccountStatusSchema = z.enum([
@@ -102,6 +114,15 @@ export type HostedCliDeviceConnectLinkRequest =
 
 export type HostedCliDeviceAccountListRequest =
   z.infer<typeof hostedCliDeviceAccountListRequestSchema>;
+
+export type HostedCliAssistantCurrentRouteRequest =
+  z.infer<typeof hostedCliAssistantCurrentRouteRequestSchema>;
+
+export type HostedCliAssistantCurrentRoute =
+  z.infer<typeof hostedCliAssistantCurrentRouteSchema>;
+
+export type HostedCliAssistantCurrentRouteResponse =
+  z.infer<typeof hostedCliAssistantCurrentRouteResponseSchema>;
 
 export interface HostedCliDeviceConnectLinkResponse {
   authorizationUrl: string;
@@ -179,6 +200,34 @@ export function parseHostedCliDeviceAccountListRequest(
   value: unknown,
 ): HostedCliDeviceAccountListRequest {
   return hostedCliDeviceAccountListRequestSchema.parse(value);
+}
+
+export function parseHostedCliAssistantCurrentRouteRequest(
+  value: unknown,
+): HostedCliAssistantCurrentRouteRequest {
+  return hostedCliAssistantCurrentRouteRequestSchema.parse(value);
+}
+
+export function parseHostedCliAssistantCurrentRouteResponse(
+  value: unknown,
+): HostedCliAssistantCurrentRouteResponse {
+  return hostedCliAssistantCurrentRouteResponseSchema.parse(value);
+}
+
+export async function requestHostedCliAssistantCurrentRoute(input: {
+  bridge: HostedCliBridgeClientConfig;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<HostedCliAssistantCurrentRouteResponse> {
+  const payload = await requestHostedCliBridgeJson({
+    body: {},
+    bridge: input.bridge,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return parseHostedCliAssistantCurrentRouteResponse(payload);
 }
 
 export async function requestHostedCliDeviceConnectLink(input: {

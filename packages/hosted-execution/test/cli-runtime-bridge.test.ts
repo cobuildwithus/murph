@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 
 import {
   HostedCliBridgeRequestError,
+  requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "../src/cli-runtime-bridge.ts";
@@ -124,6 +125,44 @@ describe("hosted CLI runtime bridge client", () => {
       }),
       isBridgeRequestErrorWithCode("HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT"),
     );
+  });
+
+  it("requests the active assistant current route through the bridge", async () => {
+    let requestedPath = "";
+    let requestBody: unknown = null;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requestedPath = new URL(String(url)).pathname;
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          route: {
+            channel: "linq",
+            deliveryTarget: "linq_chat_real",
+          },
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      );
+    };
+
+    const result = await requestHostedCliAssistantCurrentRoute({
+      bridge: {
+        token: "bridge-token",
+        url: "http://127.0.0.1:8787/",
+      },
+      fetchImpl,
+    });
+
+    assert.equal(requestedPath, "/assistant/current-route");
+    assert.deepEqual(requestBody, {});
+    assert.deepEqual(result, {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+      },
+    });
   });
 
   it("requests hosted device account lists through the bridge", async () => {

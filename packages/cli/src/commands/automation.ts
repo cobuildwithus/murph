@@ -1,6 +1,13 @@
 import { Cli, z } from "incur";
 
 import {
+  HostedCliBridgeRequestError,
+  isHostedRuntimeProcessEnv,
+  readHostedCliBridgeEnv,
+  requestHostedCliAssistantCurrentRoute,
+  type HostedCliAssistantCurrentRoute,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   automationContinuityPolicyValues,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
@@ -14,7 +21,8 @@ import {
 } from "@murphai/contracts";
 import {
   looksLikePrivateAssistantRoutePlaceholder,
-  resolveAssistantDeliveryRouteWithCurrentDefaults,
+  readAssistantCurrentDeliveryRouteEnv,
+  resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 import {
@@ -150,26 +158,79 @@ function buildAutomationScheduleFromOptions(
   }
 }
 
-function buildAutomationRouteFromOptions(input: {
-  channel: string;
+async function buildAutomationRouteFromOptions(input: {
+  channel?: string;
   deliveryTarget?: string;
   identityId?: string;
   participantId?: string;
   threadId?: string;
-}): AutomationRoute {
+}): Promise<AutomationRoute> {
+  const currentRoute = await readAutomationSaveCurrentRoute(input);
   const route = stripPrivateAssistantRoutePlaceholders(
-    resolveAssistantDeliveryRouteWithCurrentDefaults({
+    resolveAssistantDeliveryRouteWithCurrentRoute({
       channel: input.channel,
       deliveryTarget: input.deliveryTarget,
       identityId: input.identityId,
       participantId: input.participantId,
       threadId: input.threadId,
-    }),
+    }, currentRoute),
   );
-  const parsed = automationRouteSchema.parse(route);
+  const parsed = normalizeAutomationRouteFieldsForSave(route);
 
   assertAutomationRouteCanDeliver(parsed);
   return parsed;
+}
+
+async function readAutomationSaveCurrentRoute(input: {
+  channel?: string;
+  deliveryTarget?: string;
+  participantId?: string;
+  threadId?: string;
+}): Promise<HostedCliAssistantCurrentRoute | null> {
+  if (!automationSaveNeedsCurrentRoute(input)) {
+    return null;
+  }
+
+  const bridge = readHostedCliBridgeEnv(process.env);
+  if (bridge) {
+    try {
+      const response = await requestHostedCliAssistantCurrentRoute({ bridge });
+      return response.route;
+    } catch (error) {
+      if (error instanceof HostedCliBridgeRequestError) {
+        throw new VaultCliError(
+          "invalid_option",
+          "Unable to read the hosted assistant current delivery route.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  if (isHostedRuntimeProcessEnv(process.env)) {
+    return null;
+  }
+
+  return readAssistantCurrentDeliveryRouteEnv(process.env);
+}
+
+function automationSaveNeedsCurrentRoute(input: {
+  channel?: string;
+  deliveryTarget?: string;
+  participantId?: string;
+  threadId?: string;
+}): boolean {
+  const channel = normalizeAutomationRouteOption(input.channel);
+  const deliveryTarget = normalizeAutomationRouteOption(input.deliveryTarget);
+  if (!channel) {
+    return true;
+  }
+  if (channel === "linq") {
+    return !deliveryTarget;
+  }
+  return !deliveryTarget
+    && !normalizeAutomationRouteOption(input.participantId)
+    && !normalizeAutomationRouteOption(input.threadId);
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
@@ -193,11 +254,32 @@ function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
 }
 
 function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRoute {
-  const normalized = automationRouteSchema.parse(
-    stripPrivateAssistantRoutePlaceholders(route),
-  );
+  const normalized = normalizeAutomationRouteFieldsForSave(route);
   assertAutomationRouteCanDeliver(normalized);
   return normalized;
+}
+
+function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
+  const normalized = automationRouteSchema.parse(
+    stripPrivateAssistantRoutePlaceholders(
+      automationRouteSchema.parse(route),
+    ),
+  );
+  if (normalized.channel !== "linq" || !normalized.deliveryTarget) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    participantId: null,
+    threadId: null,
+  };
+}
+
+function normalizeAutomationRouteOption(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 export function registerAutomationCommands(cli: Cli.Cli) {
@@ -293,7 +375,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
         .optional()
         .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
-      channel: z.string().min(1).describe("Outbound route channel."),
+      channel: z.string().min(1).optional().describe("Optional outbound route channel."),
       deliveryTarget: z
         .string()
         .min(1)
@@ -321,7 +403,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
-        route: buildAutomationRouteFromOptions({
+        route: await buildAutomationRouteFromOptions({
           channel: context.options.channel,
           deliveryTarget: context.options.deliveryTarget,
           identityId: context.options.identityId,

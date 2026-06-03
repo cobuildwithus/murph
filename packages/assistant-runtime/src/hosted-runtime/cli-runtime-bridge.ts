@@ -3,13 +3,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Socket } from "node:net";
 
 import {
+  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
+  parseHostedCliAssistantCurrentRouteRequest,
   parseHostedCliDeviceAccountListRequest,
   parseHostedCliDeviceConnectLinkRequest,
+  type HostedCliAssistantCurrentRoute,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import type {
@@ -25,6 +28,12 @@ export type HostedCliRuntimeBridgeMessagingReturnTargetSource =
   | undefined
   | (() => HostedRuntimeDeviceSyncMessagingReturnTarget | null | undefined);
 
+export type HostedCliRuntimeBridgeCurrentDeliveryRouteSource =
+  | HostedCliAssistantCurrentRoute
+  | null
+  | undefined
+  | (() => HostedCliAssistantCurrentRoute | null | undefined);
+
 export interface HostedCliRuntimeBridge {
   consumeOffInvocationViolation(): boolean;
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
@@ -38,6 +47,7 @@ export interface HostedCliRuntimeBridge {
 }
 
 export interface HostedCliRuntimeBridgeInvocationInput {
+  currentDeliveryRoute?: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
   signal?: AbortSignal | null;
@@ -45,6 +55,7 @@ export interface HostedCliRuntimeBridgeInvocationInput {
 
 interface HostedCliRuntimeBridgeActiveInvocation {
   closing: boolean;
+  currentDeliveryRoute: HostedCliRuntimeBridgeCurrentDeliveryRouteSource;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
   inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
@@ -161,6 +172,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       }
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         closing: false,
+        currentDeliveryRoute: input.currentDeliveryRoute ?? null,
         deviceSyncPort: input.deviceSyncPort ?? null,
         inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
@@ -224,7 +236,8 @@ async function handleHostedCliBridgeRequest(input: {
 
     const path = input.request.url ?? "";
     if (
-      path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
+      path !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH
+      && path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH
     ) {
       writeHostedCliBridgeError(
@@ -289,6 +302,18 @@ async function handleActiveHostedCliBridgeRequest(input: {
   request: IncomingMessage;
   response: ServerResponse;
 }): Promise<void> {
+  const body = await readHostedCliBridgeJsonBody(input.request);
+
+  if (input.path === HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH) {
+    parseHostedCliAssistantCurrentRouteRequest(body);
+    writeHostedCliBridgeJson(input.response, 200, {
+      route: resolveHostedCliBridgeCurrentDeliveryRoute(
+        input.active.currentDeliveryRoute,
+      ),
+    });
+    return;
+  }
+
   if (!input.active.deviceSyncPort) {
     writeHostedCliBridgeError(
       input.response,
@@ -298,8 +323,6 @@ async function handleActiveHostedCliBridgeRequest(input: {
     );
     return;
   }
-
-  const body = await readHostedCliBridgeJsonBody(input.request);
 
   if (input.path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH) {
     const request = parseHostedCliDeviceAccountListRequest(body);
@@ -428,6 +451,28 @@ function resolveHostedCliBridgeMessagingReturnTarget(
 ): HostedRuntimeDeviceSyncMessagingReturnTarget | null {
   const value = typeof source === "function" ? source() : source;
   return value === "imessage" || value === "telegram" ? value : null;
+}
+
+function resolveHostedCliBridgeCurrentDeliveryRoute(
+  source: HostedCliRuntimeBridgeCurrentDeliveryRouteSource,
+): HostedCliAssistantCurrentRoute | null {
+  const value = typeof source === "function" ? source() : source;
+  const channel = normalizeHostedCliBridgeRouteValue(value?.channel);
+  const deliveryTarget = normalizeHostedCliBridgeRouteValue(value?.deliveryTarget);
+  if (!channel || !deliveryTarget) {
+    return null;
+  }
+  return {
+    channel,
+    deliveryTarget,
+  };
+}
+
+function normalizeHostedCliBridgeRouteValue(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 async function readHostedCliBridgeJsonBody(request: IncomingMessage): Promise<unknown> {

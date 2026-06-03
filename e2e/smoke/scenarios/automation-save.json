@@ -1,6 +1,6 @@
 {
   "id": "automation-save",
-  "command": "vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> --channel <channel> [...]",
+  "command": "vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

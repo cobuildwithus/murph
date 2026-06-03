@@ -23,6 +23,10 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  readAssistantInputEvent,
+  type AssistantInputReplyTarget,
+} from "@murphai/assistant-engine";
+import {
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
@@ -885,8 +889,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
+        let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+          initialMailboxImport: passInput.initialMailboxImport,
+          vaultRoot: restored.vaultRoot,
+        });
         const passResult = await hostedCliBridge.runWithInvocation(
           {
+            currentDeliveryRoute: () => currentDeliveryRoute,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: runtimeAbortController.signal,
@@ -897,8 +906,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 ...baseRunnerInput,
                 initialMailboxImport: passInput.initialMailboxImport,
                 requestId: passInput.requestId,
-                runAssistantPhase: (phaseInput) =>
-                  (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                runAssistantPhase: async (phaseInput) => {
+                  currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+                    initialMailboxImport: phaseInput.initialMailboxImport,
+                    vaultRoot: restored.vaultRoot,
+                  });
+                  return await (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
                     ...phaseInput,
                     request: input.request,
                     restored,
@@ -907,7 +920,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: runtimeAbortController.signal,
-                  }),
+                  });
+                },
                 workspace: passInput.workspace,
               }),
               runtimeAbortController.signal,
@@ -2314,6 +2328,75 @@ function resolveHostedWorkspaceForegroundMailboxLimit(value: number | null | und
 
 function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {
   return importLimit >= Number.MAX_SAFE_INTEGER ? importLimit : importLimit + 1;
+}
+
+async function resolveHostedForegroundCurrentDeliveryRoute(input: {
+  initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
+  vaultRoot: string;
+}): Promise<{
+  channel: string;
+  deliveryTarget: string;
+} | null> {
+  const assistantInputIds = input.initialMailboxImport?.importResult.assistantInputIds ?? [];
+  const routes = new Map<string, {
+    channel: string;
+    deliveryTarget: string;
+  }>();
+  for (const inputId of assistantInputIds) {
+    if (!inputId) {
+      continue;
+    }
+    try {
+      const event = await readAssistantInputEvent({
+        inputId,
+        vault: input.vaultRoot,
+      });
+      const route = readHostedAssistantInputCurrentDeliveryRoute(event?.replyTarget ?? null);
+      if (route) {
+        routes.set(`${route.channel}\0${route.deliveryTarget}`, route);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (routes.size !== 1) {
+    return null;
+  }
+  return [...routes.values()][0] ?? null;
+}
+
+function readHostedAssistantInputCurrentDeliveryRoute(
+  replyTarget: AssistantInputReplyTarget | null,
+): {
+  channel: string;
+  deliveryTarget: string;
+} | null {
+  const channel = normalizeHostedCurrentDeliveryRouteValue(replyTarget?.channel);
+  if (!channel || !hostedReplyTargetThreadIsDeliveryTarget(channel)) {
+    return null;
+  }
+  const deliveryTarget = normalizeHostedCurrentDeliveryRouteValue(replyTarget?.threadId);
+  return deliveryTarget
+    ? {
+        channel,
+        deliveryTarget,
+      }
+    : null;
+}
+
+function hostedReplyTargetThreadIsDeliveryTarget(channel: string): boolean {
+  return channel === "linq"
+    || channel === "telegram"
+    || channel === "email"
+    || channel === "whatsapp";
+}
+
+function normalizeHostedCurrentDeliveryRouteValue(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {

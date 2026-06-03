@@ -1121,9 +1121,9 @@
                           "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
                         },
                         "channel": {
+                          "description": "Optional outbound route channel.",
                           "type": "string",
-                          "minLength": 1,
-                          "description": "Outbound route channel."
+                          "minLength": 1
                         },
                         "deliveryTarget": {
                           "description": "Optional route delivery target.",

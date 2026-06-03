@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { createConnection } from "node:net";
 
 import {
+  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+  requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -223,6 +225,69 @@ test("hosted CLI runtime bridge creates device connect links through the runtime
     });
     assert.doesNotMatch(JSON.stringify(bridge.env), /opaque/u);
   });
+});
+
+test("hosted CLI runtime bridge exposes current route without device sync", async () => {
+  await withHostedCliBridgeInvocation({
+    currentDeliveryRoute: {
+      channel: "linq",
+      deliveryTarget: "linq_chat_real",
+    },
+    deviceSyncPort: null,
+  }, async (bridge) => {
+    const result = await requestHostedCliAssistantCurrentRoute({
+      bridge: {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      },
+    });
+
+    assert.deepEqual(result, {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+      },
+    });
+
+    const deviceRequest = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      {
+        body: JSON.stringify({ connectTarget: "whoop" }),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    assert.equal(deviceRequest.status, 503);
+    assert.match(await deviceRequest.text(), /HOSTED_CLI_BRIDGE_DEVICE_SYNC_UNAVAILABLE/u);
+  });
+});
+
+test("hosted CLI runtime bridge records off-invocation current route requests", async () => {
+  await stopHostedCliRuntimeBridge();
+  const bridge = await getOrCreateHostedCliRuntimeBridge();
+
+  try {
+    const outsideInvocation = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      {
+        body: JSON.stringify({}),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    assert.equal(outsideInvocation.status, 503);
+    assert.match(await outsideInvocation.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
+    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
+    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
+  } finally {
+    await bridge.stop();
+  }
 });
 
 test("hosted CLI runtime bridge drains accepted requests before clearing active invocation", async () => {

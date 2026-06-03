@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
+import {
+  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
   ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
   ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
@@ -57,6 +65,67 @@ async function readCommandSchema(
   return JSON.parse(
     await runRawInProcessCli(cli, [...commandArgs, "--schema", "--format", "json"]),
   ) as CommandSchemaEnvelope;
+}
+
+async function startAssistantCurrentRouteBridgeStub(input: {
+  channel: string;
+  deliveryTarget: string;
+  token: string;
+}): Promise<{
+  requests: string[];
+  stop(): Promise<void>;
+  url: string;
+}> {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? "");
+    if (request.method !== "POST") {
+      response.writeHead(405);
+      response.end();
+      return;
+    }
+    if (request.url !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    if (request.headers.authorization !== `Bearer ${input.token}`) {
+      response.writeHead(401);
+      response.end();
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": "application/json",
+    });
+    response.end(JSON.stringify({
+      route: {
+        channel: input.channel,
+        deliveryTarget: input.deliveryTarget,
+      },
+    }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected test bridge to bind a TCP port.");
+  }
+
+  return {
+    requests,
+    async stop() {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+    url: `http://127.0.0.1:${address.port}/`,
+  };
 }
 
 function hasCommandMap(value: unknown): value is { commands: Map<string, unknown> } {
@@ -239,6 +308,7 @@ test("automation save schema exposes typed fields while automation import-json i
   assert.deepEqual(saveSchema.args.required, ["title"]);
   assert.equal("input" in saveSchema.options.properties, false);
   assert.equal(saveSchema.options.required?.includes("input") ?? false, false);
+  assert.equal(saveSchema.options.required?.includes("channel") ?? false, false);
 
   for (const field of [
     "id",
@@ -270,6 +340,11 @@ test("automation save schema exposes typed fields while automation import-json i
 
 test("automation save injects the current private iMessage delivery route", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-route-");
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "linq",
+    deliveryTarget: "linq_chat_real",
+    token: "test-bridge-token",
+  });
 
   try {
     const cli = Cli.create("vault-cli", {
@@ -277,8 +352,9 @@ test("automation save injects the current private iMessage delivery route", asyn
       version: "0.0.0-test",
     });
     registerAutomationCommands(cli);
-    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV, "linq");
-    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV, "linq_chat_real");
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
 
     const saved = await runInProcessJsonCli<{
       automationId: string;
@@ -300,14 +376,137 @@ test("automation save injects the current private iMessage delivery route", asyn
         "at",
         "--schedule-at",
         "2026-12-06T12:00:00.000Z",
-        "--channel",
-        "linq",
-        "--thread-id",
-        "hid_redacted_thread",
         "--vault",
         vaultRoot,
       ],
     );
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      "current-route-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
+    assert.equal(shown.envelope.data?.automation?.route.participantId, null);
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+    assert.deepEqual(bridge.requests, [
+      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
+    ]);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation save injects a hosted current messaging route without target flags", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-hosted-route-");
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "telegram",
+    deliveryTarget: "telegram_thread_real",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Hosted route reminder",
+      "--slug",
+      "hosted-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          channel: string;
+          deliveryTarget: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      "hosted-route-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation save keeps local current route env support outside hosted runtime", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-local-route-");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV, "linq");
+    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV, "linq_chat_real");
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Local route reminder",
+      "--slug",
+      "local-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--vault",
+      vaultRoot,
+    ]);
     assert.equal(saved.exitCode, null);
     assert.equal(saved.envelope.ok, true);
 
@@ -322,7 +521,7 @@ test("automation save injects the current private iMessage delivery route", asyn
     }>(cli, [
       "automation",
       "show",
-      "current-route-reminder",
+      "local-route-reminder",
       "--vault",
       vaultRoot,
     ]);
@@ -366,6 +565,28 @@ test("automation save rejects iMessage routes without a deliverable target", asy
     ]);
     assert.equal(saved.exitCode, 1);
     assert.equal(saved.envelope.ok, false);
+
+    const realThreadFallback = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Broken real thread route reminder",
+      "--slug",
+      "broken-real-thread-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--thread-id",
+      "linq_chat_real",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(realThreadFallback.exitCode, 1);
+    assert.equal(realThreadFallback.envelope.ok, false);
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }

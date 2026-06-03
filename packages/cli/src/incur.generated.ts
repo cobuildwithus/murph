@@ -36,7 +36,7 @@ declare module 'incur' {
       'audit tail': { args: {}; options: { requestId?: string; limit: number } }
       'automation import-json': { args: {}; options: { requestId?: string; input: string } }
       'automation list': { args: {}; options: { requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
-      'automation save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; instructions: string; scheduleKind: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string } }
+      'automation save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; instructions: string; scheduleKind: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string } }
       'automation scaffold': { args: {}; options: { requestId?: string } }
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
