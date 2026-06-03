@@ -3,7 +3,7 @@ import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { parseHostedRunnerProviderEffectErrorResponse } from "../runner-effects-contract.ts";
 import {
   HostedRuntimeControlPlaneFetchError,
-  combineAbortSignals,
+  combineAbortSignalsWithCleanup,
   shouldPreserveHostedRuntimeFetchError,
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
@@ -20,11 +20,11 @@ export async function fetchHostedResponse(input: {
 }): Promise<Response> {
   const callerSignal = input.signal ?? input.init?.signal ?? null;
   const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-  const requestSignal = combineAbortSignals(callerSignal, timeoutSignal);
+  const requestSignal = combineAbortSignalsWithCleanup(callerSignal, timeoutSignal);
   try {
     return await input.fetchImpl(input.url, {
       ...input.init,
-      signal: requestSignal,
+      signal: requestSignal.signal,
     });
   } catch (error) {
     if (shouldPreserveHostedRuntimeFetchError(error)) {
@@ -36,7 +36,7 @@ export async function fetchHostedResponse(input: {
       description: input.description,
       signalState: {
         callerSignalAborted: callerSignal?.aborted ?? false,
-        requestSignalAborted: requestSignal.aborted,
+        requestSignalAborted: requestSignal.signal.aborted,
         timeoutMs: input.timeoutMs,
         timeoutSignalAborted: timeoutSignal.aborted,
       },
@@ -57,6 +57,8 @@ export async function fetchHostedResponse(input: {
       userId: null,
     });
     throw wrappedError;
+  } finally {
+    requestSignal.dispose();
   }
 }
 

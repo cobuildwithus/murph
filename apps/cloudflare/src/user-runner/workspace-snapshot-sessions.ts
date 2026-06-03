@@ -163,6 +163,7 @@ export function createWorkspaceSnapshotSessionService(input: {
 
       for (const [key, candidate] of eligibleCandidates) {
         if (candidate.objectKey === currentObjectKey) {
+          await input.state.storage.delete(key);
           continue;
         }
         await deleteR2ObjectIfSupported(input.bucket, candidate.objectKey);

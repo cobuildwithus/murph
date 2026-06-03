@@ -28,7 +28,6 @@ import {
   readHostedExecutionBoundUserIdHeader,
 } from "./route-utils/bound-user-header.ts";
 import {
-  DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
   isRequestBodyTooLargeError,
 } from "./route-utils/json-body.ts";
 import {
@@ -39,6 +38,9 @@ export async function authorizeRoute(
   authorization: WorkerRouteAuthorization,
   context: { request: Request } & Partial<WorkerRouteContext>,
   routeName: string,
+  options: {
+    signatureBodyLimitBytes?: number;
+  } = {},
 ): Promise<Response | null> {
   switch (authorization) {
     case "web-callback-signature": {
@@ -59,10 +61,16 @@ export async function authorizeRoute(
         return unauthorized();
       }
 
+      if (options.signatureBodyLimitBytes === undefined) {
+        throw new TypeError(
+          `Hosted worker route ${routeName} is missing a signature body limit.`,
+        );
+      }
+
       let payload: string;
       try {
         payload = await readCachedRequestText(context, {
-          limitBytes: DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
+          limitBytes: options.signatureBodyLimitBytes,
         });
       } catch (error) {
         if (isRequestBodyTooLargeError(error)) {

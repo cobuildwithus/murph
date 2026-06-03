@@ -183,23 +183,40 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
         "x-amz-meta-snapshotid": request.snapshotId,
       };
-      const response = await fetchHostedResponse({
-        description: "Hosted workspace snapshot direct R2 upload",
-        fetchImpl: input.fetchImpl,
-        init: {
-          body,
-          duplex: "half",
-          headers: putHeaders,
-          method: "PUT",
-        } as RequestInit & { duplex: "half" },
-        redactedLogPath: "/workspace-snapshot-object",
-        redactedResponseOrigin: "workspace_snapshot_object",
-        timeoutMs: putTimeoutMs,
-        url: new URL(presignedPut.putUrl),
-      });
+      let response: Response;
+      try {
+        response = await fetchHostedResponse({
+          description: "Hosted workspace snapshot direct R2 upload",
+          fetchImpl: input.fetchImpl,
+          init: {
+            body,
+            duplex: "half",
+            headers: putHeaders,
+            method: "PUT",
+          } as RequestInit & { duplex: "half" },
+          redactedLogPath: "/workspace-snapshot-object",
+          redactedResponseOrigin: "workspace_snapshot_object",
+          timeoutMs: putTimeoutMs,
+          url: new URL(presignedPut.putUrl),
+        });
+      } catch (error) {
+        throw new Error(
+          "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
+          + "abandon this snapshot session and start a fresh snapshot before retrying.",
+          { cause: error },
+        );
+      }
       timings.snapshotDirectR2PutElapsedMs =
         readHostedRuntimeStepElapsedMs(putStartedAt);
-      assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
+      try {
+        assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
+      } catch (error) {
+        throw new Error(
+          `Hosted workspace snapshot direct R2 upload is not resumable after HTTP ${response.status}; `
+          + "abandon this snapshot session and start a fresh snapshot before retrying.",
+          { cause: error },
+        );
+      }
       return timings;
     },
 

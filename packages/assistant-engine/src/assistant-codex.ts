@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import {
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
@@ -126,6 +128,55 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
+const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
+  'ALL_PROXY',
+  'CI',
+  'CODEX_CA_CERTIFICATE',
+  'CODEX_HOME',
+  'COLORTERM',
+  'CURL_CA_BUNDLE',
+  'FORCE_COLOR',
+  'HOME',
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+  'HOSTED_ASSISTANT_APPROVAL_POLICY',
+  'HOSTED_ASSISTANT_MODEL',
+  'HOSTED_ASSISTANT_REASONING_EFFORT',
+  'HOSTED_ASSISTANT_SANDBOX',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'MURPH_ASSISTANT_SKILLS_ROOT',
+  'MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID',
+  'NO_COLOR',
+  'NO_PROXY',
+  'NODE_ENV',
+  'NODE_EXTRA_CA_CERTS',
+  'OPENAI_API_KEY',
+  'PATH',
+  'PATHEXT',
+  'REQUESTS_CA_BUNDLE',
+  'SSL_CERT_DIR',
+  'SSL_CERT_FILE',
+  'SystemDrive',
+  'SystemRoot',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'TZ',
+  'VAULT',
+] as const
+const HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES = [
+  'MURPH_HOSTED_CODEX_BOUND_USER_ID',
+  'MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID',
+  'MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION',
+  'MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION',
+] as const
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -501,13 +552,30 @@ function resolveHostedCodexAppServerCommand(env: NodeJS.ProcessEnv): string {
 
 function projectHostedCodexAppServerChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const codexHome = normalizeNullableString(env.CODEX_HOME)
+  const childEnv = { ...env }
+  for (const key of HOSTED_CODEX_APP_SERVER_REJECTED_CHILD_ENV_NAMES) {
+    delete childEnv[key]
+  }
 
   return {
-    ...env,
+    ...childEnv,
     ...(codexHome ? { CODEX_HOME: codexHome } : {}),
     [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
     PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
   }
+}
+
+function projectHostedCodexAppServerIdentityEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const projected: NodeJS.ProcessEnv = {}
+
+  for (const key of HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES) {
+    const value = env[key]
+    if (typeof value === 'string') {
+      projected[key] = value
+    }
+  }
+
+  return projected
 }
 
 export function buildCodexAppServerArgs(
@@ -1049,11 +1117,14 @@ async function buildCodexAppServerProcessIdentity(input: {
     codexCommand: input.codexCommand,
   }
   const configTomlDigest = await readCodexConfigTomlDigest(input.env.CODEX_HOME)
+  const identityEnv = input.hostedRuntimeProcess
+    ? projectHostedCodexAppServerIdentityEnv(input.env)
+    : input.env
   const identity = {
     ...commandIdentity,
     codexHome: normalizeNullableString(input.env.CODEX_HOME),
     configTomlDigest,
-    envDigest: hashStableCodexIdentity(input.env),
+    envDigest: hashStableCodexIdentity(identityEnv),
     hostedRuntimeProcess: input.hostedRuntimeProcess,
     hostedTestCommand:
       normalizeNullableString(input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]),

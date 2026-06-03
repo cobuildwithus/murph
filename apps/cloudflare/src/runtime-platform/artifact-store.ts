@@ -196,168 +196,168 @@ export function createCloudflareArtifactStore(input: {
 
   let artifactFetchOrdinal = 0;
   return {
-      async get(sha256) {
-        const ordinal = ++artifactFetchOrdinal;
-        const startedAt = Date.now();
-        const logDetails = {
-          artifactFetchOrdinal: ordinal,
-          method: "GET",
-          operation: "artifact_fetch",
-          path: "/objects/REDACTED",
-          responseOrigin: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore,
-          timeoutMs,
+    async get(sha256) {
+      const ordinal = ++artifactFetchOrdinal;
+      const startedAt = Date.now();
+      const logDetails = {
+        artifactFetchOrdinal: ordinal,
+        method: "GET",
+        operation: "artifact_fetch",
+        path: "/objects/REDACTED",
+        responseOrigin: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore,
+        timeoutMs,
+      };
+
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.artifact-store",
+        details: logDetails,
+        message: "Hosted runtime artifact fetch started.",
+        phase: "runtime.starting",
+        userId: null,
+      });
+
+      for (
+        let attempt = 1;
+        attempt <= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS;
+        attempt += 1
+      ) {
+        const attemptLogDetails = {
+          ...logDetails,
+          artifactFetchAttempt: attempt,
+          artifactFetchMaxAttempts: HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
         };
+        let response: Response;
+        try {
+          response = await fetchHostedResponse({
+            description: "Hosted artifact fetch",
+            fetchImpl,
+            redactedLogPath: "/objects/REDACTED",
+            timeoutMs,
+            url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+          });
+        } catch (error) {
+          const retrying = shouldRetryHostedRuntimeReplaySafeRead({
+            attempt,
+            error,
+          });
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runtime.artifact-store",
+            details: {
+              ...attemptLogDetails,
+              durationMs: Date.now() - startedAt,
+              retrying,
+              ...buildHostedRuntimeSafeErrorMetadata(error),
+            },
+            level: "warn",
+            message: retrying
+              ? "Hosted runtime artifact fetch failed before response; retrying."
+              : "Hosted runtime artifact fetch failed before response.",
+            phase: "runtime.starting",
+            userId: null,
+          });
+          if (retrying) {
+            await sleepHostedReplaySafeReadRetryDelay();
+            continue;
+          }
+          throw error;
+        }
 
         emitHostedExecutionStructuredLog({
           component: "hosted.runtime.artifact-store",
-          details: logDetails,
-          message: "Hosted runtime artifact fetch started.",
+          details: {
+            ...attemptLogDetails,
+            contentLengthPresent: response.headers.has("content-length"),
+            contentTypePresent: response.headers.has("content-type"),
+            durationMs: Date.now() - startedAt,
+            responseOk: response.ok,
+            responseStatus: response.status,
+          },
+          level: response.ok || response.status === 404 ? "info" : "warn",
+          message: "Hosted runtime artifact fetch response received.",
           phase: "runtime.starting",
           userId: null,
         });
 
-        for (
-          let attempt = 1;
-          attempt <= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS;
-          attempt += 1
-        ) {
-          const attemptLogDetails = {
-            ...logDetails,
-            artifactFetchAttempt: attempt,
-            artifactFetchMaxAttempts: HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
-          };
-          let response: Response;
-          try {
-            response = await fetchHostedResponse({
-              description: "Hosted artifact fetch",
-              fetchImpl,
-              redactedLogPath: "/objects/REDACTED",
+        if (response.status === 404) {
+          return null;
+        }
+
+        assertHostedOk(response, "Hosted artifact fetch");
+        const bodyStartedAt = Date.now();
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: {
+            ...attemptLogDetails,
+            durationMs: bodyStartedAt - startedAt,
+            responseStatus: response.status,
+          },
+          message: "Hosted runtime artifact fetch body read started.",
+          phase: "runtime.starting",
+          userId: null,
+        });
+
+        let body: ArrayBuffer;
+        try {
+          body = await response.arrayBuffer();
+        } catch (error) {
+          const wrappedError = new HostedRuntimeControlPlaneFetchError({
+            cause: error,
+            description: "Hosted artifact fetch response body read",
+            signalState: {
+              callerSignalAborted: false,
+              requestSignalAborted: false,
               timeoutMs,
-              url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
-            });
-          } catch (error) {
-            const retrying = shouldRetryHostedRuntimeReplaySafeRead({
-              attempt,
-              error,
-            });
-            emitHostedExecutionStructuredLog({
-              component: "hosted.runtime.artifact-store",
-              details: {
-                ...attemptLogDetails,
-                durationMs: Date.now() - startedAt,
-                retrying,
-                ...buildHostedRuntimeSafeErrorMetadata(error),
-              },
-              level: "warn",
-              message: retrying
-                ? "Hosted runtime artifact fetch failed before response; retrying."
-                : "Hosted runtime artifact fetch failed before response.",
-              phase: "runtime.starting",
-              userId: null,
-            });
-            if (retrying) {
-              await sleepHostedReplaySafeReadRetryDelay();
-              continue;
-            }
-            throw error;
-          }
-
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runtime.artifact-store",
-            details: {
-              ...attemptLogDetails,
-              contentLengthPresent: response.headers.has("content-length"),
-              contentTypePresent: response.headers.has("content-type"),
-              durationMs: Date.now() - startedAt,
-              responseOk: response.ok,
-              responseStatus: response.status,
+              timeoutSignalAborted: false,
             },
-            level: response.ok || response.status === 404 ? "info" : "warn",
-            message: "Hosted runtime artifact fetch response received.",
-            phase: "runtime.starting",
-            userId: null,
           });
-
-          if (response.status === 404) {
-            return null;
-          }
-
-          assertHostedOk(response, "Hosted artifact fetch");
-          const bodyStartedAt = Date.now();
+          const retrying = shouldRetryHostedRuntimeReplaySafeRead({
+            attempt,
+            error: wrappedError,
+          });
           emitHostedExecutionStructuredLog({
             component: "hosted.runtime.artifact-store",
             details: {
               ...attemptLogDetails,
-              durationMs: bodyStartedAt - startedAt,
-              responseStatus: response.status,
-            },
-            message: "Hosted runtime artifact fetch body read started.",
-            phase: "runtime.starting",
-            userId: null,
-          });
-
-          let body: ArrayBuffer;
-          try {
-            body = await response.arrayBuffer();
-          } catch (error) {
-            const wrappedError = new HostedRuntimeControlPlaneFetchError({
-              cause: error,
-              description: "Hosted artifact fetch response body read",
-              signalState: {
-                callerSignalAborted: false,
-                requestSignalAborted: false,
-                timeoutMs,
-                timeoutSignalAborted: false,
-              },
-            });
-            const retrying = shouldRetryHostedRuntimeReplaySafeRead({
-              attempt,
-              error: wrappedError,
-            });
-            emitHostedExecutionStructuredLog({
-              component: "hosted.runtime.artifact-store",
-              details: {
-                ...attemptLogDetails,
-                bodyDurationMs: Date.now() - bodyStartedAt,
-                durationMs: Date.now() - startedAt,
-                responseStatus: response.status,
-                retrying,
-                ...buildHostedRuntimeSafeErrorMetadata(wrappedError),
-              },
-              level: "warn",
-              message: retrying
-                ? "Hosted runtime artifact fetch body read failed; retrying."
-                : "Hosted runtime artifact fetch body read failed.",
-              phase: "runtime.starting",
-              userId: null,
-            });
-            if (retrying) {
-              await sleepHostedReplaySafeReadRetryDelay();
-              continue;
-            }
-            throw wrappedError;
-          }
-
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runtime.artifact-store",
-            details: {
-              ...attemptLogDetails,
-              artifactByteLength: body.byteLength,
               bodyDurationMs: Date.now() - bodyStartedAt,
               durationMs: Date.now() - startedAt,
               responseStatus: response.status,
+              retrying,
+              ...buildHostedRuntimeSafeErrorMetadata(wrappedError),
             },
-            message: "Hosted runtime artifact fetch body read completed.",
+            level: "warn",
+            message: retrying
+              ? "Hosted runtime artifact fetch body read failed; retrying."
+              : "Hosted runtime artifact fetch body read failed.",
             phase: "runtime.starting",
             userId: null,
           });
-          return new Uint8Array(body);
+          if (retrying) {
+            await sleepHostedReplaySafeReadRetryDelay();
+            continue;
+          }
+          throw wrappedError;
         }
 
-        throw new Error("Hosted artifact fetch exhausted retry attempts.");
-      },
-      async put({ bytes, sha256 }) {
-        await putArtifactOnce({ bytes, sha256 });
-      },
-    }
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: {
+            ...attemptLogDetails,
+            artifactByteLength: body.byteLength,
+            bodyDurationMs: Date.now() - bodyStartedAt,
+            durationMs: Date.now() - startedAt,
+            responseStatus: response.status,
+          },
+          message: "Hosted runtime artifact fetch body read completed.",
+          phase: "runtime.starting",
+          userId: null,
+        });
+        return new Uint8Array(body);
+      }
+
+      throw new Error("Hosted artifact fetch exhausted retry attempts.");
+    },
+    async put({ bytes, sha256 }) {
+      await putArtifactOnce({ bytes, sha256 });
+    },
+  };
 }

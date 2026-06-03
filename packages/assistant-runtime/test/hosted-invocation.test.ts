@@ -33,6 +33,7 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
+  createHostedWorkspaceInvocationLease,
   runHostedWorkspaceInvocation,
   type HostedWorkspaceMailboxPayloadDecoder,
   type HostedWorkspaceSnapshotArchiveBuilder,
@@ -190,6 +191,17 @@ describe("runHostedWorkspaceInvocation", () => {
       vaultRoot,
     })).rejects.toThrow("runHostedWorkspaceInvocation requires runtimeWakeSignal.");
     expect(mocks.runHostedWorkspaceRuntimeJobInProcess).not.toHaveBeenCalled();
+  });
+
+  it("creates a lease from the workspace invocation request", () => {
+    const job = createWorkspaceJob();
+
+    expect(createHostedWorkspaceInvocationLease(job)).toEqual({
+      attemptId: job.request.attemptId,
+      leaseGeneration: job.request.leaseGeneration,
+      userId: job.request.userId,
+      workspaceVersion: job.request.workspaceVersion,
+    });
   });
 });
 

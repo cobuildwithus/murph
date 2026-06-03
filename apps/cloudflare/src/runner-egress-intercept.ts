@@ -201,6 +201,18 @@ interface HostedRunnerDiagnosticBodySource {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
+type HostedProviderEgressValidationMode =
+  | "active_container"
+  | "exact_headers"
+  | "missing_identity";
+
+interface HostedProviderEgressAuthorization {
+  authorized: boolean;
+  durationMs: number;
+  mode: HostedProviderEgressValidationMode;
+  userId: string | null;
+}
+
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
 type HostedRunnerDiagnosticScalar = boolean | null | number | string;
 export type HostedRunnerDiagnosticJson = Record<
@@ -236,10 +248,10 @@ export async function handleHostedRunnerOpenInternetOutbound(
 
   const handled =
     await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleMapboxRequest({ env, request, url })
-    ?? await maybeHandleLinqRequest({ env, request, url, userId })
-    ?? await maybeHandleTelegramRequest({ env, request, url, userId })
-    ?? await maybeHandleWhatsAppRequest({ env, request, url, userId });
+    ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleTelegramRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleWhatsAppRequest({ ctx, env, request, url, userId });
 
   if (handled) {
     return handled;
@@ -382,9 +394,11 @@ export async function handleHostedRunnerMapboxOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleMapboxRequest({
+      ctx: _ctx,
       env,
       request,
       url,
+      userId: readHostedRunnerBoundUserId(request),
     }),
   );
 }
@@ -397,6 +411,7 @@ export async function handleHostedRunnerLinqOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleLinqRequest({
+      ctx: _ctx,
       env,
       request,
       url,
@@ -413,6 +428,7 @@ export async function handleHostedRunnerTelegramOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleTelegramRequest({
+      ctx: _ctx,
       env,
       request,
       url,
@@ -429,6 +445,7 @@ export async function handleHostedRunnerWhatsAppOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleWhatsAppRequest({
+      ctx: _ctx,
       env,
       request,
       url,
@@ -464,9 +481,19 @@ async function maybeHandleOpenAiRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "openai",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "openai",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
   }
 
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
@@ -488,17 +515,31 @@ async function maybeHandleOpenAiRequest(input: {
       env: input.env,
       request: input.request,
       upstreamRequestBody: upstreamRequest.clone(),
-      userId: input.userId,
+      userId: authorization.userId,
     });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(diagnosticPromise);
     } else {
-      const response = await fetch(upstreamRequest);
+      const response = await fetchAuthorizedProviderUpstream({
+        authorization,
+        providerKind: "openai",
+        request: input.request,
+        startedAt,
+        upstreamRequest,
+        url: input.url,
+      });
       await diagnosticPromise;
       return response;
     }
   }
-  return await fetch(upstreamRequest);
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "openai",
+    request: input.request,
+    startedAt,
+    upstreamRequest,
+    url: input.url,
+  });
 }
 
 function readOpenAiCacheDiagnosticEndpointKind(
@@ -1452,9 +1493,11 @@ async function drainHostedRunnerMetadataResponse(response: Response): Promise<vo
 }
 
 async function maybeHandleMapboxRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
+  userId: string | null;
 }): Promise<Response | null> {
   const providerBase = readProviderBaseConfig(undefined, DEFAULT_MAPBOX_API_BASE_URL, input.env);
   const pathMatch = readProviderPathMatch(input.url, providerBase);
@@ -1472,19 +1515,40 @@ async function maybeHandleMapboxRequest(input: {
     return disallowedProviderEgress();
   }
 
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "mapbox",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "mapbox",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
   const token = readRequiredInterceptSecret(input.env.MAPBOX_ACCESS_TOKEN, "MAPBOX_ACCESS_TOKEN");
   const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
   upstreamUrl.searchParams.set("access_token", token);
-  return await fetch(
-    await createHostedRunnerUpstreamRequest(
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "mapbox",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
       input.request,
       upstreamUrl,
       stripHostedProviderUpstreamHeaders(input.request.headers),
     ),
-  );
+    url: input.url,
+  });
 }
 
 async function maybeHandleLinqRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
@@ -1510,22 +1574,40 @@ async function maybeHandleLinqRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "linq",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "linq",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
   }
 
   const token = readRequiredInterceptSecret(input.env.LINQ_API_TOKEN, "LINQ_API_TOKEN");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return await fetch(await createHostedRunnerUpstreamRequest(
-    input.request,
-    createProviderUpstreamUrl(input.url, pathMatch),
-    headers,
-  ));
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "linq",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderUpstreamUrl(input.url, pathMatch),
+      headers,
+    ),
+    url: input.url,
+  });
 }
 
 async function maybeHandleTelegramRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
@@ -1582,6 +1664,7 @@ async function maybeHandleTelegramRequest(input: {
 
 async function handleTelegramTokenRewrite(
   input: {
+    ctx?: HostedRunnerOutboundContext;
     env: RunnerOutboundEnvironmentSource;
     request: Request;
     url: URL;
@@ -1590,24 +1673,40 @@ async function handleTelegramTokenRewrite(
   pathMatch: ProviderPathMatch,
   createPathnameSuffix: (token: string) => string,
 ): Promise<Response> {
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "telegram",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "telegram",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
   }
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
   const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
   const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
   upstreamUrl.pathname = `${prefix}${createPathnameSuffix(token)}`;
-  return await fetch(
-    await createHostedRunnerUpstreamRequest(
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "telegram",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
       input.request,
       upstreamUrl,
       stripHostedProviderUpstreamHeaders(input.request.headers),
     ),
-  );
+    url: input.url,
+  });
 }
 
 async function maybeHandleWhatsAppRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
@@ -1638,9 +1737,19 @@ async function maybeHandleWhatsAppRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "whatsapp",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "whatsapp",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
   }
 
   const token = readRequiredInterceptSecret(input.env.WHATSAPP_ACCESS_TOKEN, "WHATSAPP_ACCESS_TOKEN");
@@ -1656,7 +1765,14 @@ async function maybeHandleWhatsAppRequest(input: {
   )}`;
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return await fetch(await createHostedRunnerUpstreamRequest(input.request, upstreamUrl, headers));
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "whatsapp",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, upstreamUrl, headers),
+    url: input.url,
+  });
 }
 
 function readHostedRunnerBoundUserId(request: Request): string | null {
@@ -1764,28 +1880,197 @@ function isAllowedTelegramOperation(operation: string): boolean {
     || operation === "getFile";
 }
 
-async function requestOwnsRuntimeWriteFence(input: {
+async function authorizeHostedProviderEgress(input: {
+  ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
+  providerKind: string;
   request: Request;
   userId: string | null;
-}): Promise<boolean> {
-  if (!input.userId) {
-    return false;
+}): Promise<HostedProviderEgressAuthorization> {
+  const startedAt = Date.now();
+  if (input.userId && hostedRuntimeAuthorityHeadersPresent(input.request.headers)) {
+    try {
+      await requireRunnerRuntimeWriteFenceWrite({
+        env: input.env,
+        request: input.request,
+        userId: input.userId,
+      });
+      return {
+        authorized: true,
+        durationMs: Date.now() - startedAt,
+        mode: "exact_headers",
+        userId: input.userId,
+      };
+    } catch (error) {
+      if (error instanceof RunnerRuntimeWriteFenceError) {
+        return {
+          authorized: false,
+          durationMs: Date.now() - startedAt,
+          mode: "exact_headers",
+          userId: input.userId,
+        };
+      }
+      throw error;
+    }
   }
 
+  const activeUserId = input.userId ?? readHostedRunnerContainerUserId(input);
+  if (!activeUserId) {
+    return {
+      authorized: false,
+      durationMs: Date.now() - startedAt,
+      mode: "missing_identity",
+      userId: null,
+    };
+  }
+
+  const runner = input.env.USER_RUNNER.getByName(activeUserId);
+  if (typeof runner.validateActiveRuntimeWriteFence !== "function") {
+    return {
+      authorized: false,
+      durationMs: Date.now() - startedAt,
+      mode: "active_container",
+      userId: activeUserId,
+    };
+  }
+
+  return {
+    authorized: await runner.validateActiveRuntimeWriteFence({ userId: activeUserId }),
+    durationMs: Date.now() - startedAt,
+    mode: "active_container",
+    userId: activeUserId,
+  };
+}
+
+function readHostedRunnerContainerUserId(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+}): string | null {
+  const containerId = typeof input.ctx?.containerId === "string"
+    ? input.ctx.containerId.trim()
+    : "";
+  if (!containerId) {
+    return null;
+  }
+  const versionSegment = readRunnerContainerWorkerVersionSegment(input.env);
+  const versionSuffix = versionSegment ? `--v-${versionSegment}` : null;
+  const userId = versionSuffix && containerId.endsWith(versionSuffix)
+    ? containerId.slice(0, -versionSuffix.length)
+    : containerId;
+  const normalized = userId.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readRunnerContainerWorkerVersionSegment(source: RunnerOutboundEnvironmentSource): string | null {
+  const metadata = source.CF_VERSION_METADATA;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const versionId = (metadata as { id?: unknown }).id;
+  return typeof versionId === "string"
+    ? sanitizeRunnerContainerNameSegment(versionId)
+    : null;
+}
+
+function sanitizeRunnerContainerNameSegment(value: string): string | null {
+  const sanitized = value
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return sanitized.length > 0 ? sanitized : null;
+}
+
+function unauthorizedProviderEgress(input: {
+  authorization: HostedProviderEgressAuthorization;
+  providerKind: string;
+  request: Request;
+  startedAt: number;
+  url: URL;
+}): Response {
+  const response = new Response("Unauthorized", { status: 401 });
+  emitHostedProviderEgressDiagnostic({
+    authorization: input.authorization,
+    providerKind: input.providerKind,
+    request: input.request,
+    response,
+    startedAt: input.startedAt,
+    upstreamDurationMs: null,
+    url: input.url,
+  });
+  return response;
+}
+
+async function fetchAuthorizedProviderUpstream(input: {
+  authorization: HostedProviderEgressAuthorization;
+  providerKind: string;
+  request: Request;
+  startedAt: number;
+  upstreamRequest: Request;
+  url: URL;
+}): Promise<Response> {
+  const upstreamStartedAt = Date.now();
   try {
-    await requireRunnerRuntimeWriteFenceWrite({
-      env: input.env,
+    const response = await fetch(input.upstreamRequest);
+    emitHostedProviderEgressDiagnostic({
+      authorization: input.authorization,
+      providerKind: input.providerKind,
       request: input.request,
-      userId: input.userId,
+      response,
+      startedAt: input.startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
     });
-    return true;
+    return response;
   } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return false;
-    }
+    emitHostedProviderEgressDiagnostic({
+      authorization: input.authorization,
+      error,
+      providerKind: input.providerKind,
+      request: input.request,
+      startedAt: input.startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
     throw error;
   }
+}
+
+function emitHostedProviderEgressDiagnostic(input: {
+  authorization: HostedProviderEgressAuthorization;
+  error?: unknown;
+  providerKind: string;
+  request: Request;
+  response?: Response;
+  startedAt: number;
+  upstreamDurationMs: number | null;
+  url: URL;
+}): void {
+  const errorCode = input.error ? deriveHostedExecutionErrorCode(input.error) : null;
+  const errorName = input.error ? readHostedExecutionSafeErrorName(input.error) : null;
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      host: input.url.hostname,
+      method: readHostedRunnerDiagnosticMethod(input.request.method),
+      providerKind: input.providerKind,
+      providerRequestAuthorized: input.authorization.authorized,
+      providerTotalDurationMs: Date.now() - input.startedAt,
+      providerUpstreamDurationMs: input.upstreamDurationMs,
+      responseOk: input.response?.ok ?? null,
+      responseStatus: input.response?.status ?? null,
+      userIdPresent: input.authorization.userId !== null,
+      writeFenceValidationDurationMs: input.authorization.durationMs,
+      writeFenceValidationMode: input.authorization.mode,
+      ...(errorCode ? { errorCode } : {}),
+      ...(errorName ? { errorName } : {}),
+    },
+    level: input.authorization.authorized && !input.error ? "info" : "warn",
+    message: "Hosted runner provider egress completed.",
+    phase: "wake.running",
+  });
 }
 
 function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {

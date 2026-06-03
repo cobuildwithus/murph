@@ -132,10 +132,10 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.NO_PROXY).toBe("localhost,127.0.0.1,host.docker.internal");
     expect(env.NODE_EXTRA_CA_CERTS).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
     expect(env.REQUESTS_CA_BUNDLE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
-    expect(env.MURPH_HOSTED_CODEX_BOUND_USER_ID).toBe("member_123");
-    expect(env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID).toBe("attempt_123");
-    expect(env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION).toBe("7");
-    expect(env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION).toBe("42");
+    expect(env.MURPH_HOSTED_CODEX_BOUND_USER_ID).toBeUndefined();
+    expect(env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID).toBeUndefined();
+    expect(env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION).toBeUndefined();
+    expect(env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION).toBeUndefined();
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".codex-hosted", "bin"));

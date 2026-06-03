@@ -61,23 +61,12 @@ export {
     as HostedUserRunnerDataDeletionRunnerStillActiveError,
 };
 
-interface HostedRunnerUserDataDeletionServiceInput {
+export interface HostedRunnerUserDataDeletionServiceInput {
   bucket: R2BucketLike;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
   stateStore: HostedRunnerUserDataDeletionStateStore;
-}
-
-export class UserDataDeletionService {
-  constructor(private readonly input: HostedRunnerUserDataDeletionServiceInput) {}
-
-  async delete(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
-    return await deleteHostedRunnerUserData({
-      ...this.input,
-      userId,
-    });
-  }
 }
 
 export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDeletionServiceInput & {

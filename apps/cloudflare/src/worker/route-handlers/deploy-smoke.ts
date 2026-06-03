@@ -29,6 +29,7 @@ import {
   matchExactPath,
 } from "../routes.ts";
 import {
+  DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
   normalizeNonEmptyString,
   parseJsonValue,
   requireJsonRecord,
@@ -51,6 +52,7 @@ export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] 
     match: matchExactPath("/internal/deploy/container-smoke"),
     methods: ["POST"],
     name: "deploy-container-smoke",
+    signatureBodyLimitBytes: DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
     wrongMethodResponse: "method-not-allowed",
   },
 ];

@@ -10,22 +10,36 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-runtime", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime")>(
-    "@murphai/assistant-runtime",
-  );
   return {
-    ...actual,
     clearHostedBrowserVaultWarmSourceStateHash:
       mocks.clearHostedBrowserVaultWarmSourceStateHash,
+    createCoalescingRuntimeWakeSignal: () => {
+      let pending = false;
+      return {
+        consumePending: () => {
+          if (!pending) {
+            return false;
+          }
+          pending = false;
+          return true;
+        },
+        notify: () => {
+          pending = true;
+        },
+        wait: async () => {},
+      };
+    },
   };
 });
 
 vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-invocation")>(
-    "@murphai/assistant-runtime/hosted-invocation",
-  );
   return {
-    ...actual,
+    createHostedWorkspaceInvocationLease: (input: HostedExecutionWorkspaceInvocationJobInput) => ({
+      attemptId: input.request.attemptId,
+      leaseGeneration: input.request.leaseGeneration,
+      userId: input.request.userId,
+      workspaceVersion: input.request.workspaceVersion,
+    }),
     runHostedWorkspaceInvocation:
       mocks.runPackageHostedWorkspaceInvocation,
   };
@@ -41,6 +55,12 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "../src/runner-injected-credential.ts";
 import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+} from "../src/runner-outbound/headers.ts";
+import {
   buildHostedExecutionJobRuntime,
   clearHostedRunnerWarmLauncherRootsForTests,
   resolveHostedRunnerWarmWorkspaceVaultRoot,
@@ -53,6 +73,7 @@ import type {
 describe("runHostedWorkspaceInvocation", () => {
   afterEach(async () => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     await clearHostedRunnerWarmLauncherRootsForTests();
   });
 
@@ -127,6 +148,34 @@ describe("runHostedWorkspaceInvocation", () => {
     );
     const onRuntimeWakeReady = vi.fn();
     const abortController = new AbortController();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+        return new Response(JSON.stringify({
+          checkpointed: true,
+          workspace: {
+            checkpointedAt: "2026-04-26T00:00:04.000Z",
+            createdAt: "2026-04-26T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: {},
+            snapshotRef: null,
+            updatedAt: "2026-04-26T00:00:04.000Z",
+            userId: "member_direct_invocation",
+            version: "10",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url === "https://telegram.example.test/bot-test") {
+        return new Response("ok", { status: 200 });
+      }
+      throw new Error(`Unexpected direct invocation platform request: ${request.url}`);
+    });
     const job = createWorkspaceJob({
       forwardedEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-job",
@@ -137,6 +186,7 @@ describe("runHostedWorkspaceInvocation", () => {
         OPENAI_API_KEY: "fixture-user-openai-key",
       },
     });
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(runHostedWorkspaceInvocation(job, {
       onRuntimeWakeReady,
@@ -145,6 +195,7 @@ describe("runHostedWorkspaceInvocation", () => {
         HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         NODE_ENV: "production",
+        TELEGRAM_API_BASE_URL: "https://telegram.example.test",
       },
     })).resolves.toEqual(runtimeResult);
 
@@ -176,6 +227,86 @@ describe("runHostedWorkspaceInvocation", () => {
     });
     expect(capturedJob.runtime?.parserToolchain?.tools.ffmpeg?.command).toBe(
       "/usr/bin/ffmpeg",
+    );
+    const readCurrentLease = requireCallable(
+      capturedInput.readCurrentLease,
+      "captured readCurrentLease",
+    );
+    expect(readCurrentLease()).toMatchObject({
+      attemptId: job.request.attemptId,
+      leaseGeneration: job.request.leaseGeneration,
+      userId: job.request.userId,
+      workspaceVersion: job.request.workspaceVersion,
+    });
+
+    const platform = requireObjectRecord(capturedInput.platform, "captured platform");
+    const workspacePort = requireObjectRecord(
+      platform.workspacePort,
+      "captured workspacePort",
+    );
+    const checkpoint = requireCallable(
+      workspacePort.checkpoint,
+      "captured workspacePort.checkpoint",
+    );
+    await expect(checkpoint({
+      attemptId: job.request.attemptId,
+      expectedWorkspaceVersion: job.request.workspaceVersion,
+      leaseGeneration: job.request.leaseGeneration,
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {},
+      snapshotRef: null,
+    })).resolves.toMatchObject({
+      workspace: {
+        version: "10",
+      },
+    });
+    expect(readCurrentLease()).toMatchObject({
+      attemptId: job.request.attemptId,
+      leaseGeneration: job.request.leaseGeneration,
+      userId: job.request.userId,
+      workspaceVersion: "10",
+    });
+
+    const providerFetch = requireCallable(platform.providerFetch, "captured providerFetch");
+    const providerResponse = await providerFetch("https://telegram.example.test/bot-test");
+    expect(providerResponse).toBeInstanceOf(Response);
+    if (providerResponse instanceof Response) {
+      expect(providerResponse.status).toBe(200);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const checkpointRequest = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "direct invocation workspace checkpoint",
+    );
+    expect(checkpointRequest.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(
+      job.request.attemptId,
+    );
+    expect(checkpointRequest.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(
+      job.request.leaseGeneration,
+    );
+    expect(checkpointRequest.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(
+      job.request.workspaceVersion,
+    );
+    expect(checkpointRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
+      job.request.userId,
+    );
+
+    const providerRequest = requireFetchRequest(
+      fetchMock.mock.calls[1],
+      "direct invocation provider fetch",
+    );
+    expect(providerRequest.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(
+      job.request.attemptId,
+    );
+    expect(providerRequest.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(
+      job.request.leaseGeneration,
+    );
+    expect(providerRequest.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe("10");
+    expect(providerRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
+      job.request.userId,
     );
   });
 
@@ -364,6 +495,46 @@ function isWorkspaceInvocationJob(value: unknown): value is HostedExecutionWorks
   return value !== null
     && typeof value === "object"
     && Reflect.get(value, "kind") === "workspace-invocation";
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value);
+}
+
+function requireObjectRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isObjectRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requireCallable(
+  value: unknown,
+  label: string,
+): (...args: unknown[]) => Promise<unknown> | unknown {
+  if (typeof value !== "function") {
+    throw new Error(`${label} must be a function.`);
+  }
+  return (...args: unknown[]) => value(...args);
+}
+
+function requireFetchRequest(call: readonly unknown[] | undefined, label: string): Request {
+  if (!call) {
+    throw new Error(`${label} was not called.`);
+  }
+  const [input, init] = call;
+  if (input instanceof Request) {
+    return input;
+  }
+  if (input instanceof URL || typeof input === "string") {
+    if (init !== undefined && !isObjectRecord(init)) {
+      throw new Error(`${label} init must be an object.`);
+    }
+    return new Request(input, init as RequestInit | undefined);
+  }
+  throw new Error(`${label} must receive a Request, URL, or string input.`);
 }
 
 async function assertRealPrivateDirectory(directoryPath: string): Promise<void> {

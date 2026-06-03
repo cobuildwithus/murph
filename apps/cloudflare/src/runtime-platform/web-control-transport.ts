@@ -5,6 +5,11 @@ import {
   assertAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
 } from "../runner-outbound/shared-web-control-policy.ts";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+} from "../runner-outbound/headers.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import {
@@ -14,7 +19,7 @@ import {
 import {
   HostedRuntimeControlPlaneFetchError,
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
-  combineAbortSignals,
+  combineAbortSignalsWithCleanup,
   isRetryableHostedWebControlReadError,
   shouldPreserveHostedRuntimeFetchError,
   sleepHostedReplaySafeReadRetryDelay,
@@ -23,6 +28,7 @@ import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
 import { fetchHostedResponse } from "./hosted-http.ts";
 import {
   isHostedRuntimeInternalAuthorityRejectedError,
+  requireHostedRuntimeWriteFenceHeaders,
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./authority-headers.ts";
 
@@ -31,6 +37,7 @@ export type HostedWebControlTransport =
     callbackSigning: HostedWebCallbackSigningEnvironment;
     mode: "direct";
     webControlBaseUrl: string;
+    workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
   }
   | {
     mode: "proxy";
@@ -45,6 +52,7 @@ export function resolveHostedWebControlTransport(input: {
       callbackSigning: input.webCallbackSigning,
       mode: "direct",
       webControlBaseUrl: input.webControlBaseUrl,
+      workspaceCheckpointBridge: input.workspaceCheckpointBridge,
     };
   }
 
@@ -144,9 +152,16 @@ export async function fetchHostedWebControlPlaneJson(input: {
     ? AbortSignal.timeout(input.timeoutMs)
     : null;
   const directRequestSignal = directTimeoutSignal
-    ? combineAbortSignals(input.signal ?? null, directTimeoutSignal)
+    ? combineAbortSignalsWithCleanup(input.signal ?? null, directTimeoutSignal)
     : null;
   try {
+    const directHeaders = input.transport.mode === "direct"
+      ? await createHostedWebControlDirectHeaders({
+        description: input.description,
+        headers: input.headers,
+        transport: input.transport,
+      })
+      : undefined;
     response = input.transport.mode === "direct"
       ? await fetchHostedExecutionWebControlPlaneResponse({
         baseUrl: input.transport.webControlBaseUrl,
@@ -154,10 +169,10 @@ export async function fetchHostedWebControlPlaneJson(input: {
         boundUserId: input.boundUserId,
         callbackSigning: input.transport.callbackSigning,
         fetchImpl: input.fetchImpl,
-        headers: input.headers,
+        headers: directHeaders,
         method,
         path: route.pathAndSearch,
-        signal: directRequestSignal,
+        signal: directRequestSignal?.signal ?? null,
         timeoutMs: input.timeoutMs,
       })
       : await fetchHostedResponse({
@@ -189,8 +204,8 @@ export async function fetchHostedWebControlPlaneJson(input: {
         cause: error,
         description: input.description,
         signalState: {
-          callerSignalAborted: false,
-          requestSignalAborted: directRequestSignal?.aborted ?? false,
+          callerSignalAborted: input.signal?.aborted ?? false,
+          requestSignalAborted: directRequestSignal?.signal.aborted ?? false,
           timeoutMs: input.timeoutMs,
           timeoutSignalAborted: directTimeoutSignal?.aborted ?? false,
         },
@@ -217,6 +232,8 @@ export async function fetchHostedWebControlPlaneJson(input: {
     }
 
     throw loggedError;
+  } finally {
+    directRequestSignal?.dispose();
   }
 
   emitHostedExecutionStructuredLog({
@@ -297,6 +314,63 @@ export async function fetchHostedWebControlPlaneJson(input: {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
 }
+async function createHostedWebControlDirectHeaders(input: {
+  description: string;
+  headers?: Headers;
+  transport: Extract<HostedWebControlTransport, { mode: "direct" }>;
+}): Promise<Headers | undefined> {
+  if (!input.transport.workspaceCheckpointBridge) {
+    return input.headers;
+  }
+
+  const headers = new Headers(input.headers);
+  const hasCompleteWriteFence = hasCompleteHostedRuntimeWriteFenceHeaders(headers);
+  if (hasAnyHostedRuntimeWriteFenceHeader(headers)) {
+    if (!hasCompleteWriteFence) {
+      throw new Error(`${input.description} has incomplete hosted runtime write-fence headers.`);
+    }
+  }
+
+  const writeFenceHeaders = await requireHostedRuntimeWriteFenceHeaders(
+    input.transport.workspaceCheckpointBridge,
+    input.description,
+  );
+  if (
+    hasCompleteWriteFence
+    && !hasMatchingHostedRuntimeWriteFenceHeaders(headers, writeFenceHeaders)
+  ) {
+    throw new Error(`${input.description} has stale hosted runtime write-fence headers.`);
+  }
+  writeFenceHeaders.forEach((value, name) => {
+    headers.set(name, value);
+  });
+  return headers;
+}
+
+function hasCompleteHostedRuntimeWriteFenceHeaders(headers: Headers): boolean {
+  return headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+    && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
+    && headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+}
+
+function hasAnyHostedRuntimeWriteFenceHeader(headers: Headers): boolean {
+  return headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+    || headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
+    || headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+}
+
+function hasMatchingHostedRuntimeWriteFenceHeaders(
+  actual: Headers,
+  expected: Headers,
+): boolean {
+  return actual.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+    === expected.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+    && actual.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
+      === expected.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
+    && actual.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)
+      === expected.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+}
+
 function buildHostedWebControlRequestLogDetails(input: {
   body: string | undefined;
   description: string;

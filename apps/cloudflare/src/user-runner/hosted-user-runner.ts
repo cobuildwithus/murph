@@ -52,7 +52,8 @@ import {
   type WorkspaceSnapshotSessionService,
 } from "./workspace-snapshot-sessions.js";
 import {
-  UserDataDeletionService,
+  deleteHostedRunnerUserData,
+  type HostedRunnerUserDataDeletionServiceInput,
   type HostedRunnerUserDataDeletionResult,
 } from "./user-data-deletion.js";
 import { RunnerStoreCache } from "./runner-store-cache.js";
@@ -75,7 +76,7 @@ export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runtimeProcessing: RuntimeProcessingController;
   private readonly testControls: RunnerTestControls;
-  private readonly userDataDeletion: UserDataDeletionService;
+  private readonly userDataDeletionInput: HostedRunnerUserDataDeletionServiceInput;
   private readonly workspaceSnapshotSessions: WorkspaceSnapshotSessionService;
   private readonly runnerStoreCache: RunnerStoreCache;
 
@@ -127,13 +128,13 @@ export class HostedUserRunner {
       runtimeProcessing,
       stateStore: this.stateStore,
     });
-    this.userDataDeletion = new UserDataDeletionService({
+    this.userDataDeletionInput = {
       bucket,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
       state,
       stateStore: this.stateStore,
-    });
+    };
     this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
       bucket,
       state,
@@ -186,7 +187,10 @@ export class HostedUserRunner {
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
     this.runnerStoreCache.clearIfUser(userId);
-    return await this.userDataDeletion.delete(userId);
+    return await deleteHostedRunnerUserData({
+      ...this.userDataDeletionInput,
+      userId,
+    });
   }
 
   async ensureRuntimeProcessingForUser(
@@ -220,6 +224,27 @@ export class HostedUserRunner {
         }),
         level: "warn",
         message: "Hosted runner runtime write fence validation rejected.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+    }
+    return validation.owns;
+  }
+
+  async validateActiveRuntimeWriteFence(input: {
+    userId: string;
+  }): Promise<boolean> {
+    const validation = await this.stateStore.validateActiveWriteFence(input);
+    if (!validation.owns) {
+      const writeFence = validation.record.writeFence;
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          activeWriteFencePresent: writeFence !== null,
+          activeWriteFenceUserMatches: validation.record.userId === input.userId,
+        },
+        level: "warn",
+        message: "Hosted runner active runtime write fence validation rejected.",
         phase: "wake.running",
         userId: input.userId,
       });

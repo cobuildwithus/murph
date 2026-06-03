@@ -239,6 +239,10 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
       HOSTED_ASSISTANT_PROFILE: "legacy-profile",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
+      MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
+      MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_123",
+      MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "7",
+      MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: "42",
       OPENAI_API_KEY: "secret-openai-key",
     },
   });
@@ -252,6 +256,10 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_OSS, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROFILE, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
+  assert.equal(result.runtimeEnv.MURPH_HOSTED_CODEX_BOUND_USER_ID, undefined);
+  assert.equal(result.runtimeEnv.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID, undefined);
+  assert.equal(result.runtimeEnv.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION, undefined);
+  assert.equal(result.runtimeEnv.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION, undefined);
 });
 
 test("hosted Codex runtime config drops blank model env values", async () => {
@@ -1603,7 +1611,6 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
-      'env_http_headers = { "x-hosted-runner-bound-user-id" = "MURPH_HOSTED_CODEX_BOUND_USER_ID", "x-hosted-runtime-attempt-id" = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID", "x-hosted-runtime-lease-generation" = "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION", "x-hosted-runtime-workspace-version" = "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION" }',
       "requires_openai_auth = false",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",

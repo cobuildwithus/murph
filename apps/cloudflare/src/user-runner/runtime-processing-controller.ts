@@ -10,21 +10,12 @@ import type {
   HostedRuntimePrewarmRequest,
   HostedRuntimePrewarmResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import type {
-  HostedWorkspaceInvocationReason,
-} from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
-  type RunnerContainerEnsureProcessingResult,
-  type RunnerRuntimeWakeInput,
-  type RunnerRuntimeWakeResult,
 } from "../runner-container.js";
-import {
-  computeHostedRuntimeProcessingRecheckDelayMs,
-} from "../runtime-processing-timing.ts";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
   buildRunnerRecordTimingLogDetails,
@@ -35,11 +26,20 @@ import {
 } from "./diagnostics.js";
 import {
   createRuntimeProcessingCommandBudget,
-  isRuntimeProcessingCommandBudgetTimeout,
   readRuntimeProcessingCommandStepTimeoutMs,
-  runRuntimeProcessingCommandStep,
   type RuntimeProcessingCommandBudget,
 } from "./runtime-command-budget.js";
+import {
+  ensureActiveRuntimeProcessing,
+} from "./runtime-container-wake.js";
+import {
+  computeRuntimeProcessingOwnerWatchdogAt as computeRuntimeProcessingOwnerWatchdogAtValue,
+  computeRuntimeProcessingRetryAt as computeRuntimeProcessingRetryAtValue,
+  createActiveWorkspaceWakeRetryLater,
+  createRuntimePrewarmRetryLater,
+  createRuntimeProcessingRetryLater,
+  recordRuntimePrewarmAccepted,
+} from "./runtime-processing-responses.js";
 import {
   RuntimeInvocationService,
   type PreparedRuntimeInvocation,
@@ -155,14 +155,14 @@ export class RuntimeProcessingController {
     await this.input.stateStore.bindUser(input.userId);
     const record = await this.input.stateStore.readState();
     if (record.writeFence) {
-      return this.recordRuntimePrewarmAccepted({
+      return recordRuntimePrewarmAccepted({
         action: "already_running",
         input,
       });
     }
 
     if (!this.input.runnerContainerNamespace) {
-      return this.createRuntimePrewarmRetryLater({
+      return createRuntimePrewarmRetryLater({
         reason: "missing_container_binding",
         userId: input.userId,
       });
@@ -175,7 +175,7 @@ export class RuntimeProcessingController {
       }),
     );
     if (!container.prewarmForProcessing) {
-      return this.createRuntimePrewarmRetryLater({
+      return createRuntimePrewarmRetryLater({
         reason: "container_rpc_error",
         userId: input.userId,
       });
@@ -190,12 +190,12 @@ export class RuntimeProcessingController {
         userId: input.userId,
       });
       if (result.kind === "busy") {
-        return this.createRuntimePrewarmRetryLater({
+        return createRuntimePrewarmRetryLater({
           reason: "container_busy",
           userId: input.userId,
         });
       }
-      return this.recordRuntimePrewarmAccepted({
+      return recordRuntimePrewarmAccepted({
         action: result.action ?? "started",
         input,
       });
@@ -213,7 +213,7 @@ export class RuntimeProcessingController {
         phase: "runtime.prewarm",
         userId: input.userId,
       });
-      return this.createRuntimePrewarmRetryLater({
+      return createRuntimePrewarmRetryLater({
         reason: "container_rpc_error",
         userId: input.userId,
       });
@@ -245,26 +245,16 @@ export class RuntimeProcessingController {
   }
 
   computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
-    const delayMs =
-      reason === "stale_fence_replacement_race" ? 5_000 :
-      reason === "container_busy" ? 5_000 :
-      reason === "container_rpc_timeout" ? 10_000 :
-      reason === "container_rpc_error" ? 30_000 :
-      reason === "missing_container_binding" ? 60_000 :
-      15_000;
-
-    return new Date(Date.now() + delayMs).toISOString();
+    return computeRuntimeProcessingRetryAtValue(reason);
   }
 
   computeRuntimeProcessingOwnerWatchdogAt(input: {
     expiresAt: string;
   }): string {
-    const activeRuntimeWakeRecheckMs = Date.parse(this.computeActiveRuntimeWakeRecheckAt());
-    const expiresAtMs = Date.parse(input.expiresAt);
-    const watchdogMs = Number.isFinite(expiresAtMs)
-      ? Math.min(expiresAtMs, activeRuntimeWakeRecheckMs)
-      : activeRuntimeWakeRecheckMs;
-    return new Date(Math.max(Date.now(), watchdogMs)).toISOString();
+    return computeRuntimeProcessingOwnerWatchdogAtValue({
+      activeFence: input,
+      env: this.input.env,
+    });
   }
 
   private async ensureExistingRuntimeProcessing(input: {
@@ -286,20 +276,24 @@ export class RuntimeProcessingController {
     const activeFence = record.writeFence;
     if (input.input.source === "workspace_wake") {
       await this.syncWatchdogAlarm(record);
-      return this.createActiveWorkspaceWakeRetryLater({
+      return createActiveWorkspaceWakeRetryLater({
         activeFence,
+        env: this.input.env,
         userId: input.input.userId,
       });
     }
 
-    const containerResult = await this.ensureActiveRuntimeProcessing({
+    const containerResult = await ensureActiveRuntimeProcessing({
       activeRuntime: {
         attemptId: activeFence.attemptId,
         leaseGeneration: String(activeFence.generation),
         userId: record.userId,
       },
       commandBudget: input.commandBudget,
+      env: this.input.env,
       reason: input.input.reason,
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
     });
 
     if (containerResult.kind === "accepted") {
@@ -319,7 +313,7 @@ export class RuntimeProcessingController {
     if (containerResult.kind === "start-required") {
       if (this.shouldPreserveStartingWriteFence(activeFence)) {
         await this.syncWatchdogAlarm(record);
-        return this.createRuntimeProcessingRetryLater({
+        return createRuntimeProcessingRetryLater({
           reason: "container_rpc_timeout",
           userId: input.input.userId,
         });
@@ -333,7 +327,7 @@ export class RuntimeProcessingController {
       });
       await this.syncWatchdogAlarm(cleared.record);
       if (!cleared.cleared) {
-        return this.createRuntimeProcessingRetryLater({
+        return createRuntimeProcessingRetryLater({
           reason: "stale_fence_replacement_race",
           userId: input.input.userId,
         });
@@ -347,7 +341,7 @@ export class RuntimeProcessingController {
     }
 
     await this.syncWatchdogAlarm(record);
-    return this.createRuntimeProcessingRetryLater({
+    return createRuntimeProcessingRetryLater({
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
     });
@@ -373,7 +367,7 @@ export class RuntimeProcessingController {
     });
 
     if (!this.input.runnerContainerNamespace) {
-      return this.createRuntimeProcessingRetryLater({
+      return createRuntimeProcessingRetryLater({
         reason: "missing_container_binding",
         userId: input.input.userId,
       });
@@ -435,7 +429,7 @@ export class RuntimeProcessingController {
       token: prepared.token,
     });
     if (!stillOwnsPreparedFence) {
-      return this.createRuntimeProcessingRetryLater({
+      return createRuntimeProcessingRetryLater({
         reason: "stale_fence_replacement_race",
         userId: input.input.userId,
       });
@@ -513,7 +507,7 @@ export class RuntimeProcessingController {
     if (!this.input.runnerContainerNamespace) {
       return {
         confirmed: false,
-        response: this.createRuntimeProcessingRetryLater({
+        response: createRuntimeProcessingRetryLater({
           reason: "missing_container_binding",
           userId: input.input.userId,
         }),
@@ -618,97 +612,10 @@ export class RuntimeProcessingController {
     });
     return {
       confirmed: false,
-      response: this.createRuntimeProcessingRetryLater({
+      response: createRuntimeProcessingRetryLater({
         reason: retryReason,
         userId: input.input.userId,
       }),
-    };
-  }
-
-  private createRuntimeProcessingRetryLater(input: {
-    reason: RuntimeProcessingRetryReason;
-    userId: string;
-  }): HostedRuntimeEnsureProcessingResponse {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        runtimeProcessingRetryReason: input.reason,
-      },
-      level: "warn",
-      message: "Hosted runner runtime processing could not be accepted yet.",
-      phase: "runtime.starting",
-      userId: input.userId,
-    });
-    return {
-      kind: "retry_later",
-      retryAt: this.computeRuntimeProcessingRetryAt(input.reason),
-    };
-  }
-
-  private createActiveWorkspaceWakeRetryLater(input: {
-    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
-    userId: string;
-  }): HostedRuntimeEnsureProcessingResponse {
-    const retryAt = this.computeRuntimeProcessingOwnerWatchdogAt(input.activeFence);
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        retryAt,
-        runtimeProcessingRetryReason: "active_runtime_workspace_wake",
-        workspaceAttemptIdPresent: input.activeFence.attemptId.length > 0,
-      },
-      message: "Hosted runner deferred workspace wake while runtime processing is already active.",
-      phase: "runtime.starting",
-      userId: input.userId,
-    });
-    return {
-      kind: "retry_later",
-      retryAt,
-    };
-  }
-
-  private recordRuntimePrewarmAccepted(input: {
-    action: Extract<
-      HostedRuntimePrewarmResponse,
-      { kind: "runtime_prewarm_accepted" }
-    >["action"];
-    input: RuntimePrewarmInput;
-  }): HostedRuntimePrewarmResponse {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        prewarmAttemptIdPresent: input.input.prewarmAttemptId.length > 0,
-        runtimePrewarmAction: input.action,
-        source: input.input.source,
-      },
-      message: "Hosted runner runtime prewarm accepted.",
-      phase: "runtime.prewarm",
-      userId: input.input.userId,
-    });
-    return {
-      action: input.action,
-      kind: "runtime_prewarm_accepted",
-    };
-  }
-
-  private createRuntimePrewarmRetryLater(input: {
-    reason: RuntimeProcessingRetryReason;
-    userId: string;
-  }): HostedRuntimePrewarmResponse {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        runtimePrewarmAction: "retry_later",
-        runtimePrewarmRetryReason: input.reason,
-      },
-      level: "warn",
-      message: "Hosted runner runtime prewarm could not be accepted yet.",
-      phase: "runtime.prewarm",
-      userId: input.userId,
-    });
-    return {
-      kind: "retry_later",
-      retryAt: this.computeRuntimeProcessingRetryAt(input.reason),
     };
   }
 
@@ -723,113 +630,6 @@ export class RuntimeProcessingController {
         this.runtimeExecutionTasks.delete(attemptId);
       }
     });
-  }
-
-  private async ensureActiveRuntimeProcessing(
-    input: {
-      activeRuntime: RunnerRuntimeWakeInput;
-      commandBudget: RuntimeProcessingCommandBudget;
-      reason: HostedWorkspaceInvocationReason;
-    },
-  ): Promise<
-    | Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>
-    | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
-    | Extract<RunnerContainerEnsureProcessingResult, { kind: "wake-unconfirmed" }>
-  > {
-    if (!this.input.runnerContainerNamespace) {
-      return { kind: "wake-unconfirmed", reason: "missing-container-binding" };
-    }
-
-    const container = this.input.runnerContainerNamespace.getByName(
-      resolveHostedExecutionRunnerContainerName({
-        source: this.input.runnerRuntimeEnvSource,
-        userId: input.activeRuntime.userId,
-      }),
-    );
-
-    const ensureProcessing = container.ensureProcessing;
-    if (ensureProcessing) {
-      try {
-        const result = await runRuntimeProcessingCommandStep({
-          budget: input.commandBudget,
-          operation: async () => await ensureProcessing({
-            activeRuntime: input.activeRuntime,
-            reason: input.reason,
-            userId: input.activeRuntime.userId,
-          }),
-          stepTimeoutMs: this.input.env.runnerTimeoutMs,
-        });
-        if (
-          result.kind === "accepted"
-          || result.kind === "start-required"
-          || result.kind === "wake-unconfirmed"
-        ) {
-          return result;
-        }
-        return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
-      } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-          level: "warn",
-          message: "Hosted runner could not ensure active runtime processing.",
-          phase: "scheduled",
-          userId: input.activeRuntime.userId,
-        });
-        return {
-          kind: "wake-unconfirmed",
-          reason: isRuntimeProcessingCommandBudgetTimeout(error)
-            ? "container-rpc-timeout"
-            : "container-rpc-error",
-        };
-      }
-    }
-
-    const wakeRuntime = container.wakeRuntime;
-    if (!wakeRuntime) {
-      return { kind: "wake-unconfirmed", reason: "missing-wake-method" };
-    }
-
-    try {
-      const runtimeWake = normalizeRunnerRuntimeWakeResult(
-        await runRuntimeProcessingCommandStep({
-          budget: input.commandBudget,
-          operation: async () => await wakeRuntime(input.activeRuntime),
-          stepTimeoutMs: this.input.env.runnerTimeoutMs,
-        }),
-      );
-      if (runtimeWake.kind === "accepted") {
-        return { action: runtimeWake.action, kind: "accepted" };
-      }
-      if (runtimeWake.kind === "not-wakeable") {
-        return { kind: "start-required", reason: "no-active-child" };
-      }
-      return { kind: "wake-unconfirmed", reason: runtimeWake.reason };
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted runner could not ensure active runtime processing.",
-        phase: "scheduled",
-        userId: input.activeRuntime.userId,
-      });
-      return {
-        kind: "wake-unconfirmed",
-        reason: isRuntimeProcessingCommandBudgetTimeout(error)
-          ? "container-rpc-timeout"
-          : "container-rpc-error",
-      };
-    }
-  }
-
-  private computeActiveRuntimeWakeRecheckAt(): string {
-    return new Date(
-      Date.now() + computeHostedRuntimeProcessingRecheckDelayMs({
-        idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
-        runnerCommitTimeoutMs: this.input.env.runnerCommitTimeoutMs,
-      }),
-    ).toISOString();
   }
 
   private shouldPreserveStartingWriteFence(
@@ -855,42 +655,4 @@ export class RuntimeProcessingController {
       return null;
     }
   }
-}
-
-function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResult {
-  if (isObjectRecord(value)) {
-    if (value.kind === "accepted") {
-      return {
-        action: value.action === "already_running" ? "already_running" : "woken",
-        kind: "accepted",
-      };
-    }
-    if (value.kind === "not-wakeable" && value.reason === "no-active-child") {
-      return { kind: "not-wakeable", reason: "no-active-child" };
-    }
-    if (value.kind === "unknown" && typeof value.reason === "string") {
-      return {
-        kind: "unknown",
-        reason: isRunnerRuntimeWakeUnknownReason(value.reason)
-          ? value.reason
-          : "container-rpc-error",
-      };
-    }
-  }
-
-  return { kind: "unknown", reason: "container-rpc-error" };
-}
-
-function isRunnerRuntimeWakeUnknownReason(
-  value: string,
-): value is Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"] {
-  return value === "active-child-rejected"
-    || value === "container-rpc-error"
-    || value === "container-rpc-timeout"
-    || value === "missing-container-binding"
-    || value === "missing-wake-method";
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

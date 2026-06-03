@@ -1416,10 +1416,14 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir('assistant-codex-warm-work-')
     let child: MockChildProcess | null = null
 
-    codexMocks.spawn.mockImplementation(() => {
+    codexMocks.spawn.mockImplementation((_command, _args, options) => {
       const spawnedChild = new MockChildProcess()
       spawnedChild.pid = 987_654_321
       child = spawnedChild
+      expect(options.env.MURPH_HOSTED_CODEX_BOUND_USER_ID).toBeUndefined()
+      expect(options.env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID).toBeUndefined()
+      expect(options.env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION).toBeUndefined()
+      expect(options.env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION).toBeUndefined()
 
       queueMicrotask(() => {
         void (async () => {
@@ -1489,16 +1493,20 @@ describe('assistant codex runtime', () => {
       return spawnedChild
     })
 
-    const hostedEnv = {
+    const hostedEnv = (turn: string) => ({
       CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_CODEX_BOUND_USER_ID: `member_${turn}`,
+      MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: `attempt_${turn}`,
+      MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: turn === 'one' ? '7' : '8',
+      MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: turn === 'one' ? '41' : '42',
       MURPH_HOSTED_RUNTIME_PROCESS: '1',
       NODE_ENV: 'test',
       PATH: '/usr/bin',
-    }
+    })
 
     await expect(
       executeCodexAppServerTurn({
-        env: hostedEnv,
+        env: hostedEnv('one'),
         prompt: 'first warm turn',
         workingDirectory,
       }),
@@ -1509,7 +1517,7 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        env: hostedEnv,
+        env: hostedEnv('two'),
         prompt: 'second warm turn',
         workingDirectory,
       }),

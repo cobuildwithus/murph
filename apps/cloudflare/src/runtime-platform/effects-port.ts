@@ -8,11 +8,6 @@ import {
   parseHostedRunnerTelegramDownloadFileResponse,
   parseHostedRunnerTelegramGetFileResponse,
 } from "../runner-effects-contract.ts";
-import {
-  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
-  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
-  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
-} from "../runner-outbound/headers.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { requireHostedRuntimeWriteFenceHeaders } from "./authority-headers.ts";
 import {
@@ -90,6 +85,12 @@ export function createCloudflareEffectsPort(input: {
       const response = await fetchHostedResponse({
         description: "Hosted raw email read",
         fetchImpl: input.fetchImpl,
+        init: {
+          headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+            description: "Hosted raw email read",
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+          }),
+        },
         timeoutMs: input.timeoutMs,
         url: new URL(
           buildHostedExecutionRunnerEmailMessagePath(rawMessageKey),
@@ -105,18 +106,14 @@ export function createCloudflareEffectsPort(input: {
       return new Uint8Array(await response.arrayBuffer());
     },
     async sendEmail(request) {
-      const headers = new Headers();
-      const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
-      if (lease) {
-        headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, lease.attemptId);
-        headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, lease.leaseGeneration);
-        headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, lease.workspaceVersion);
-      }
       const payload = await fetchHostedJson({
         body: request,
         description: "Hosted email send",
         fetchImpl: input.fetchImpl,
-        headers,
+        headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+          description: "Hosted email send",
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+        }),
         method: "POST",
         timeoutMs: input.timeoutMs,
         url: new URL(
@@ -129,4 +126,17 @@ export function createCloudflareEffectsPort(input: {
       return target ? { target } : undefined;
     },
   };
+}
+
+async function requireHostedEffectsRuntimeWriteFenceHeaders(input: {
+  description: string;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
+}): Promise<Headers> {
+  if (!input.workspaceCheckpointBridge) {
+    throw new Error(`${input.description} is missing a runtime write-fence authority.`);
+  }
+  return await requireHostedRuntimeWriteFenceHeaders(
+    input.workspaceCheckpointBridge,
+    input.description,
+  );
 }

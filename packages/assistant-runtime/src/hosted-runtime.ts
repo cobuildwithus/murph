@@ -24,11 +24,10 @@ import {
   normalizeHostedAssistantRuntimeConfig,
 } from "./hosted-runtime/environment.ts";
 import {
-  HOSTED_CODEX_RUNTIME_AUTHORITY_ENV,
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
-  startHostedCliRuntimeBridge,
+  getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
 import {
   executeHostedMailboxEvent,
@@ -588,13 +587,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       vaultRoot: restored.vaultRoot,
       workspace: workspaceRead.workspace,
     };
+    emitPhaseLog({
+      input,
+      requestId,
+      stage: "cli.bridge",
+      status: "start",
+    });
+    const hostedCliBridge = await raceHostedRuntimeCancellation(
+      getOrCreateHostedCliRuntimeBridge(),
+      runtimeAbortController.signal,
+    );
+    emitPhaseLog({
+      details: {
+        bridgeStarted: true,
+      },
+      input,
+      requestId,
+      stage: "cli.bridge",
+      status: "done",
+    });
     const baseRuntimeEnv = {
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
-      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.attemptId]: input.request.attemptId,
-      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.boundUserId]: input.request.userId,
-      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration]: input.request.leaseGeneration,
-      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion]: input.request.workspaceVersion,
+      ...hostedCliBridge.env,
     };
     emitPhaseLog({
       details: {
@@ -779,29 +794,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    emitPhaseLog({
-      input,
-      requestId,
-      stage: "cli.bridge",
-      status: "start",
-    });
-    const hostedCliBridge = await startHostedCliRuntimeBridge({
-      deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
-      messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
-    });
-    emitPhaseLog({
-      details: {
-        bridgeStarted: hostedCliBridge !== null,
-      },
-      input,
-      requestId,
-      stage: "cli.bridge",
-      status: "done",
-    });
-    const runtimeEnv = {
-      ...hostedCodexRuntime.runtimeEnv,
-      ...(hostedCliBridge?.env ?? {}),
-    };
+    const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     const stageDeviceSyncDirtyAcks = (
@@ -844,25 +837,33 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        const passResult = await raceHostedRuntimeCancellation(
-          runHostedWorkspaceUntilIdleOrBudget({
-            ...baseRunnerInput,
-            initialMailboxImport: passInput.initialMailboxImport,
-            requestId: passInput.requestId,
-            runAssistantPhase: (phaseInput) =>
-              (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                ...phaseInput,
-                request: input.request,
-                restored,
-                runtime: foregroundRuntime,
-                runtimeEnv,
-                stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                signal: runtimeAbortController.signal,
+        const passResult = await hostedCliBridge.runWithInvocation(
+          {
+            deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
+            messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+            signal: runtimeAbortController.signal,
+          },
+          async () =>
+            await raceHostedRuntimeCancellation(
+              runHostedWorkspaceUntilIdleOrBudget({
+                ...baseRunnerInput,
+                initialMailboxImport: passInput.initialMailboxImport,
+                requestId: passInput.requestId,
+                runAssistantPhase: (phaseInput) =>
+                  (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                    ...phaseInput,
+                    request: input.request,
+                    restored,
+                    runtime: foregroundRuntime,
+                    runtimeEnv,
+                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
+                    signal: runtimeAbortController.signal,
+                  }),
+                workspace: passInput.workspace,
               }),
-            workspace: passInput.workspace,
-          }),
-          runtimeAbortController.signal,
+              runtimeAbortController.signal,
+            ),
         );
         emitPhaseLog({
           details: {
@@ -1331,22 +1332,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "done",
         });
         return invocationResult;
-      }
-    } finally {
-      if (hostedCliBridge) {
-        emitPhaseLog({
-          input,
-          requestId,
-          stage: "cli.bridge.stop",
-          status: "start",
-        });
-        await hostedCliBridge.stop();
-        emitPhaseLog({
-          input,
-          requestId,
-          stage: "cli.bridge.stop",
-          status: "done",
-        });
       }
     }
     assertRuntimeNotAborted();

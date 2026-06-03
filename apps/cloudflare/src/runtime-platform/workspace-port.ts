@@ -26,6 +26,14 @@ export function createHostedWebWorkspacePort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted workspace read",
         fetchImpl: input.fetchImpl,
+        ...(input.workspaceCheckpointBridge
+          ? {
+              headers: await requireHostedRuntimeWriteFenceHeaders(
+                input.workspaceCheckpointBridge,
+                "Hosted workspace read",
+              ),
+            }
+          : {}),
         method: "GET",
         path: HOSTED_RUNTIME_WORKSPACE_PATH,
         timeoutMs: input.timeoutMs,

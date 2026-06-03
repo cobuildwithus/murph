@@ -135,25 +135,61 @@ export function combineAbortSignals(
   first: AbortSignal | null,
   second: AbortSignal,
 ): AbortSignal {
+  return combineAbortSignalsWithCleanup(first, second).signal;
+}
+
+export function combineAbortSignalsWithCleanup(
+  first: AbortSignal | null,
+  second: AbortSignal,
+): {
+  dispose(): void;
+  signal: AbortSignal;
+} {
   if (!first) {
-    return second;
+    return {
+      dispose: () => undefined,
+      signal: second,
+    };
   }
 
   if (first.aborted) {
-    return first;
+    return {
+      dispose: () => undefined,
+      signal: first,
+    };
+  }
+
+  if (second.aborted) {
+    return {
+      dispose: () => undefined,
+      signal: second,
+    };
   }
 
   const controller = new AbortController();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    first.removeEventListener("abort", abortFirst);
+    second.removeEventListener("abort", abortSecond);
+  };
   const abort = (signal: AbortSignal) => {
     if (!controller.signal.aborted) {
       controller.abort(signal.reason);
     }
+    dispose();
   };
   const abortFirst = () => abort(first);
   const abortSecond = () => abort(second);
   first.addEventListener("abort", abortFirst, { once: true });
   second.addEventListener("abort", abortSecond, { once: true });
-  return controller.signal;
+  return {
+    dispose,
+    signal: controller.signal,
+  };
 }
 
 function classifyHostedRuntimeFetchCause(

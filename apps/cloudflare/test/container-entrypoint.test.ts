@@ -817,10 +817,6 @@ describe("startHostedContainerEntrypoint", () => {
           "  HOME: process.env.HOME,",
           "  HTTP_PROXY: process.env.HTTP_PROXY,",
           "  HTTPS_PROXY: process.env.HTTPS_PROXY,",
-          "  MURPH_HOSTED_CODEX_BOUND_USER_ID: process.env.MURPH_HOSTED_CODEX_BOUND_USER_ID,",
-          "  MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: process.env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID,",
-          "  MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: process.env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION,",
-          "  MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: process.env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION,",
           "  NO_PROXY: process.env.NO_PROXY,",
           "  NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,",
           "  OPENAI_API_KEY: process.env.OPENAI_API_KEY,",
@@ -880,27 +876,14 @@ describe("startHostedContainerEntrypoint", () => {
         CODEX_CA_CERTIFICATE: "/managed-container/cloudflare-ca.pem",
         HTTP_PROXY: "http://cloudflare-local-proxy.example.test:8080",
         HTTPS_PROXY: "http://cloudflare-local-proxy.example.test:8080",
-        MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_smoke",
-        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_smoke",
-        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "17",
-        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: "42",
         NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
         OPENAI_API_KEY: "__cloudflare_injected__",
         SSL_CERT_FILE: "/managed-container/ssl-cert-file.pem",
       });
       expect(captured.CODEX_HOME).toEqual(expect.stringContaining(".codex-smoke"));
-      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining("env_http_headers"));
-      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
-        '"x-hosted-runner-bound-user-id" = "MURPH_HOSTED_CODEX_BOUND_USER_ID"',
-      ));
-      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
-        '"x-hosted-runtime-attempt-id" = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID"',
-      ));
-      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
-        '"x-hosted-runtime-lease-generation" = "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION"',
-      ));
-      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
-        '"x-hosted-runtime-workspace-version" = "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION"',
+      expect(captured.CODEX_CONFIG).not.toEqual(expect.stringContaining("env_http_headers"));
+      expect(captured.CODEX_CONFIG).not.toEqual(expect.stringContaining(
+        "MURPH_HOSTED_CODEX_",
       ));
       expect(captured.HOME).toEqual(expect.stringContaining("hosted-openai-intercept-smoke-"));
       expect(captured.NODE_EXTRA_CA_CERTS).toEqual(expect.any(String));

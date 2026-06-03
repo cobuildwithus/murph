@@ -77,95 +77,132 @@ export function createCloudflareHostedInternalFetch(
       }
       writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     }
-    if (options.injectBoundUserIdHeader) {
-      headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
-    }
-    const internalRequest = createHostedInternalRequest(request, headers);
-    const shouldLogInternalRequest = true;
-    const operation = readHostedRunnerInternalOperation({
-      hostname: url.hostname,
-      method: internalRequest.method,
-      pathname: url.pathname,
-    });
-    const safePath = readHostedRuntimeInternalRequestLogPath(url);
-    const details = {
-      effectsFingerprintPresent: url.searchParams.has("fingerprint"),
-      host: url.hostname,
-      hostKind: readHostedRunnerInternalHostKind(url.hostname),
-      method: readHostedRunnerDiagnosticMethod(internalRequest.method),
-      operation,
-      path: safePath,
-      userIdPresent: boundUserId.length > 0,
-    };
 
-    if (shouldLogInternalRequest) {
+    return await fetchCloudflareHostedInternalRequest({
+      boundUserId,
+      fetchImpl,
+      headers,
+      injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
+      request,
+      url,
+    });
+  }) as typeof fetch;
+}
+
+export function createCloudflareHostedTrustedInternalFetch(
+  boundUserId: string,
+  fetchImpl: typeof fetch,
+  options: {
+    injectBoundUserIdHeader?: boolean;
+  } = {},
+): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+
+    if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
+      return fetchImpl(request);
+    }
+
+    return await fetchCloudflareHostedInternalRequest({
+      boundUserId,
+      fetchImpl,
+      headers: new Headers(request.headers),
+      injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
+      request,
+      url,
+    });
+  }) as typeof fetch;
+}
+
+async function fetchCloudflareHostedInternalRequest(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  headers: Headers;
+  injectBoundUserIdHeader: boolean;
+  request: Request;
+  url: URL;
+}): Promise<Response> {
+  if (input.injectBoundUserIdHeader) {
+    input.headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, input.boundUserId);
+  }
+  const internalRequest = createHostedInternalRequest(input.request, input.headers);
+  const operation = readHostedRunnerInternalOperation({
+    hostname: input.url.hostname,
+    method: internalRequest.method,
+    pathname: input.url.pathname,
+  });
+  const safePath = readHostedRuntimeInternalRequestLogPath(input.url);
+  const details = {
+    effectsFingerprintPresent: input.url.searchParams.has("fingerprint"),
+    host: input.url.hostname,
+    hostKind: readHostedRunnerInternalHostKind(input.url.hostname),
+    method: readHostedRunnerDiagnosticMethod(internalRequest.method),
+    operation,
+    path: safePath,
+    userIdPresent: input.boundUserId.length > 0,
+  };
+
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details,
+    message: "Hosted runtime internal request started.",
+    phase: "outbox",
+    userId: input.boundUserId,
+  });
+
+  try {
+    const response = await input.fetchImpl(internalRequest);
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        ...details,
+        ok: response.ok ? "true" : "false",
+        status: String(response.status),
+      },
+      message: "Hosted runtime internal request completed.",
+      phase: "outbox",
+      userId: input.boundUserId,
+    });
+    if (isInternalAuthorityRejectedStatus(response.status)) {
+      const error = new HostedRuntimeInternalAuthorityRejectedError({
+        description: readHostedRuntimeInternalRequestDescription({
+          hostname: input.url.hostname,
+          method: internalRequest.method,
+          operation,
+          pathname: input.url.pathname,
+        }),
+        status: response.status,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          ...details,
+          responseStatus: response.status,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runtime internal authority rejected invocation.",
+        phase: "outbox",
+        userId: input.boundUserId,
+      });
+      throw error;
+    }
+    return response;
+  } catch (error) {
+    if (!isHostedRuntimeInternalAuthorityRejectedError(error)) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
         details,
-        message: "Hosted runtime internal request started.",
+        error,
+        level: "warn",
+        message: "Hosted runtime internal request failed.",
         phase: "outbox",
-        userId: boundUserId,
+        userId: input.boundUserId,
       });
     }
-
-    try {
-      const response = await fetchImpl(internalRequest);
-      if (shouldLogInternalRequest) {
-        emitHostedExecutionStructuredLog({
-          component: "assistant-delivery",
-          details: {
-            ...details,
-            ok: response.ok ? "true" : "false",
-            status: String(response.status),
-          },
-          message: "Hosted runtime internal request completed.",
-          phase: "outbox",
-          userId: boundUserId,
-        });
-      }
-      if (isInternalAuthorityRejectedStatus(response.status)) {
-        const error = new HostedRuntimeInternalAuthorityRejectedError({
-          description: readHostedRuntimeInternalRequestDescription({
-            hostname: url.hostname,
-            method: internalRequest.method,
-            operation,
-            pathname: url.pathname,
-          }),
-          status: response.status,
-        });
-        emitHostedExecutionStructuredLog({
-          component: "assistant-delivery",
-          details: {
-            ...details,
-            responseStatus: response.status,
-          },
-          error,
-          level: "warn",
-          message: "Hosted runtime internal authority rejected invocation.",
-          phase: "outbox",
-          userId: boundUserId,
-        });
-        throw error;
-      }
-      return response;
-    } catch (error) {
-      if (
-        shouldLogInternalRequest
-        && !isHostedRuntimeInternalAuthorityRejectedError(error)
-      ) {
-        emitHostedExecutionStructuredLog({
-          component: "assistant-delivery",
-          details,
-          error,
-          level: "warn",
-          message: "Hosted runtime internal request failed.",
-          phase: "outbox",
-          userId: boundUserId,
-        });
-      }
-      throw error;
-    }
-  }) as typeof fetch;
+    throw error;
+  }
 }
 
 export function createCloudflareHostedProviderFetch(

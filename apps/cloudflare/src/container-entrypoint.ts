@@ -74,12 +74,6 @@ const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL =
   "__cloudflare_injected__";
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
-const HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV = {
-  attemptId: "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID",
-  boundUserId: "MURPH_HOSTED_CODEX_BOUND_USER_ID",
-  leaseGeneration: "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION",
-  workspaceVersion: "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION",
-} as const;
 
 type HostedContainerRuntimeAuthority = RunnerRuntimeWriteFenceToken & {
   leaseGeneration: string;
@@ -1578,7 +1572,6 @@ function buildHostedContainerOpenAiInterceptSmokeCodexConfig(): string {
     'base_url = "https://api.openai.com/v1"',
     'env_key = "OPENAI_API_KEY"',
     'wire_api = "responses"',
-    `env_http_headers = { "${HOSTED_RUNNER_BOUND_USER_ID_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.boundUserId}", "${HOSTED_RUNTIME_ATTEMPT_ID_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.attemptId}", "${HOSTED_RUNTIME_LEASE_GENERATION_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.leaseGeneration}", "${HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.workspaceVersion}" }`,
     'requires_openai_auth = false',
     "request_max_retries = 0",
     "stream_max_retries = 0",
@@ -1682,10 +1675,6 @@ function buildHostedContainerOpenAiInterceptSmokeProcessEnv(input: {
     CURL_CA_BUNDLE:
       process.env.CURL_CA_BUNDLE ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
     HOME: input.workspaceRoot,
-    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.attemptId]: input.authority.attemptId,
-    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.boundUserId]: input.authority.userId,
-    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.leaseGeneration]: input.authority.leaseGeneration,
-    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.workspaceVersion]: input.authority.workspaceVersion,
     NODE_EXTRA_CA_CERTS:
       process.env.NODE_EXTRA_CA_CERTS ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
     OPENAI_API_KEY: HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL,

@@ -190,6 +190,12 @@ function buildTestHostedExecutionRuntimePlatform(
   });
 }
 
+function expectDefaultRuntimeWriteFenceHeaders(request: Request): void {
+  expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+  expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+  expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+}
+
 function createBrowserVaultReplicaRef(sourceBundleHash: string) {
   return {
     byteLength: 256,
@@ -475,7 +481,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
       })).rejects.toThrow(
-        "Hosted workspace snapshot direct R2 upload request failed.",
+        "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
+        + "abandon this snapshot session and start a fresh snapshot before retrying.",
       );
 
       const logs = readHostedExecutionStructuredLogs();
@@ -495,6 +502,64 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain("fixture-secret");
       expect(serializedLogs).not.toContain(tempRoot);
       expect(serializedLogs).not.toContain(putUrl);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("fails direct R2 workspace snapshot PUT status errors as non-resumable sessions", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot platform fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        return new Response("precondition failed", { status: 412 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      })).rejects.toThrow(
+        "Hosted workspace snapshot direct R2 upload is not resumable after HTTP 412; "
+        + "abandon this snapshot session and start a fresh snapshot before retrying.",
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const putRequest = requireFetchRequest(fetchMock.mock.calls[1], "direct R2 workspace snapshot PUT");
+      expect(putRequest.method).toBe("PUT");
+      expect(putRequest.url).toBe(putUrl);
     } finally {
       await rm(tempRoot, {
         force: true,
@@ -1919,6 +1984,54 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .toContain("hidden request detail");
   });
 
+  it("marks caller-aborted direct control-plane failures in diagnostics", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await delayWithAbort(1_000, request.signal);
+      return new Response(JSON.stringify({
+        connections: [],
+        generatedAt: "2026-04-07T00:00:00.000Z",
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const abortController = new AbortController();
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test",
+    });
+    abortController.abort(new DOMException("caller cancelled", "AbortError"));
+
+    await expect(platform.deviceSyncPort!.fetchSnapshot({
+      connectionId: "conn_123",
+      signal: abortController.signal,
+    })).rejects.toThrow("Hosted device-sync runtime snapshot request failed.");
+
+    const failureLog = readHostedExecutionStructuredLogs().find((log) =>
+      log.message === "Hosted runtime control-plane request failed before response."
+      && log.details?.description === "Hosted device-sync runtime snapshot");
+    expect(failureLog?.details).toMatchObject({
+      description: "Hosted device-sync runtime snapshot",
+      fetchCallerSignalAborted: true,
+      fetchCauseKind: "abort",
+      fetchRequestSignalAborted: true,
+      fetchTimeoutSignalAborted: false,
+      method: "POST",
+      path: "/api/internal/device-sync/runtime/snapshot",
+      responseOrigin: "https://web.example.test",
+      transport: "direct",
+    });
+  });
+
   it("logs invalid control-plane JSON without response body text", async () => {
     const fetchMock = vi.fn(async () => new Response("hidden response body", {
       headers: {
@@ -2736,6 +2849,89 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
       expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+      expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    }
+  });
+
+  it("attaches active lease headers to direct signed web-control callbacks", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/api/internal/hosted-runtime/log")) {
+        return new Response(JSON.stringify({
+          loggedCount: 1,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.pathname.endsWith("/api/internal/device-sync/runtime/snapshot")) {
+        return new Response(JSON.stringify({
+          connections: [],
+          generatedAt: "2026-04-26T00:00:02.000Z",
+          userId: "member_123",
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.pathname.endsWith("/api/internal/hosted-execution/usage/record")) {
+        return new Response(JSON.stringify({
+          recorded: true,
+          usageId: "turn_usage.runtime_write_123",
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected callback URL: ${request.url}`);
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await platform.logPort!.write({
+      entries: [
+        {
+          at: "2026-04-26T00:00:03.000Z",
+          attemptId: "runtime_write_123",
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          leaseGeneration: "7",
+          level: "info",
+          mailboxLane: "conversation",
+          mailboxSeqEnd: "1",
+          mailboxSeqStart: "1",
+          phase: "import",
+          redactedJson: { importedCount: 1 },
+          workspaceVersion: "6",
+        },
+      ],
+    });
+    await platform.deviceSyncPort!.fetchSnapshot({
+      connectionId: "conn_123",
+    });
+    await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const requests = fetchMock.mock.calls.map((call, index) =>
+      requireFetchRequest(call, `direct web-control request ${index}`)
+    );
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://web.example.test/api/internal/hosted-runtime/log",
+      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
+    ]);
+    for (const request of requests) {
+      expectDefaultRuntimeWriteFenceHeaders(request);
+      expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+      expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
   });

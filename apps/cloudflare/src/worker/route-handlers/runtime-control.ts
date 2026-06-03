@@ -59,6 +59,7 @@ const runtimeEnsureProcessingRoute = {
   match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", pathname),
   methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeEnsureProcessing.method],
   name: "runtime-ensure-processing",
+  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
@@ -74,6 +75,7 @@ const runtimePrewarmRoute = {
   match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimePrewarm", pathname),
   methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimePrewarm.method],
   name: "runtime-prewarm",
+  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
@@ -116,10 +118,19 @@ function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefin
     return undefined;
   }
 
-  const logLimit = Number.parseInt(rawLogLimit, 10);
-  return Number.isSafeInteger(logLimit) && logLimit > 0
+  const logLimit = parseStrictPositiveInteger(rawLogLimit);
+  return logLimit !== null
     ? { logLimit: Math.min(logLimit, 50) }
     : undefined;
+}
+
+function parseStrictPositiveInteger(value: string): number | null {
+  if (!/^[0-9]+$/u.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 export async function handleRuntimeEnsureProcessingRoute(

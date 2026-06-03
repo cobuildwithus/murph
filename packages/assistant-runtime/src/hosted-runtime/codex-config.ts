@@ -78,6 +78,9 @@ export const HOSTED_CODEX_RUNTIME_AUTHORITY_ENV = {
   leaseGeneration: HOSTED_CODEX_RUNTIME_LEASE_GENERATION_ENV,
   workspaceVersion: HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION_ENV,
 } as const;
+const HOSTED_CODEX_REJECTED_RUNTIME_AUTHORITY_ENV_KEYS = Object.values(
+  HOSTED_CODEX_RUNTIME_AUTHORITY_ENV,
+);
 
 export interface HostedCodexRuntimeEnvironmentInput {
   operatorHomeRoot: string;
@@ -171,7 +174,10 @@ function stripHostedCodexRejectedSeedEnv(
 ): Record<string, string> {
   const nextEnv = { ...runtimeEnv };
 
-  for (const key of HOSTED_CODEX_REJECTED_SEED_ENV_KEYS) {
+  for (const key of [
+    ...HOSTED_CODEX_REJECTED_SEED_ENV_KEYS,
+    ...HOSTED_CODEX_REJECTED_RUNTIME_AUTHORITY_ENV_KEYS,
+  ]) {
     delete nextEnv[key];
   }
 
@@ -325,12 +331,6 @@ export function buildHostedCodexConfigToml(input: {
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
-    `env_http_headers = ${tomlInlineTable({
-      "x-hosted-runner-bound-user-id": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.boundUserId,
-      "x-hosted-runtime-attempt-id": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.attemptId,
-      "x-hosted-runtime-lease-generation": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration,
-      "x-hosted-runtime-workspace-version": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion,
-    })}`,
     "requires_openai_auth = false",
     ...(input.disableProviderRetries
       ? [
@@ -393,10 +393,4 @@ function tomlString(value: string): string {
 
 function tomlStringArray(values: readonly string[]): string {
   return `[${values.map(tomlString).join(", ")}]`;
-}
-
-function tomlInlineTable(values: Readonly<Record<string, string>>): string {
-  return `{ ${Object.entries(values).map(([key, value]) =>
-    `${tomlString(key)} = ${tomlString(value)}`
-  ).join(", ")} }`;
 }

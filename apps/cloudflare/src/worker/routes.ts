@@ -32,6 +32,7 @@ export interface DeclarativeRoute<Context> {
   match: RouteMatcher;
   methods: readonly string[];
   name: string;
+  signatureBodyLimitBytes?: number;
   wrongMethodResponse?: WrongMethodResponse;
 }
 
@@ -47,7 +48,12 @@ export async function handleDeclarativeRoute<Context>(
 
     const authorizationContext = context as { request: Request } & Partial<WorkerRouteContext>;
     if (route.authorizeBeforeMethod) {
-      const authorizationError = await authorizeRoute(route.authorization ?? null, authorizationContext, route.name);
+      const authorizationError = await authorizeRoute(
+        route.authorization ?? null,
+        authorizationContext,
+        route.name,
+        { signatureBodyLimitBytes: route.signatureBodyLimitBytes },
+      );
       if (authorizationError) {
         return authorizationError;
       }
@@ -73,7 +79,12 @@ export async function handleDeclarativeRoute<Context>(
     }
 
     if (!route.authorizeBeforeMethod) {
-      const authorizationError = await authorizeRoute(route.authorization ?? null, authorizationContext, route.name);
+      const authorizationError = await authorizeRoute(
+        route.authorization ?? null,
+        authorizationContext,
+        route.name,
+        { signatureBodyLimitBytes: route.signatureBodyLimitBytes },
+      );
       if (authorizationError) {
         return authorizationError;
       }

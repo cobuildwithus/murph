@@ -47,6 +47,9 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
+  validateActiveRuntimeWriteFence?(input: {
+    userId: string;
+  }): Promise<boolean>;
 }
 
 export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {

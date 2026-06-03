@@ -429,22 +429,28 @@ export function parseTestPositiveInteger(value: string | null): number | "invali
   if (value === null) {
     return null;
   }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    return "invalid";
-  }
-  return parsed;
+  return parseTestPositiveIntegerString(value);
 }
 
 export function parseTestPositiveIntegerValue(value: unknown): number | "invalid" | null {
   if (value === undefined || value === null) {
     return null;
   }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+  if (typeof value === "string") {
+    return parseTestPositiveIntegerString(value);
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     return "invalid";
   }
-  return parsed;
+  return value;
+}
+
+function parseTestPositiveIntegerString(value: string): number | "invalid" {
+  if (!/^[0-9]+$/u.test(value)) {
+    return "invalid";
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : "invalid";
 }
 
 export function createTestRuntimeWriteFenceHeaders(input: {

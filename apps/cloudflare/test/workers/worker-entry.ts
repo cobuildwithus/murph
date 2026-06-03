@@ -123,6 +123,12 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return await this.runner.validateRuntimeWriteFence(input);
   }
 
+  async validateActiveRuntimeWriteFence(input: {
+    userId: string;
+  }): Promise<boolean> {
+    return await this.runner.validateActiveRuntimeWriteFence(input);
+  }
+
   async beginRuntimeWriteFenceForSmoke(input: {
     userId: string;
     workspaceVersion: string;
@@ -399,6 +405,9 @@ function getUserRunnerStub(userId: string) {
           validateRuntimeWriteFence(input: {
             attemptId: string;
             generation: string;
+            userId: string;
+          }): Promise<boolean>;
+          validateActiveRuntimeWriteFence(input: {
             userId: string;
           }): Promise<boolean>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;

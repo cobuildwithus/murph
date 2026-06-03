@@ -83,6 +83,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async validateActiveRuntimeWriteFence(input: {
+    userId: string;
+  }): Promise<boolean> {
+    return this.runner.validateActiveRuntimeWriteFence(input);
+  }
+
   async createHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]> {

@@ -27,24 +27,39 @@ export type HostedCliRuntimeBridgeMessagingReturnTargetSource =
 
 export interface HostedCliRuntimeBridge {
   env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
+  runWithInvocation<T>(
+    input: HostedCliRuntimeBridgeInvocationInput,
+    operation: () => Promise<T>,
+  ): Promise<T>;
   stop(): Promise<void>;
 }
 
-export async function startHostedCliRuntimeBridge(input: {
+export interface HostedCliRuntimeBridgeInvocationInput {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
-}): Promise<HostedCliRuntimeBridge | null> {
-  const deviceSyncPort = input.deviceSyncPort ?? null;
-  if (!deviceSyncPort) {
-    return null;
-  }
+  signal?: AbortSignal | null;
+}
 
+interface HostedCliRuntimeBridgeActiveInvocation {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
+  messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  signal: AbortSignal | null;
+}
+
+let hostedCliRuntimeBridgePromise: Promise<HostedCliRuntimeBridge> | null = null;
+
+export async function getOrCreateHostedCliRuntimeBridge(): Promise<HostedCliRuntimeBridge> {
+  hostedCliRuntimeBridgePromise ??= startHostedCliRuntimeBridgeServer();
+  return await hostedCliRuntimeBridgePromise;
+}
+
+async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
   const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
+  let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
   const server = createServer((request, response) => {
     void handleHostedCliBridgeRequest({
-      deviceSyncPort,
-      messagingReturnTarget: input.messagingReturnTarget,
+      getActive: () => active,
       request,
       response,
       token,
@@ -79,13 +94,39 @@ export async function startHostedCliRuntimeBridge(input: {
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
       [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
     },
-    stop: () => closeHostedCliBridgeServer(server, sockets),
+    async runWithInvocation<T>(
+      input: HostedCliRuntimeBridgeInvocationInput,
+      operation: () => Promise<T>,
+    ): Promise<T> {
+      if (active) {
+        throw new TypeError("Hosted CLI bridge already has an active invocation.");
+      }
+      const invocation: HostedCliRuntimeBridgeActiveInvocation = {
+        deviceSyncPort: input.deviceSyncPort ?? null,
+        messagingReturnTarget: input.messagingReturnTarget,
+        signal: input.signal ?? null,
+      };
+      active = invocation;
+      try {
+        return await operation();
+      } finally {
+        if (active === invocation) {
+          active = null;
+        }
+      }
+    },
+    async stop() {
+      active = null;
+      if (hostedCliRuntimeBridgePromise) {
+        hostedCliRuntimeBridgePromise = null;
+      }
+      await closeHostedCliBridgeServer(server, sockets);
+    },
   };
 }
 
 async function handleHostedCliBridgeRequest(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
-  messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  getActive: () => HostedCliRuntimeBridgeActiveInvocation | null;
   request: IncomingMessage;
   response: ServerResponse;
   token: string;
@@ -137,12 +178,32 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
+    const active = input.getActive();
+    if (!active || active.signal?.aborted) {
+      writeHostedCliBridgeError(
+        input.response,
+        503,
+        "HOSTED_CLI_BRIDGE_UNAVAILABLE",
+        "Hosted CLI bridge has no active invocation.",
+      );
+      return;
+    }
+    if (!active.deviceSyncPort) {
+      writeHostedCliBridgeError(
+        input.response,
+        503,
+        "HOSTED_CLI_BRIDGE_DEVICE_SYNC_UNAVAILABLE",
+        "Hosted CLI bridge device sync is unavailable.",
+      );
+      return;
+    }
+
     const body = await readHostedCliBridgeJsonBody(input.request);
 
     if (path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH) {
       const request = parseHostedCliDeviceAccountListRequest(body);
       try {
-        const snapshot = await input.deviceSyncPort.fetchSnapshot({
+        const snapshot = await active.deviceSyncPort.fetchSnapshot({
           ...(request.provider ? { provider: request.provider } : {}),
           ...(request.sourceProvider ? { sourceProviderSlug: request.sourceProvider } : {}),
         });
@@ -176,9 +237,9 @@ async function handleHostedCliBridgeRequest(input: {
 
     try {
       const messagingReturnTarget = resolveHostedCliBridgeMessagingReturnTarget(
-        input.messagingReturnTarget,
+        active.messagingReturnTarget,
       );
-      const result = await input.deviceSyncPort.createConnectLink({
+      const result = await active.deviceSyncPort.createConnectLink({
         connectTarget: request.connectTarget,
         ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
       });

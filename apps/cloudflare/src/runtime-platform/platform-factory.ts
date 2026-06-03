@@ -16,6 +16,7 @@ import { createHostedWebMailboxPort } from "./mailbox-port.ts";
 import {
   createCloudflareHostedInternalFetch,
   createCloudflareHostedProviderFetch,
+  createCloudflareHostedTrustedInternalFetch,
 } from "./provider-fetch.ts";
 import { createCloudflareHostedPublicInternetFetch } from "./public-internet-fetch.ts";
 import { createHostedRuntimeUsageRecordPort } from "./usage-record-port.ts";
@@ -42,6 +43,13 @@ export function buildHostedExecutionRuntimePlatform(input: {
       readCurrentLease: input.workspaceCheckpointBridge?.readCurrentLease,
     },
   );
+  const trustedInternalFetchImpl = createCloudflareHostedTrustedInternalFetch(
+    input.boundUserId,
+    baseFetchImpl,
+    {
+      injectBoundUserIdHeader: input.proxyBoundUserIdHeader ?? false,
+    },
+  );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
   const transport = resolveHostedWebControlTransport({
     webCallbackSigning: input.webCallbackSigning ?? null,
@@ -59,7 +67,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
   return {
     artifactStore: createCloudflareArtifactStore({
-      fetchImpl,
+      fetchImpl: trustedInternalFetchImpl,
       timeoutMs,
       workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
     }),
@@ -67,7 +75,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
       ? {
           workspaceSnapshotPort: createCloudflareWorkspaceSnapshotPort({
             boundUserId: input.boundUserId,
-            fetchImpl,
+            fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),
@@ -97,7 +105,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           }),
           latencyTracePort: createHostedWebRuntimeLatencyTracePort({
             boundUserId: input.boundUserId,
-            fetchImpl,
+            fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
             transport,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
@@ -110,7 +118,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           }),
           workspacePort: createHostedWebWorkspacePort({
             boundUserId: input.boundUserId,
-            fetchImpl,
+            fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
             transport,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
@@ -122,7 +130,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
-            fetchImpl,
+            fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
             transport,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
@@ -130,7 +138,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     effectsPort: createCloudflareEffectsPort({
-      fetchImpl,
+      fetchImpl: trustedInternalFetchImpl,
       timeoutMs,
       workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
     }),

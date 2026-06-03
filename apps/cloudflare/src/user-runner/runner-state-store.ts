@@ -423,6 +423,28 @@ export class RunnerStateStore {
     };
   }
 
+  async validateActiveWriteFence(input: {
+    userId: string;
+  }): Promise<RunnerWriteFenceValidationResult> {
+    let meta = this.requireMetaRowSync();
+    if (this.clearExpiredActiveRunSync(meta, Date.now())) {
+      this.writeMetaRowSync(meta);
+      meta = this.requireMetaRowSync();
+    }
+    const token = this.readWriteFenceTokenSync(meta);
+    if (!token || token.userId !== input.userId) {
+      return {
+        owns: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    return {
+      owns: true,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
   private clearExpiredActiveRunSync(meta: RunnerMetaRow, nowMs: number): boolean {
     const writeFence = this.readWriteFenceTokenSync(meta);
     if (!writeFence) {

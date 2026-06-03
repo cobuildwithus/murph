@@ -101,14 +101,14 @@ export async function runHostedWorkspaceInvocation(
   input: HostedExecutionWorkspaceInvocationJobInput,
   options: HostedWorkspaceInvocationOptions,
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+  if (options.signal?.aborted) {
+    throw options.signal.reason ?? new Error("Hosted runner job aborted before direct invocation.");
+  }
+
   const warmRoot = await resolveHostedRunnerWarmLauncherRoot(input);
   await clearHostedBrowserVaultWarmSourceStateHash({
     vaultRoot: resolveHostedRunnerWarmWorkspaceVaultRoot(input.request.userId),
   });
-
-  if (options.signal?.aborted) {
-    throw options.signal.reason ?? new Error("Hosted runner job aborted before direct invocation.");
-  }
 
   assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(input.runtime?.forwardedEnv ?? {});
   assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(input.runtime?.userEnv ?? {});
