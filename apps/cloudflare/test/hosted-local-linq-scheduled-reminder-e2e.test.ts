@@ -79,6 +79,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     requireScenario().queueAssistantResponses([
       buildHostedAssistantAutomationSaveDirectiveResponse({
         dueAtIso: scheduledReminderTimes.dueAtIso,
+        deliveryTarget: scheduledChatId,
         text: setupReplyText,
       }),
     ]);
@@ -180,6 +181,7 @@ async function startScenario(): Promise<void> {
 }
 
 function buildHostedAssistantAutomationSaveDirectiveResponse(input: {
+  deliveryTarget: string;
   dueAtIso: string;
   text: string;
 }): string {
@@ -202,6 +204,10 @@ function buildHostedAssistantAutomationSaveDirectiveResponse(input: {
           "scheduled",
           "--continuity-policy",
           "preserve",
+          "--channel",
+          "linq",
+          "--delivery-target",
+          input.deliveryTarget,
           "--schedule-kind",
           "at",
           "--schedule-at",
