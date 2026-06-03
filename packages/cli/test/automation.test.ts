@@ -3,8 +3,12 @@ import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
-import { test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 
+import {
+  ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
+  ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
+} from "@murphai/operator-config/assistant/current-delivery-route";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
@@ -12,6 +16,10 @@ import {
   registerAutomationCommands,
 } from "../src/commands/automation.js";
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 interface CommandSchemaEnvelope {
   args: {
@@ -258,6 +266,109 @@ test("automation save schema exposes typed fields while automation import-json i
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
   assert.deepEqual(importJsonSchema.args.required ?? [], []);
+});
+
+test("automation save injects the current private iMessage delivery route", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-route-");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV, "linq");
+    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV, "linq_chat_real");
+
+    const saved = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+      path: string;
+      vault: string;
+    }>(
+      cli,
+      [
+        "automation",
+        "save",
+        "Current route reminder",
+        "--slug",
+        "current-route-reminder",
+        "--instructions",
+        "Send the reminder.",
+        "--schedule-kind",
+        "at",
+        "--schedule-at",
+        "2026-12-06T12:00:00.000Z",
+        "--channel",
+        "linq",
+        "--thread-id",
+        "hid_redacted_thread",
+        "--vault",
+        vaultRoot,
+      ],
+    );
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliveryTarget: string | null;
+          threadId: string | null;
+        };
+      } | null;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "show",
+      "current-route-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation save rejects iMessage routes without a deliverable target", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-route-required-");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Broken route reminder",
+      "--slug",
+      "broken-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2026-12-06T12:00:00.000Z",
+      "--channel",
+      "linq",
+      "--thread-id",
+      "hid_redacted_thread",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
 });
 
 test("automation commands round-trip save, import-json, show, and list through the registered CLI", async () => {

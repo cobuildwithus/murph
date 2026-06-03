@@ -34,6 +34,11 @@
       "import": "./dist/assistant/codex-resume-state.js",
       "default": "./dist/assistant/codex-resume-state.js"
     },
+    "./assistant/current-delivery-route": {
+      "types": "./dist/assistant/current-delivery-route.d.ts",
+      "import": "./dist/assistant/current-delivery-route.js",
+      "default": "./dist/assistant/current-delivery-route.js"
+    },
     "./assistant/redaction": {
       "types": "./dist/assistant/redaction.d.ts",
       "import": "./dist/assistant/redaction.js",

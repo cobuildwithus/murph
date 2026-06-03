@@ -3,6 +3,11 @@ import {
   type AssistantCronTarget,
   type AssistantCronTargetSnapshot,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  looksLikePrivateAssistantRoutePlaceholder,
+  resolveAssistantDeliveryRouteWithCurrentDefaults,
+  stripPrivateAssistantRoutePlaceholders,
+} from '@murphai/operator-config/assistant/current-delivery-route'
 import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantBindingDelivery } from '../bindings.js'
@@ -28,14 +33,17 @@ export async function resolveAssistantCronTargetDefaults<
       allowSingleSavedTargetFallback: true,
     },
   )
+  const resolvedRoute = stripPrivateAssistantRoutePlaceholders(
+    resolveAssistantDeliveryRouteWithCurrentDefaults(resolvedTarget),
+  )
 
   return {
     ...input,
-    channel: resolvedTarget.channel ?? undefined,
-    identityId: resolvedTarget.identityId ?? undefined,
-    participantId: resolvedTarget.participantId ?? undefined,
-    threadId: resolvedTarget.threadId ?? undefined,
-    deliveryTarget: resolvedTarget.deliveryTarget ?? undefined,
+    channel: resolvedRoute.channel ?? undefined,
+    identityId: resolvedRoute.identityId ?? undefined,
+    participantId: resolvedRoute.participantId ?? undefined,
+    threadId: resolvedRoute.threadId ?? undefined,
+    deliveryTarget: resolvedRoute.deliveryTarget ?? undefined,
   }
 }
 
@@ -65,9 +73,31 @@ export function validateAssistantCronDeliveryTarget(
     )
   }
 
-  const participantId = normalizeNullableString(input.participantId)
-  const threadId = normalizeNullableString(input.threadId)
-  const deliveryTarget = normalizeNullableString(input.deliveryTarget)
+  const normalizedRoute = stripPrivateAssistantRoutePlaceholders({
+    channel,
+    identityId,
+    participantId: normalizeNullableString(input.participantId),
+    threadId: normalizeNullableString(input.threadId),
+    deliveryTarget: normalizeNullableString(input.deliveryTarget),
+  })
+  const participantId = normalizedRoute.participantId
+  const threadId = normalizedRoute.threadId
+  const deliveryTarget = normalizedRoute.deliveryTarget
+  if (channel === 'linq') {
+    if (!deliveryTarget) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_REQUIRED',
+        'iMessage assistant cron jobs require an explicit delivery target. In assistant turns this is injected automatically; otherwise pass --deliveryTarget.',
+      )
+    }
+
+    if (looksLikePrivateAssistantRoutePlaceholder(deliveryTarget)) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_REQUIRED',
+        'iMessage assistant cron jobs cannot use redacted conversation placeholders as delivery targets.',
+      )
+    }
+  }
   const bindingDelivery = resolveAssistantBindingDelivery({
     channel,
     actorId: participantId,

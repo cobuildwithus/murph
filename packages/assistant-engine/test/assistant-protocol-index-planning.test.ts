@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
+  ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
+  ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
+} from '@murphai/operator-config/assistant/current-delivery-route'
+import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -46,6 +50,7 @@ vi.mock('../src/assistant/context-snapshot.js', () => ({
 }))
 
 import {
+  buildCodexTurnExecutionPlan,
   resolveAssistantRouteTurnPlan,
   type AssistantCodexTurnResolvedExecutionProfile,
 } from '../src/assistant/codex-turn/planning.js'
@@ -67,6 +72,49 @@ afterEach(() => {
 })
 
 describe('assistant protocol index planning', () => {
+  it('passes current explicit delivery routes through private provider env only for foreground turns', async () => {
+    const foregroundPlan = await buildCodexTurnExecutionPlan({
+      activeTurnHistory: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliveryTarget: 'linq_chat_real',
+      },
+      plan: createSharedPlan(),
+      resolvedSession: createSession(),
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-test',
+    })
+    expect(
+      foregroundPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
+    ).toBe('linq')
+    expect(
+      foregroundPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
+    ).toBe('linq_chat_real')
+
+    const cronPlan = await buildCodexTurnExecutionPlan({
+      activeTurnHistory: null,
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        deliveryTarget: 'linq_chat_real',
+        turnTrigger: 'automation-cron',
+      },
+      plan: createSharedPlan(),
+      resolvedSession: createSession(),
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-test',
+    })
+    expect(
+      cronPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV],
+    ).toBeUndefined()
+    expect(
+      cronPlan.memoryTurnEnv[ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV],
+    ).toBeUndefined()
+  })
+
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

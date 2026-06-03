@@ -301,6 +301,9 @@
       "@murphai/operator-config/hosted-assistant-config-constants": [
         "packages/operator-config/src/hosted-assistant-config-constants.ts"
       ],
+      "@murphai/operator-config/assistant/current-delivery-route": [
+        "packages/operator-config/src/assistant/current-delivery-route.ts"
+      ],
       "@murphai/operator-config/inbox-cli-contracts": [
         "packages/operator-config/src/inbox-cli-contracts.ts"
       ],

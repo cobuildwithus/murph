@@ -7,10 +7,16 @@ import {
   automationScheduleSchema,
   automationScheduleKindValues,
   automationStatusValues,
+  type AutomationRoute,
   type AutomationScaffoldPayload,
   type AutomationSchedule,
   type AutomationScheduleKind,
 } from "@murphai/contracts";
+import {
+  looksLikePrivateAssistantRoutePlaceholder,
+  resolveAssistantDeliveryRouteWithCurrentDefaults,
+  stripPrivateAssistantRoutePlaceholders,
+} from "@murphai/operator-config/assistant/current-delivery-route";
 import {
   withBaseOptions,
 } from "@murphai/operator-config/command-helpers";
@@ -144,6 +150,56 @@ function buildAutomationScheduleFromOptions(
   }
 }
 
+function buildAutomationRouteFromOptions(input: {
+  channel: string;
+  deliveryTarget?: string;
+  identityId?: string;
+  participantId?: string;
+  threadId?: string;
+}): AutomationRoute {
+  const route = stripPrivateAssistantRoutePlaceholders(
+    resolveAssistantDeliveryRouteWithCurrentDefaults({
+      channel: input.channel,
+      deliveryTarget: input.deliveryTarget,
+      identityId: input.identityId,
+      participantId: input.participantId,
+      threadId: input.threadId,
+    }),
+  );
+  const parsed = automationRouteSchema.parse(route);
+
+  assertAutomationRouteCanDeliver(parsed);
+  return parsed;
+}
+
+function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
+  if (route.channel !== "linq") {
+    return;
+  }
+
+  if (!route.deliveryTarget) {
+    throw new VaultCliError(
+      "invalid_option",
+      "iMessage automation routes require an explicit delivery target. In assistant turns this is injected automatically; otherwise pass --delivery-target.",
+    );
+  }
+
+  if (looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)) {
+    throw new VaultCliError(
+      "invalid_option",
+      "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
+    );
+  }
+}
+
+function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRoute {
+  const normalized = automationRouteSchema.parse(
+    stripPrivateAssistantRoutePlaceholders(route),
+  );
+  assertAutomationRouteCanDeliver(normalized);
+  return normalized;
+}
+
 export function registerAutomationCommands(cli: Cli.Cli) {
   const automation = Cli.create("automation", {
     description: "Canonical automation registry commands.",
@@ -265,13 +321,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
-        route: {
+        route: buildAutomationRouteFromOptions({
           channel: context.options.channel,
-          deliveryTarget: context.options.deliveryTarget ?? null,
-          identityId: context.options.identityId ?? null,
-          participantId: context.options.participantId ?? null,
-          threadId: context.options.threadId ?? null,
-        },
+          deliveryTarget: context.options.deliveryTarget,
+          identityId: context.options.identityId,
+          participantId: context.options.participantId,
+          threadId: context.options.threadId,
+        }),
         schedule: buildAutomationScheduleFromOptions(context.options),
         slug: context.options.slug,
         status: context.options.status,
@@ -362,8 +418,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation payload",
         ),
       );
+      const route = normalizeAutomationRouteForSave(input.route);
       const result = await upsertAutomation({
         ...input,
+        route,
         vaultRoot: context.options.vault,
       });
 

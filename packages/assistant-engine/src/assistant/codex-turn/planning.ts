@@ -3,6 +3,9 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  createAssistantCurrentDeliveryRouteEnv,
+} from '@murphai/operator-config/assistant/current-delivery-route'
+import {
   normalizeIanaTimeZone,
   resolveSystemTimeZone,
   toLocalDayKey,
@@ -309,13 +312,21 @@ export async function buildCodexTurnExecutionPlan(input: {
   turnId: string
 }): Promise<AssistantCodexTurnExecutionPlan> {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
-  const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
-    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    sessionId: input.resolvedSession.sessionId,
-    sourcePrompt: input.input.prompt,
-    turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
-    vault: input.input.vault,
-  })
+  const memoryTurnEnv = {
+    ...createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+      sessionId: input.resolvedSession.sessionId,
+      sourcePrompt: input.input.prompt,
+      turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
+      vault: input.input.vault,
+    }),
+    ...(input.input.turnTrigger === 'automation-cron'
+      ? {}
+      : createAssistantCurrentDeliveryRouteEnv({
+          channel: input.input.channel,
+          deliveryTarget: input.input.deliveryTarget,
+        })),
+  }
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
     turnTrigger: input.input.turnTrigger,

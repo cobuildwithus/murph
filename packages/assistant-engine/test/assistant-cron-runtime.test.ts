@@ -8,6 +8,10 @@ import {
   type AssistantCronJob,
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV,
+  ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV,
+} from '@murphai/operator-config/assistant/current-delivery-route'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -312,6 +316,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
       rm(rootPath, {
@@ -323,6 +328,67 @@ afterEach(async () => {
 })
 
 describe('assistant cron runtime orchestration', () => {
+  it('injects the current private iMessage delivery route when creating cron jobs', async () => {
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-linq-route-')
+    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_CHANNEL_ENV, 'linq')
+    vi.stubEnv(ASSISTANT_CURRENT_DELIVERY_ROUTE_TARGET_ENV, 'linq_chat_real')
+
+    cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValueOnce({
+      channel: 'linq',
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      threadId: 'hid_redacted_thread',
+    })
+
+    const job = await addAssistantCronJob({
+      name: 'linq-current-route-job',
+      prompt: 'Send the check-in.',
+      schedule: {
+        at: '2026-12-08T12:00:00.000Z',
+        kind: 'at',
+      },
+      vault: vaultRoot,
+    })
+
+    expect(job.target).toMatchObject({
+      channel: 'linq',
+      deliveryTarget: 'linq_chat_real',
+      threadId: null,
+    })
+    expect(findCanonicalAutomation(vaultRoot, job.jobId)?.route).toMatchObject({
+      channel: 'linq',
+      deliveryTarget: 'linq_chat_real',
+      threadId: null,
+    })
+  })
+
+  it('rejects iMessage cron jobs without an explicit delivery target', async () => {
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-linq-route-required-')
+
+    cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValueOnce({
+      channel: 'linq',
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      threadId: 'hid_redacted_thread',
+    })
+
+    await expect(
+      addAssistantCronJob({
+        name: 'linq-missing-route-job',
+        prompt: 'Send the check-in.',
+        schedule: {
+          at: '2026-12-08T12:00:00.000Z',
+          kind: 'at',
+        },
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+    })
+  })
+
   it('lists mixed local and canonical jobs and computes status from both stores', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
