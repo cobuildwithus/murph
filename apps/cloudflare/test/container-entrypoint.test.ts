@@ -1,4 +1,5 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1950,6 +1951,204 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(readdir).toHaveBeenCalled();
     expect(readFile).toHaveBeenCalled();
+  });
+
+  it("allows only the verified warm Codex root process during cleanup", async () => {
+    const codexPid = process.pid + 1250;
+    const codexChildPid = process.pid + 1251;
+    const codexCmdline = "codex\u0000-a\u0000never\u0000app-server\u0000";
+    const codexCmdlineDigest = createHash("sha256").update(codexCmdline).digest("hex");
+    const codexStartTime = "1234567";
+    let runnerStarted = false;
+    let childKilled = false;
+    const kill = vi.fn((pid: number) => {
+      if (pid === codexChildPid) {
+        childKilled = true;
+      }
+    });
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted
+        ? [
+          { isDirectory: () => true, name: String(codexPid) },
+          { isDirectory: () => true, name: String(codexChildPid) },
+        ]
+        : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${process.pid}/stat`)) {
+        return `${process.pid} (node) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${process.pid}/status`)) {
+        return "Name:\tnode\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${codexPid}/stat`)) {
+        return `${codexPid} (codex) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${codexPid}/cmdline`)) {
+        return codexCmdline;
+      }
+
+      if (String(filePath).endsWith(`/${codexPid}/status`)) {
+        return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${codexChildPid}/stat`)) {
+        const state = childKilled ? "Z" : "S";
+        return `${codexChildPid} (sh) ${state} ${codexPid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${codexChildPid}/status`)) {
+        return "Name:\tsh\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async () => {
+        runnerStarted = true;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+        snapshotExpectedCodexRootProcess: vi.fn(async () => ({
+          commandDigest: "command_digest",
+          commandLineDigest: codexCmdlineDigest,
+          identityDigest: "identity_digest",
+          owner: "codex-app-server" as const,
+          pid: codexPid,
+          processGroupId: codexPid,
+          startTimeTicksFromProcStat: codexStartTime,
+          uid: 1000,
+        })),
+        stopWarmCodex: vi.fn(async () => undefined),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_warm_codex_root_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(kill).not.toHaveBeenCalledWith(codexPid, "SIGKILL");
+    expect(kill).toHaveBeenCalledWith(codexChildPid, "SIGKILL");
+    expect(readdir).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects an expected warm Codex root when the live command line changes", async () => {
+    const codexPid = process.pid + 1350;
+    const codexCmdline = "python\u0000worker.py\u0000";
+    const codexStartTime = "2468135";
+    let runnerStarted = false;
+    let codexKilled = false;
+    const kill = vi.fn((pid: number) => {
+      if (pid === codexPid) {
+        codexKilled = true;
+      }
+    });
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(codexPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${process.pid}/stat`)) {
+        return `${process.pid} (node) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${process.pid}/status`)) {
+        return "Name:\tnode\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${codexPid}/cmdline`)) {
+        return codexCmdline;
+      }
+
+      if (String(filePath).endsWith(`/${codexPid}/stat`)) {
+        const state = codexKilled ? "Z" : "S";
+        return `${codexPid} (python) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${codexPid}/status`)) {
+        return "Name:\tpython\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async () => {
+        runnerStarted = true;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+        snapshotExpectedCodexRootProcess: vi.fn(async () => ({
+          commandDigest: "command_digest",
+          commandLineDigest: createHash("sha256")
+            .update("codex\u0000-a\u0000never\u0000app-server\u0000")
+            .digest("hex"),
+          identityDigest: "identity_digest",
+          owner: "codex-app-server" as const,
+          pid: codexPid,
+          processGroupId: codexPid,
+          startTimeTicksFromProcStat: codexStartTime,
+          uid: 1000,
+        })),
+        stopWarmCodex: vi.fn(async () => undefined),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_warm_codex_root_cmdline_mismatch",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(kill).toHaveBeenCalledWith(codexPid, "SIGKILL");
   });
 
   it("runs warm-container cleanup after a failed runner job", async () => {

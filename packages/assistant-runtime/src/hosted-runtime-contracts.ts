@@ -73,6 +73,11 @@ export {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "./hosted-runtime/codex-shell-env-policy.ts";
 export {
+  snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer,
+  type HostedExpectedCodexRootProcess,
+} from "@murphai/assistant-engine/assistant-codex";
+export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
 export type {

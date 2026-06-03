@@ -25,6 +25,9 @@ import {
 import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNNER_EXECUTABLE_PATH,
+  snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer,
+  type HostedExpectedCodexRootProcess,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
@@ -138,6 +141,8 @@ interface HostedContainerRuntimeOptions {
   runCodexShellSmoke?: (
     options: { signal: AbortSignal },
   ) => Promise<HostedContainerCodexShellSmokeResult>;
+  snapshotExpectedCodexRootProcess?: () => Promise<HostedExpectedCodexRootProcess | null>;
+  stopWarmCodex?: (reason: string) => Promise<void>;
   runOpenAiInterceptSmoke?: (
     options: { authority: HostedContainerRuntimeAuthority; signal: AbortSignal },
   ) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
@@ -160,6 +165,8 @@ interface HostedContainerRuntimeDependencies {
     }) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
   runCodexShellSmoke:
     (options: { signal: AbortSignal }) => Promise<HostedContainerCodexShellSmokeResult>;
+  snapshotExpectedCodexRootProcess: () => Promise<HostedExpectedCodexRootProcess | null>;
+  stopWarmCodex: (reason: string) => Promise<void>;
   runOpenAiInterceptSmoke:
     (options: {
       authority: HostedContainerRuntimeAuthority;
@@ -252,7 +259,9 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
 }
 
 interface HostedContainerProcessState {
+  commandLineDigest: string | null;
   ppid: number | null;
+  startTimeTicksFromProcStat: string | null;
   state: string | null;
   uid: number | null;
 }
@@ -593,6 +602,19 @@ export async function startHostedContainerEntrypoint(input: {
     }
   });
 
+  server.once("close", () => {
+    void runtime.stopWarmCodex("container-server-close").catch((error) => {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: buildHostedContainerRunnerJobErrorMetadata(error),
+        level: "warn",
+        message: "Hosted container entrypoint failed to stop warm Codex on server close.",
+        phase: "failed",
+        userId: null,
+      });
+    });
+  });
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(input.port ?? 8080, "0.0.0.0", () => resolve());
@@ -876,6 +898,10 @@ function resolveHostedContainerRuntimeDependencies(
       runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
     runCodexShellSmoke:
       runtime?.runCodexShellSmoke ?? runHostedContainerCodexShellSmoke,
+    snapshotExpectedCodexRootProcess:
+      runtime?.snapshotExpectedCodexRootProcess ?? snapshotExpectedHostedCodexRootProcess,
+    stopWarmCodex:
+      runtime?.stopWarmCodex ?? stopHostedWarmCodexAppServer,
     runOpenAiInterceptSmoke:
       runtime?.runOpenAiInterceptSmoke ?? runHostedContainerOpenAiInterceptSmoke,
   };
@@ -1666,12 +1692,18 @@ function copyOptionalHostedContainerSmokeEnv(
 async function enforceHostedContainerProcessIsolation(
   processApi: HostedContainerProcessApi,
   baseline: HostedContainerProcessSnapshot,
+  expectedCodexRoot: HostedExpectedCodexRootProcess | null,
 ): Promise<void> {
   if (process.platform === "win32") {
     return;
   }
 
-  const firstPass = await listUnexpectedHostedContainerProcessIds(process.pid, processApi, baseline);
+  const firstPass = await listUnexpectedHostedContainerProcessIds(
+    process.pid,
+    processApi,
+    baseline,
+    expectedCodexRoot,
+  );
   if (firstPass.length === 0) {
     return;
   }
@@ -1686,7 +1718,12 @@ async function enforceHostedContainerProcessIsolation(
 
   await new Promise((resolve) => setTimeout(resolve, 25));
 
-  const secondPass = await listUnexpectedHostedContainerProcessIds(process.pid, processApi, baseline);
+  const secondPass = await listUnexpectedHostedContainerProcessIds(
+    process.pid,
+    processApi,
+    baseline,
+    expectedCodexRoot,
+  );
   if (secondPass.length > 0) {
     throw new HostedRunnerShellIsolationError(
       `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
@@ -1748,6 +1785,7 @@ async function listUnexpectedHostedContainerProcessIds(
   rootPid: number,
   processApi: HostedContainerProcessApi,
   baseline: HostedContainerProcessSnapshot,
+  expectedCodexRoot: HostedExpectedCodexRootProcess | null,
 ): Promise<number[]> {
   const processStates = await readHostedContainerProcessStates(rootPid, processApi);
   const descendantPids = new Set<number>();
@@ -1777,6 +1815,10 @@ async function listUnexpectedHostedContainerProcessIds(
       continue;
     }
 
+    if (isExpectedHostedCodexRootProcess(pid, state, expectedCodexRoot)) {
+      continue;
+    }
+
     if (descendantPids.has(pid)) {
       unexpected.push(pid);
       continue;
@@ -1794,13 +1836,49 @@ async function listUnexpectedHostedContainerProcessIds(
   return unexpected.sort((left, right) => left - right);
 }
 
+function isExpectedHostedCodexRootProcess(
+  pid: number,
+  state: HostedContainerProcessState,
+  expectedCodexRoot: HostedExpectedCodexRootProcess | null,
+): boolean {
+  if (!expectedCodexRoot || expectedCodexRoot.owner !== "codex-app-server") {
+    return false;
+  }
+
+  if (pid !== expectedCodexRoot.pid) {
+    return false;
+  }
+
+  if (state.commandLineDigest !== expectedCodexRoot.commandLineDigest) {
+    return false;
+  }
+
+  if (
+    state.startTimeTicksFromProcStat !== expectedCodexRoot.startTimeTicksFromProcStat
+  ) {
+    return false;
+  }
+
+  return expectedCodexRoot.uid === null || state.uid === expectedCodexRoot.uid;
+}
+
 async function readHostedContainerProcessState(
   pid: number,
   processApi: HostedContainerProcessApi,
 ): Promise<HostedContainerProcessState> {
+  let commandLineDigest: string | null = null;
   let ppid: number | null = null;
+  let startTimeTicksFromProcStat: string | null = null;
   let state: string | null = null;
   let uid: number | null = null;
+
+  try {
+    commandLineDigest = createHash("sha256")
+      .update(await processApi.readFile(`/proc/${pid}/cmdline`, "utf8"))
+      .digest("hex");
+  } catch {
+    // Command line can disappear while /proc is being scanned.
+  }
 
   try {
     const stat = await processApi.readFile(`/proc/${pid}/stat`, "utf8");
@@ -1808,11 +1886,17 @@ async function readHostedContainerProcessState(
 
     if (commandEnd !== -1 && commandEnd + 2 < stat.length) {
       const remainder = stat.slice(commandEnd + 2).trim();
-      const [stateRaw, ppidRaw] = remainder.split(/\s+/u, 2);
+      const statFields = remainder.split(/\s+/u);
+      const [stateRaw, ppidRaw] = statFields;
       const parsedPpid = Number.parseInt(ppidRaw ?? "", 10);
 
       ppid = Number.isInteger(parsedPpid) ? parsedPpid : null;
       state = typeof stateRaw === "string" && stateRaw.length > 0 ? stateRaw : null;
+      const startTimeRaw = statFields[19];
+      startTimeTicksFromProcStat =
+        typeof startTimeRaw === "string" && /^[0-9]+$/u.test(startTimeRaw)
+          ? startTimeRaw
+          : null;
     }
   } catch {
     // Processes can exit while /proc is being scanned.
@@ -1826,7 +1910,7 @@ async function readHostedContainerProcessState(
     // UID is only needed for the daemonized-orphan cleanup path.
   }
 
-  return { ppid, state, uid };
+  return { commandLineDigest, ppid, startTimeTicksFromProcStat, state, uid };
 }
 
 function readHostedContainerProcessUid(status: string): number | null {
@@ -2146,9 +2230,15 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   } finally {
     if (processBaseline) {
       try {
-        await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);
+        const expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
+        await enforceHostedContainerProcessIsolation(
+          runtime.processApi,
+          processBaseline,
+          expectedCodexRoot,
+        );
         options?.onCleanupStatus?.("passed");
       } catch (error) {
+        await runtime.stopWarmCodex("process-isolation-failed").catch(() => undefined);
         options?.onCleanupStatus?.("failed");
         throw error;
       }

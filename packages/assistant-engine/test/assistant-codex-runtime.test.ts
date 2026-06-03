@@ -29,6 +29,8 @@ import {
   buildCodexAppServerArgs,
   executeCodexAppServerTurn,
   resolveCodexDisplayOptions,
+  snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
@@ -95,6 +97,10 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.mocked(process.kill).mockImplementation(() => {
+    throw createErrnoException('ESRCH', 'process not found')
+  })
+  await stopHostedWarmCodexAppServer('test-cleanup')
   vi.restoreAllMocks()
   codexMocks.spawn.mockReset()
   await Promise.all(
@@ -1400,6 +1406,341 @@ describe('assistant codex runtime', () => {
         expect.any(Object),
       )
     }
+  })
+
+  it('reuses one hosted Codex app-server process for matching warm identities', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-work-')
+    let child: MockChildProcess | null = null
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 987_654_321
+      child = spawnedChild
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
+
+          const firstThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 1)
+          spawnedChild.stdout.write(jsonLine({
+            id: firstThread.id,
+            result: {
+              thread: {
+                id: 'thread-warm-one',
+              },
+            },
+          }))
+
+          const firstTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 1)
+          spawnedChild.stdout.write(jsonLine({
+            id: firstTurn.id,
+            result: {
+              turn: {
+                id: 'turn-warm-one',
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-warm-one',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 2)
+          spawnedChild.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-warm-two',
+              },
+            },
+          }))
+
+          const secondTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 2)
+          spawnedChild.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-warm-two',
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-warm-two',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first warm turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-one',
+      turnId: 'turn-warm-one',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second warm turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-two',
+      turnId: 'turn-warm-two',
+    })
+
+    const spawnedChild = requireMockChildProcess(child)
+    const messages = readWrittenRpcMessages(spawnedChild)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'thread/start').map((message) => message.id))
+      .toEqual([2, 4])
+    expect(messages.filter((message) => message.method === 'turn/start').map((message) => message.id))
+      .toEqual([3, 5])
+    expect(await snapshotExpectedHostedCodexRootProcess()).toBeNull()
+  })
+
+  it('starts a fresh hosted Codex app-server process when config authority changes', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-config-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-config-work-')
+    await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "first"\n')
+    const spawnedChildren: MockChildProcess[] = []
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
+      if (child && signal === 'SIGTERM') {
+        queueMicrotask(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 30_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          const processNumber = spawnedChildren.length
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: `thread-warm-config-${processNumber}`,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: `turn-warm-config-${processNumber}`,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: `turn-warm-config-${processNumber}`,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first config identity',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-config-1',
+      turnId: 'turn-warm-config-1',
+    })
+
+    await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "second"\n')
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second config identity',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-config-2',
+      turnId: 'turn-warm-config-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-30_000, 'SIGTERM')
+    expect(readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null)).filter((message) => message.method === 'initialize'))
+      .toHaveLength(1)
+    expect(readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[1] ?? null)).filter((message) => message.method === 'initialize'))
+      .toHaveLength(1)
+  })
+
+  it('poisons hosted warm Codex when an aborted turn later completes', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-abort-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-abort-work-')
+    const controller = new AbortController()
+    const spawnedChildren: MockChildProcess[] = []
+
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find((candidate) => pid === -candidate.pid)
+      if (child && signal === 'SIGTERM') {
+        queueMicrotask(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 20_000 + spawnedChildren.length
+      spawnedChildren.push(spawnedChild)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+          const threadId = spawnedChildren.length === 1
+            ? 'thread-warm-abort-one'
+            : 'thread-warm-abort-two'
+          const turnId = spawnedChildren.length === 1
+            ? 'turn-warm-abort-one'
+            : 'turn-warm-abort-two'
+          spawnedChild.stdout.write(jsonLine({
+            id: thread.id,
+            result: {
+              thread: {
+                id: threadId,
+              },
+            },
+          }))
+
+          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+          spawnedChild.stdout.write(jsonLine({
+            id: turn.id,
+            result: {
+              turn: {
+                id: turnId,
+              },
+            },
+          }))
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: turnId,
+              },
+            },
+          }))
+
+          if (spawnedChildren.length === 1) {
+            controller.abort()
+            await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+          }
+
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        abortSignal: controller.signal,
+        env: hostedEnv,
+        prompt: 'aborted but completed',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-abort-one',
+      turnId: 'turn-warm-abort-one',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'next turn after abort',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-warm-abort-two',
+      turnId: 'turn-warm-abort-two',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGINT')
+    expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGTERM')
   })
 
   it('keeps one Codex app-server process open and steers late input into the active turn', async () => {
@@ -5233,6 +5574,27 @@ async function waitForRpcMethod(
   }
 
   throw new Error(`Expected RPC method ${method} from Murph.`)
+}
+
+async function waitForRpcMethodCount(
+  child: MockChildProcess,
+  method: string,
+  count: number,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const messages = readWrittenRpcMessages(child).filter(
+      (candidate) => candidate.method === method,
+    )
+    if (messages.length >= count) {
+      const message = messages[count - 1]
+      if (message) {
+        return message
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  throw new Error(`Expected ${count} RPC ${method} messages from Murph.`)
 }
 
 function readTurnStartInputItems(
