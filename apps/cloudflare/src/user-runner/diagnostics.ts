@@ -131,7 +131,10 @@ export function buildHostedRunnerMetadataOnlyErrorDetails(
 }
 
 export function safeCleanupErrorCode(error: unknown): string {
-  return error instanceof Error && error.name ? error.name : "UnknownError";
+  const name = error instanceof Error ? error.name.trim() : "";
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name)
+    ? name
+    : "UnknownError";
 }
 
 export function mapRunnerProcessingRetryReason(

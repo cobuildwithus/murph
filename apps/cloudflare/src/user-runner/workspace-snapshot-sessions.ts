@@ -22,10 +22,12 @@ import {
 } from "../workspace-snapshot-store.ts";
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
-import { buildHostedRunnerMetadataOnlyErrorDetails, safeCleanupErrorCode } from "./diagnostics.js";
+import { safeCleanupErrorCode } from "./diagnostics.js";
 import { deleteR2ObjectIfSupported } from "./r2-delete.js";
 
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
+
+type WorkspaceSnapshotSessionStateStore = Pick<RunnerStateStore, "bindUser">;
 
 export interface WorkspaceSnapshotSessionService {
   cleanupOrphanCandidates(userId: string): Promise<void>;
@@ -47,7 +49,7 @@ export interface WorkspaceSnapshotSessionService {
 export function createWorkspaceSnapshotSessionService(input: {
   bucket: R2BucketLike;
   state: DurableObjectStateLike;
-  stateStore: RunnerStateStore;
+  stateStore: WorkspaceSnapshotSessionStateStore;
   readHostedWorkspaceFromWeb(userId: string): Promise<HostedWorkspaceReadResponse>;
   assertWorkspaceBelongsToRunnerUser(workspace: HostedWorkspaceState | null, userId: string): void;
 }): WorkspaceSnapshotSessionService {
@@ -104,10 +106,9 @@ export function createWorkspaceSnapshotSessionService(input: {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
-            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-            reason: safeCleanupErrorCode(error),
+            cleanupErrorCode: safeCleanupErrorCode(error),
+            cleanupFailed: true,
           },
-          error,
           level: "warn",
           message: "Hosted runner workspace snapshot orphan cleanup failed.",
           phase: "wake.running",
@@ -131,7 +132,15 @@ export function createWorkspaceSnapshotSessionService(input: {
       const eligibleCandidates: Array<[string, HostedWorkspaceSnapshotOrphanCandidate]> = [];
 
       for (const [key, value] of candidates) {
-        const candidate = parseHostedWorkspaceSnapshotOrphanCandidate(value);
+        const candidate = await readHostedWorkspaceSnapshotOrphanCandidateForCleanup({
+          key,
+          state: input.state,
+          userId,
+          value,
+        });
+        if (!candidate) {
+          continue;
+        }
         if (candidate.userId !== userId) {
           continue;
         }
@@ -201,6 +210,53 @@ export function createWorkspaceSnapshotSessionService(input: {
   };
 
   return service;
+}
+
+async function readHostedWorkspaceSnapshotOrphanCandidateForCleanup(input: {
+  key: string;
+  state: DurableObjectStateLike;
+  userId: string;
+  value: unknown;
+}): Promise<HostedWorkspaceSnapshotOrphanCandidate | null> {
+  try {
+    return parseHostedWorkspaceSnapshotOrphanCandidate(input.value);
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        cleanupErrorCode: safeCleanupErrorCode(error),
+        orphanCandidateKeyPresent: input.key.length > 0,
+      },
+      level: "warn",
+      message: "Hosted runner skipped malformed workspace snapshot orphan candidate.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+    await deleteMalformedWorkspaceSnapshotOrphanCandidateBestEffort(input);
+    return null;
+  }
+}
+
+async function deleteMalformedWorkspaceSnapshotOrphanCandidateBestEffort(input: {
+  key: string;
+  state: DurableObjectStateLike;
+  userId: string;
+}): Promise<void> {
+  try {
+    await input.state.storage.delete(input.key);
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        cleanupErrorCode: safeCleanupErrorCode(error),
+        orphanCandidateKeyPresent: input.key.length > 0,
+      },
+      level: "warn",
+      message: "Hosted runner failed to discard malformed workspace snapshot orphan candidate.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+  }
 }
 
 export function workspaceSnapshotUploadSessionCurrentStorageKey(): string {

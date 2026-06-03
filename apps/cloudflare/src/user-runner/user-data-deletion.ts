@@ -16,10 +16,15 @@ import {
   hostedRunnerSecretsObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
 } from "../storage-paths.js";
-import { buildHostedRunnerMetadataOnlyErrorDetails, safeCleanupErrorCode } from "./diagnostics.js";
+import { safeCleanupErrorCode } from "./diagnostics.js";
 import { deleteR2ObjectIfSupported, deleteR2ObjectsWithPrefix } from "./r2-delete.js";
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
+
+type HostedRunnerUserDataDeletionStateStore = Pick<
+  RunnerStateStore,
+  "assertStateForUser" | "clearWriteFenceForUserDeletion" | "deleteStateForUser"
+>;
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -44,6 +49,13 @@ export class HostedRunnerUserDataDeletionRunnerStillActiveError extends Error {
   }
 }
 
+class HostedRunnerUserDataDeletionR2CleanupFailedError extends Error {
+  constructor() {
+    super("Hosted runner R2 cleanup failed before user data deletion.");
+    this.name = "HostedRunnerUserDataDeletionR2CleanupFailedError";
+  }
+}
+
 export {
   HostedRunnerUserDataDeletionRunnerStillActiveError
     as HostedUserRunnerDataDeletionRunnerStillActiveError,
@@ -54,7 +66,7 @@ interface HostedRunnerUserDataDeletionServiceInput {
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
-  stateStore: RunnerStateStore;
+  stateStore: HostedRunnerUserDataDeletionStateStore;
 }
 
 export class UserDataDeletionService {
@@ -73,7 +85,7 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
 }): Promise<HostedRunnerUserDataDeletionResult> {
   await input.stateStore.assertStateForUser(input.userId);
   const runnerCleanup = await stopRunnerBeforeUserDataDeletion(input);
-  const r2 = await deleteHostedUserR2DataBestEffort(input);
+  const r2 = await deleteHostedUserR2DataBeforeStateDeletion(input);
   const stateDeletion = await input.stateStore.deleteStateForUser(input.userId);
   const deleteAlarm = input.state.storage.deleteAlarm;
   const alarmCleared = typeof deleteAlarm === "function";
@@ -111,7 +123,7 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
 async function stopRunnerBeforeUserDataDeletion(input: {
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
-  stateStore: RunnerStateStore;
+  stateStore: HostedRunnerUserDataDeletionStateStore;
   userId: string;
 }): Promise<{
   activeInvocationPreempted: boolean;
@@ -166,32 +178,26 @@ async function stopRunnerBeforeUserDataDeletion(input: {
   };
 }
 
-async function deleteHostedUserR2DataBestEffort(input: {
+async function deleteHostedUserR2DataBeforeStateDeletion(input: {
   bucket: R2BucketLike;
   userId: string;
 }): Promise<HostedRunnerUserDataDeletionResult["r2"]> {
   try {
     return await deleteHostedUserR2Data(input);
   } catch (error) {
+    const r2CleanupErrorCode = safeCleanupErrorCode(error);
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-        r2Supported: false,
-        userScopedSkipReason: safeCleanupErrorCode(error),
+        r2CleanupErrorCode,
+        r2CleanupFailed: true,
       },
-      error,
-      level: "warn",
-      message: "Hosted runner R2 user data deletion failed; continuing Durable Object cleanup.",
+      level: "error",
+      message: "Hosted runner user data deletion blocked because R2 cleanup failed.",
       phase: "wake.running",
       userId: input.userId,
     });
-    return {
-      deletedObjectCount: 0,
-      skippedUserScopedPrefixes: true,
-      supported: false,
-      userScopedSkipReason: safeCleanupErrorCode(error),
-    };
+    throw new HostedRunnerUserDataDeletionR2CleanupFailedError();
   }
 }
 
