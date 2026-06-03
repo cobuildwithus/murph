@@ -47,7 +47,7 @@ Then load only the task-relevant docs listed below.
 - Prefer narrow ledger rows and narrow plans.
 - Treat supplied patches as behavioral intent, not overwrite authority.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
-- Enforce the 1,000-line touch-time file limit from `agent-docs/references/giant-file-composability-seams.md`: do not create or extend oversized hand-authored files, and split a touched oversized file along composable ownership seams before adding behavior, tests, config, or docs there.
+- The 1,000-line touch-time split policy is paused. Do not treat oversized hand-authored files as an automatic split/refactor requirement unless the current user task asks for giant-file cleanup or the split is independently the simplest durable fix.
 - Required completion-workflow audit subagent passes are mandatory for the repo task classes that require them. Treat this workflow doc plus `AGENTS.md` as standing user approval and explicit repo instruction to spawn those required local Codex audit subagents when a repo task reaches that workflow, even if general agent guidance says not to spawn subagents without an explicit user request. Do not stop after implementation, verification, or commit, and do not pause only to ask for a second explicit "use subagents" instruction.
 - Required workflow audit subagents use high reasoning by default. Use xhigh reasoning for large or complex changes, high-risk/cross-cutting changes, or audits spanning multiple owners, architecture decisions, or trust-boundary decisions.
 - For user-facing `apps/web` UI changes, the completion workflow's `frontend-review` pass is a mandatory audit alongside any other required passes for the task class.
@@ -92,6 +92,6 @@ Additional gate rules:
 
 - Mechanical/enforced rules live in scripts, tests, lint-like guards, or CI wherever possible.
 - `AGENTS.md` and this doc should point to those guards or to the durable policy doc, not duplicate large policy blobs.
-- The 1,000-line file limit is currently a touch-time policy rather than a whole-repo CI gate, so unrelated existing oversized files do not block narrow work. Add mechanical enforcement only when the guard can distinguish current-task hand-authored files from generated, vendored, lockfile, or tool-owned artifacts.
+- The prior 1,000-line touch-time policy is paused. `agent-docs/references/giant-file-composability-seams.md` remains planning guidance for intentional giant-file cleanup, not an active workflow gate.
 - Keep `AGENTS.md` intentionally small. Treat roughly 100 lines as the soft ceiling and preserve the same stable shape: purpose, precedence, always-read set, task router, non-negotiable invariants, workflow defaults, and notes.
 - If a rule matters and keeps drifting, prefer encoding it into tooling over expanding `AGENTS.md`.
