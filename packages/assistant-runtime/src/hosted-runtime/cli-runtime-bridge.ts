@@ -53,6 +53,15 @@ export async function getOrCreateHostedCliRuntimeBridge(): Promise<HostedCliRunt
   return await hostedCliRuntimeBridgePromise;
 }
 
+export async function stopHostedCliRuntimeBridge(): Promise<void> {
+  const bridgePromise = hostedCliRuntimeBridgePromise;
+  if (!bridgePromise) {
+    return;
+  }
+  const bridge = await bridgePromise;
+  await bridge.stop();
+}
+
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
   const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
