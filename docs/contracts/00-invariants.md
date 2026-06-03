@@ -39,6 +39,12 @@
 - Assistant reply code must not import, call, await, or coordinate with device-sync execution. Device sync may preserve a follow-up wake or recovery marker, but it must stay out of the foreground reply path.
 - Foreground preemption is not permission to publish partial or corrupt state. Wrong-user authority, stale lease, invalid auth, undecryptable mailbox payloads, and checkpoint compare-and-swap conflicts still fail closed.
 
+## Hosted Runner Boundary
+
+- Cloudflare must remain a thin execution runner over the same Murph runtime used locally. It may own platform coordination, workspace restore/checkpoint transport, write fences, secret injection, and process cleanup, but assistant business logic, vault semantics, Codex orchestration policy, and product state belong to the Murph runtime and hosted web owners.
+- Hosted execution should reuse warm in-container runtime infrastructure across messages while the same container remains alive and the authority/configuration identity still matches. That includes the Node process, restored workspace root, and Codex App Server process where cleanup proof and write-fence validity make reuse safe.
+- Warm container reuse is only an optimization. Each message still enters through the assistant input spine, validates current user/write-fence/config authority, uses invocation-local cache/temp state, and falls back to cold restore or process restart when safe reuse cannot be proven.
+
 ## Observability And Logging
 
 - Log errors at the root failure boundary, where the system first has enough context to classify the failing owner, operation, and cause. Do not scatter patchwork logs across callers, retries, or fallback layers to compensate for an unclear source.
