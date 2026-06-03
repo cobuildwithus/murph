@@ -326,6 +326,7 @@ export function verifyWorkspaceImportPolicy({
   specifier,
 }) {
   const isTestFile = isTestSourceFile(filePath);
+  const relativeFilePath = path.relative(repoRoot, filePath).replace(/\\/g, "/");
 
   if (
     isWorkspacePackageSpecifier(specifier)
@@ -365,14 +366,24 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
-    path.relative(repoRoot, filePath).replace(/\\/g, "/")
-      === "packages/assistant-runtime/src/hosted-runtime-contracts.ts"
+    (
+      relativeFilePath === "packages/assistant-runtime/src/hosted-runtime-contracts.ts"
+      || relativeFilePath === "packages/assistant-runtime/src/hosted-runtime-worker-contracts.ts"
+    )
     && (
       specifier === "@murphai/assistant-engine"
       || specifier.startsWith("@murphai/assistant-engine/")
     )
   ) {
-    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from assistant-engine; hosted-runtime-contracts must not route concrete assistant-engine lifecycle ownership through assistant-runtime.`;
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from assistant-engine; assistant-runtime contract entrypoints must not route concrete assistant-engine lifecycle ownership through assistant-runtime.`;
+  }
+
+  if (
+    sourceMember === "packages/assistant-runtime"
+    && filePath.includes(`${path.sep}packages${path.sep}assistant-runtime${path.sep}src${path.sep}`)
+    && specifier === "@murphai/assistant-engine/hosted-codex-lifecycle"
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted Codex lifecycle ownership from ${JSON.stringify(specifier)}; assistant-runtime must not route concrete assistant-engine lifecycle hooks.`;
   }
 
   if (
@@ -845,19 +856,39 @@ function importsOnlyNamedBindingsFromSpecifier(source, specifier, allowedBinding
     return false;
   }
 
-  const allowed = new Set(allowedBindingNames);
-  const namedImportPattern = new RegExp(
-    String.raw`^${optionalTrivia}import${optionalTrivia}\{(?<bindings>[^}]*)\}${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
-    "gmu",
-  );
-  const matches = [...source.matchAll(namedImportPattern)];
-
-  if (matches.length === 0) {
+  if (new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}["']${specifierPattern}["']`,
+    "mu",
+  ).test(source)) {
     return false;
   }
 
-  return matches.every((match) => {
-    const bindings = stripImportBindingComments(match.groups?.bindings ?? "")
+  const fromStatementPattern = new RegExp(
+    String.raw`^${optionalTrivia}(?:import|export)${optionalTrivia}(?:type${optionalTrivia})?(?<bindings>(?:(?!\n\s*(?:import|export)\b)[\s\S])*?)${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "gmu",
+  );
+  const fromStatements = [...source.matchAll(fromStatementPattern)];
+  const allowed = new Set(allowedBindingNames);
+
+  if (fromStatements.length === 0) {
+    return false;
+  }
+
+  return fromStatements.every((match) => {
+    if (!new RegExp(
+      String.raw`^${optionalTrivia}import${optionalTrivia}\{[\s\S]*\}${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+      "mu",
+    ).test(match[0])) {
+      return false;
+    }
+
+    const rawBindings = match.groups?.bindings ?? "";
+    const trimmedBindings = rawBindings.trim();
+    if (!trimmedBindings.startsWith("{") || !trimmedBindings.endsWith("}")) {
+      return false;
+    }
+
+    const bindings = stripImportBindingComments(trimmedBindings.slice(1, -1))
       .split(",")
       .map((binding) => binding.trim())
       .filter(Boolean)
