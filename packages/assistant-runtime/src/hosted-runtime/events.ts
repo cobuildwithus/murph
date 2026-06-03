@@ -181,6 +181,9 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "thread-started",
   "turn-completed",
   "turn-started",
+  "warm-abort-poisoned",
+  "warm-idle",
+  "warm-reused",
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "command.execution",

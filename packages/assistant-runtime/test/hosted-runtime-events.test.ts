@@ -646,6 +646,68 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures hosted Codex warm app-server timing traces", () => {
+    for (const stage of ["warm-reused", "warm-idle", "warm-abort-poisoned"]) {
+      const eventId = `evt_codex_${stage.replaceAll("-", "_")}_timing`;
+      const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId,
+        memberId: "member_123",
+        notification: {
+          instructions: "Reply in chat.",
+          route: {
+            actorId: "actor_codex_warm_timing",
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "thread_123",
+            },
+            identityId: "hbidx:phone:v1:test",
+            threadId: "thread_123",
+            threadIsDirect: true,
+          },
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      });
+
+      const entry = emitHostedAssistantProviderTraceLog({
+        details: {
+          requestId: "req_123",
+        },
+        event: {
+          rawEvent: {
+            schema: "murph.assistant-codex-app-server-timing.v1",
+            type: "assistant.codex.app_server_timing",
+            codexTimingElapsedMs: 12,
+            codexTimingStage: stage,
+            codexTimingTotalElapsedMs: 34,
+            cwd: "/tmp/raw-path",
+            threadId: "raw-thread-id",
+          },
+        },
+        wake,
+      });
+
+      expect(entry).toEqual({
+        component: "runtime.provider",
+        eventId,
+        level: "info",
+        message: "Hosted assistant Codex app-server timing captured.",
+        phase: "wake.running",
+        redacted: expect.objectContaining({
+          codexTimingElapsedMs: 12,
+          codexTimingStage: stage,
+          codexTimingTotalElapsedMs: 34,
+          codexTimingTraceType: "app-server",
+          providerTraceKind: "codex.app_server_timing",
+          requestId: "req_123",
+          schema: "murph.assistant-codex-app-server-timing.v1",
+        }),
+      });
+      expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
+      expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+    }
+  });
+
   it("captures hosted Codex action diagnostics without raw payloads", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_action_diagnostics",
