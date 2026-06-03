@@ -1,30 +1,24 @@
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-
 import { afterEach, expect, it, vi } from "vitest";
 
 import type {
   HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.ts";
 import {
-  createHostedExecutionRunnerChildResultMessage,
-} from "../src/runner-job-transport.ts";
-import {
-  buildHostedRunnerChildRuntimeEnv,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
 } from "../src/runner-env.js";
 import {
-  createHostedRunnerChildProcessEnv,
-  type HostedRunnerChildLauncherDirectories,
-} from "../src/runner-child-launcher.ts";
-import {
   RunnerContainer,
 } from "../src/runner-container.ts";
+import {
+  HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+} from "../src/hosted-runtime-architecture.ts";
+import {
+  buildHostedExecutionJobRuntime,
+} from "../src/hosted-workspace-invocation.ts";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
-  spawn: vi.fn(),
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -34,14 +28,6 @@ vi.mock("@murphai/hosted-execution", async () => {
   return {
     ...actual,
     emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
-  };
-});
-
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...actual,
-    spawn: mocks.spawn,
   };
 });
 
@@ -103,40 +89,37 @@ const CURRENT_RESOLVED_CONFIG_SECRET_SUFFIXES = [
 const TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST = new Set<string>([
   ...buildAllowedSecretPaths(
     [
-      "actual isolated child env",
-      "direct child env",
-      "direct child env projection",
+      "direct runtime.forwardedEnv",
       "runtime.forwardedEnv",
       "serialized job input.runtime.forwardedEnv",
       "job payload sent to container.job.runtime.forwardedEnv",
-      "child stdin payload.job.runtime.forwardedEnv",
     ],
     CURRENT_FORWARDED_SECRET_KEYS,
   ),
   ...buildAllowedSecretPaths(
     [
+      "direct runtime.platformEnv",
       "runtime.platformEnv",
       "serialized job input.runtime.platformEnv",
       "job payload sent to container.job.runtime.platformEnv",
-      "child stdin payload.job.runtime.platformEnv",
     ],
     CURRENT_PLATFORM_SECRET_KEYS,
   ),
   ...buildAllowedSecretPaths(
     [
+      "direct runtime.userEnv",
       "runtime.userEnv",
       "serialized job input.runtime.userEnv",
       "job payload sent to container.job.runtime.userEnv",
-      "child stdin payload.job.runtime.userEnv",
     ],
     CURRENT_USER_SECRET_KEYS,
   ),
   ...buildAllowedSecretPaths(
     [
+      "direct runtime.resolvedConfig",
       "runtime.resolvedConfig",
       "serialized job input.runtime.resolvedConfig",
       "job payload sent to container.job.runtime.resolvedConfig",
-      "child stdin payload.job.runtime.resolvedConfig",
     ],
     CURRENT_RESOLVED_CONFIG_SECRET_SUFFIXES,
   ),
@@ -144,19 +127,16 @@ const TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST = new Set<string>([
     [
       "serialized job input.diagnostics",
       "job payload sent to container.job.diagnostics",
-      "child stdin payload.job.diagnostics",
     ],
     ["workspaceSnapshotPathHashSecret"],
   ),
 ]);
 
 afterEach(() => {
-  mocks.spawn.mockReset();
   vi.restoreAllMocks();
 });
 
-it("guards hosted runner job JSON and child launch surfaces against unreviewed static secret keys", async () => {
-  const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+it("guards hosted runner job JSON and direct invocation surfaces against unreviewed static secret keys", async () => {
   expect([...TEMPORARY_REVIEWED_HOSTED_SECRET_KEYS].sort()).toEqual(
     [...REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS].sort(),
   );
@@ -179,37 +159,24 @@ it("guards hosted runner job JSON and child launch surfaces against unreviewed s
     rewritePlatformUrlsForContainer: true,
     runnerSecrets,
   });
-  const childRuntimeEnv = buildHostedRunnerChildRuntimeEnv({
-    forwardedEnv: runtime.forwardedEnv ?? {},
-  });
-  const childProcessEnv = createHostedRunnerChildProcessEnv({
-    ambientEnv: {
-      LANG: "en_US.UTF-8",
-      PATH: "/usr/bin:/bin",
-      SSL_CERT_FILE: "/etc/ssl/cert.pem",
-      TZ: "UTC",
-    },
-    forwardedEnv: childRuntimeEnv,
-    isTypeScriptChild: true,
-    launcherDirectories: createLauncherDirectories("/tmp/hosted-runner-launch"),
-  });
   const job = createWorkspaceJob(runtime, {
     workspaceSnapshotPathHashSecret: "a".repeat(64),
   });
+  const directRuntime = buildHostedExecutionJobRuntime({
+    requestedRuntime: runtime,
+    supervisorEnv: configSource,
+  });
   const serializedJobInput = JSON.stringify(job);
   const containerRequestBody = await serializeContainerRequestBody(job);
-  const childLaunch = await serializeChildStdinPayload(job);
   expect(serializedJobInput).not.toContain(configSource.HOSTED_LOG_FINGERPRINT_SECRET);
   expect(containerRequestBody).not.toContain(configSource.HOSTED_LOG_FINGERPRINT_SECRET);
-  expect(childLaunch.stdinPayload).not.toContain(configSource.HOSTED_LOG_FINGERPRINT_SECRET);
   expect(serializedJobInput).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
   expect(containerRequestBody).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
-  expect(childLaunch.stdinPayload).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
   const scannedSurfaces = {
-    "actual isolated child env": childLaunch.childEnv,
-    "direct child env": childProcessEnv,
-    "direct child env projection": childRuntimeEnv,
-    "child stdin payload": JSON.parse(childLaunch.stdinPayload) as unknown,
+    "direct runtime.forwardedEnv": directRuntime.forwardedEnv ?? {},
+    "direct runtime.platformEnv": directRuntime.platformEnv ?? {},
+    "direct runtime.resolvedConfig": directRuntime.resolvedConfig ?? {},
+    "direct runtime.userEnv": directRuntime.userEnv ?? {},
     "job payload sent to container": JSON.parse(containerRequestBody) as unknown,
     "runtime.forwardedEnv": runtime.forwardedEnv ?? {},
     "runtime.platformEnv": runtime.platformEnv ?? {},
@@ -226,8 +193,6 @@ it("guards hosted runner job JSON and child launch surfaces against unreviewed s
     expect(collectExactKeyPaths(value, "MURPH_HOSTED_CLI_BRIDGE_TOKEN")).toEqual([]);
     expect(surface.length).toBeGreaterThan(0);
   }
-  expect(Object.keys(childLaunch.childEnv).length).toBeGreaterThan(0);
-  expect(processKillSpy).toHaveBeenCalled();
 });
 
 function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
@@ -318,7 +283,10 @@ async function serializeContainerRequestBody(
             ? requestOrUrl.toString()
             : requestOrUrl.url;
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify({
+          hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+          ok: true,
+        }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
         });
@@ -351,72 +319,6 @@ async function serializeContainerRequestBody(
 
   expect(requestBody.length).toBeGreaterThan(0);
   return requestBody;
-}
-
-async function serializeChildStdinPayload(
-  job: HostedExecutionWorkspaceInvocationJobInput,
-): Promise<{
-  childEnv: Record<string, string>;
-  stdinPayload: string;
-}> {
-  const module = await import("../src/node-runner-isolated.ts");
-  let childEnv: Record<string, string> = {};
-  let stdinPayload = "";
-
-  mocks.spawn.mockImplementation((_command: unknown, _args: unknown, options: {
-    env?: Record<string, string>;
-  } = {}) => {
-    childEnv = options.env ?? {};
-    const child = new EventEmitter() as EventEmitter & {
-      kill: ReturnType<typeof vi.fn>;
-      pid: number;
-      stderr: PassThrough;
-      stdin: PassThrough;
-      stdout: PassThrough;
-    };
-    child.kill = vi.fn();
-    child.pid = 45_678;
-    child.stderr = new PassThrough();
-    child.stdin = new PassThrough();
-    child.stdout = new PassThrough();
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdin.on("data", (chunk: Buffer | string) => {
-      stdinPayload += String(chunk);
-    });
-
-    queueMicrotask(() => {
-      child.emit("message", createHostedExecutionRunnerChildResultMessage({
-        ok: true,
-        result: createRunnerResult(),
-      }));
-      child.stdout.end();
-      child.emit("close", 0);
-    });
-
-    return child;
-  });
-
-  await module.runHostedWorkspaceInvocationIsolatedDetailed({
-    job,
-  });
-
-  expect(stdinPayload.length).toBeGreaterThan(0);
-  return {
-    childEnv,
-    stdinPayload,
-  };
-}
-
-function createLauncherDirectories(
-  root: string,
-): HostedRunnerChildLauncherDirectories {
-  return {
-    cacheRoot: `${root}/cache`,
-    homeRoot: `${root}/home`,
-    huggingFaceRoot: `${root}/hf-home`,
-    tempRoot: `${root}/tmp`,
-  };
 }
 
 function createRunnerResult() {

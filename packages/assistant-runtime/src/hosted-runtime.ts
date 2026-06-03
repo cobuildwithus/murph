@@ -22,7 +22,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   normalizeHostedAssistantRuntimeConfig,
-  withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
 import {
   HOSTED_CODEX_RUNTIME_AUTHORITY_ENV,
@@ -115,10 +114,6 @@ export type {
 import type {
   RuntimeWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
-export {
-  formatHostedRuntimeChildResult,
-  parseHostedRuntimeChildResult,
-} from "./hosted-runtime/child-result.ts";
 export {
   createHostedBrowserVaultReplicaRefreshFromWorkspace,
   createHostedBrowserVaultReplicaForSourceState,
@@ -629,19 +624,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "start",
     });
     const initialMailboxImportResult = await raceHostedRuntimeCancellation(
-      withHostedProcessEnvironment(
-        {
-          envOverrides: hostedCodexRuntime.runtimeEnv,
-          operatorHomeRoot: restored.operatorHomeRoot,
-          vaultRoot: restored.vaultRoot,
-        },
-        async () =>
-          importHostedInitialMailboxForWorkspaceRunner({
-            checkpointRequestBuilder,
-            runnerInput: baseRunnerInput,
-            requestId,
-          }),
-      ),
+      importHostedInitialMailboxForWorkspaceRunner({
+        checkpointRequestBuilder,
+        runnerInput: baseRunnerInput,
+        requestId,
+      }),
       runtimeAbortController.signal,
     );
     const initialMailboxImport = initialMailboxImportResult.result;
@@ -845,31 +832,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         const passResult = await raceHostedRuntimeCancellation(
-          withHostedProcessEnvironment(
-            {
-              envOverrides: runtimeEnv,
-              operatorHomeRoot: restored.operatorHomeRoot,
-              vaultRoot: restored.vaultRoot,
-            },
-            async () =>
-              runHostedWorkspaceUntilIdleOrBudget({
-                ...baseRunnerInput,
-                initialMailboxImport: passInput.initialMailboxImport,
-                requestId: passInput.requestId,
-                runAssistantPhase: (phaseInput) =>
-                  (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                    ...phaseInput,
-                    request: input.request,
-                    restored,
-                    runtime: foregroundRuntime,
-                    runtimeEnv,
-                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                    suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                    signal: runtimeAbortController.signal,
-                  }),
-                workspace: passInput.workspace,
+          runHostedWorkspaceUntilIdleOrBudget({
+            ...baseRunnerInput,
+            initialMailboxImport: passInput.initialMailboxImport,
+            requestId: passInput.requestId,
+            runAssistantPhase: (phaseInput) =>
+              (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                ...phaseInput,
+                request: input.request,
+                restored,
+                runtime: foregroundRuntime,
+                runtimeEnv,
+                stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
+                signal: runtimeAbortController.signal,
               }),
-          ),
+            workspace: passInput.workspace,
+          }),
           runtimeAbortController.signal,
         );
         emitPhaseLog({

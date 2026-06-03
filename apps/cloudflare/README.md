@@ -37,11 +37,11 @@ Internal control routes:
 
 The supported worker HTTP surface stops at those narrow control routes, the deploy smoke callback, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
-The runner container sends child-runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Mapbox, Linq, Telegram, and WhatsApp credentials stay in Worker env, while the child container receives sentinel placeholder values for those keys. The Worker fails closed for known provider hosts unless the request matches the sentinel credential contract, validates the runtime write fence before mutating provider-effect secret injection, constrains Mapbox to read-only GET allowlisted path families, injects the real provider credential only into the upstream request, and strips runtime authority headers before that upstream request leaves Cloudflare. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata.
-The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and the isolated child preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception while still scrubbing operator-only process-control env and user-supplied proxy overrides.
+The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Mapbox, Linq, Telegram, and WhatsApp credentials stay in Worker env, while the direct runtime receives sentinel placeholder values for those keys. The Worker fails closed for known provider hosts unless the request matches the sentinel credential contract, validates the runtime write fence before mutating provider-effect secret injection, constrains Mapbox to read-only GET allowlisted path families, injects the real provider credential only into the upstream request, and strips runtime authority headers before that upstream request leaves Cloudflare. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata.
+The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.
 
-Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into the child container env.
+Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into direct runtime env.
 
 ## Storage Contract
 
@@ -128,33 +128,36 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`, but the child runner receives only an injected-credential placeholder; host Codex bridge/proxy env is not accepted
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`, but the hosted runtime receives only an injected-credential placeholder; host Codex bridge/proxy env is not accepted
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
-  secret. It must not be forwarded into the child runtime env; usage
+  secret. It must not be forwarded into the hosted runtime env; usage
   attribution is added at the Worker/web-control boundary when configured.
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
-- opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the child container by sentinel placeholders, while native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
+- opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the hosted runtime by sentinel placeholders, while native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
 
 When hosted email sender identity is configured, deploy automation renders an environment-specific native `HOSTED_EMAIL` send binding and constrains it with `allowed_sender_addresses` so outbound sender selection remains config-owned.
 
-The runtime always includes the minimal `assistant` env profile. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Cloudflare owns the configured profile string, runner-secret allowlisting, native parser toolchain binding inside the container image, and container transport rewrites such as local loopback host adaptation. The profile key sets and canonical hosted runtime launch spec are built by `@murphai/assistant-runtime`, so local and Cloudflare execution pass the same semantic runtime manifest shape. Hosted device-sync runtime config is derived into `runtime.resolvedConfig`, so it stays outside the child-env profile surface.
+The runtime always includes the minimal `assistant` env profile. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Cloudflare owns the configured profile string, runner-secret allowlisting, native parser toolchain binding inside the container image, and container transport rewrites such as local loopback host adaptation. The profile key sets and canonical hosted runtime launch spec are built by `@murphai/assistant-runtime`, so local and Cloudflare execution pass the same semantic runtime manifest shape. Hosted device-sync runtime config is derived into `runtime.resolvedConfig`, so it stays outside the runtime-env profile surface.
 
-Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the child process reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
+Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the hosted runtime reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
 
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
 invocations keep the same Durable Object write fence while the runtime waits for
 `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or the
-write-fence deadline. If local runtime state is dirty, the child checkpoints
+write-fence deadline. If local runtime state is dirty, direct invocation checkpoints
 with reason `idle_shutdown` before returning success. When Cloudflare reports
 the container `sleepAfter` lifecycle expiry, the container only yields to an
 active foreground operation or tears down the warm shell.
-Each invocation still runs through an isolated child process with fresh
-invocation-local cache/temp roots, but child-to-worker effects use internal
-virtual hosts and write-fence headers instead of per-invocation
-outbound proxy tokens or dynamically installed outbound handlers.
+Each invocation runs in-process through `packages/assistant-runtime` with
+per-user warm workspace roots and invocation-local cache/temp roots. Runtime
+effects use internal virtual hosts and write-fence headers instead of
+per-invocation outbound proxy tokens or dynamically installed outbound
+handlers. After each request, the container verifies process cleanup by
+snapshotting `/proc`, killing unexpected descendant or same-user orphan
+processes, and poisoning/exiting the warm shell if cleanup cannot be proven.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
 deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle

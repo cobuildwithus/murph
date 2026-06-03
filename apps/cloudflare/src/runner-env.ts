@@ -7,7 +7,6 @@ import {
   HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
 import {
-  buildHostedRuntimeChildEnv,
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   readHostedRuntimeCommitTimeoutConfigValue,
@@ -63,21 +62,6 @@ export {
   buildHostedRunnerContainerEnv,
   filterHostedRunnerSecrets,
 };
-
-export function buildHostedRunnerChildRuntimeEnv(input: {
-  ambientSource?: Readonly<Record<string, unknown>>;
-  forwardedEnv?: Readonly<Record<string, string>>;
-} = {}): Record<string, string> {
-  if (input.forwardedEnv) {
-    return buildHostedRuntimeChildEnv({
-      forwardedEnv: input.forwardedEnv,
-    });
-  }
-
-  return buildHostedRuntimeChildEnv({
-    forwardedEnv: buildHostedRunnerAmbientEnv(input.ambientSource ?? process.env),
-  });
-}
 
 export function buildHostedRunnerPlatformEnv(
   source: Readonly<Record<string, unknown>>,

@@ -1154,7 +1154,6 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const mailboxPort = createMailboxPort({ events, items });
     const imported: Array<{ id: string; route: string }> = [];
-    const ambientHome = process.env.HOME;
 
     try {
       const ensureHostedInboxSidecarReadyImpl =
@@ -1197,8 +1196,6 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem(item) {
-            assert.equal(process.env.VAULT, path.resolve(vaultRoot));
-            assert.notEqual(process.env.HOME, ambientHome);
             imported.push({
               id: item.item.id,
               route: item.route.action,
@@ -3620,7 +3617,6 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         async runAssistantPhase(input) {
           assert.equal(input.restored.vaultRoot, path.resolve(vaultRoot));
-          assert.equal(process.env.VAULT, path.resolve(vaultRoot));
           assert.equal(
             (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
             "1",

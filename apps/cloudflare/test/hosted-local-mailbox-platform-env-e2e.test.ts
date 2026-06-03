@@ -37,7 +37,7 @@ describe("hosted local mailbox platform env e2e", () => {
     scenario = null;
   }, 120_000);
 
-  it("drains encrypted activation mailbox items through the isolated child runtime", async () => {
+  it("drains encrypted activation mailbox items through the direct hosted runtime", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
     await requireScenario().runWake(buildActivationWake(userId), userId);
 

@@ -19,10 +19,6 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
     new URL('../src/hosted-runtime/context.ts', import.meta.url),
     'utf8',
   )
-  const hostedRuntimeChildResultSource = await readFile(
-    new URL('../src/hosted-runtime/child-result.ts', import.meta.url),
-    'utf8',
-  )
   const hostedAssistantEnvSource = await readFile(
     new URL('../src/hosted-assistant-env.ts', import.meta.url),
     'utf8',
@@ -32,10 +28,6 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
   assert.equal(runtimeManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(runtimeManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(runtimeManifest.dependencies?.['@murphai/assistant-core'], undefined)
-  assert.match(
-    hostedRuntimeChildResultSource,
-    /from "@murphai\/operator-config\/hosted-assistant-config"/,
-  )
   assert.match(
     hostedContextSource,
     /from "@murphai\/operator-config\/hosted-assistant-config"/,

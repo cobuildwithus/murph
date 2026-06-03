@@ -1,0 +1,161 @@
+import { readFile } from "node:fs/promises";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  clearHostedBrowserVaultWarmSourceStateHash: vi.fn(),
+  runHostedWorkspaceRuntimeJobInProcess: vi.fn(),
+}));
+
+vi.mock("@murphai/assistant-runtime", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime")>(
+    "@murphai/assistant-runtime",
+  );
+  return {
+    ...actual,
+    clearHostedBrowserVaultWarmSourceStateHash:
+      mocks.clearHostedBrowserVaultWarmSourceStateHash,
+    runHostedWorkspaceRuntimeJobInProcess:
+      mocks.runHostedWorkspaceRuntimeJobInProcess,
+  };
+});
+
+import type {
+  HostedAssistantRuntimeConfig,
+} from "@murphai/assistant-runtime";
+import {
+  HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV,
+} from "../src/runner-native-parser-toolchain.ts";
+import {
+  buildHostedExecutionJobRuntime,
+  clearHostedRunnerWarmLauncherRootsForTests,
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
+  runHostedWorkspaceInvocation,
+} from "../src/hosted-workspace-invocation.ts";
+import type {
+  HostedExecutionWorkspaceInvocationJobInput,
+} from "../src/runner-job-transport.ts";
+
+describe("runHostedWorkspaceInvocation", () => {
+  afterEach(async () => {
+    vi.clearAllMocks();
+    await clearHostedRunnerWarmLauncherRootsForTests();
+  });
+
+  it("keeps the direct invocation adapter independent from ambient env and cwd", async () => {
+    const source = await readFile(
+      new URL("../src/hosted-workspace-invocation.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).not.toMatch(/\bprocess\.(?:cwd|env)\b/u);
+    expect(source).not.toContain("node-runner");
+    expect(source).not.toContain("runner-child");
+  });
+
+  it("builds runtime config from explicit supervisor env and rebinds parser tools from that snapshot", () => {
+    const runtime = buildHostedExecutionJobRuntime({
+      requestedRuntime: {},
+      supervisorEnv: {
+        FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV]: "1",
+        NODE_ENV: "production",
+        OPENAI_API_KEY: "fixture-openai-key",
+        WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+        WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
+      },
+    });
+
+    expect(runtime.forwardedEnv).toMatchObject({
+      HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      NODE_ENV: "production",
+      OPENAI_API_KEY: "fixture-openai-key",
+    });
+    expect(runtime.parserToolchain?.tools.ffmpeg?.command).toBe(
+      "/app/test-parser-toolchain/ffmpeg",
+    );
+    expect(runtime.parserToolchain?.tools.whisper?.command).toBe(
+      "/app/test-parser-toolchain/whisper-cli",
+    );
+  });
+
+  it("clears browser-vault warm source state and invokes the package runtime in process", async () => {
+    const runtimeResult = {
+      nextWakeAt: null,
+      redactedStatus: {
+        importedCount: 0,
+      },
+      status: "idle" as const,
+    };
+    const capturedJobs: HostedExecutionWorkspaceInvocationJobInput[] = [];
+    const capturedOptionValues: Record<string, unknown>[] = [];
+    mocks.runHostedWorkspaceRuntimeJobInProcess.mockImplementation(
+      async (job: HostedExecutionWorkspaceInvocationJobInput, options: Record<string, unknown>) => {
+        capturedJobs.push(job);
+        capturedOptionValues.push(options);
+        return runtimeResult;
+      },
+    );
+    const onRuntimeWakeReady = vi.fn();
+    const job = createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+      userEnv: {
+        OPENAI_API_KEY: "fixture-user-openai-key",
+      },
+    });
+
+    await expect(runHostedWorkspaceInvocation(job, {
+      onRuntimeWakeReady,
+      supervisorEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    })).resolves.toEqual(runtimeResult);
+
+    const expectedVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(job.request.userId);
+    const capturedJob = capturedJobs[0];
+    const capturedOptions = capturedOptionValues[0];
+    if (!capturedJob || !capturedOptions) {
+      throw new Error("Expected direct invocation to call the package runtime.");
+    }
+    expect(mocks.clearHostedBrowserVaultWarmSourceStateHash).toHaveBeenCalledWith({
+      vaultRoot: expectedVaultRoot,
+    });
+    expect(capturedOptions.vaultRoot).toBe(expectedVaultRoot);
+    expect(capturedOptions.runtimeWakeSignal).toBeTruthy();
+    expect(onRuntimeWakeReady).toHaveBeenCalledTimes(1);
+    expect(onRuntimeWakeReady.mock.calls[0]?.[0]()).toBe(true);
+    expect(capturedJob.runtime?.forwardedEnv).toMatchObject({
+      HOSTED_ASSISTANT_MODEL: "gpt-job",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      NODE_ENV: "production",
+    });
+    expect(capturedJob.runtime?.parserToolchain?.tools.ffmpeg?.command).toBe(
+      "/usr/bin/ffmpeg",
+    );
+  });
+});
+
+function createWorkspaceJob(
+  runtime: HostedAssistantRuntimeConfig,
+): HostedExecutionWorkspaceInvocationJobInput {
+  return {
+    kind: "workspace-invocation",
+    request: {
+      attemptId: "attempt_direct_invocation",
+      leaseGeneration: "3",
+      reason: "nudge",
+      userId: "member_direct_invocation",
+      workspaceVersion: "9",
+    },
+    runtime,
+  };
+}

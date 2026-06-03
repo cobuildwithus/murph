@@ -27,16 +27,16 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+} from "./hosted-runtime-architecture.ts";
+import {
+  runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
+} from "./hosted-workspace-invocation.ts";
+import {
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
-import {
-  readHostedExecutionChildRuntimeDiagnosticMetadata,
-  readHostedRunnerChildFirstCompletionKind,
-  readHostedRunnerChildOutputMarkers,
-  readHostedRunnerChildRuntimePhaseMetadata,
-} from "./runner-child-diagnostics.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
@@ -112,15 +112,21 @@ const defaultHostedContainerExitScheduler = () => {
 let hostedContainerRuntimeContractsLoader:
   | Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>
   | null = null;
-let hostedContainerNodeRunnerLoader: Promise<typeof import("./node-runner.js")> | null = null;
+
+interface HostedContainerStartupConfig {
+  appRoot: string;
+  hostedRuntimeArchitectureVersion: typeof HOSTED_RUNTIME_ARCHITECTURE_VERSION;
+  runnerBundleManifestPath: string;
+  supervisorEnv: Readonly<Record<string, string | undefined>>;
+}
 
 interface HostedContainerRuntimeOptions {
   exitScheduler?: () => void;
-  loadNodeRunner?: () => Promise<typeof import("./node-runner.js")>;
   loadRuntimeContracts?:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi?: Partial<HostedContainerProcessApi>;
   processIsolation?: boolean;
+  runWorkspaceInvocation?: typeof runHostedWorkspaceInvocationDirect;
   runDirectR2PresignedPutSmoke?: (
     options: {
       byteLength: number;
@@ -139,11 +145,12 @@ interface HostedContainerRuntimeOptions {
 
 interface HostedContainerRuntimeDependencies {
   exitScheduler: () => void;
-  loadNodeRunner: () => Promise<typeof import("./node-runner.js")>;
   loadRuntimeContracts:
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi: HostedContainerProcessApi;
   processIsolation: boolean;
+  runWorkspaceInvocation: typeof runHostedWorkspaceInvocationDirect;
+  startupConfig: HostedContainerStartupConfig;
   runDirectR2PresignedPutSmoke:
     (options: {
       byteLength: number;
@@ -232,6 +239,18 @@ class HostedContainerRequestBodyTooLargeError extends RangeError {
   }
 }
 
+class HostedContainerArchitectureVersionMismatchError extends Error {
+  readonly actualVersion: string | null;
+  readonly expectedVersion: string;
+
+  constructor(input: { actualVersion: string | null; expectedVersion: string }) {
+    super("Hosted container runtime architecture version mismatch.");
+    this.name = "HostedContainerArchitectureVersionMismatchError";
+    this.actualVersion = input.actualVersion;
+    this.expectedVersion = input.expectedVersion;
+  }
+}
+
 interface HostedContainerProcessState {
   ppid: number | null;
   state: string | null;
@@ -243,12 +262,16 @@ interface HostedContainerProcessSnapshot {
   rootUid: number | null;
 }
 
+type HostedContainerCleanupStatus = "not_run" | "passed" | "failed";
+
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
   let activeHostedRunnerJobCount = 0;
+  let hostedContainerPoisoned = false;
+  let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
   let activeRuntimeWake: (() => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakePending = false;
@@ -265,11 +288,19 @@ export async function startHostedContainerEntrypoint(input: {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
 
       if (request.method === "GET" && requestUrl.pathname === "/health") {
-        const runnerBundle = await readHostedRunnerBundleManifestSummary(runtime.processApi);
+        const runnerBundle = await readHostedRunnerBundleManifestSummary(
+          runtime.processApi,
+          runtime.startupConfig.runnerBundleManifestPath,
+        );
         response.statusCode = 200;
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
+          activeJobCount: activeHostedRunnerJobCount,
+          hostedRuntimeArchitectureVersion:
+            runtime.startupConfig.hostedRuntimeArchitectureVersion,
+          lastCleanupStatus,
           ok: true,
+          poisoned: hostedContainerPoisoned,
           service: "cloudflare-hosted-runner-node",
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
@@ -477,7 +508,7 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
-        onChildReadyForRuntimeWake(sendWake) {
+        onRuntimeWakeReady(sendWake) {
           activeRuntimeWake = sendWake;
           activeRuntimeWakeAttemptId = job
             ? readHostedContainerWorkspaceAttemptId(job)
@@ -493,10 +524,16 @@ export async function startHostedContainerEntrypoint(input: {
               pendingRuntimeWakeDelivered: pendingWake ? sendWake() : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
             },
-            message: "Hosted container child reported runtime wake readiness.",
+            message: "Hosted container invocation reported runtime wake readiness.",
             phase: "wake.running",
             userId: null,
           });
+        },
+        onCleanupStatus(status) {
+          lastCleanupStatus = status;
+          if (status === "failed") {
+            hostedContainerPoisoned = true;
+          }
         },
         signal: requestAbort.signal,
       });
@@ -531,6 +568,7 @@ export async function startHostedContainerEntrypoint(input: {
         userId: null,
       });
       if (error instanceof HostedRunnerShellIsolationError) {
+        hostedContainerPoisoned = true;
         runtime.exitScheduler();
       }
       const classified = classifyRunnerJobError(error);
@@ -588,16 +626,6 @@ export async function startHostedContainerEntrypoint(input: {
     throw error;
   }
 
-  void runtime.loadNodeRunner().catch((error) => {
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      error,
-      level: "error",
-      message: "Hosted runner runtime preload failed.",
-      phase: "failed",
-    });
-  });
-
   return server;
 }
 
@@ -613,6 +641,7 @@ async function parseHostedExecutionContainerInvocationRequest(
 
   const record = value as Record<string, unknown>;
   const assistantRuntime = await runtime.loadRuntimeContracts();
+  assertHostedContainerArchitectureVersion(record.hostedRuntimeArchitectureVersion);
 
   return {
     job: parseHostedExecutionRunnerJobInput(record.job, {
@@ -811,13 +840,25 @@ function readHostedContainerWorkspaceAttemptId(
   return job.kind === "workspace-invocation" ? job.request.attemptId : null;
 }
 
+function assertHostedContainerArchitectureVersion(value: unknown): void {
+  const actualVersion = typeof value === "string" && value.trim().length > 0
+    ? value
+    : null;
+  if (actualVersion === HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
+    return;
+  }
+
+  throw new HostedContainerArchitectureVersionMismatchError({
+    actualVersion,
+    expectedVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+  });
+}
+
 function resolveHostedContainerRuntimeDependencies(
   runtime: HostedContainerRuntimeOptions | undefined,
 ): HostedContainerRuntimeDependencies {
+  const startupConfig = createHostedContainerStartupConfig();
   return {
-    loadNodeRunner: createCachedHostedContainerLoader(
-      runtime?.loadNodeRunner ?? loadHostedContainerNodeRunner,
-    ),
     loadRuntimeContracts: createCachedHostedContainerLoader(
       runtime?.loadRuntimeContracts ?? loadHostedContainerRuntimeContracts,
     ),
@@ -829,6 +870,8 @@ function resolveHostedContainerRuntimeDependencies(
       }
       : defaultHostedContainerProcessApi,
     processIsolation: runtime?.processIsolation ?? false,
+    runWorkspaceInvocation: runtime?.runWorkspaceInvocation ?? runHostedWorkspaceInvocationDirect,
+    startupConfig,
     runDirectR2PresignedPutSmoke:
       runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
     runCodexShellSmoke:
@@ -836,6 +879,17 @@ function resolveHostedContainerRuntimeDependencies(
     runOpenAiInterceptSmoke:
       runtime?.runOpenAiInterceptSmoke ?? runHostedContainerOpenAiInterceptSmoke,
   };
+}
+
+function createHostedContainerStartupConfig(): HostedContainerStartupConfig {
+  const appRoot = process.cwd();
+  const supervisorEnv = Object.freeze({ ...process.env });
+  return Object.freeze({
+    appRoot,
+    hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+    runnerBundleManifestPath: path.join(appRoot, ".murph-runner-bundle-manifest.json"),
+    supervisorEnv,
+  });
 }
 
 async function runHostedContainerDirectR2PresignedPutSmoke(input: {
@@ -1897,83 +1951,10 @@ function buildHostedContainerRunnerJobErrorMetadata(
   const rawDetails = readHostedContainerErrorDetailsRecord(error);
   if (rawDetails) {
     details.detailsKeys = Object.keys(rawDetails).sort();
-    const childProcess = readHostedContainerRecordProperty(rawDetails, "childProcess");
-    if (childProcess) {
-      details.childProcess = buildHostedContainerChildProcessMetadata(childProcess);
-    }
-    for (const [key, value] of Object.entries(
-      readHostedExecutionChildRuntimeDiagnosticMetadata(rawDetails),
-    )) {
-      details[key] = value;
-    }
     details.errorDetailPresent = hasNonEmptyHostedContainerString(rawDetails.errorDetail);
   }
 
   return Object.keys(details).length > 0 ? details : null;
-}
-
-function buildHostedContainerChildProcessMetadata(
-  childProcess: Record<string, unknown>,
-): HostedExecutionStructuredLogDetails {
-  const metadata: HostedExecutionStructuredLogDetails = {
-    abortedByParent: childProcess.abortedByParent === true,
-    abortReasonMessagePresent: hasNonEmptyHostedContainerString(childProcess.abortReasonMessage),
-    runtimeWakeReady: childProcess.runtimeWakeReady === true,
-    stderrTailPresent: hasNonEmptyHostedContainerString(childProcess.stderrTail),
-    stdoutTailPresent: hasNonEmptyHostedContainerString(childProcess.stdoutTail),
-  };
-  const exitCode = childProcess.exitCode;
-  if (typeof exitCode === "number" || exitCode === null) {
-    metadata.exitCode = exitCode;
-  }
-
-  const signal = readHostedContainerSafeSignal(childProcess.signal);
-  if (signal !== undefined) {
-    metadata.signal = signal;
-  }
-
-  const abortReasonName = readHostedContainerSafeCode(childProcess.abortReasonName);
-  if (abortReasonName) {
-    metadata.abortReasonName = abortReasonName;
-  }
-
-  const firstCompletionKind = readHostedRunnerChildFirstCompletionKind(
-    childProcess.firstCompletionKind,
-  );
-  if (firstCompletionKind) {
-    metadata.firstCompletionKind = firstCompletionKind;
-  }
-
-  const stderrTailLineCount = readHostedContainerSafeInteger(childProcess.stderrTailLineCount);
-  if (stderrTailLineCount !== null) {
-    metadata.stderrTailLineCount = stderrTailLineCount;
-  }
-
-  const stdoutTailLineCount = readHostedContainerSafeInteger(childProcess.stdoutTailLineCount);
-  if (stdoutTailLineCount !== null) {
-    metadata.stdoutTailLineCount = stdoutTailLineCount;
-  }
-
-  const stderrTailMarkers = readHostedRunnerChildOutputMarkers(
-    childProcess.stderrTailMarkers,
-  );
-  if (stderrTailMarkers) {
-    metadata.stderrTailMarkers = stderrTailMarkers;
-  }
-
-  const stdoutTailMarkers = readHostedRunnerChildOutputMarkers(
-    childProcess.stdoutTailMarkers,
-  );
-  if (stdoutTailMarkers) {
-    metadata.stdoutTailMarkers = stdoutTailMarkers;
-  }
-
-  Object.assign(
-    metadata,
-    readHostedRunnerChildRuntimePhaseMetadata(childProcess),
-  );
-
-  return metadata;
 }
 
 function readHostedContainerErrorDetailsRecord(error: unknown): Record<string, unknown> | null {
@@ -2011,20 +1992,6 @@ function readHostedContainerSafeCode(value: unknown): string | null {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized) ? normalized : null;
 }
 
-function readHostedContainerSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : null;
-}
-
-function readHostedContainerSafeSignal(value: unknown): string | null | undefined {
-  if (value === null) {
-    return null;
-  }
-
-  return readHostedContainerSafeCode(value) ?? undefined;
-}
-
 function hasHostedContainerOwnProperty(error: unknown, key: string): boolean {
   return Boolean(
     error
@@ -2041,6 +2008,18 @@ function classifyRequestDecodeError(error: unknown): {
   payload: Record<string, unknown>;
   statusCode: number;
 } {
+  if (error instanceof HostedContainerArchitectureVersionMismatchError) {
+    return {
+      payload: {
+        actualVersion: error.actualVersion,
+        code: "runtime_architecture_mismatch",
+        error: "Hosted runtime architecture mismatch.",
+        expectedVersion: error.expectedVersion,
+      },
+      statusCode: 409,
+    };
+  }
+
   if (error instanceof HostedContainerRequestBodyTooLargeError) {
     return {
       payload: {
@@ -2091,14 +2070,12 @@ function classifyRequestDecodeError(error: unknown): {
 
 async function readHostedRunnerBundleManifestSummary(
   processApi: HostedContainerProcessApi,
+  manifestPath: string,
 ): Promise<HostedRunnerBundleManifestSummary | null> {
   let raw: string;
 
   try {
-    raw = await processApi.readFile(
-      path.join(process.cwd(), ".murph-runner-bundle-manifest.json"),
-      "utf8",
-    );
+    raw = await processApi.readFile(manifestPath, "utf8");
   } catch (error) {
     if (isMissingFileError(error)) {
       return null;
@@ -2134,31 +2111,47 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
-): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
-  const nodeRunner = await runtime.loadNodeRunner();
-  return await nodeRunner.runHostedWorkspaceInvocation(input, options);
+): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
+  return await runtime.runWorkspaceInvocation(input, {
+    onRuntimeWakeReady: options?.onRuntimeWakeReady,
+    signal: options?.signal,
+    supervisorEnv: runtime.startupConfig.supervisorEnv,
+  });
 }
 
 async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
+    onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
+    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
-): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
-  const processBaseline = runtime.processIsolation
-    ? await snapshotHostedContainerProcesses(process.pid, runtime.processApi)
-    : null;
+): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
+  let processBaseline: HostedContainerProcessSnapshot | null = null;
+  if (runtime.processIsolation) {
+    try {
+      processBaseline = await snapshotHostedContainerProcesses(process.pid, runtime.processApi);
+    } catch (error) {
+      options?.onCleanupStatus?.("failed");
+      throw error;
+    }
+  }
 
   try {
     return await runHostedWorkspaceInvocation(input, runtime, options);
   } finally {
     if (processBaseline) {
-      await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);
+      try {
+        await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);
+        options?.onCleanupStatus?.("passed");
+      } catch (error) {
+        options?.onCleanupStatus?.("failed");
+        throw error;
+      }
     }
   }
 }
@@ -2279,9 +2272,4 @@ async function loadHostedContainerRuntimeContracts(): Promise<
   hostedContainerRuntimeContractsLoader ??=
     import("@murphai/assistant-runtime/hosted-runtime-contracts");
   return await hostedContainerRuntimeContractsLoader;
-}
-
-async function loadHostedContainerNodeRunner(): Promise<typeof import("./node-runner.js")> {
-  hostedContainerNodeRunnerLoader ??= import("./node-runner.js");
-  return await hostedContainerNodeRunnerLoader;
 }

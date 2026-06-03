@@ -30,44 +30,6 @@ export interface HostedExecutionRunnerJobParsers {
   parseWorkspaceJobInput(value: unknown): HostedAssistantWorkspaceRuntimeJobInput;
 }
 
-export type HostedExecutionRunnerChildResult =
-  | {
-      error?: never;
-      ok: true;
-      result: HostedExecutionRunnerJobResult;
-    }
-  | {
-      error: {
-        code?: string | null;
-        details?: Record<string, unknown> | null;
-        message: string;
-        name?: string | null;
-        stack?: string | null;
-      };
-      ok: false;
-      result?: never;
-    };
-
-export const HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE =
-  "murph.hosted-execution.runner-child-result.v1";
-export const HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE =
-  "murph.hosted-execution.runner-child-runtime-wake-ready.v1";
-export const HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE =
-  "murph.hosted-execution.runner-child-runtime-wake.v1";
-
-export interface HostedExecutionRunnerChildResultMessage {
-  result: HostedExecutionRunnerChildResult;
-  type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE;
-}
-
-export interface HostedExecutionRunnerChildRuntimeWakeReadyMessage {
-  type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE;
-}
-
-export interface HostedExecutionRunnerChildRuntimeWakeMessage {
-  type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE;
-}
-
 export function parseHostedExecutionRunnerJobInput(
   value: unknown,
   parsers: HostedExecutionRunnerJobParsers = {
@@ -102,58 +64,6 @@ export function assertHostedExecutionRunnerJobResult(
   _job: HostedExecutionRunnerJobInput,
 ): HostedExecutionRunnerJobResult {
   return parseHostedWorkspaceInvocationResult(value);
-}
-
-export function createHostedExecutionRunnerChildResultMessage(
-  payload: HostedExecutionRunnerChildResult,
-): HostedExecutionRunnerChildResultMessage {
-  return {
-    result: payload,
-    type: HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE,
-  };
-}
-
-export function createHostedExecutionRunnerChildRuntimeWakeReadyMessage(): HostedExecutionRunnerChildRuntimeWakeReadyMessage {
-  return {
-    type: HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE,
-  };
-}
-
-export function createHostedExecutionRunnerChildRuntimeWakeMessage(): HostedExecutionRunnerChildRuntimeWakeMessage {
-  return {
-    type: HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE,
-  };
-}
-
-export function isHostedExecutionRunnerChildRuntimeWakeReadyMessage(
-  value: unknown,
-): value is HostedExecutionRunnerChildRuntimeWakeReadyMessage {
-  return isHostedExecutionRunnerChildMessageOfType(
-    value,
-    HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE,
-  );
-}
-
-export function isHostedExecutionRunnerChildRuntimeWakeMessage(
-  value: unknown,
-): value is HostedExecutionRunnerChildRuntimeWakeMessage {
-  return isHostedExecutionRunnerChildMessageOfType(
-    value,
-    HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE,
-  );
-}
-
-export function parseHostedExecutionRunnerChildResultMessage(
-  value: unknown,
-): HostedExecutionRunnerChildResult {
-  const record = requireRecord(value, "Hosted execution runner child IPC message");
-  if (record.type !== HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE) {
-    throw new TypeError(
-      `Hosted execution runner child IPC message.type must be ${HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE}.`,
-    );
-  }
-
-  return parseHostedExecutionRunnerChildResultPayload(record.result);
 }
 
 function requireHostedExecutionWorkspaceJobKind(
@@ -191,84 +101,12 @@ function parseHostedExecutionWorkspaceInvocationDiagnostics(
   };
 }
 
-function isHostedExecutionRunnerChildMessageOfType(
-  value: unknown,
-  type: string,
-): boolean {
-  return (
-    value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Reflect.get(value, "type") === type
-  );
-}
-
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
-}
-
-function parseHostedExecutionRunnerChildResultPayload(
-  value: unknown,
-): HostedExecutionRunnerChildResult {
-  const record = requireRecord(value, "Hosted execution runner child result");
-  if (typeof record.ok !== "boolean") {
-    throw new TypeError("Hosted execution runner child result.ok must be a boolean.");
-  }
-
-  if (record.ok) {
-    return {
-      ok: true,
-      result: record.result as HostedExecutionRunnerJobResult,
-    };
-  }
-
-  return {
-    ok: false,
-    error: parseHostedExecutionRunnerChildError(record.error),
-  };
-}
-
-function parseHostedExecutionRunnerChildError(
-  value: unknown,
-): Extract<HostedExecutionRunnerChildResult, { ok: false }>["error"] {
-  const record = requireRecord(value, "Hosted execution runner child error");
-  if (typeof record.message !== "string" || record.message.length === 0) {
-    throw new TypeError("Hosted execution runner child error.message must be a non-empty string.");
-  }
-
-  return {
-    ...(record.code === undefined ? {} : { code: requireOptionalString(record.code, "code") }),
-    ...(record.details === undefined
-      ? {}
-      : { details: requireOptionalRecord(record.details, "details") }),
-    message: record.message,
-    ...(record.name === undefined ? {} : { name: requireOptionalString(record.name, "name") }),
-    ...(record.stack === undefined ? {} : { stack: requireOptionalString(record.stack, "stack") }),
-  };
-}
-
-function requireOptionalRecord(value: unknown, field: string): Record<string, unknown> | null {
-  if (value === null) {
-    return null;
-  }
-
-  return requireRecord(value, `Hosted execution runner child error.${field}`);
-}
-
-function requireOptionalString(value: unknown, field: string): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError(`Hosted execution runner child error.${field} must be a string or null.`);
-  }
-
-  return value;
 }
 
 function requireOptionalDerivedDiagnosticsKey(value: unknown, label: string): string | null {

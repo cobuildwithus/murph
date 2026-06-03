@@ -51,7 +51,7 @@ function createCloudflareNodeProject(name: string, fileNames: readonly string[])
       alias: cloudflareNodeAliases,
     },
     test: {
-      ...(name === "cloudflare-node-runner"
+      ...(name === "cloudflare-runner"
         ? murphVitestLongRunningTimeouts
         : murphVitestNoTimeouts),
       name,
@@ -66,10 +66,9 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
   path.join(cloudflareDir, "test"),
   [
     {
-      name: "cloudflare-node-runner",
+      name: "cloudflare-runner",
       patterns: [
         "gateway-store.test.ts",
-        "node-runner*.test.ts",
         "runner-*.test.ts",
         "runner-secrets.test.ts",
         "user-runner.test.ts",

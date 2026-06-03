@@ -11,7 +11,6 @@ import {
 
 import {
   buildHostedRunnerAmbientEnv,
-  buildHostedRunnerChildRuntimeEnv,
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
@@ -777,7 +776,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.platformEnv).toBeUndefined();
   });
 
-  it("keeps platform private JWKs out of hosted runtime job, child, forwarded, and user env", () => {
+  it("keeps platform private JWKs out of hosted runtime job, forwarded, and user env", () => {
     const configSource = {
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
@@ -796,13 +795,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
           "user-callback-private-jwk",
       },
     });
-    const childEnv = buildHostedRunnerChildRuntimeEnv({
-      forwardedEnv: runtime.forwardedEnv ?? {},
-    });
-
     expect(runtime.platformEnv).toBeUndefined();
-    expect(childEnv.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
-    expect(childEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(runtime.forwardedEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
     expect(runtime.forwardedEnv?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(runtime.userEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
@@ -1015,45 +1008,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   });
 });
 
-describe("buildHostedRunnerChildRuntimeEnv", () => {
-  it("falls back to the ambient runner allowlist instead of forwarding operator-only secrets", () => {
-    expect(buildHostedRunnerChildRuntimeEnv({
-      ambientSource: {
-        ...REQUIRED_OPENAI_PROVIDER_ENV,
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "fixture-openai-key",
-      },
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-      OPENAI_API_KEY: "fixture-openai-key",
-    });
-  });
-
-  it("preserves the explicit forwarded child runtime env when provided", () => {
-    expect(buildHostedRunnerChildRuntimeEnv({
-      forwardedEnv: {
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
-        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
-        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
-        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-        HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
-        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "fixture-openai-key",
-        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
-      },
-    })).toEqual({
-      OPENAI_API_KEY: "fixture-openai-key",
-    });
-  });
-});
-
 describe("buildHostedRuntimeResolvedConfig", () => {
   it("derives explicit channel capabilities from the forwarded runner env", () => {
     expect(buildHostedRuntimeResolvedConfig({
@@ -1142,7 +1096,7 @@ describe("buildHostedRuntimeResolvedConfig", () => {
 });
 
 describe("hosted deploy automation device-sync surface", () => {
-  it("keeps device-sync outside the default child env profiles while reusing shared provider env key lists", () => {
+  it("keeps device-sync outside the default runner env profiles while reusing shared provider env key lists", () => {
     const deployEnv = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",

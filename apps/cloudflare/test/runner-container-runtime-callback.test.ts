@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   RunnerContainer,
 } from "../src/runner-container.js";
+import {
+  HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+} from "../src/hosted-runtime-architecture.js";
 import type {
   HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.js";
@@ -14,7 +17,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
     const destroy = vi.fn(async () => {});
     const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
         });
@@ -54,6 +57,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
 
     const requestBody = readPostedRunnerBody(containerFetch, 0);
     expect(requestBody).toMatchObject({
+      hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
       job: {
         kind: "workspace-invocation",
       },
@@ -67,7 +71,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
     const destroy = vi.fn(async () => {});
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
         });
@@ -139,6 +143,13 @@ function createRunnerResult(overrides: Record<string, unknown> = {}) {
     },
     status: "idle",
     ...overrides,
+  };
+}
+
+function createRunnerHealthResult(): Record<string, unknown> {
+  return {
+    hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+    ok: true,
   };
 }
 

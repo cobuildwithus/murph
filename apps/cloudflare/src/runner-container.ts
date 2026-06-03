@@ -19,6 +19,9 @@ import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
 import {
+  HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+} from "./hosted-runtime-architecture.ts";
+import {
   writeRunnerRuntimeWriteFenceHeaders,
   type RunnerRuntimeWriteFenceToken,
 } from "./runner-outbound/write-fence.ts";
@@ -30,12 +33,6 @@ import {
   type HostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
-import {
-  readHostedExecutionChildRuntimeDiagnosticMetadata,
-  readHostedRunnerChildFirstCompletionKind,
-  readHostedRunnerChildOutputMarkers,
-  readHostedRunnerChildRuntimePhaseMetadata,
-} from "./runner-child-diagnostics.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -73,6 +70,28 @@ const RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE =
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+
+class HostedRunnerContainerArchitectureMismatchError extends Error {
+  readonly actualVersion: string | null;
+  readonly expectedVersion: string;
+
+  constructor(input: { actualVersion: string | null; expectedVersion: string }) {
+    super("Hosted runner container architecture version mismatch.");
+    this.name = "HostedRunnerContainerArchitectureMismatchError";
+    this.actualVersion = input.actualVersion;
+    this.expectedVersion = input.expectedVersion;
+  }
+}
+
+class HostedRunnerContainerPoisonedError extends Error {
+  readonly lastCleanupStatus: string | null;
+
+  constructor(input: { lastCleanupStatus: string | null }) {
+    super("Hosted runner container is poisoned.");
+    this.name = "HostedRunnerContainerPoisonedError";
+    this.lastCleanupStatus = input.lastCleanupStatus;
+  }
+}
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -524,13 +543,32 @@ export class RunnerContainer extends Container {
           },
         );
         const payload = await response.json() as {
+          hostedRuntimeArchitectureVersion?: unknown;
+          lastCleanupStatus?: unknown;
           ok?: unknown;
+          poisoned?: unknown;
           runnerBundle?: unknown;
           service?: unknown;
         };
 
         if (!response.ok || payload.ok !== true) {
           throw new Error(`Hosted runner container smoke health failed with HTTP ${response.status}.`);
+        }
+        const architectureVersion = typeof payload.hostedRuntimeArchitectureVersion === "string"
+          ? payload.hostedRuntimeArchitectureVersion
+          : null;
+        if (architectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
+          throw new HostedRunnerContainerArchitectureMismatchError({
+            actualVersion: architectureVersion,
+            expectedVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+          });
+        }
+        if (payload.poisoned === true) {
+          throw new HostedRunnerContainerPoisonedError({
+            lastCleanupStatus: typeof payload.lastCleanupStatus === "string"
+              ? payload.lastCleanupStatus
+              : null,
+          });
         }
 
         const openAiIntercept = input.openAiIntercept === true
@@ -845,6 +883,7 @@ export class RunnerContainer extends Container {
         RUNNER_EXECUTE_URL,
         {
           body: JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
             job: input.job,
           }),
           headers: {
@@ -1560,17 +1599,6 @@ function buildHostedRunnerContainerPayloadDetailsMetadata(
     metadata.errorStatus = errorStatus;
   }
 
-  const childProcess = readHostedRunnerContainerRecordProperty(record, "childProcess");
-  if (childProcess) {
-    metadata.childProcess = buildHostedRunnerContainerChildProcessMetadata(childProcess);
-  }
-
-  for (const [key, value] of Object.entries(
-    readHostedExecutionChildRuntimeDiagnosticMetadata(record),
-  )) {
-    metadata[key] = value;
-  }
-
   for (const [key, value] of Object.entries(readHostedRunnerContainerResponseMetadata(record))) {
     metadata[key] = value;
   }
@@ -1602,86 +1630,6 @@ function readHostedRunnerContainerResponseMetadata(
   return metadata;
 }
 
-function buildHostedRunnerContainerChildProcessMetadata(
-  childProcess: Record<string, unknown>,
-): HostedExecutionStructuredLogDetails {
-  const metadata: HostedExecutionStructuredLogDetails = {
-    abortedByParent: childProcess.abortedByParent === true,
-    abortReasonMessagePresent: childProcess.abortReasonMessagePresent === true
-      || hasNonEmptyHostedRunnerContainerString(childProcess.abortReasonMessage),
-    runtimeWakeReady: childProcess.runtimeWakeReady === true,
-    stderrTailPresent: childProcess.stderrTailPresent === true
-      || hasNonEmptyHostedRunnerContainerString(childProcess.stderrTail),
-    stdoutTailPresent: childProcess.stdoutTailPresent === true
-      || hasNonEmptyHostedRunnerContainerString(childProcess.stdoutTail),
-  };
-  const exitCode = childProcess.exitCode;
-  if (typeof exitCode === "number" || exitCode === null) {
-    metadata.exitCode = exitCode;
-  }
-
-  const signal = readHostedRunnerContainerSafeNullableCode(childProcess.signal);
-  if (signal !== undefined) {
-    metadata.signal = signal;
-  }
-
-  const abortReasonName = readHostedRunnerContainerSafeCode(childProcess.abortReasonName);
-  if (abortReasonName) {
-    metadata.abortReasonName = abortReasonName;
-  }
-
-  const firstCompletionKind = readHostedRunnerChildFirstCompletionKind(
-    childProcess.firstCompletionKind,
-  );
-  if (firstCompletionKind) {
-    metadata.firstCompletionKind = firstCompletionKind;
-  }
-
-  const stderrTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stderrTailLineCount);
-  if (stderrTailLineCount !== null) {
-    metadata.stderrTailLineCount = stderrTailLineCount;
-  }
-
-  const stdoutTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stdoutTailLineCount);
-  if (stdoutTailLineCount !== null) {
-    metadata.stdoutTailLineCount = stdoutTailLineCount;
-  }
-
-  const stderrTailMarkers = readHostedRunnerChildOutputMarkers(
-    childProcess.stderrTailMarkers,
-  );
-  if (stderrTailMarkers) {
-    metadata.stderrTailMarkers = stderrTailMarkers;
-  }
-
-  const stdoutTailMarkers = readHostedRunnerChildOutputMarkers(
-    childProcess.stdoutTailMarkers,
-  );
-  if (stdoutTailMarkers) {
-    metadata.stdoutTailMarkers = stdoutTailMarkers;
-  }
-  Object.assign(
-    metadata,
-    readHostedRunnerChildRuntimePhaseMetadata(childProcess),
-  );
-  Object.assign(
-    metadata,
-    readHostedExecutionChildRuntimeDiagnosticMetadata(childProcess),
-  );
-
-  return metadata;
-}
-
-function readHostedRunnerContainerRecordProperty(
-  record: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> | null {
-  const value = record[key];
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
 function readHostedRunnerContainerSafePayloadMessage(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -1699,14 +1647,6 @@ function summarizeHostedRunnerContainerErrorCode(code: string | null): string | 
     : summarizeHostedExecutionErrorCode(code);
 }
 
-function readHostedRunnerContainerSafeNullableCode(value: unknown): string | null | undefined {
-  if (value === null) {
-    return null;
-  }
-
-  return readHostedRunnerContainerSafeCode(value) ?? undefined;
-}
-
 function readHostedRunnerContainerSafeCode(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -1714,12 +1654,6 @@ function readHostedRunnerContainerSafeCode(value: unknown): string | null {
 
   const normalized = value.trim();
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized) ? normalized : null;
-}
-
-function readHostedRunnerContainerSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : null;
 }
 
 function readHostedRunnerContainerSafeContentType(value: unknown): string | null {
@@ -2105,13 +2039,84 @@ async function assertRunnerHealthy(
   );
 
   const responseOk = response.ok;
-  await drainRunnerContainerMetadataResponseBody(response, {
+  const payload = await readRunnerContainerMetadataJsonObject(response, {
     signal: abortSignal,
   });
 
   if (!responseOk) {
     throw new Error(`Hosted runner container health check returned HTTP ${response.status}.`);
   }
+  const actualVersion = typeof payload.hostedRuntimeArchitectureVersion === "string"
+    ? payload.hostedRuntimeArchitectureVersion
+    : null;
+  if (actualVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
+    throw new HostedRunnerContainerArchitectureMismatchError({
+      actualVersion,
+      expectedVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+    });
+  }
+  if (payload.poisoned === true) {
+    throw new HostedRunnerContainerPoisonedError({
+      lastCleanupStatus: typeof payload.lastCleanupStatus === "string"
+        ? payload.lastCleanupStatus
+        : null,
+    });
+  }
+}
+
+async function readRunnerContainerMetadataJsonObject(
+  response: Response,
+  options: { signal?: AbortSignal } = {},
+): Promise<Record<string, unknown>> {
+  const text = await readRunnerContainerMetadataResponseText(response, options);
+  if (!text.trim()) {
+    return {};
+  }
+
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("Runner container metadata response body must be a JSON object.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function readRunnerContainerMetadataResponseText(
+  response: Response,
+  options: { signal?: AbortSignal } = {},
+): Promise<string> {
+  const body = response.body;
+  if (body === null || response.bodyUsed) {
+    return "";
+  }
+
+  const chunks: Uint8Array[] = [];
+  let bytesRead = 0;
+  const drainTimeoutSignal = AbortSignal.timeout(RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS);
+  const drainSignal = options.signal
+    ? combineRunnerContainerAbortSignals(options.signal, drainTimeoutSignal)
+    : drainTimeoutSignal;
+  await body.pipeTo(new WritableStream<Uint8Array>({
+    write(chunk) {
+      bytesRead += chunk.byteLength;
+      if (bytesRead > RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES) {
+        throw new Error("Runner container metadata response body exceeded the drain limit.");
+      }
+      chunks.push(chunk);
+    },
+  }), {
+    signal: drainSignal,
+  });
+  return new TextDecoder().decode(concatRunnerContainerMetadataChunks(chunks, bytesRead));
+}
+
+function concatRunnerContainerMetadataChunks(chunks: readonly Uint8Array[], byteLength: number): Uint8Array {
+  const output = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
 }
 
 async function drainRunnerContainerMetadataResponseBody(
@@ -2305,157 +2310,9 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
     return {};
   }
 
-  const result: HostedExecutionStructuredLogDetails = {
+  return {
     runnerResponseDetailsKeys: Object.keys(details).sort(),
   };
-  for (const [key, value] of Object.entries(
-    buildRunnerChildRuntimeDiagnosticMetadata(details),
-  )) {
-    result[key] = value;
-  }
-
-  const childProcess = details.childProcess;
-  if (!isStructuredLogDetailsRecord(childProcess)) {
-    return result;
-  }
-
-  const exitCode = childProcess.exitCode;
-  const signal = childProcess.signal;
-  const abortReasonName = childProcess.abortReasonName;
-  const firstCompletionKind = readHostedRunnerChildFirstCompletionKind(
-    childProcess.firstCompletionKind,
-  );
-
-  const metadata: HostedExecutionStructuredLogDetails = {
-    ...result,
-    runnerChildAbortedByParent: childProcess.abortedByParent === true,
-    runnerChildRuntimeWakeReady: childProcess.runtimeWakeReady === true,
-    ...(typeof exitCode === "number" || exitCode === null ? { runnerChildExitCode: exitCode } : {}),
-    ...(typeof signal === "string" || signal === null ? { runnerChildSignal: signal } : {}),
-    ...(typeof abortReasonName === "string" && abortReasonName.trim().length > 0
-      ? { runnerChildAbortReasonName: abortReasonName }
-      : {}),
-    ...(firstCompletionKind ? { runnerChildFirstCompletionKind: firstCompletionKind } : {}),
-    runnerChildAbortReasonMessagePresent: childProcess.abortReasonMessagePresent === true
-      || hasNonEmptyStringProperty(childProcess, "abortReasonMessage"),
-    runnerChildStderrTailPresent: childProcess.stderrTailPresent === true
-      || hasNonEmptyStringProperty(childProcess, "stderrTail"),
-    runnerChildStdoutTailPresent: childProcess.stdoutTailPresent === true
-      || hasNonEmptyStringProperty(childProcess, "stdoutTail"),
-  };
-  const stderrTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stderrTailLineCount);
-  if (stderrTailLineCount !== null) {
-    metadata.runnerChildStderrTailLineCount = stderrTailLineCount;
-  }
-  const stdoutTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stdoutTailLineCount);
-  if (stdoutTailLineCount !== null) {
-    metadata.runnerChildStdoutTailLineCount = stdoutTailLineCount;
-  }
-  const stderrTailMarkers = readHostedRunnerChildOutputMarkers(
-    childProcess.stderrTailMarkers,
-  );
-  if (stderrTailMarkers) {
-    metadata.runnerChildStderrTailMarkers = stderrTailMarkers;
-  }
-  const stdoutTailMarkers = readHostedRunnerChildOutputMarkers(
-    childProcess.stdoutTailMarkers,
-  );
-  if (stdoutTailMarkers) {
-    metadata.runnerChildStdoutTailMarkers = stdoutTailMarkers;
-  }
-  for (const [key, value] of Object.entries(
-    prefixRunnerContainerRuntimePhaseMetadata(
-      readHostedRunnerChildRuntimePhaseMetadata(childProcess),
-    ),
-  )) {
-    metadata[key] = value;
-  }
-  for (const [key, value] of Object.entries(
-    buildRunnerChildRuntimeDiagnosticMetadata(childProcess),
-  )) {
-    if (metadata[key] === undefined) {
-      metadata[key] = value;
-    }
-  }
-
-  return metadata;
-}
-
-function buildRunnerChildRuntimeDiagnosticMetadata(
-  details: HostedExecutionStructuredLogDetails,
-): HostedExecutionStructuredLogDetails {
-  const childRuntimeMetadata = readHostedExecutionChildRuntimeDiagnosticMetadata(details);
-  const result: HostedExecutionStructuredLogDetails = {};
-
-  const runtimeFields = {
-    childRuntimeBundleArchiveOperation: "runnerChildRuntimeBundleArchiveOperation",
-    childRuntimeBundleArchiveValidationCause:
-      "runnerChildRuntimeBundleArchiveValidationCause",
-    childRuntimeBundleRefKeyPresent: "runnerChildRuntimeBundleRefKeyPresent",
-    childRuntimeBundleRefPresent: "runnerChildRuntimeBundleRefPresent",
-    childRuntimeBundleRefSize: "runnerChildRuntimeBundleRefSize",
-    childRuntimeErrorCode: "runnerChildRuntimeErrorCode",
-    childRuntimeErrorMessageKind: "runnerChildRuntimeErrorMessageKind",
-    childRuntimeErrorName: "runnerChildRuntimeErrorName",
-    childRuntimeErrorStatus: "runnerChildRuntimeErrorStatus",
-    childRuntimeFailureKind: "runnerChildRuntimeFailureKind",
-    childRuntimeFetchCallerSignalAborted: "runnerChildRuntimeFetchCallerSignalAborted",
-    childRuntimeFetchCauseKind: "runnerChildRuntimeFetchCauseKind",
-    childRuntimeFetchCauseName: "runnerChildRuntimeFetchCauseName",
-    childRuntimeFetchRequestSignalAborted: "runnerChildRuntimeFetchRequestSignalAborted",
-    childRuntimeFetchTimeoutMs: "runnerChildRuntimeFetchTimeoutMs",
-    childRuntimeFetchTimeoutSignalAborted: "runnerChildRuntimeFetchTimeoutSignalAborted",
-    childRuntimeHttpOperation: "runnerChildRuntimeHttpOperation",
-    childRuntimeStage: "runnerChildRuntimeStage",
-    childRuntimeWorkspaceSnapshotRestoreStep:
-      "runnerChildRuntimeWorkspaceSnapshotRestoreStep",
-    childRuntimeWorkspaceSnapshotProcessExitCode:
-      "runnerChildRuntimeWorkspaceSnapshotProcessExitCode",
-    childRuntimeWorkspaceSnapshotProcessLabel:
-      "runnerChildRuntimeWorkspaceSnapshotProcessLabel",
-    childRuntimeWorkspaceSnapshotProcessSignal:
-      "runnerChildRuntimeWorkspaceSnapshotProcessSignal",
-    childRuntimeWorkspaceSnapshotProcessStderrBytes:
-      "runnerChildRuntimeWorkspaceSnapshotProcessStderrBytes",
-    childRuntimeWorkspaceSnapshotProcessStderrLineCount:
-      "runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount",
-    childRuntimeWorkspaceSnapshotProcessStderrMarkers:
-      "runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers",
-    childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-      "runnerChildRuntimeWorkspaceSnapshotProcessStderrErrorDetail",
-    childRuntimeWorkspaceSnapshotProcessStderrTruncated:
-      "runnerChildRuntimeWorkspaceSnapshotProcessStderrTruncated",
-  } as const;
-
-  for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {
-    const value = childRuntimeMetadata[sourceKey];
-    if (value !== undefined) {
-      result[targetKey] = value;
-    }
-  }
-
-  return result;
-}
-
-function prefixRunnerContainerRuntimePhaseMetadata(
-  metadata: HostedExecutionStructuredLogDetails,
-): HostedExecutionStructuredLogDetails {
-  const result: HostedExecutionStructuredLogDetails = {};
-  const runtimeFields = {
-    runtimeLastPhase: "runnerChildRuntimeLastPhase",
-    runtimeLastPhaseOrdinal: "runnerChildRuntimeLastPhaseOrdinal",
-    runtimeLastPhaseStatus: "runnerChildRuntimeLastPhaseStatus",
-    runtimePhaseTrace: "runnerChildRuntimePhaseTrace",
-  } as const;
-
-  for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {
-    const value = metadata[sourceKey];
-    if (value !== undefined) {
-      result[targetKey] = value;
-    }
-  }
-
-  return result;
 }
 
 function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructuredLogDetails | null {
@@ -2466,20 +2323,6 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   return sanitizeHostedExecutionStructuredLogDetails(
     (error as { details?: unknown }).details as HostedExecutionStructuredLogDetails | null | undefined,
   );
-}
-
-function isStructuredLogDetailsRecord(
-  value: HostedExecutionStructuredLogDetailValue | undefined,
-): value is HostedExecutionStructuredLogDetails {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasNonEmptyStringProperty(
-  record: HostedExecutionStructuredLogDetails,
-  key: string,
-): boolean {
-  const value = record[key];
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

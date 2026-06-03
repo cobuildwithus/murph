@@ -28,6 +28,9 @@ import {
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../src/runner-egress-intercept.ts";
+import {
+  HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+} from "../src/hosted-runtime-architecture.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
@@ -70,7 +73,7 @@ describe("RunnerContainer", () => {
       createContainerDouble({
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
-            return new Response(JSON.stringify({ ok: true }), {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
               headers: {
                 "content-type": "application/json; charset=utf-8",
               },
@@ -119,8 +122,16 @@ describe("RunnerContainer", () => {
 
     const firstBody = JSON.parse(executeCalls[0]?.[1]?.body as string);
     const secondBody = JSON.parse(executeCalls[1]?.[1]?.body as string);
-    expect(Object.keys(firstBody).sort()).toEqual(["job"]);
-    expect(Object.keys(secondBody).sort()).toEqual(["job"]);
+    expect(Object.keys(firstBody).sort()).toEqual([
+      "hostedRuntimeArchitectureVersion",
+      "job",
+    ]);
+    expect(Object.keys(secondBody).sort()).toEqual([
+      "hostedRuntimeArchitectureVersion",
+      "job",
+    ]);
+    expect(firstBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
+    expect(secondBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
   });
 
   it("posts a payloadless runtime wake to the active workspace invocation", async () => {
@@ -129,7 +140,7 @@ describe("RunnerContainer", () => {
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -193,7 +204,7 @@ describe("RunnerContainer", () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -259,7 +270,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -471,7 +482,7 @@ describe("RunnerContainer", () => {
     let workspaceRequestCount = 0;
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -533,7 +544,7 @@ describe("RunnerContainer", () => {
       }
 
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -628,7 +639,7 @@ describe("RunnerContainer", () => {
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -686,7 +697,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -753,7 +764,7 @@ describe("RunnerContainer", () => {
       const { container } = createContainerDouble({
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
-            return new Response(JSON.stringify({ ok: true }), {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
               headers: {
                 "content-type": "application/json; charset=utf-8",
               },
@@ -821,6 +832,7 @@ describe("RunnerContainer", () => {
 
         expect(url).toBe("http://container/health");
         return new Response(JSON.stringify({
+          hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
           ok: true,
           runnerBundle: {
             buildSkipped: false,
@@ -865,6 +877,7 @@ describe("RunnerContainer", () => {
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
             ok: true,
             service: "cloudflare-hosted-runner-node",
           }), {
@@ -941,6 +954,7 @@ describe("RunnerContainer", () => {
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
             ok: true,
             service: "cloudflare-hosted-runner-node",
           }), {
@@ -1077,6 +1091,7 @@ describe("RunnerContainer", () => {
     }
 
     expect(JSON.parse(executeCall[1].body)).toMatchObject({
+      hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     });
   });
 
@@ -1085,7 +1100,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -1116,7 +1131,10 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
-    expect(observedTopLevelKeys).toEqual(["job"]);
+    expect(observedTopLevelKeys).toEqual([
+      "hostedRuntimeArchitectureVersion",
+      "job",
+    ]);
   });
 
   it("uses activity expiry as fallback cleanup after warm reuse and cold-starts the next run", async () => {
@@ -1237,7 +1255,7 @@ describe("RunnerContainer", () => {
         },
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
-            return new Response(JSON.stringify({ ok: true }), {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
               headers: {
                 "content-type": "application/json; charset=utf-8",
               },
@@ -1289,7 +1307,7 @@ describe("RunnerContainer", () => {
     });
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -1349,7 +1367,7 @@ describe("RunnerContainer", () => {
     });
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -1411,7 +1429,7 @@ describe("RunnerContainer", () => {
       const hangingRunnerResponse = new Promise<Response>(() => undefined);
       const containerFetch = vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -1479,7 +1497,7 @@ describe("RunnerContainer", () => {
       const runnerResponse = createDeferred<Response>();
       const containerFetch = vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -1544,7 +1562,7 @@ describe("RunnerContainer", () => {
       const hangingRunnerResponse = new Promise<Response>(() => undefined);
       const containerFetch = vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -1659,7 +1677,7 @@ describe("RunnerContainer", () => {
   it("reuses a surviving warm shell after plain health succeeds", async () => {
     const rehydratedContainerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -1866,7 +1884,7 @@ describe("RunnerContainer", () => {
             if (healthChecks === 1) {
               vi.setSystemTime(new Date("2026-04-08T00:00:02.500Z"));
             }
-            return new Response(JSON.stringify(healthChecks === 1 ? { error: "stale shell" } : { ok: true }), {
+            return new Response(JSON.stringify(healthChecks === 1 ? { error: "stale shell" } : createRunnerHealthResult()), {
               headers: {
                 "content-type": "application/json; charset=utf-8",
               },
@@ -1910,6 +1928,60 @@ describe("RunnerContainer", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("restarts a warm shell when health reports it is poisoned", async () => {
+    let healthChecks = 0;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          healthChecks += 1;
+          return new Response(JSON.stringify(
+            healthChecks === 1
+              ? {
+                  ...createRunnerHealthResult(),
+                  lastCleanupStatus: "failed",
+                  poisoned: true,
+                }
+              : createRunnerHealthResult(),
+          ), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_restart_after_poisoned_health"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(healthChecks).toBe(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        level: "warn",
+        message: "Hosted execution container warm health check failed; restarting shell.",
+        phase: "container.starting",
+      }),
+    );
   });
 
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
@@ -1968,7 +2040,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2040,7 +2112,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2083,7 +2155,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2153,7 +2225,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2223,7 +2295,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2272,14 +2344,12 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });
 
-  it("logs child-process runner failure metadata without free-form tails", async () => {
-    const hiddenStderrTail = "hidden stderr tail";
-    const hiddenStdoutTail = "hidden stdout tail";
-    const hiddenAbortReason = "hidden abort reason";
+  it("does not promote legacy child-shaped runner response details into logs", async () => {
+    const hiddenChildDetail = "hidden child detail";
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2290,66 +2360,15 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            childRuntimeBundleArchiveOperation: "runner-output",
-            childRuntimeBundleArchiveValidationCause: "artifact_integrity",
-            childRuntimeBundleRefKeyPresent: false,
-            childRuntimeBundleRefPresent: true,
-            childRuntimeBundleRefSize: 1234,
-            childRuntimeErrorCode: "invalid_request",
-            childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
-            childRuntimeErrorName: "Error",
-            childRuntimeErrorStatus: 404,
-            childRuntimeFailureKind: "control_plane_http",
-            childRuntimeFetchCallerSignalAborted: false,
-            childRuntimeFetchCauseKind: "timeout",
-            childRuntimeFetchCauseName: "TimeoutError",
-            childRuntimeFetchRequestSignalAborted: true,
-            childRuntimeFetchTimeoutMs: 30_000,
-            childRuntimeFetchTimeoutSignalAborted: true,
-            childRuntimeHttpOperation: "workspace_read",
             childRuntimeStage: "runtime.in-process",
-            childRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
-            childRuntimeWorkspaceSnapshotProcessExitCode: 1,
-            childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
-            childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
-            childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-              "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
-            childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
-            childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
-              "unsupported_format",
-              "hidden_process_marker",
-            ],
-            childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
             childProcess: {
               abortedByParent: false,
-              abortReasonMessage: hiddenAbortReason,
-              abortReasonName: "AbortError",
+              abortReasonMessage: hiddenChildDetail,
               exitCode: 1,
-              firstCompletionKind: "close",
-              runtimeWakeReady: true,
-              signal: "SIGTERM",
-              stderrTail: hiddenStderrTail,
-              stderrTailLineCount: 2,
-              stderrTailMarkers: [
-                "module_resolution_failed",
-                "hidden_code_marker",
-              ],
-              runtimeLastPhase: "runtime",
-              runtimeLastPhaseDurationMs: 999_999,
-              runtimeLastPhaseElapsedMs: 999_999,
-              runtimeLastPhaseOrdinal: 999_999,
-              runtimeLastPhaseStatus: "fail",
-              runtimePhaseTrace: [
-                "workspace.read:start",
-                "runtime:fail",
-                "hidden.phase:start",
-              ],
-              stdoutTail: hiddenStdoutTail,
-              stdoutTailLineCount: 1,
-              stdoutTailMarkers: ["hosted_child_prepared"],
+              stderrTail: hiddenChildDetail,
+              stdoutTail: hiddenChildDetail,
             },
-            errorDetail:
-              "Hosted assistant runtime child exited without emitting a result payload.",
+            errorDetail: hiddenChildDetail,
           },
           error: "Hosted execution runtime failed.",
           errorName: "Error",
@@ -2365,7 +2384,7 @@ describe("RunnerContainer", () => {
     const thrown = await container.invoke({
       job: {
         kind: "workspace-invocation",
-        request: createRunnerRequest("evt_child_process_diagnostics"),
+        request: createRunnerRequest("evt_legacy_child_response_details"),
       },
       timeoutMs: 10_000,
       userId: "member_123",
@@ -2374,53 +2393,6 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        childRuntimeBundleArchiveOperation: "runner-output",
-        childRuntimeBundleArchiveValidationCause: "artifact_integrity",
-        childRuntimeBundleRefKeyPresent: false,
-        childRuntimeBundleRefPresent: true,
-        childRuntimeBundleRefSize: 1234,
-        childRuntimeErrorCode: "invalid_request",
-        childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
-        childRuntimeErrorName: "Error",
-        childRuntimeErrorStatus: 404,
-        childRuntimeFailureKind: "control_plane_http",
-        childRuntimeFetchCallerSignalAborted: false,
-        childRuntimeFetchCauseKind: "timeout",
-        childRuntimeFetchCauseName: "TimeoutError",
-        childRuntimeFetchRequestSignalAborted: true,
-        childRuntimeFetchTimeoutMs: 30_000,
-        childRuntimeFetchTimeoutSignalAborted: true,
-        childRuntimeHttpOperation: "workspace_read",
-        childRuntimeStage: "runtime.in-process",
-        childRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
-        childRuntimeWorkspaceSnapshotProcessExitCode: 1,
-        childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
-        childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
-        childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-          "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
-        childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
-        childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
-          "unsupported_format",
-        ],
-        childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
-        childProcess: {
-          abortedByParent: false,
-          abortReasonName: "AbortError",
-          abortReasonMessagePresent: true,
-          exitCode: 1,
-          firstCompletionKind: "close",
-          runtimeLastPhase: "runtime",
-          runtimeLastPhaseStatus: "fail",
-          runtimePhaseTrace: ["workspace.read:start", "runtime:fail"],
-          runtimeWakeReady: true,
-          signal: "SIGTERM",
-          stderrTailLineCount: 2,
-          stderrTailMarkers: ["module_resolution_failed"],
-          stderrTailPresent: true,
-          stdoutTailLineCount: 1,
-          stdoutTailMarkers: ["hosted_child_prepared"],
-          stdoutTailPresent: true,
-        },
         errorDetailPresent: true,
         payloadDetailsPresent: true,
       },
@@ -2428,12 +2400,10 @@ describe("RunnerContainer", () => {
       statusCode: 500,
     });
     const serializedThrown = JSON.stringify(thrown);
-    expect(serializedThrown).not.toContain(hiddenAbortReason);
-    expect(serializedThrown).not.toContain(hiddenStderrTail);
-    expect(serializedThrown).not.toContain(hiddenStdoutTail);
-    expect(serializedThrown).not.toContain("hidden_code_marker");
-    expect(serializedThrown).not.toContain("hidden.phase");
-    expect(serializedThrown).not.toContain("999999");
+    const thrownDetails = (thrown as { details?: Record<string, unknown> }).details;
+    expect(thrownDetails).not.toHaveProperty("childProcess");
+    expect(thrownDetails).not.toHaveProperty("childRuntimeStage");
+    expect(serializedThrown).not.toContain(hiddenChildDetail);
     const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
       .find((input) => input?.message === "Hosted execution container failed.");
@@ -2449,79 +2419,7 @@ describe("RunnerContainer", () => {
           errorMessage: "Hosted execution runtime failed.",
           errorName: "Error",
           errorStatus: 500,
-          runnerChildAbortedByParent: false,
-          runnerChildAbortReasonMessagePresent: true,
-          runnerChildAbortReasonName: "AbortError",
-          runnerChildExitCode: 1,
-          runnerChildFirstCompletionKind: "close",
-          runnerChildRuntimeBundleArchiveOperation: "runner-output",
-          runnerChildRuntimeBundleArchiveValidationCause: "artifact_integrity",
-          runnerChildRuntimeBundleRefKeyPresent: false,
-          runnerChildRuntimeBundleRefPresent: true,
-          runnerChildRuntimeBundleRefSize: 1234,
-          runnerChildRuntimeErrorCode: "invalid_request",
-          runnerChildRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
-          runnerChildRuntimeErrorName: "Error",
-          runnerChildRuntimeErrorStatus: 404,
-          runnerChildRuntimeFailureKind: "control_plane_http",
-          runnerChildRuntimeFetchCallerSignalAborted: false,
-          runnerChildRuntimeFetchCauseKind: "timeout",
-          runnerChildRuntimeFetchCauseName: "TimeoutError",
-          runnerChildRuntimeFetchRequestSignalAborted: true,
-          runnerChildRuntimeFetchTimeoutMs: 30_000,
-          runnerChildRuntimeFetchTimeoutSignalAborted: true,
-          runnerChildRuntimeHttpOperation: "workspace_read",
-          runnerChildRuntimeLastPhase: "runtime",
-          runnerChildRuntimeLastPhaseStatus: "fail",
-          runnerChildRuntimePhaseTrace: ["workspace.read:start", "runtime:fail"],
-          runnerChildRuntimeWorkspaceSnapshotProcessExitCode: 1,
-          runnerChildRuntimeWorkspaceSnapshotProcessLabel: "zstd",
-          runnerChildRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
-          runnerChildRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-            "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
-          runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
-          runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers: [
-            "unsupported_format",
-          ],
-          runnerChildRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
-          runnerChildRuntimeStage: "runtime.in-process",
-          runnerChildRuntimeWorkspaceSnapshotRestoreStep: "object_fetch",
-          runnerChildRuntimeWakeReady: true,
-          runnerChildSignal: "SIGTERM",
-          runnerChildStderrTailLineCount: 2,
-          runnerChildStderrTailMarkers: ["module_resolution_failed"],
-          runnerChildStderrTailPresent: true,
-          runnerChildStdoutTailLineCount: 1,
-          runnerChildStdoutTailMarkers: ["hosted_child_prepared"],
-          runnerChildStdoutTailPresent: true,
           runnerResponseDetailsKeys: [
-            "childProcess",
-            "childRuntimeBundleArchiveOperation",
-            "childRuntimeBundleArchiveValidationCause",
-            "childRuntimeBundleRefKeyPresent",
-            "childRuntimeBundleRefPresent",
-            "childRuntimeBundleRefSize",
-            "childRuntimeErrorCode",
-            "childRuntimeErrorMessageKind",
-            "childRuntimeErrorName",
-            "childRuntimeErrorStatus",
-            "childRuntimeFailureKind",
-            "childRuntimeFetchCallerSignalAborted",
-            "childRuntimeFetchCauseKind",
-            "childRuntimeFetchCauseName",
-            "childRuntimeFetchRequestSignalAborted",
-            "childRuntimeFetchTimeoutMs",
-            "childRuntimeFetchTimeoutSignalAborted",
-            "childRuntimeHttpOperation",
-            "childRuntimeStage",
-            "childRuntimeWorkspaceSnapshotProcessExitCode",
-            "childRuntimeWorkspaceSnapshotProcessLabel",
-            "childRuntimeWorkspaceSnapshotProcessStderrBytes",
-            "childRuntimeWorkspaceSnapshotProcessStderrErrorDetail",
-            "childRuntimeWorkspaceSnapshotProcessStderrLineCount",
-            "childRuntimeWorkspaceSnapshotProcessStderrMarkers",
-            "childRuntimeWorkspaceSnapshotProcessStderrTruncated",
-            "childRuntimeWorkspaceSnapshotRestoreStep",
             "errorDetailPresent",
             "payloadDetailsPresent",
           ],
@@ -2533,210 +2431,17 @@ describe("RunnerContainer", () => {
       }),
     );
 
+    expect(failureLogInput.details).not.toHaveProperty("runnerChildRuntimeStage");
+    expect(failureLogInput.details).not.toHaveProperty("runnerChildStderrTailPresent");
     const serializedFailureLog = JSON.stringify(failureLogInput);
-    expect(serializedFailureLog).not.toContain(hiddenAbortReason);
-    expect(serializedFailureLog).not.toContain(hiddenStderrTail);
-    expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
-    expect(serializedFailureLog).not.toContain("hidden_code_marker");
-    expect(serializedFailureLog).not.toContain("hidden.phase");
-    expect(serializedFailureLog).not.toContain("999999");
-    expect(serializedFailureLog).not.toContain("secret-value");
-  });
-
-  it("promotes child-process workspace snapshot diagnostics when no child result is available", async () => {
-    const hiddenStderrTail = "hidden child stderr tail";
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        return new Response(JSON.stringify({
-          code: "runtime_error",
-          details: {
-            childProcess: {
-              abortedByParent: false,
-              childRuntimeWorkspaceSnapshotProcessExitCode: 1,
-              childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
-              childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
-              childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-                "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
-              childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
-              childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
-                "unsupported_format",
-                "hidden_process_marker",
-              ],
-              childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
-              childRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
-              exitCode: null,
-              firstCompletionKind: "close",
-              runtimeWakeReady: false,
-              signal: "SIGKILL",
-              stderrTail: hiddenStderrTail,
-              stderrTailLineCount: 1,
-            },
-            errorDetail:
-              "Hosted assistant runtime child exited without emitting a result payload.",
-          },
-          error: "Hosted execution runtime failed.",
-          errorName: "Error",
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 500,
-        });
-      }),
-    });
-
-    const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_child_process_snapshot_diagnostics"),
-      },
-      timeoutMs: 10_000,
-      userId: "member_123",
-    }).catch((error: unknown) => error);
-
-    expect(thrown).toMatchObject({
-      code: "runtime_error",
-      details: {
-        childProcess: {
-          childRuntimeWorkspaceSnapshotProcessExitCode: 1,
-          childRuntimeWorkspaceSnapshotProcessLabel: "zstd",
-          childRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
-          childRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-            "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
-          childRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
-          childRuntimeWorkspaceSnapshotProcessStderrMarkers: [
-            "unsupported_format",
-          ],
-          childRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
-          childRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
-          stderrTailLineCount: 1,
-          stderrTailPresent: true,
-        },
-      },
-    });
-
-    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)
-      .find((input) =>
-        input?.message === "Hosted execution container failed."
-        && input?.details?.runnerChildRuntimeWorkspaceSnapshotRestoreStep
-          === "archive_restore");
-    if (!failureLogInput) {
-      throw new Error("Expected container failure log input.");
-    }
-    expect(failureLogInput.details).toEqual(expect.objectContaining({
-      runnerChildRuntimeWorkspaceSnapshotProcessExitCode: 1,
-      runnerChildRuntimeWorkspaceSnapshotProcessLabel: "zstd",
-      runnerChildRuntimeWorkspaceSnapshotProcessStderrBytes: 192,
-      runnerChildRuntimeWorkspaceSnapshotProcessStderrErrorDetail:
-        "zstd: unsupported format at <redacted-path>; OPENAI_API_KEY=[redacted]",
-      runnerChildRuntimeWorkspaceSnapshotProcessStderrLineCount: 2,
-      runnerChildRuntimeWorkspaceSnapshotProcessStderrMarkers: [
-        "unsupported_format",
-      ],
-      runnerChildRuntimeWorkspaceSnapshotProcessStderrTruncated: false,
-      runnerChildRuntimeWorkspaceSnapshotRestoreStep: "archive_restore",
-      runnerChildStderrTailLineCount: 1,
-      runnerChildStderrTailPresent: true,
-    }));
-    const serializedFailureLog = JSON.stringify(failureLogInput);
-    expect(serializedFailureLog).not.toContain(hiddenStderrTail);
-    expect(serializedFailureLog).not.toContain("hidden_process_marker");
-    expect(serializedFailureLog).not.toContain("secret-value");
-  });
-
-  it("drops non-allowlisted child runtime error diagnostics from runner response logs", async () => {
-    const hiddenErrorName = "UntrustedCustomErrorName";
-    const hiddenErrorCode = "untrusted_custom_error_code";
-    const hiddenErrorMessageKind = "untrusted_custom_error_message_kind";
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        return new Response(JSON.stringify({
-          code: "runtime_error",
-          details: {
-            childRuntimeErrorCode: hiddenErrorCode,
-            childRuntimeErrorMessageKind: hiddenErrorMessageKind,
-            childRuntimeErrorName: hiddenErrorName,
-            childRuntimeErrorStatus: 499,
-            childRuntimeFailureKind: "unclassified_runtime_error",
-            childRuntimeHttpOperation: "hidden_http_operation",
-            childRuntimeStage: "runtime.in-process",
-          },
-          error: "Hosted execution runtime failed.",
-          errorName: "Error",
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 500,
-        });
-      }),
-    });
-
-    const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_child_runtime_untrusted_diagnostics"),
-      },
-      timeoutMs: 10_000,
-      userId: "member_123",
-    }).catch((error: unknown) => error);
-
-    expect(thrown).toMatchObject({
-      details: {
-        childRuntimeErrorStatus: 499,
-        childRuntimeFailureKind: "unclassified_runtime_error",
-        childRuntimeStage: "runtime.in-process",
-      },
-    });
-    const serializedThrown = JSON.stringify(thrown);
-    expect(serializedThrown).not.toContain(hiddenErrorName);
-    expect(serializedThrown).not.toContain(hiddenErrorCode);
-    expect(serializedThrown).not.toContain(hiddenErrorMessageKind);
-    expect(serializedThrown).not.toContain("hidden_http_operation");
-
-    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)
-      .find((input) => input?.message === "Hosted execution container failed.");
-    expect(failureLogInput).toEqual(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          runnerChildRuntimeErrorStatus: 499,
-          runnerChildRuntimeFailureKind: "unclassified_runtime_error",
-          runnerChildRuntimeStage: "runtime.in-process",
-        }),
-      }),
-    );
-    const serializedFailureLog = JSON.stringify(failureLogInput);
-    expect(serializedFailureLog).not.toContain(hiddenErrorName);
-    expect(serializedFailureLog).not.toContain(hiddenErrorCode);
-    expect(serializedFailureLog).not.toContain(hiddenErrorMessageKind);
-    expect(serializedFailureLog).not.toContain("hidden_http_operation");
+    expect(serializedFailureLog).not.toContain(hiddenChildDetail);
   });
 
   it("prefers sanitized inner runtime status over the container response status", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2786,7 +2491,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -3162,7 +2867,7 @@ describe("RunnerContainer", () => {
           if (url.endsWith("/health")) {
             healthChecks += 1;
             if (healthChecks > 1) {
-              return new Response(JSON.stringify({ ok: true }), {
+              return new Response(JSON.stringify(createRunnerHealthResult()), {
                 headers: {
                   "content-type": "application/json; charset=utf-8",
                 },
@@ -3257,7 +2962,7 @@ describe("RunnerContainer", () => {
     _label,
     initialStatus,
   ) => {
-    const healthResponse = new Response(JSON.stringify({ ok: true }), {
+    const healthResponse = new Response(JSON.stringify(createRunnerHealthResult()), {
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
@@ -3540,7 +3245,7 @@ describe("RunnerContainer", () => {
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -3794,7 +3499,7 @@ function createContainerDouble(input: {
   } as never);
   const containerFetch = input.containerFetch ?? vi.fn(async (url: string) => {
     if (url.endsWith("/health")) {
-      return new Response(JSON.stringify({ ok: true }), {
+      return new Response(JSON.stringify(createRunnerHealthResult()), {
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -3973,5 +3678,12 @@ function createRunnerResult(): HostedWorkspaceInvocationResult {
       importedCount: 0,
     },
     status: "idle",
+  };
+}
+
+function createRunnerHealthResult(): Record<string, unknown> {
+  return {
+    hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+    ok: true,
   };
 }

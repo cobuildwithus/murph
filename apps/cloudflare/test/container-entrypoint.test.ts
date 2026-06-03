@@ -13,6 +13,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
+  runHostedWorkspaceInvocation: vi.fn(),
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -25,12 +26,23 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
+vi.mock("../src/hosted-workspace-invocation.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/hosted-workspace-invocation.js")>(
+    "../src/hosted-workspace-invocation.js",
+  );
+  return {
+    ...actual,
+    runHostedWorkspaceInvocation: mocks.runHostedWorkspaceInvocation,
+  };
+});
+
 import {
   classifyRunnerJobError,
   createRequestAbortController,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
-import * as nodeRunner from "../src/node-runner.js";
+import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
+import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 const nativeFetch = globalThis.fetch;
@@ -40,6 +52,7 @@ const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
+  mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
 });
 
 afterEach(async () => {
@@ -230,6 +243,7 @@ function buildJobBody(input: {
   const userId = typeof input.wake.event.userId === "string" ? input.wake.event.userId : "u1";
 
   return {
+    hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     job: {
       kind: "workspace-invocation",
       request: {
@@ -255,6 +269,7 @@ function buildWorkspaceRunnerResult() {
 
 function buildWorkspaceJobBody() {
   return {
+    hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     job: {
       kind: "workspace-invocation",
       request: {
@@ -307,26 +322,30 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(response.json).toMatchObject({
+      activeJobCount: 0,
+      hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+      lastCleanupStatus: "not_run",
       ok: true,
+      poisoned: false,
       service: "cloudflare-hosted-runner-node",
     });
   });
 
-  it("accepts runtime wakes only after the active child reports readiness", async () => {
-    const childStarted = createDeferred();
-    const allowChildReady = createDeferred();
-    const childReady = createDeferred();
+  it("accepts runtime wakes only after the active invocation reports readiness", async () => {
+    const invocationStarted = createDeferred();
+    const allowInvocationReady = createDeferred();
+    const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
-        childStarted.resolve();
-        await allowChildReady.promise;
-        options?.onChildReadyForRuntimeWake?.(() => {
+        invocationStarted.resolve();
+        await allowInvocationReady.promise;
+        options?.onRuntimeWakeReady?.(() => {
           runtimeWakeCount += 1;
           return true;
         });
-        childReady.resolve();
+        invocationReady.resolve();
         await releaseInvocation.promise;
         return buildWorkspaceRunnerResult();
       },
@@ -360,12 +379,12 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
-    await childStarted.promise;
+    await invocationStarted.promise;
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
-    allowChildReady.resolve();
-    await childReady.promise;
+    allowInvocationReady.resolve();
+    await invocationReady.promise;
 
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
@@ -395,7 +414,7 @@ describe("startHostedContainerEntrypoint", () => {
         pendingRuntimeWakeDelivered: true,
         workspaceAttemptId: "attempt_evt_runtime_wake_ready",
       },
-      message: "Hosted container child reported runtime wake readiness.",
+      message: "Hosted container invocation reported runtime wake readiness.",
       userId: null,
     }));
     expect(logInputs
@@ -446,9 +465,9 @@ describe("startHostedContainerEntrypoint", () => {
     const childReady = createDeferred();
     const releaseInvocation = createDeferred();
     let childCanReceiveWake = false;
-    vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
-        options?.onChildReadyForRuntimeWake?.(() => childCanReceiveWake);
+        options?.onRuntimeWakeReady?.(() => childCanReceiveWake);
         childReady.resolve();
         await releaseInvocation.promise;
         return buildWorkspaceRunnerResult();
@@ -918,16 +937,11 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("does not expose the removed browser-vault refresh side path", async () => {
-    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
-    const nodeRunnerModule = {
-      ...nodeRunner,
-      runHostedWorkspaceInvocation,
-    };
-    const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
+    const runWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        loadNodeRunner,
+        runWorkspaceInvocation,
       },
     });
     servers.push(server);
@@ -936,9 +950,6 @@ describe("startHostedContainerEntrypoint", () => {
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
-
-    await vi.waitFor(() => expect(loadNodeRunner).toHaveBeenCalledTimes(1));
-    loadNodeRunner.mockClear();
 
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/browser-vault-refresh`, {
       body: "{]",
@@ -950,8 +961,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(404);
     await expect(response.text()).resolves.toBe("Not found");
-    expect(loadNodeRunner).not.toHaveBeenCalled();
-    expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(runWorkspaceInvocation).not.toHaveBeenCalled();
   });
 
   it("does not expose the removed warm-shell health side route", async () => {
@@ -1019,7 +1029,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects oversized invocation requests before parsing JSON", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
@@ -1047,7 +1057,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects oversized invocation requests while receiving the body", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
@@ -1103,7 +1113,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("preloads the node runner after listen while parsing requests through hosted runtime contracts", async () => {
+  it("parses requests through hosted runtime contracts before direct invocation", async () => {
     const requestBody = buildJobBody({
       wake: {
         event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u_loader_split" },
@@ -1122,24 +1132,19 @@ describe("startHostedContainerEntrypoint", () => {
       ...actualContractsModule,
       parseHostedAssistantWorkspaceRuntimeJobInput,
     };
-    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
-    const nodeRunnerModule = {
-      ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
-      runHostedWorkspaceInvocation,
-    };
     const loadRuntimeContracts = vi.fn(async () => contractsModule);
-    const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
+    const runWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        loadNodeRunner,
+        runWorkspaceInvocation,
         loadRuntimeContracts,
       },
     });
     servers.push(server);
 
-    expect(loadNodeRunner).toHaveBeenCalledTimes(1);
+    expect(runWorkspaceInvocation).not.toHaveBeenCalled();
     expect(loadRuntimeContracts).not.toHaveBeenCalled();
 
     const address = server.address();
@@ -1158,19 +1163,20 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(loadRuntimeContracts).toHaveBeenCalledTimes(1);
-    expect(loadNodeRunner).toHaveBeenCalledTimes(1);
+    expect(runWorkspaceInvocation).toHaveBeenCalledTimes(1);
     expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
-    expect(runHostedWorkspaceInvocation).toHaveBeenCalledWith(
+    expect(runWorkspaceInvocation).toHaveBeenCalledWith(
       {
         ...parsedJob,
         kind: "workspace-invocation",
       },
       expect.objectContaining({
+        supervisorEnv: expect.any(Object),
       }),
     );
   });
 
-  it("parses workspace-invocation requests through the workspace contract before invoking the node runner", async () => {
+  it("parses workspace-invocation requests through the workspace contract before direct invocation", async () => {
     const baseRequestBody = buildWorkspaceJobBody();
     const requestBody = {
       ...baseRequestBody,
@@ -1192,15 +1198,11 @@ describe("startHostedContainerEntrypoint", () => {
       ...actualContractsModule,
       parseHostedAssistantWorkspaceRuntimeJobInput,
     };
-    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
-    const nodeRunnerModule = {
-      ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
-      runHostedWorkspaceInvocation,
-    };
+    const runWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        loadNodeRunner: vi.fn(async () => nodeRunnerModule),
+        runWorkspaceInvocation,
         loadRuntimeContracts: vi.fn(async () => contractsModule),
       },
     });
@@ -1221,7 +1223,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
-    expect(runHostedWorkspaceInvocation).toHaveBeenCalledWith(
+    expect(runWorkspaceInvocation).toHaveBeenCalledWith(
       {
         diagnostics: {
           workspaceSnapshotPathHashSecret: TEST_SNAPSHOT_PATH_HASH_SECRET,
@@ -1230,13 +1232,14 @@ describe("startHostedContainerEntrypoint", () => {
         kind: "workspace-invocation",
       },
       expect.objectContaining({
+        supervisorEnv: expect.any(Object),
       }),
     );
   });
 
-  it("rejects malformed workspace snapshot diagnostics keys before invoking the node runner", async () => {
+  it("rejects malformed workspace snapshot diagnostics keys before direct invocation", async () => {
     const runHostedWorkspaceInvocation = vi
-      .spyOn(nodeRunner, "runHostedWorkspaceInvocation")
+      .spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
       .mockResolvedValue(buildWorkspaceRunnerResult());
 
     try {
@@ -1284,15 +1287,13 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("keeps startup healthy when the background node-runner preload fails", async () => {
-    const loadNodeRunner = vi.fn(async () => {
-      throw new Error("preload failed");
-    });
+  it("keeps startup health independent from direct invocation loading", async () => {
+    const runWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        loadNodeRunner,
+        runWorkspaceInvocation,
       },
     });
     servers.push(server);
@@ -1302,23 +1303,12 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    await vi.waitFor(() => {
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          level: "error",
-          message: "Hosted runner runtime preload failed.",
-          phase: "failed",
-        }),
-      );
-    });
-
     const response = await sendHostedContainerGetRequest({
       path: "/health",
       port: address.port,
     });
 
-    expect(loadNodeRunner).toHaveBeenCalledTimes(1);
+    expect(runWorkspaceInvocation).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
     expect(response.json).toMatchObject({
       ok: true,
@@ -1326,8 +1316,8 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("forwards only the hosted runner job and abort signal into the node runner", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
+  it("forwards the hosted runner job, abort signal, and frozen supervisor env into direct invocation", async () => {
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
 
@@ -1358,10 +1348,11 @@ describe("startHostedContainerEntrypoint", () => {
 
       expect(response.status).toBe(200);
       expect(runnerSpy).toHaveBeenCalledTimes(1);
-      expect(runnerSpy.mock.calls[0]?.[1]).toEqual({
-        onChildReadyForRuntimeWake: expect.any(Function),
-        signal: expect.any(AbortSignal),
-      });
+      const options = runnerSpy.mock.calls[0]?.[1];
+      expect(options?.onRuntimeWakeReady).toEqual(expect.any(Function));
+      expect(options?.signal).toEqual(expect.any(AbortSignal));
+      expect(options?.supervisorEnv).toBeDefined();
+      expect(Object.isFrozen(options?.supervisorEnv)).toBe(true);
     } finally {
       runnerSpy.mockRestore();
     }
@@ -1466,7 +1457,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("surfaces safe downstream runtime TypeError diagnostics after request decoding succeeds", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
+    const spy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockRejectedValue(
       new TypeError("missing hosted runtime config"),
     );
 
@@ -1514,50 +1505,21 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("returns metadata-only downstream child process failure diagnostics", async () => {
-    const hiddenStderrTail = "hidden child stderr tail";
-    const hiddenStdoutTail = "hidden child stdout tail";
-    const hiddenAbortReason = "hidden child abort reason";
-    const hiddenCompletionKind = "hidden_completion_kind";
-    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
-      Object.assign(new Error("hidden child failure message"), {
+  it("does not promote legacy child-shaped diagnostics at the direct invocation boundary", async () => {
+    const hiddenChildDetails = "hidden child detail";
+    const spy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockRejectedValue(
+      Object.assign(new Error("hidden direct runtime failure message"), {
         details: {
-          childRuntimeErrorCode: "invalid_request",
-          childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
-          childRuntimeErrorName: "Error",
-          childRuntimeErrorStatus: 404,
-          childRuntimeFailureKind: "control_plane_http",
-          childRuntimeHttpOperation: "workspace_read",
-          childRuntimeStage: "runtime.in-process",
           childProcess: {
             abortedByParent: false,
-            abortReasonMessage: hiddenAbortReason,
-            abortReasonName: "AbortError",
+            abortReasonMessage: hiddenChildDetails,
             exitCode: 1,
-            firstCompletionKind: hiddenCompletionKind,
-            runtimeWakeReady: true,
-            signal: "SIGTERM",
-            stderrTail: hiddenStderrTail,
-            stderrTailLineCount: 2,
-            stderrTailMarkers: [
-              "module_resolution_failed",
-              "hidden_code_marker",
-            ],
-            runtimeLastPhase: "runtime",
-            runtimeLastPhaseDurationMs: 999_999,
-            runtimeLastPhaseElapsedMs: 999_999,
-            runtimeLastPhaseOrdinal: 999_999,
-            runtimeLastPhaseStatus: "fail",
-            runtimePhaseTrace: [
-              "workspace.read:start",
-              "runtime:fail",
-              "hidden.phase:start",
-            ],
-            stdoutTail: hiddenStdoutTail,
-            stdoutTailLineCount: 1,
-            stdoutTailMarkers: ["hosted_child_prepared"],
+            stderrTail: hiddenChildDetails,
+            stdoutTail: hiddenChildDetails,
           },
-          errorDetail: "hidden child detail",
+          childRuntimeErrorCode: "invalid_request",
+          childRuntimeStage: "runtime.in-process",
+          errorDetail: hiddenChildDetails,
         },
       }),
     );
@@ -1577,7 +1539,7 @@ describe("startHostedContainerEntrypoint", () => {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-            eventId: "evt_runtime_child_process_error",
+            eventId: "evt_runtime_legacy_child_details",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
         })),
@@ -1592,38 +1554,9 @@ describe("startHostedContainerEntrypoint", () => {
       expect(payload).toMatchObject({
         code: "runtime_error",
         details: {
-          childProcess: {
-            abortedByParent: false,
-            abortReasonMessagePresent: true,
-            abortReasonName: "AbortError",
-            exitCode: 1,
-            runtimeLastPhase: "runtime",
-            runtimeLastPhaseStatus: "fail",
-            runtimePhaseTrace: ["workspace.read:start", "runtime:fail"],
-            runtimeWakeReady: true,
-            signal: "SIGTERM",
-            stderrTailLineCount: 2,
-            stderrTailMarkers: ["module_resolution_failed"],
-            stderrTailPresent: true,
-            stdoutTailLineCount: 1,
-            stdoutTailMarkers: ["hosted_child_prepared"],
-            stdoutTailPresent: true,
-          },
-          childRuntimeErrorCode: "invalid_request",
-          childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
-          childRuntimeErrorName: "Error",
-          childRuntimeErrorStatus: 404,
-          childRuntimeFailureKind: "control_plane_http",
-          childRuntimeHttpOperation: "workspace_read",
-          childRuntimeStage: "runtime.in-process",
           detailsKeys: [
             "childProcess",
             "childRuntimeErrorCode",
-            "childRuntimeErrorMessageKind",
-            "childRuntimeErrorName",
-            "childRuntimeErrorStatus",
-            "childRuntimeFailureKind",
-            "childRuntimeHttpOperation",
             "childRuntimeStage",
             "errorDetail",
           ],
@@ -1635,138 +1568,43 @@ describe("startHostedContainerEntrypoint", () => {
         error: "Hosted execution runtime failed.",
         errorName: "Error",
       });
+      const details = payload.details as Record<string, unknown>;
+      expect(details).not.toHaveProperty("childProcess");
+      expect(details).not.toHaveProperty("childRuntimeErrorCode");
+      expect(details).not.toHaveProperty("childRuntimeStage");
       const serializedPayload = JSON.stringify(payload);
-      expect(serializedPayload).not.toContain("hidden child failure message");
-      expect(serializedPayload).not.toContain("hidden child detail");
-      expect(serializedPayload).not.toContain(hiddenAbortReason);
-      expect(serializedPayload).not.toContain(hiddenCompletionKind);
-      expect(serializedPayload).not.toContain("firstCompletionKind");
-      expect(serializedPayload).not.toContain(hiddenStderrTail);
-      expect(serializedPayload).not.toContain(hiddenStdoutTail);
-      expect(serializedPayload).not.toContain("hidden_code_marker");
-      expect(serializedPayload).not.toContain("hidden.phase");
-      expect(serializedPayload).not.toContain("999999");
+      expect(serializedPayload).not.toContain("hidden direct runtime failure message");
+      expect(serializedPayload).not.toContain(hiddenChildDetails);
 
       const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
         .map(([input]) => input)
         .find((input) => input.message === "Hosted container entrypoint failed a runner job.");
       expect(failureLogInput).toEqual(expect.objectContaining({
         details: expect.objectContaining({
-          childProcess: expect.objectContaining({
-            runtimeLastPhase: "runtime",
-            runtimeLastPhaseStatus: "fail",
-            runtimePhaseTrace: ["workspace.read:start", "runtime:fail"],
-            stderrTailMarkers: ["module_resolution_failed"],
-            stderrTailPresent: true,
-            stdoutTailMarkers: ["hosted_child_prepared"],
-            stdoutTailPresent: true,
-          }),
-          childRuntimeErrorCode: "invalid_request",
-          childRuntimeErrorMessageKind: "workspace_snapshot_fetch_http_failure",
-          childRuntimeErrorName: "Error",
-          childRuntimeErrorStatus: 404,
-          childRuntimeFailureKind: "control_plane_http",
-          childRuntimeHttpOperation: "workspace_read",
-          childRuntimeStage: "runtime.in-process",
+          detailsKeys: [
+            "childProcess",
+            "childRuntimeErrorCode",
+            "childRuntimeStage",
+            "errorDetail",
+          ],
+          errorDetailPresent: true,
         }),
         userId: null,
       }));
+      const failureLogDetails = failureLogInput?.details as Record<string, unknown> | undefined;
+      expect(failureLogDetails).not.toHaveProperty("childProcess");
+      expect(failureLogDetails).not.toHaveProperty("childRuntimeErrorCode");
+      expect(failureLogDetails).not.toHaveProperty("childRuntimeStage");
       const serializedFailureLog = JSON.stringify(failureLogInput);
-      expect(serializedFailureLog).not.toContain("hidden child failure message");
-      expect(serializedFailureLog).not.toContain("hidden child detail");
-      expect(serializedFailureLog).not.toContain(hiddenAbortReason);
-      expect(serializedFailureLog).not.toContain(hiddenCompletionKind);
-      expect(serializedFailureLog).not.toContain("firstCompletionKind");
-      expect(serializedFailureLog).not.toContain(hiddenStderrTail);
-      expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
-      expect(serializedFailureLog).not.toContain("hidden_code_marker");
-      expect(serializedFailureLog).not.toContain("hidden.phase");
-      expect(serializedFailureLog).not.toContain("999999");
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it("drops non-allowlisted child runtime error diagnostics at the entrypoint boundary", async () => {
-    const hiddenErrorName = "UntrustedCustomErrorName";
-    const hiddenErrorCode = "untrusted_custom_error_code";
-    const hiddenErrorMessageKind = "untrusted_custom_error_message_kind";
-    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
-      Object.assign(new Error("hidden child failure message"), {
-        details: {
-          childRuntimeErrorCode: hiddenErrorCode,
-          childRuntimeErrorMessageKind: hiddenErrorMessageKind,
-          childRuntimeErrorName: hiddenErrorName,
-          childRuntimeErrorStatus: 499,
-          childRuntimeFailureKind: "unclassified_runtime_error",
-          childRuntimeHttpOperation: "hidden_http_operation",
-          childRuntimeStage: "runtime.in-process",
-        },
-      }),
-    );
-
-    try {
-      const server = await startHostedContainerEntrypoint({
-        port: 0,
-      });
-      servers.push(server);
-      const address = server.address();
-
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
-        body: JSON.stringify(buildJobBody({
-          wake: {
-            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-            eventId: "evt_runtime_child_untrusted_diagnostics",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      });
-
-      expect(response.status).toBe(500);
-      const payload = await response.json() as Record<string, unknown>;
-      expect(payload).toMatchObject({
-        details: {
-          childRuntimeErrorStatus: 499,
-          childRuntimeFailureKind: "unclassified_runtime_error",
-          childRuntimeStage: "runtime.in-process",
-        },
-      });
-      const serializedPayload = JSON.stringify(payload);
-      expect(serializedPayload).not.toContain(hiddenErrorName);
-      expect(serializedPayload).not.toContain(hiddenErrorCode);
-      expect(serializedPayload).not.toContain(hiddenErrorMessageKind);
-      expect(serializedPayload).not.toContain("hidden_http_operation");
-
-      const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
-        .map(([input]) => input)
-        .find((input) => input.message === "Hosted container entrypoint failed a runner job.");
-      expect(failureLogInput).toEqual(expect.objectContaining({
-        details: expect.objectContaining({
-          childRuntimeErrorStatus: 499,
-          childRuntimeFailureKind: "unclassified_runtime_error",
-          childRuntimeStage: "runtime.in-process",
-        }),
-      }));
-      const serializedFailureLog = JSON.stringify(failureLogInput);
-      expect(serializedFailureLog).not.toContain(hiddenErrorName);
-      expect(serializedFailureLog).not.toContain(hiddenErrorCode);
-      expect(serializedFailureLog).not.toContain(hiddenErrorMessageKind);
-      expect(serializedFailureLog).not.toContain("hidden_http_operation");
+      expect(serializedFailureLog).not.toContain("hidden direct runtime failure message");
+      expect(serializedFailureLog).not.toContain(hiddenChildDetails);
     } finally {
       spy.mockRestore();
     }
   });
 
   it("redacts downstream runtime secrets while surfacing safe failure diagnostics", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
+    const spy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockRejectedValue(
       new Error("Authorization: Bearer placeholder for ops@example.com OPENAI_API_KEY=placeholder"),
     );
 
@@ -1817,7 +1655,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("returns safe configuration error details from the inner hosted runtime", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
+    const spy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockRejectedValue(
       new HostedAssistantConfigurationError(
         "HOSTED_ASSISTANT_CONFIG_REQUIRED",
         "Hosted assistant defaults are missing.",
@@ -1867,7 +1705,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("passes the workspace-invocation context through request parsing into the node runner", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
+    const spy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
 
@@ -2029,7 +1867,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
 
@@ -2086,7 +1924,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockRejectedValue(
       new TypeError("missing hosted runtime config"),
     );
 
@@ -2161,7 +1999,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async () => {
         runnerStarted = true;
         return buildWorkspaceRunnerResult();
@@ -2218,7 +2056,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(buildWorkspaceRunnerResult());
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -2263,6 +2101,17 @@ describe("startHostedContainerEntrypoint", () => {
     expect(JSON.stringify(payload)).not.toContain(String(childPid));
     expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(exit).toHaveBeenCalledTimes(1);
+
+    const health = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(health.status).toBe(200);
+    expect(health.json).toMatchObject({
+      activeJobCount: 0,
+      lastCleanupStatus: "failed",
+      poisoned: true,
+    });
   });
 });
 
