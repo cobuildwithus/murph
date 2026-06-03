@@ -20,6 +20,9 @@ import type {
   HostedRuntimeDeviceSyncPort,
 } from "../src/hosted-runtime/platform.ts";
 
+type HostedCliRuntimeBridgeModule =
+  typeof import("../src/hosted-runtime/cli-runtime-bridge.ts");
+
 function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
   return {
     async ackDirtyStateProcessed() {
@@ -49,6 +52,60 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
   };
 }
 
+async function importCliRuntimeBridgeWithOneFailedListen(): Promise<{
+  bridgeModule: HostedCliRuntimeBridgeModule;
+  cleanup: () => Promise<void>;
+  createServerCallCount: () => number;
+  startupError: Error;
+}> {
+  vi.resetModules();
+
+  let createServerCallCount = 0;
+  let failNextListen = true;
+  const startupError = new Error("simulated hosted CLI bridge startup failure");
+
+  vi.doMock("node:http", async () => {
+    const actual = await vi.importActual<typeof import("node:http")>("node:http");
+
+    return {
+      ...actual,
+      createServer: (...args: Parameters<typeof actual.createServer>) => {
+        createServerCallCount += 1;
+        const server = actual.createServer(...args);
+        const listen = server.listen.bind(server);
+        server.listen = ((port: number, host: string, callback?: () => void) => {
+          if (failNextListen) {
+            failNextListen = false;
+            queueMicrotask(() => {
+              server.emit("error", startupError);
+            });
+            return server;
+          }
+          return listen(port, host, callback);
+        }) as typeof server.listen;
+        return server;
+      },
+    };
+  });
+
+  const bridgeModule = await import("../src/hosted-runtime/cli-runtime-bridge.ts");
+
+  return {
+    bridgeModule,
+    async cleanup() {
+      try {
+        await bridgeModule.stopHostedCliRuntimeBridge();
+      } catch {
+        // Ignore expected startup-failure residue during test cleanup.
+      }
+      vi.doUnmock("node:http");
+      vi.resetModules();
+    },
+    createServerCallCount: () => createServerCallCount,
+    startupError,
+  };
+}
+
 async function withHostedCliBridgeInvocation<T>(
   input: HostedCliRuntimeBridgeInvocationInput,
   operation: (bridge: HostedCliRuntimeBridge) => Promise<T>,
@@ -60,6 +117,69 @@ async function withHostedCliBridgeInvocation<T>(
     await bridge.stop();
   }
 }
+
+test("hosted CLI runtime bridge retries after startup failure", async () => {
+  const { bridgeModule, cleanup, createServerCallCount, startupError } =
+    await importCliRuntimeBridgeWithOneFailedListen();
+
+  try {
+    await assert.rejects(
+      () => bridgeModule.getOrCreateHostedCliRuntimeBridge(),
+      startupError,
+    );
+
+    const bridge = await bridgeModule.getOrCreateHostedCliRuntimeBridge();
+    assert.match(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV], /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+    assert.equal(createServerCallCount(), 2);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted CLI runtime bridge stop clears failed startup promises", async () => {
+  const { bridgeModule, cleanup, createServerCallCount, startupError } =
+    await importCliRuntimeBridgeWithOneFailedListen();
+
+  try {
+    const startup = bridgeModule.getOrCreateHostedCliRuntimeBridge();
+    await assert.rejects(
+      () => bridgeModule.stopHostedCliRuntimeBridge(),
+      startupError,
+    );
+    await assert.rejects(() => startup, startupError);
+
+    const bridge = await bridgeModule.getOrCreateHostedCliRuntimeBridge();
+    assert.match(bridge.env[HOSTED_CLI_BRIDGE_URL_ENV], /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+    assert.equal(createServerCallCount(), 2);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted CLI runtime bridge stop preserves newer retry promises", async () => {
+  const { bridgeModule, cleanup, createServerCallCount, startupError } =
+    await importCliRuntimeBridgeWithOneFailedListen();
+
+  try {
+    const startup = bridgeModule.getOrCreateHostedCliRuntimeBridge();
+    const retryAfterFailure = startup.catch(async (error: unknown) => {
+      assert.equal(error, startupError);
+      return await bridgeModule.getOrCreateHostedCliRuntimeBridge();
+    });
+
+    await assert.rejects(
+      () => bridgeModule.stopHostedCliRuntimeBridge(),
+      startupError,
+    );
+
+    const retriedBridge = await retryAfterFailure;
+    const sameBridge = await bridgeModule.getOrCreateHostedCliRuntimeBridge();
+    assert.strictEqual(sameBridge, retriedBridge);
+    assert.equal(createServerCallCount(), 2);
+  } finally {
+    await cleanup();
+  }
+});
 
 test("hosted CLI runtime bridge creates device connect links through the runtime port", async () => {
   const deviceSyncPort = createDeviceSyncPortStub();

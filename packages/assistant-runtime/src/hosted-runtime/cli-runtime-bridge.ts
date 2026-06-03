@@ -49,7 +49,12 @@ interface HostedCliRuntimeBridgeActiveInvocation {
 let hostedCliRuntimeBridgePromise: Promise<HostedCliRuntimeBridge> | null = null;
 
 export async function getOrCreateHostedCliRuntimeBridge(): Promise<HostedCliRuntimeBridge> {
-  hostedCliRuntimeBridgePromise ??= startHostedCliRuntimeBridgeServer();
+  if (!hostedCliRuntimeBridgePromise) {
+    hostedCliRuntimeBridgePromise = startHostedCliRuntimeBridgeServer().catch((error) => {
+      hostedCliRuntimeBridgePromise = null;
+      throw error;
+    });
+  }
   return await hostedCliRuntimeBridgePromise;
 }
 
@@ -58,8 +63,14 @@ export async function stopHostedCliRuntimeBridge(): Promise<void> {
   if (!bridgePromise) {
     return;
   }
-  const bridge = await bridgePromise;
-  await bridge.stop();
+  try {
+    const bridge = await bridgePromise;
+    await bridge.stop();
+  } finally {
+    if (hostedCliRuntimeBridgePromise === bridgePromise) {
+      hostedCliRuntimeBridgePromise = null;
+    }
+  }
 }
 
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
