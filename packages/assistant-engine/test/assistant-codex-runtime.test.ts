@@ -2148,11 +2148,12 @@ describe('assistant codex runtime', () => {
       .toHaveLength(1)
   })
 
-  it('does not replace a stale hosted warm Codex process when stop cannot prove exit', async () => {
+  it('does not clear or replace a stale hosted warm Codex process when stop cannot prove exit', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-stop-fail-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-stop-fail-work-')
     await writeFile(path.join(hostedCodexHome, 'config.toml'), 'model = "first"\n')
     const spawnedChildren: MockChildProcess[] = []
+    const offSpy = vi.spyOn(process, 'off')
 
     vi.mocked(process.kill).mockImplementation(() => true)
     codexMocks.spawn.mockImplementation(() => {
@@ -2222,6 +2223,18 @@ describe('assistant codex runtime', () => {
 
     vi.useFakeTimers()
     try {
+      const externalStop = stopHostedWarmCodexAppServer('operator-stop')
+      const externalStopExpectation = expect(externalStop).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_STOP_FAILED',
+        context: {
+          retryable: false,
+        },
+      })
+      await waitForProcessKillWithFakeTimers(-31_000, 'SIGTERM')
+      await vi.advanceTimersByTimeAsync(6_000)
+      await externalStopExpectation
+      vi.mocked(process.kill).mockClear()
+
       const replacementAttempt = executeCodexAppServerTurn({
         env: hostedEnv,
         prompt: 'second stop failure identity',
@@ -2243,6 +2256,14 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     expect(process.kill).toHaveBeenCalledWith(-31_000, 'SIGTERM')
     expect(process.kill).toHaveBeenCalledWith(-31_000, 'SIGKILL')
+    expect(
+      offSpy.mock.calls.some(
+        ([eventName]) =>
+          eventName === 'exit' ||
+          eventName === 'SIGINT' ||
+          eventName === 'SIGTERM',
+      ),
+    ).toBe(false)
   })
 
   it('poisons hosted warm Codex when an aborted turn later completes', async () => {
@@ -6195,8 +6216,8 @@ function emitProcessErrorAndExit(
   error: Error,
 ): void {
   child.emit('error', error)
-  child.emit('exit', null, null)
-  child.emit('close', null, null)
+  child.emit('exit', 1, null)
+  child.emit('close', 1, null)
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

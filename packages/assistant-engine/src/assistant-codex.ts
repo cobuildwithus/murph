@@ -740,7 +740,6 @@ class CodexAppServerProcess {
       })
       stopped = true
     } finally {
-      this.cleanupProcessExitListener()
       this.activeTurn = null
       this.ignoredResponseIds.clear()
       if (
@@ -748,6 +747,7 @@ class CodexAppServerProcess {
         this.child.exitCode !== null ||
         this.child.signalCode !== null
       ) {
+        this.cleanupProcessExitListener()
         this.state = 'stopped'
         this.stopCompleted = true
       } else {
