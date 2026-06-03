@@ -29,7 +29,7 @@ import {
 } from "../../runner-outbound/write-fence.ts";
 import type {
   HostedRunnerStuckInvocationTestResult,
-} from "../../user-runner.ts";
+} from "../../user-runner/hosted-user-runner-test.ts";
 import type {
   UserRunnerDurableObjectStubLike,
   WorkerRouteContext,
@@ -39,9 +39,6 @@ import {
 } from "../auth.ts";
 import type {
   DeclarativeRoute,
-} from "../routes.ts";
-import {
-  matchTestUserRoute,
 } from "../routes.ts";
 import {
   DIRECT_R2_PRESIGNED_PUT_TEST_BODY_LIMIT_BYTES,
@@ -54,6 +51,36 @@ import {
   isHostedWorkerTestEnvironment,
   requireHostedWorkerTestEnvironment,
 } from "../route-utils/test-env.ts";
+import {
+  matchHostedLocalTestUserRoute,
+} from "../route-utils/test-routes.ts";
+
+interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubLike {
+  runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
+  runUntilIdleForTest(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): Promise<HostedWorkspaceInvocationResult>;
+  startStuckInvocationForTest(input: {
+    expiresInMs?: number;
+    reason?: HostedWorkspaceInvocationReason;
+    startedAgoMs?: number;
+    userId: string;
+  }): Promise<HostedRunnerStuckInvocationTestResult>;
+}
+
+interface HostedLocalTestRunnerContainerStubLike {
+  expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
+}
+
+function hasHostedLocalTestRunnerContainerActivityControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & {
+  expireActivityForTest(input: { userId: string }): Promise<{ ok: true }>;
+} {
+  return "expireActivityForTest" in stub
+    && typeof stub.expireActivityForTest === "function";
+}
 
 export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
@@ -64,7 +91,7 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     async handle(context, params) {
       return handleTestRunUntilIdleRoute(context, params.userId);
     },
-    match: matchTestUserRoute("/__test/users/", "/run-until-idle"),
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/run-until-idle"),
     methods: ["POST"],
     name: "test-run-until-idle",
     wrongMethodResponse: "not-found",
@@ -77,7 +104,7 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     async handle(context, params) {
       return handleTestRunAlarmRoute(context, params.userId);
     },
-    match: matchTestUserRoute("/__test/users/", "/alarm"),
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/alarm"),
     methods: ["POST"],
     name: "test-run-alarm",
     wrongMethodResponse: "not-found",
@@ -90,7 +117,7 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     async handle(context, params) {
       return handleTestContainerActivityExpiredRoute(context, params.userId);
     },
-    match: matchTestUserRoute("/__test/users/", "/container-activity-expired"),
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/container-activity-expired"),
     methods: ["POST"],
     name: "test-container-activity-expired",
     wrongMethodResponse: "not-found",
@@ -103,7 +130,7 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     async handle(context, params) {
       return handleTestStartStuckInvocationRoute(context, params.userId);
     },
-    match: matchTestUserRoute("/__test/users/", "/stuck-invocation"),
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/stuck-invocation"),
     methods: ["POST"],
     name: "test-start-stuck-invocation",
     wrongMethodResponse: "not-found",
@@ -116,22 +143,9 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     async handle(context, params) {
       return handleTestCheckpointArtifactWriteFenceRoute(context, params.userId);
     },
-    match: matchTestUserRoute("/__test/users/", "/checkpoint-artifact-write-fence"),
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/checkpoint-artifact-write-fence"),
     methods: ["POST"],
     name: "test-checkpoint-artifact-write-fence",
-    wrongMethodResponse: "not-found",
-  },
-  {
-    authorization: "vercel-oidc",
-    beforeMethod(context) {
-      return requireHostedWorkerTestEnvironment(context);
-    },
-    async handle(context, params) {
-      return handleTestProviderEgressActiveContainerProbeRoute(context, params.userId);
-    },
-    match: matchTestUserRoute("/__test/users/", "/provider-egress-active-container-probe"),
-    methods: ["POST"],
-    name: "test-provider-egress-active-container-probe",
     wrongMethodResponse: "not-found",
   },
 ];
@@ -156,12 +170,7 @@ export async function handleTestRunUntilIdleRoute(
     return boundUserResponse;
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId) as UserRunnerDurableObjectStubLike & {
-    runUntilIdleForTest(input: {
-      reason: HostedWorkspaceInvocationReason;
-      userId: string;
-    }): Promise<HostedWorkspaceInvocationResult>;
-  };
+  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
   const reason = parseTestWorkspaceInvocationReason(context.url.searchParams.get("reason"));
   if (reason === "invalid") {
     return json({ error: "Unsupported test workspace invocation reason." }, 400);
@@ -192,7 +201,7 @@ export async function handleTestRunAlarmRoute(
     return boundUserResponse;
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId);
+  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
   return json(await stub.runAlarmForTest({ userId }));
 }
 
@@ -220,8 +229,10 @@ export async function handleTestContainerActivityExpiredRoute(
     source: context.env,
     userId,
   });
-  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
-  if (typeof stub.expireActivityForTest !== "function") {
+  const stub = context.env.RUNNER_CONTAINER.getByName(
+    runnerContainerName,
+  );
+  if (!hasHostedLocalTestRunnerContainerActivityControl(stub)) {
     throw new Error("Hosted runner container test activity-expiry RPC is unavailable.");
   }
   return json(await stub.expireActivityForTest({ userId }));
@@ -247,14 +258,7 @@ export async function handleTestStartStuckInvocationRoute(
     return boundUserResponse;
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId) as UserRunnerDurableObjectStubLike & {
-    startStuckInvocationForTest(input: {
-      expiresInMs?: number;
-      reason?: HostedWorkspaceInvocationReason;
-      startedAgoMs?: number;
-      userId: string;
-    }): Promise<HostedRunnerStuckInvocationTestResult>;
-  };
+  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
   const reason = parseTestWorkspaceInvocationReason(context.url.searchParams.get("reason"));
   if (reason === "invalid") {
     return json({ error: "Unsupported test stuck invocation reason." }, 400);
@@ -324,13 +328,13 @@ export async function handleTestCheckpointArtifactWriteFenceRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId);
   if (
-    typeof stub.beginRuntimeWriteFenceForSmoke !== "function"
-    || typeof stub.finishRuntimeWriteFenceForSmoke !== "function"
+    typeof stub.beginDeploySmokeRuntimeWriteFence !== "function"
+    || typeof stub.finishDeploySmokeRuntimeWriteFence !== "function"
   ) {
     throw new TypeError("Hosted user runner does not support checkpoint artifact write-fence tests.");
   }
 
-  const lease = await stub.beginRuntimeWriteFenceForSmoke({
+  const lease = await stub.beginDeploySmokeRuntimeWriteFence({
     userId,
     workspaceVersion: expectedWorkspaceVersion,
   });
@@ -418,43 +422,12 @@ export async function handleTestCheckpointArtifactWriteFenceRoute(
       ok: true,
     });
   } finally {
-    await stub.finishRuntimeWriteFenceForSmoke({
+    await stub.finishDeploySmokeRuntimeWriteFence({
       attemptId: lease.attemptId,
       generation: lease.generation,
       userId,
     });
   }
-}
-
-export async function handleTestProviderEgressActiveContainerProbeRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  if (!isHostedWorkerTestEnvironment(context.env)) {
-    return notFound();
-  }
-
-  const userId = decodeRouteParam(encodedUserId);
-  const boundUserResponse = requireHostedExecutionBoundUserResponse(
-    context.request,
-    userId,
-    "Hosted execution bound user does not match the test runner user.",
-    "test-runner-bound-user-mismatch",
-    "test-provider-egress-active-container-probe",
-  );
-  if (boundUserResponse) {
-    return boundUserResponse;
-  }
-
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
-  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
-  if (typeof stub.probeActiveContainerProviderEgressForTest !== "function") {
-    throw new Error("Hosted runner container test provider-egress probe RPC is unavailable.");
-  }
-  return json(await stub.probeActiveContainerProviderEgressForTest({ userId }));
 }
 
 export function parseTestWorkspaceInvocationReason(

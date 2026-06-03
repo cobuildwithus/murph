@@ -66,7 +66,7 @@ vi.mock("node:net", () => ({
   },
 }));
 
-vi.mock("./runtime.ts", () => runtimeMocks);
+vi.mock("../../src/dev-hosted-local/runtime.ts", () => runtimeMocks);
 
 describe("hosted-local MinIO sidecar", () => {
   beforeEach(() => {
@@ -85,7 +85,7 @@ describe("hosted-local MinIO sidecar", () => {
       stdoutText: () => "",
     };
     runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     const server = await maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -158,7 +158,7 @@ describe("hosted-local MinIO sidecar", () => {
       stdoutText: () => "",
     };
     runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     const server = await maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -209,7 +209,7 @@ describe("hosted-local MinIO sidecar", () => {
       stdoutText: () => "",
     };
     runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     await maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -243,7 +243,7 @@ describe("hosted-local MinIO sidecar", () => {
       stdoutText: () => "",
     };
     runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     const server = await maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -280,7 +280,7 @@ describe("hosted-local MinIO sidecar", () => {
     childProcessMocks.spawnResponses = [
       { stdout: "172.17.0.1\n" },
     ];
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     await expect(maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -299,7 +299,7 @@ describe("hosted-local MinIO sidecar", () => {
       { stdout: "container-a\ncontainer-b\n" },
       {},
     ];
-    const { cleanupHostedLocalMinioContainerBestEffort } = await import("./minio.ts");
+    const { cleanupHostedLocalMinioContainerBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
 
     await cleanupHostedLocalMinioContainerBestEffort(
       { DOCKER_CONFIG: ".tmp/docker-config" },
@@ -335,7 +335,7 @@ describe("hosted-local MinIO sidecar", () => {
       { stdout: "container-a\ncontainer-b\n" },
       {},
     ];
-    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("./minio.ts");
+    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
 
     await cleanupHostedLocalMinioE2eContainersBestEffort({
       DOCKER_CONFIG: ".tmp/docker-config",
@@ -383,7 +383,7 @@ describe("hosted-local MinIO sidecar", () => {
     };
     runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
     runtimeMocks.waitForHealthyHttpEndpoint.mockRejectedValueOnce(new Error("minio unhealthy"));
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     await expect(maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -411,7 +411,7 @@ describe("hosted-local MinIO sidecar", () => {
   });
 
   it("fails fast when MinIO is skipped without explicit hosted-local R2 endpoints", async () => {
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     await expect(maybeStartHostedLocalMinio({
       buildId: "build:test",
@@ -426,7 +426,7 @@ describe("hosted-local MinIO sidecar", () => {
   });
 
   it("accepts explicit hosted-local R2 presign env when MinIO is intentionally skipped", async () => {
-    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
 
     await expect(maybeStartHostedLocalMinio({
       buildId: "build:test",

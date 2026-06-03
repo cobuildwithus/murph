@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateHostedLocalStripeCheckoutEnv,
   writeHostedLocalStripeCheckoutDiagnostics,
-} from "./stripe.ts";
+} from "../../src/dev-hosted-local/stripe.ts";
 
 class CapturingWritable extends Writable {
   readonly chunks: string[] = [];

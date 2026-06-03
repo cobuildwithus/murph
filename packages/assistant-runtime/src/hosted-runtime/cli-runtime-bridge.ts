@@ -44,7 +44,9 @@ export interface HostedCliRuntimeBridgeInvocationInput {
 }
 
 interface HostedCliRuntimeBridgeActiveInvocation {
+  closing: boolean;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
+  inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
   signal: AbortSignal | null;
 }
@@ -158,7 +160,9 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         );
       }
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
+        closing: false,
         deviceSyncPort: input.deviceSyncPort ?? null,
+        inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
         signal: input.signal ?? null,
       };
@@ -166,6 +170,11 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       try {
         return await operation();
       } finally {
+        invocation.closing = true;
+        await waitForInFlightBridgeRequests(
+          invocation,
+          HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+        );
         if (active === invocation) {
           active = null;
         }
@@ -238,7 +247,7 @@ async function handleHostedCliBridgeRequest(input: {
     }
 
     const active = input.getActive();
-    if (!active || active.signal?.aborted) {
+    if (!active || active.closing || active.signal?.aborted) {
       input.recordOffInvocationAuthenticatedRequest();
       writeHostedCliBridgeError(
         input.response,
@@ -248,69 +257,18 @@ async function handleHostedCliBridgeRequest(input: {
       );
       return;
     }
-    if (!active.deviceSyncPort) {
-      writeHostedCliBridgeError(
-        input.response,
-        503,
-        "HOSTED_CLI_BRIDGE_DEVICE_SYNC_UNAVAILABLE",
-        "Hosted CLI bridge device sync is unavailable.",
-      );
-      return;
-    }
 
-    const body = await readHostedCliBridgeJsonBody(input.request);
-
-    if (path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH) {
-      const request = parseHostedCliDeviceAccountListRequest(body);
-      try {
-        const snapshot = await active.deviceSyncPort.fetchSnapshot({
-          ...(request.provider ? { provider: request.provider } : {}),
-          ...(request.sourceProvider ? { sourceProviderSlug: request.sourceProvider } : {}),
-        });
-        writeHostedCliBridgeJson(input.response, 200, {
-          accounts: snapshot.connections.map(hostedDeviceSyncSnapshotToAccount),
-          provider: request.provider ?? null,
-          sourceProvider: request.sourceProvider ?? null,
-        });
-      } catch {
-        writeHostedCliBridgeError(
-          input.response,
-          502,
-          "HOSTED_DEVICE_ACCOUNT_LIST_FAILED",
-          "Hosted device account list failed.",
-        );
-      }
-      return;
-    }
-
-    const request = parseHostedCliDeviceConnectLinkRequest(body);
-
-    if (request.returnTo) {
-      writeHostedCliBridgeError(
-        input.response,
-        400,
-        "HOSTED_DEVICE_CONNECT_RETURN_TO_UNSUPPORTED",
-        "Hosted device connect does not support returnTo yet.",
-      );
-      return;
-    }
-
+    const requestWork = handleActiveHostedCliBridgeRequest({
+      active,
+      path,
+      request: input.request,
+      response: input.response,
+    });
+    active.inFlight.add(requestWork);
     try {
-      const messagingReturnTarget = resolveHostedCliBridgeMessagingReturnTarget(
-        active.messagingReturnTarget,
-      );
-      const result = await active.deviceSyncPort.createConnectLink({
-        connectTarget: request.connectTarget,
-        ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
-      });
-      writeHostedCliBridgeJson(input.response, 200, result);
-    } catch {
-      writeHostedCliBridgeError(
-        input.response,
-        502,
-        "HOSTED_DEVICE_CONNECT_LINK_FAILED",
-        "Hosted device connect link creation failed.",
-      );
+      await requestWork;
+    } finally {
+      active.inFlight.delete(requestWork);
     }
   } catch (error) {
     if (requestTimedOut || input.response.writableEnded) {
@@ -322,6 +280,103 @@ async function handleHostedCliBridgeRequest(input: {
       "HOSTED_CLI_BRIDGE_REQUEST_INVALID",
       "Hosted CLI bridge request is invalid.",
     );
+  }
+}
+
+async function handleActiveHostedCliBridgeRequest(input: {
+  active: HostedCliRuntimeBridgeActiveInvocation;
+  path: string;
+  request: IncomingMessage;
+  response: ServerResponse;
+}): Promise<void> {
+  if (!input.active.deviceSyncPort) {
+    writeHostedCliBridgeError(
+      input.response,
+      503,
+      "HOSTED_CLI_BRIDGE_DEVICE_SYNC_UNAVAILABLE",
+      "Hosted CLI bridge device sync is unavailable.",
+    );
+    return;
+  }
+
+  const body = await readHostedCliBridgeJsonBody(input.request);
+
+  if (input.path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH) {
+    const request = parseHostedCliDeviceAccountListRequest(body);
+    try {
+      const snapshot = await input.active.deviceSyncPort.fetchSnapshot({
+        ...(request.provider ? { provider: request.provider } : {}),
+        ...(request.sourceProvider ? { sourceProviderSlug: request.sourceProvider } : {}),
+      });
+      writeHostedCliBridgeJson(input.response, 200, {
+        accounts: snapshot.connections.map(hostedDeviceSyncSnapshotToAccount),
+        provider: request.provider ?? null,
+        sourceProvider: request.sourceProvider ?? null,
+      });
+    } catch {
+      writeHostedCliBridgeError(
+        input.response,
+        502,
+        "HOSTED_DEVICE_ACCOUNT_LIST_FAILED",
+        "Hosted device account list failed.",
+      );
+    }
+    return;
+  }
+
+  const request = parseHostedCliDeviceConnectLinkRequest(body);
+
+  if (request.returnTo) {
+    writeHostedCliBridgeError(
+      input.response,
+      400,
+      "HOSTED_DEVICE_CONNECT_RETURN_TO_UNSUPPORTED",
+      "Hosted device connect does not support returnTo yet.",
+    );
+    return;
+  }
+
+  try {
+    const messagingReturnTarget = resolveHostedCliBridgeMessagingReturnTarget(
+      input.active.messagingReturnTarget,
+    );
+    const result = await input.active.deviceSyncPort.createConnectLink({
+      connectTarget: request.connectTarget,
+      ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+    });
+    writeHostedCliBridgeJson(input.response, 200, result);
+  } catch {
+    writeHostedCliBridgeError(
+      input.response,
+      502,
+      "HOSTED_DEVICE_CONNECT_LINK_FAILED",
+      "Hosted device connect link creation failed.",
+    );
+  }
+}
+
+async function waitForInFlightBridgeRequests(
+  invocation: HostedCliRuntimeBridgeActiveInvocation,
+  timeoutMs: number,
+): Promise<void> {
+  if (invocation.inFlight.size === 0) {
+    return;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const drained = Promise.allSettled([...invocation.inFlight]).then((): "drained" => "drained");
+  const timedOut = new Promise<"timed-out">((resolve) => {
+    const timer = setTimeout(() => resolve("timed-out"), timeoutMs);
+    timer.unref?.();
+    timeout = timer;
+  });
+  const result = await Promise.race([drained, timedOut]);
+  if (timeout) {
+    clearTimeout(timeout);
+  }
+
+  if (result === "timed-out") {
+    throw new Error("Hosted CLI bridge in-flight request drain timed out.");
   }
 }
 

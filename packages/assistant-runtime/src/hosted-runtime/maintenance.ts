@@ -14,6 +14,7 @@ import {
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
   type AssistantRunEvent,
+  type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
   readAssistantAutomationState,
   runAssistantAutomationPass,
@@ -51,6 +52,9 @@ import type {
 import {
   createHostedAssistantInputSource,
 } from "./turn-input.ts";
+import {
+  createHostedAssistantTurnEnvironment,
+} from "./environment.ts";
 import {
   summarizeHostedAssistantAutoReplyEligibleAfter,
   summarizeHostedRuntimeStatusCounts,
@@ -155,7 +159,9 @@ export async function runHostedAssistantAutomationLane(input: {
   foregroundReplayInputIds?: readonly string[] | null;
   foregroundReplayPromptInputIds?: readonly string[] | null;
   preferredInputIds?: readonly string[] | null;
+  operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
+  runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
@@ -185,6 +191,11 @@ export async function runHostedAssistantAutomationLane(input: {
         input.signal,
         input.foregroundReplayInputIds ?? [],
         input.foregroundReplayPromptInputIds ?? [],
+        createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot ?? null,
+          runtimeEnv: input.runtimeEnv ?? {},
+          vaultRoot: input.vaultRoot,
+        }),
         {
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
@@ -233,6 +244,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   foregroundReplayInputIds: readonly string[] = [],
   foregroundReplayPromptInputIds: readonly string[] = [],
+  turnEnvironment?: AssistantTurnEnvironment | null,
   latencyTrace?: {
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
@@ -400,6 +412,7 @@ export async function runHostedAssistantAutomation(
       requestId,
       signal,
       inputSource,
+      turnEnvironment: turnEnvironment ?? null,
       ...(foregroundReplayScanLimit !== null
         ? {
             maxPerScan: foregroundReplayScanLimit,

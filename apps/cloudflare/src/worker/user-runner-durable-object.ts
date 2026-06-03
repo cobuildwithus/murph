@@ -1,8 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type {
   HostedRunnerStatusResponse,
-  HostedWorkspaceInvocationReason,
-  HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimeEnsureProcessingRequest,
@@ -22,7 +20,6 @@ import {
 } from "../user-runner.ts";
 import type {
   DurableObjectStateLike,
-  HostedRunnerStuckInvocationTestResult,
 } from "../user-runner.ts";
 import {
   asWorkerStringEnvironment,
@@ -35,15 +32,13 @@ import type {
 export class UserRunnerDurableObject extends DurableObject implements UserRunnerDurableObjectStubLike {
   private readonly runner: HostedUserRunner;
 
-  constructor(state: DurableObjectStateLike, env: WorkerEnvironmentSource) {
+  constructor(
+    state: DurableObjectStateLike,
+    env: WorkerEnvironmentSource,
+    runner: HostedUserRunner = createHostedUserRunner(state, env),
+  ) {
     super(state as never, env as never);
-    this.runner = new HostedUserRunner(
-      state,
-      readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
-      env.BUNDLES,
-      env,
-      env.RUNNER_CONTAINER,
-    );
+    this.runner = runner;
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -90,6 +85,13 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateActiveRuntimeWriteFence(input);
   }
 
+  async validateRuntimeProviderEgressToken(input: {
+    providerEgressToken: string;
+    userId: string;
+  }): ReturnType<HostedUserRunner["validateRuntimeProviderEgressToken"]> {
+    return this.runner.validateRuntimeProviderEgressToken(input);
+  }
+
   async createHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]> {
@@ -114,42 +116,19 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
   }
 
-  async beginRuntimeWriteFenceForSmoke(input: {
+  async beginDeploySmokeRuntimeWriteFence(input: {
     userId: string;
     workspaceVersion: string;
-  }): ReturnType<HostedUserRunner["beginRuntimeWriteFenceForSmoke"]> {
-    return this.runner.beginRuntimeWriteFenceForSmoke(input);
+  }): ReturnType<HostedUserRunner["beginDeploySmokeRuntimeWriteFence"]> {
+    return this.runner.beginDeploySmokeRuntimeWriteFence(input);
   }
 
-  async finishRuntimeWriteFenceForSmoke(input: {
+  async finishDeploySmokeRuntimeWriteFence(input: {
     attemptId: string;
     generation: string;
     userId: string;
-  }): ReturnType<HostedUserRunner["finishRuntimeWriteFenceForSmoke"]> {
-    return this.runner.finishRuntimeWriteFenceForSmoke(input);
-  }
-
-  async runUntilIdleForTest(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    return await this.runner.runUntilIdleForTest(input);
-  }
-
-  async runAlarmForTest(input: { userId: string }): Promise<{ ok: true }> {
-    await this.runner.bindUser(input.userId);
-    await this.runner.alarm();
-    return { ok: true };
-  }
-
-  async startStuckInvocationForTest(input: {
-    expiresInMs?: number;
-    reason?: HostedWorkspaceInvocationReason;
-    startedAgoMs?: number;
-    userId: string;
-  }): Promise<HostedRunnerStuckInvocationTestResult> {
-    await this.runner.bindUser(input.userId);
-    return this.runner.startStuckInvocationForTest(input);
+  }): ReturnType<HostedUserRunner["finishDeploySmokeRuntimeWriteFence"]> {
+    return this.runner.finishDeploySmokeRuntimeWriteFence(input);
   }
 
   async fetch(): Promise<Response> {
@@ -159,4 +138,17 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   async alarm(): Promise<void> {
     await this.runner.alarm();
   }
+}
+
+function createHostedUserRunner(
+  state: DurableObjectStateLike,
+  env: WorkerEnvironmentSource,
+): HostedUserRunner {
+  return new HostedUserRunner(
+    state,
+    readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+    env.BUNDLES,
+    env,
+    env.RUNNER_CONTAINER,
+  );
 }

@@ -1,4 +1,6 @@
 import {
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -19,6 +21,7 @@ function stripCloudflareHostedRuntimeAuthorityHeaders(headers: Headers): Headers
   stripped.delete(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
   stripped.delete(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
   stripped.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
-  stripped.delete("x-hosted-execution-runner-proxy-token");
+  stripped.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
+  stripped.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
   return stripped;
 }

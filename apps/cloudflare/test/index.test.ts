@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,12 +21,17 @@ import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
+import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-routes.ts";
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
   HostedUserRunner,
 } from "../src/user-runner.ts";
+import type {
+  HostedRunnerStuckInvocationTestResult,
+} from "../src/user-runner/hosted-user-runner-test.ts";
 import {
   parseTestPositiveInteger,
   parseTestPositiveIntegerValue,
@@ -66,6 +71,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
+  HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -104,26 +110,80 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 };
 
 async function readWorkerEntrypointSource(): Promise<string> {
-  const sourceFiles = [
-    path.join(APP_DIR, "src/index.ts"),
-    ...await listTypeScriptFiles(path.join(APP_DIR, "src/worker")),
-  ];
+  return await readTypeScriptImportGraphSource([path.join(APP_DIR, "src/index.ts")]);
+}
+
+async function readWorkerHttpRouteSource(): Promise<string> {
+  return await readTypeScriptImportGraphSource([
+    path.join(APP_DIR, "src/worker/fetch-handler.ts"),
+    path.join(APP_DIR, "src/worker/internal-routes.ts"),
+    path.join(APP_DIR, "src/worker/public-routes.ts"),
+  ]);
+}
+
+async function readTypeScriptImportGraphSource(entryPaths: readonly string[]): Promise<string> {
+  const seen = new Set<string>();
+  const sourceFiles = (await Promise.all(
+    entryPaths.map((entryPath) => listTypeScriptImportGraph(entryPath, seen)),
+  )).flat();
   const sources = await Promise.all(
-    sourceFiles.map((filePath) => readFile(filePath, "utf8")),
+    [...new Set(sourceFiles)].sort().map((filePath) => readFile(filePath, "utf8")),
   );
   return sources.join("\n");
 }
 
-async function listTypeScriptFiles(rootDir: string): Promise<string[]> {
-  const entries = await readdir(rootDir, { withFileTypes: true });
-  const nestedFiles = await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) {
-      return listTypeScriptFiles(entryPath);
+async function listTypeScriptImportGraph(
+  entryPath: string,
+  seen = new Set<string>(),
+): Promise<string[]> {
+  const normalizedEntryPath = path.normalize(entryPath);
+  if (seen.has(normalizedEntryPath)) {
+    return [];
+  }
+  seen.add(normalizedEntryPath);
+
+  const source = await readFile(normalizedEntryPath, "utf8");
+  const imports = [
+    ...source.matchAll(/(?:import|export)\s+(?:type\s+)?[^"'`]*?\s+from\s+["']([^"']+)["']/gu),
+    ...source.matchAll(/import\s+["']([^"']+)["']/gu),
+  ];
+  const importedFiles = await Promise.all(imports.map(async (match) => {
+    const specifier = match[1];
+    if (!specifier?.startsWith(".")) {
+      return [];
     }
-    return entry.isFile() && entry.name.endsWith(".ts") ? [entryPath] : [];
+    const resolved = await resolveTypeScriptImportPath(normalizedEntryPath, specifier);
+    return resolved ? listTypeScriptImportGraph(resolved, seen) : [];
   }));
-  return nestedFiles.flat().sort();
+
+  return [normalizedEntryPath, ...importedFiles.flat()].sort();
+}
+
+async function resolveTypeScriptImportPath(
+  importerPath: string,
+  specifier: string,
+): Promise<string | null> {
+  const rawPath = path.resolve(path.dirname(importerPath), specifier);
+  const candidates = [
+    rawPath,
+    rawPath.replace(/\.js$/u, ".ts"),
+    `${rawPath}.ts`,
+    path.join(rawPath, "index.ts"),
+  ];
+  for (const candidate of candidates) {
+    if (await isFile(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function isFile(filePath: string): Promise<boolean> {
+  try {
+    return (await stat(filePath)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 afterEach(() => {
@@ -135,13 +195,13 @@ afterEach(() => {
 
 describe("cloudflare worker routes", () => {
   it("keeps inbox email parsing isolated to the hosted email ingress module", async () => {
-    const [workerSource, hostedEmailIngressSource] = await Promise.all([
-      readWorkerEntrypointSource(),
+    const [workerHttpRouteSource, hostedEmailIngressSource] = await Promise.all([
+      readWorkerHttpRouteSource(),
       readFile(path.join(APP_DIR, "src/hosted-email/worker-ingress.ts"), "utf8"),
     ]);
 
-    expect(workerSource).not.toMatch(/from "@murphai\/inboxd";/u);
-    expect(workerSource).not.toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
+    expect(workerHttpRouteSource).not.toMatch(/from "@murphai\/inboxd";/u);
+    expect(workerHttpRouteSource).not.toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
     expect(hostedEmailIngressSource).not.toMatch(/from "@murphai\/inboxd";/u);
     expect(hostedEmailIngressSource).toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
   });
@@ -161,6 +221,24 @@ describe("cloudflare worker routes", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
     expect(deployAutomationSource).not.toMatch(/\bqueues\b/u);
     expect(wranglerSource).not.toMatch(/\bqueues\b/u);
+  });
+
+  it("keeps hosted-local test routes and toggles out of the production Worker graph", async () => {
+    const workerSource = await readWorkerEntrypointSource();
+
+    expect(workerInternalRoutes.some((route) =>
+      route.match("/__test/users/member_123/run-until-idle")
+    )).toBe(false);
+    expect(workerSource).not.toContain("/__test/");
+    expect(workerSource).not.toContain("MURPH_HOSTED_LOCAL_TEST_ROUTES");
+    expect(workerSource).not.toContain("runUntilIdleForTest");
+    expect(workerSource).not.toContain("startStuckInvocationForTest");
+    expect(workerSource).not.toContain("expireActivityForTest");
+    expect(workerSource).not.toContain("ageActiveInvocationForTest");
+    expect(workerSource).not.toContain("probeActiveContainerProviderEgressForTest");
+    expect(workerSource).not.toContain("provider-egress-active-container-probe");
+    expect(workerSource).not.toContain("HostedRunnerStuckInvocationTestResult");
+    expect(workerSource).not.toContain("matchHostedLocalTestUserRoute");
   });
 
   it("keeps generated worker contracts free of Queue producer bindings", async () => {
@@ -234,13 +312,20 @@ describe("cloudflare worker routes", () => {
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
+      "deploy-container-smoke",
+      "runtime-ensure-processing",
+      "runtime-prewarm",
+      "user-data-delete",
+      "browser-vault-session",
+      "user-status",
+    ]);
+    expect(hostedLocalTestInternalRoutes.map(({ name }) => name)).toEqual([
       "test-artifact-seed",
       "test-run-until-idle",
       "test-run-alarm",
       "test-container-activity-expired",
       "test-start-stuck-invocation",
       "test-checkpoint-artifact-write-fence",
-      "test-provider-egress-active-container-probe",
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
       "runtime-ensure-processing",
@@ -468,7 +553,7 @@ describe("cloudflare worker routes", () => {
     const response = await worker.fetch(request, env);
 
     expect(response.status).toBe(200);
-    expect(userRunner.beginRuntimeWriteFenceForSmoke).toHaveBeenCalledWith({
+    expect(userRunner.beginDeploySmokeRuntimeWriteFence).toHaveBeenCalledWith({
       userId: "member_123",
       workspaceVersion: "0",
     });
@@ -481,7 +566,7 @@ describe("cloudflare worker routes", () => {
         workspaceVersion: "0",
       },
     });
-    expect(userRunner.finishRuntimeWriteFenceForSmoke).toHaveBeenCalledWith({
+    expect(userRunner.finishDeploySmokeRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "smoke_attempt_1",
       generation: "1",
       userId: "member_123",
@@ -742,7 +827,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("keeps hosted-local test routes hidden without the explicit test-route flag", async () => {
+  it("keeps hosted-local test routes out of the production worker even when local flags are present", async () => {
     const response = await worker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
@@ -754,6 +839,7 @@ describe("cloudflare worker routes", () => {
         boundUserId: "member_123",
       }),
       createWorkerEnv(createUserRunnerStub(), {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         NODE_ENV: "test",
       }),
     );
@@ -765,7 +851,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("keeps hosted-local test routes hidden outside NODE_ENV=test", async () => {
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
         {
@@ -786,9 +872,30 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("keeps hosted-local test routes hidden without the explicit test-route flag", async () => {
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+        {
+          method: "GET",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        NODE_ENV: "test",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
   it("keeps wrong methods on enabled hosted-local test routes hidden before auth", async () => {
     const stub = createUserRunnerStub();
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       new Request("https://runner.example.test/__test/users/member_123/run-until-idle", {
         method: "GET",
       }),
@@ -811,7 +918,7 @@ describe("cloudflare worker routes", () => {
       NODE_ENV: "test",
     });
 
-    const artifactResponse = await worker.fetch(
+    const artifactResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
         {
@@ -829,7 +936,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test artifact user.",
     });
 
-    const artifactReadResponse = await worker.fetch(
+    const artifactReadResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
         {
@@ -846,7 +953,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test artifact user.",
     });
 
-    const runResponse = await worker.fetch(
+    const runResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/run-until-idle",
         {
@@ -863,7 +970,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
-    const alarmResponse = await worker.fetch(
+    const alarmResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/alarm",
         {
@@ -880,7 +987,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
-    const stuckInvocationResponse = await worker.fetch(
+    const stuckInvocationResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/stuck-invocation",
         {
@@ -897,7 +1004,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
-    const checkpointArtifactResponse = await worker.fetch(
+    const checkpointArtifactResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/checkpoint-artifact-write-fence",
         {
@@ -922,7 +1029,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
-    const directR2Response = await worker.fetch(
+    const directR2Response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
         {
@@ -958,7 +1065,7 @@ describe("cloudflare worker routes", () => {
     const url =
       `https://runner.example.test/__test/artifacts?userId=member_123&sha256=${artifactSha256}`;
 
-    const writeResponse = await worker.fetch(
+    const writeResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(url, {
         body: artifactBytes,
         method: "PUT",
@@ -976,7 +1083,7 @@ describe("cloudflare worker routes", () => {
       userId: "member_123",
     });
 
-    const readResponse = await worker.fetch(
+    const readResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(url, {
         method: "GET",
       }), {
@@ -1022,7 +1129,7 @@ describe("cloudflare worker routes", () => {
       },
     });
 
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
         {
@@ -1076,7 +1183,7 @@ describe("cloudflare worker routes", () => {
       + `?userId=member_123&sha256=${bundleRef.hash}`
       + `&key=${encodeURIComponent(bundleRef.key)}&size=${bundleRef.size}`;
 
-    const readResponse = await worker.fetch(
+    const readResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(url, {
         method: "GET",
       }), {
@@ -1102,7 +1209,7 @@ describe("cloudflare worker routes", () => {
         + "&key=cloudflare-workspace-snapshots%2Ffec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b.bundle"
         + `&size=${encodeURIComponent(size)}`;
 
-      const response = await worker.fetch(
+      const response = await hostedLocalTestWorker.fetch(
         await signControlRequest(new Request(url, {
           method: "GET",
         }), {
@@ -1130,7 +1237,7 @@ describe("cloudflare worker routes", () => {
       + `&key=${encodeURIComponent(`cloudflare-workspace-snapshots/${snapshotSha256}.bundle`)}`
       + `&size=${snapshotBytes.byteLength}`;
 
-    const writeResponse = await worker.fetch(
+    const writeResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(artifactUrl, {
         body: snapshotBytes,
         method: "PUT",
@@ -1141,7 +1248,7 @@ describe("cloudflare worker routes", () => {
     );
     expect(writeResponse.status).toBe(200);
 
-    const readResponse = await worker.fetch(
+    const readResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(bundleUrl, {
         method: "GET",
       }), {
@@ -1163,7 +1270,7 @@ describe("cloudflare worker routes", () => {
       NODE_ENV: "test",
     });
 
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/alarm",
         {
@@ -1193,7 +1300,7 @@ describe("cloudflare worker routes", () => {
       NODE_ENV: "test",
     });
 
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/stuck-invocation",
         {
@@ -1227,7 +1334,7 @@ describe("cloudflare worker routes", () => {
       NODE_ENV: "test",
     });
 
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/stuck-invocation?expiresInMs=45000&reason=manual&startedAgoMs=35000",
         {
@@ -1297,7 +1404,7 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    const response = await worker.fetch(request, env);
+    const response = await hostedLocalTestWorker.fetch(request, env);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -1705,7 +1812,7 @@ describe("cloudflare worker routes", () => {
       NODE_ENV: "test",
     });
 
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/run-until-idle?reason=manual",
         {
@@ -1735,7 +1842,7 @@ describe("cloudflare worker routes", () => {
       NODE_ENV: "test",
     });
 
-    const response = await worker.fetch(
+    const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/run-until-idle?reason=unsupported",
         {
@@ -2058,7 +2165,7 @@ describe("cloudflare worker routes", () => {
           kind: "accepted" as const,
         })),
       });
-      const token = await runner.beginRuntimeWriteFenceForSmoke({
+      const token = await runner.beginDeploySmokeRuntimeWriteFence({
         userId: "test-user",
         workspaceVersion: "7",
       });
@@ -2103,7 +2210,7 @@ describe("cloudflare worker routes", () => {
         })),
         invocationResults: [{ nextWakeAt: null, status: "idle" }],
       });
-      const oldToken = await runner.beginRuntimeWriteFenceForSmoke({
+      const oldToken = await runner.beginDeploySmokeRuntimeWriteFence({
         userId: "test-user",
         workspaceVersion: "7",
       });
@@ -2146,7 +2253,7 @@ describe("cloudflare worker routes", () => {
           reason: "container-rpc-timeout" as const,
         })),
       });
-      const token = await runner.beginRuntimeWriteFenceForSmoke({
+      const token = await runner.beginDeploySmokeRuntimeWriteFence({
         userId: "test-user",
         workspaceVersion: "7",
       });
@@ -3046,10 +3153,24 @@ async function resolveHostedUserCryptoContextForTest(
   };
 }
 
+type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
+  runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
+  runUntilIdleForTest(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): Promise<HostedWorkspaceInvocationResult>;
+  startStuckInvocationForTest(input: {
+    expiresInMs?: number;
+    reason?: HostedWorkspaceInvocationReason;
+    startedAgoMs?: number;
+    userId: string;
+  }): Promise<HostedRunnerStuckInvocationTestResult>;
+};
+
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
-    beginRuntimeWriteFenceForSmoke: vi.fn(async (input: {
+    beginDeploySmokeRuntimeWriteFence: vi.fn(async (input: {
       userId: string;
       workspaceVersion: string;
     }) => ({
@@ -3102,10 +3223,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       userId: "member_123",
       workspace: null,
     })),
-    finishRuntimeWriteFenceForSmoke: vi.fn(async () => ({ completed: true })),
+    finishDeploySmokeRuntimeWriteFence: vi.fn(async () => ({ completed: true })),
     validateRuntimeWriteFence: vi.fn(async () => true),
     ...overrides,
-  } satisfies UserRunnerDurableObjectStubLike;
+  } satisfies WorkerTestUserRunnerStub;
 }
 
 async function createSignedJsonControlRequest(

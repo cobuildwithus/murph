@@ -50,10 +50,23 @@ export function buildRunnerRecordTimingLogDetails(
 export function buildRunnerWriteFenceValidationRejectedDetails(input: {
   attemptId: string;
   generation: string;
-  record: RunnerStateRecord;
+  record: RunnerStateRecord | null;
   userId: string;
   workspaceVersion: string | null;
 }): HostedExecutionStructuredLogDetails {
+  if (!input.record) {
+    return {
+      activeWriteFencePresent: false,
+      activeWriteFenceWorkspaceVersionPresent: false,
+      runnerStatePresent: false,
+      writeFenceAttemptMatches: false,
+      writeFenceGenerationMatches: false,
+      writeFenceUserMatches: false,
+      writeFenceValidationRejectReason: "missing_runner_state",
+      writeFenceWorkspaceVersionMatches: false,
+    };
+  }
+
   const writeFence = input.record.writeFence;
   const writeFenceAttemptMatches = writeFence !== null
     && writeFence.attemptId === input.attemptId;
@@ -70,6 +83,7 @@ export function buildRunnerWriteFenceValidationRejectedDetails(input: {
     activeWriteFencePresent: writeFence !== null,
     activeWriteFenceWorkspaceVersionPresent: writeFence?.workspaceVersion !== null
       && writeFence?.workspaceVersion !== undefined,
+    runnerStatePresent: true,
     writeFenceAttemptMatches,
     writeFenceGenerationMatches,
     writeFenceUserMatches,

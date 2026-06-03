@@ -16,9 +16,8 @@ on:
       - "packages/hosted-local-harness/**"
       - "packages/hosted-orchestrator-temporal/**"
       - "render.yaml"
-      - "scripts/dev-hosted-local/**"
+      - "scripts/dev-hosted-local.ts"
       - "scripts/hosted-local.ts"
-      - "scripts/hosted-local.test.ts"
       - "scripts/setup-temporal-cli.sh"
       - "scripts/temporal-dev-server.sh"
   workflow_dispatch:

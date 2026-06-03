@@ -12,8 +12,14 @@
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
     "./compat": "./src/compat.ts",
+    "./codex-app-server-stub": "./src/codex-app-server-stub.ts",
+    "./dev-hosted-local/*": "./src/dev-hosted-local/*.ts",
     "./harness": "./src/harness.ts",
     "./e2e": "./src/e2e.ts"
+  },
+  "dependencies": {
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/operator-config": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.typecheck.json --pretty false",

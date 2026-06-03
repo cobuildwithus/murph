@@ -29,6 +29,9 @@ importers:
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
+      '@murphai/hosted-local-harness':
+        specifier: workspace:*
+        version: link:packages/hosted-local-harness
       '@types/node':
         specifier: ^25.6.2
         version: 25.6.2
@@ -572,7 +575,14 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
-  packages/hosted-local-harness: {}
+  packages/hosted-local-harness:
+    dependencies:
+      '@murphai/device-syncd':
+        specifier: workspace:*
+        version: link:../device-syncd
+      '@murphai/operator-config':
+        specifier: workspace:*
+        version: link:../operator-config
 
   packages/hosted-orchestrator-temporal:
     dependencies:

@@ -33,6 +33,7 @@ import {
   hostedWorkspaceSnapshotUserPrefix,
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import { HostedUserRunnerWithTestControls } from "../src/user-runner/hosted-user-runner-test.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -240,7 +241,7 @@ describe("HostedUserRunner execution coordination", () => {
       ensureReadyForProcessing,
     });
     await runner.bindUser(TEST_USER_ID);
-    await runner.beginRuntimeWriteFenceForSmoke({
+    await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "5",
     });
@@ -612,7 +613,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     const active = readRunnerMeta(sql);
-    await runner.finishRuntimeWriteFenceForSmoke({
+    await runner.finishDeploySmokeRuntimeWriteFence({
       attemptId: active.active_attempt_id ?? "",
       generation: String(active.active_generation),
       userId: TEST_USER_ID,
@@ -933,7 +934,7 @@ describe("HostedUserRunner execution coordination", () => {
     const active = readRunnerMeta(sql);
     expect(active.active_attempt_id).not.toBeNull();
 
-    await runner.finishRuntimeWriteFenceForSmoke({
+    await runner.finishDeploySmokeRuntimeWriteFence({
       attemptId: active.active_attempt_id ?? "",
       generation: String(active.active_generation),
       userId: TEST_USER_ID,
@@ -1154,7 +1155,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1202,7 +1203,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1249,7 +1250,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1285,7 +1286,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1338,7 +1339,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1378,7 +1379,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1433,7 +1434,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    await runner.beginRuntimeWriteFenceForSmoke({
+    await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1471,7 +1472,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1512,7 +1513,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "7",
     });
@@ -1701,7 +1702,7 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     });
 
-    const token = await runner.beginRuntimeWriteFenceForSmoke({
+    const token = await runner.beginDeploySmokeRuntimeWriteFence({
       userId: TEST_USER_ID,
       workspaceVersion: "3",
     });
@@ -2108,7 +2109,7 @@ function createRunnerHarness(input: {
     runtimeLogResponse: input.runtimeLogResponse,
   });
 
-  const runner = new HostedUserRunner(
+  const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",

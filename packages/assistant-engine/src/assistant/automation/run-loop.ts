@@ -20,6 +20,7 @@ import {
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
@@ -92,6 +93,7 @@ export interface RunAssistantAutomationInput {
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
   inputSource?: AssistantInputSource
+  turnEnvironment?: AssistantTurnEnvironment | null
   vault: string
   vaultServices?: VaultServices | null
 }
@@ -873,6 +875,7 @@ export async function runAssistantAutomationPass(
     signal: input.signal,
     sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
     state,
+    turnEnvironment: input.turnEnvironment ?? null,
     inputSource,
     vault: input.vault,
     vaultServices,
@@ -912,6 +915,7 @@ export async function runAssistantAutomationPass(
         onEvent: input.onEvent,
         vault: input.vault,
         signal: input.signal,
+        turnEnvironment: input.turnEnvironment ?? null,
         limit: input.maxPerScan,
       })
     : {

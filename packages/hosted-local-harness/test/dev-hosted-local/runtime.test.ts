@@ -10,7 +10,7 @@ import {
   spawnChildProcess,
   terminateChildProcessAndWait,
   waitForHealthyHttpEndpoint,
-} from "./runtime.ts";
+} from "../../src/dev-hosted-local/runtime.ts";
 
 let workerModeServer: http.Server | null = null;
 

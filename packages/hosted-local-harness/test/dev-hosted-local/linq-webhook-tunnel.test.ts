@@ -5,7 +5,7 @@ import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedLocalDevConfig } from "./types.ts";
+import type { HostedLocalDevConfig } from "../../src/dev-hosted-local/types.ts";
 
 type LinqWebhookSubscriptionResult = {
   createdAt: string | null;
@@ -92,7 +92,7 @@ const config: HostedLocalDevConfig = {
 
 describe("normalizeLinqWebhookPublicUrl", () => {
   it("accepts an HTTPS origin and appends the hosted Linq webhook path", async () => {
-    const { normalizeLinqWebhookPublicUrl } = await import("./linq-webhook-tunnel.ts");
+    const { normalizeLinqWebhookPublicUrl } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(normalizeLinqWebhookPublicUrl("https://tunnel.example.test")).toEqual({
       publicBaseUrl: "https://tunnel.example.test",
@@ -101,7 +101,7 @@ describe("normalizeLinqWebhookPublicUrl", () => {
   });
 
   it("accepts the exact hosted Linq webhook URL", async () => {
-    const { normalizeLinqWebhookPublicUrl } = await import("./linq-webhook-tunnel.ts");
+    const { normalizeLinqWebhookPublicUrl } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(
       normalizeLinqWebhookPublicUrl(
@@ -114,7 +114,7 @@ describe("normalizeLinqWebhookPublicUrl", () => {
   });
 
   it("rejects non-HTTPS public targets", async () => {
-    const { normalizeLinqWebhookPublicUrl } = await import("./linq-webhook-tunnel.ts");
+    const { normalizeLinqWebhookPublicUrl } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(() =>
       normalizeLinqWebhookPublicUrl("http://tunnel.example.test")
@@ -122,7 +122,7 @@ describe("normalizeLinqWebhookPublicUrl", () => {
   });
 
   it("rejects query and hash values before appending the webhook path", async () => {
-    const { normalizeLinqWebhookPublicUrl } = await import("./linq-webhook-tunnel.ts");
+    const { normalizeLinqWebhookPublicUrl } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(() =>
       normalizeLinqWebhookPublicUrl("https://tunnel.example.test?debug=1")
@@ -135,7 +135,7 @@ describe("normalizeLinqWebhookPublicUrl", () => {
 
 describe("parseCloudflaredTunnelHostname", () => {
   it("reads the first ingress hostname from a cloudflared config", async () => {
-    const { parseCloudflaredTunnelHostname } = await import("./linq-webhook-tunnel.ts");
+    const { parseCloudflaredTunnelHostname } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(parseCloudflaredTunnelHostname([
       "tunnel: dev",
@@ -146,7 +146,7 @@ describe("parseCloudflaredTunnelHostname", () => {
   });
 
   it("selects the hostname whose ingress service routes to hosted web", async () => {
-    const { parseCloudflaredTunnelHostname } = await import("./linq-webhook-tunnel.ts");
+    const { parseCloudflaredTunnelHostname } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(parseCloudflaredTunnelHostname([
       "ingress:",
@@ -162,7 +162,7 @@ describe("parseCloudflaredTunnelHostname", () => {
   });
 
   it("fails when no hostname rule routes to hosted web", async () => {
-    const { parseCloudflaredTunnelHostname } = await import("./linq-webhook-tunnel.ts");
+    const { parseCloudflaredTunnelHostname } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(() =>
       parseCloudflaredTunnelHostname([
@@ -178,7 +178,7 @@ describe("parseCloudflaredTunnelHostname", () => {
   });
 
   it("fails closed when the cloudflared config has no hostname", async () => {
-    const { parseCloudflaredTunnelHostname } = await import("./linq-webhook-tunnel.ts");
+    const { parseCloudflaredTunnelHostname } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     expect(() =>
       parseCloudflaredTunnelHostname("ingress:\n  - service: http://localhost:3000")
@@ -188,7 +188,7 @@ describe("parseCloudflaredTunnelHostname", () => {
 
 describe("resolveHostedLocalLinqWebhookSetup", () => {
   it("derives the tunnel target from the local cloudflared config when Linq env is present", async () => {
-    const { resolveHostedLocalLinqWebhookSetup } = await import("./linq-webhook-tunnel.ts");
+    const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     await expect(resolveHostedLocalLinqWebhookSetup({
       config,
@@ -213,7 +213,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
   });
 
   it("stays off for ordinary dev when the config is missing", async () => {
-    const { resolveHostedLocalLinqWebhookSetup } = await import("./linq-webhook-tunnel.ts");
+    const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     await expect(resolveHostedLocalLinqWebhookSetup({
       config,
@@ -227,7 +227,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
   });
 
   it("uses an explicit public URL without requiring a managed tunnel config", async () => {
-    const { resolveHostedLocalLinqWebhookSetup } = await import("./linq-webhook-tunnel.ts");
+    const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     await expect(resolveHostedLocalLinqWebhookSetup({
       config: {
@@ -251,7 +251,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
   });
 
   it("requires a local inbound allowlist before enabling Linq webhook handling", async () => {
-    const { resolveHostedLocalLinqWebhookSetup } = await import("./linq-webhook-tunnel.ts");
+    const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     await expect(resolveHostedLocalLinqWebhookSetup({
       config: {
@@ -267,7 +267,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
   });
 
   it("fails when the tunnel is required but the config is absent", async () => {
-    const { resolveHostedLocalLinqWebhookSetup } = await import("./linq-webhook-tunnel.ts");
+    const { resolveHostedLocalLinqWebhookSetup } = await import("../../src/dev-hosted-local/linq-webhook-tunnel.ts");
 
     await expect(resolveHostedLocalLinqWebhookSetup({
       config: {
@@ -286,7 +286,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
 describe("registerHostedLocalLinqWebhookSubscription", () => {
   it("registers message.received against the resolved target", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const stderrTarget = new CapturingWritable();
     const fetchImplementation = vi.fn<typeof fetch>(async () =>
@@ -332,7 +332,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("uses the local registration cache to avoid duplicate create calls", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
@@ -398,7 +398,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("uses the remote Linq subscription list to avoid duplicate create calls", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
@@ -464,7 +464,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("continues without caching when Linq does not expose an existing signing secret", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
@@ -515,7 +515,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("fails when an existing Linq webhook subscription returns a different signing secret", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const fetchImplementation = vi.fn<typeof fetch>(async () =>
       Response.json({
@@ -554,7 +554,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("does not trust a legacy local cache without explicit secret verification", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
@@ -615,7 +615,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("continues without duplicate create when the remote target has extra events", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const stderrTarget = new CapturingWritable();
     const fetchImplementation = vi.fn<typeof fetch>(async () =>
@@ -659,7 +659,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("continues without duplicate create when the remote target has a different phone filter", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const stderrTarget = new CapturingWritable();
     const fetchImplementation = vi.fn<typeof fetch>(async () =>
@@ -703,7 +703,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("waits for the public webhook target before Linq registration", async () => {
     const { waitForHostedLocalLinqWebhookTarget } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const fetchImplementation = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("not ready", { status: 530 }))
@@ -738,7 +738,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("fails before Linq registration when the public webhook target is unreachable", async () => {
     const { waitForHostedLocalLinqWebhookTarget } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const fetchImplementation = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("not ready", { status: 530 }));
@@ -760,7 +760,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
   it("fails if Linq returns a different signing secret", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
-      "./linq-webhook-tunnel.ts"
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     createLinqWebhookSubscription.mockResolvedValueOnce({
       createdAt: null,

@@ -6,6 +6,7 @@ import {
   resolveAssistantSkillsRoot,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
@@ -29,9 +30,6 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "./launch-spec.ts";
-import {
-  maybeInstallHostedE2ECodexAppServerStub,
-} from "./codex-e2e-app-server-stub.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./codex-runtime-env.ts";
@@ -97,6 +95,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
   rejectDeprecatedHostedCodexAppServerProxyEnv(input.runtimeEnv);
+  rejectInvalidHostedCodexAppServerCommandOverride(input.runtimeEnv);
 
   const providerConfig = resolveHostedCodexModelProviderConfig({
     provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
@@ -157,16 +156,37 @@ export async function prepareHostedCodexRuntimeEnvironment(
     },
   );
   await chmod(codexConfigPath, 0o600);
-  await maybeInstallHostedE2ECodexAppServerStub({
-    codexHome,
-    runtimeEnv,
-  });
 
   return {
     codexConfigPath,
     codexHome,
     runtimeEnv,
   };
+}
+
+function rejectInvalidHostedCodexAppServerCommandOverride(
+  runtimeEnv: Readonly<Record<string, string>>,
+): void {
+  const configuredCommand = normalizeHostedCodexEnvString(
+    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+  );
+  if (!configuredCommand) {
+    return;
+  }
+
+  if (normalizeHostedCodexEnvString(runtimeEnv.NODE_ENV) !== "test") {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV} is only available when NODE_ENV=test.`,
+    );
+  }
+
+  if (!path.isAbsolute(configuredCommand)) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV} must be an absolute path.`,
+    );
+  }
 }
 
 function stripHostedCodexRejectedSeedEnv(

@@ -97,6 +97,13 @@ Temporal hosted workflow
   hosted env projection naming, and direct invocation launcher-root side-effect
   tests has landed in current code/tests. Remaining lifecycle work should be
   tracked by new concrete findings rather than that completed follow-up note.
+- Current follow-up: scope accepted CLI bridge requests to the active
+  invocation by draining in-flight authenticated bridge work before clearing the
+  active invocation binding.
+- Current follow-up: remove hosted assistant/mailbox invocation dependence on
+  ambient `process.env` and `process.cwd()` by threading explicit turn env and
+  working-directory values through the assistant automation and notification
+  paths.
 
 ## First-Principles Corrections
 

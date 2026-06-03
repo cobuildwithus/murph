@@ -15,6 +15,9 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
+  readHostedRunnerContainerIdentity,
+} from "./hosted-runner-container-identity.ts";
+import {
   handleRunnerOutboundRequest,
 } from "./runner-outbound.ts";
 import {
@@ -31,6 +34,8 @@ import type {
   RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -204,18 +209,56 @@ interface HostedRunnerDiagnosticBodySource {
 type HostedProviderEgressValidationMode =
   | "active_container"
   | "exact_headers"
-  | "missing_identity";
+  | "missing_identity"
+  | "provider_egress_token";
 type HostedProviderEgressActiveContainerIdentitySource =
   | "bound_user_header"
   | "container_name";
+const HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS = [
+  "expired_write_fence",
+  "invalid_runner_container_name",
+  "missing_runner_state",
+  "missing_write_fence",
+  "write_fence_mismatch",
+] as const;
+const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
+  "expired_write_fence",
+  "missing_provider_egress_token",
+  "missing_runner_state",
+  "missing_write_fence",
+  "provider_egress_token_mismatch",
+  "write_fence_mismatch",
+] as const;
+type HostedActiveWriteFenceRejectReason =
+  typeof HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS[number];
+type HostedProviderEgressTokenRejectReason =
+  typeof HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS[number];
+type HostedProviderEgressRejectReason =
+  | HostedActiveWriteFenceRejectReason
+  | HostedProviderEgressTokenRejectReason
+  | "active_validation_rpc_missing"
+  | "active_write_fence_rejected"
+  | "active_write_fence_validation_error"
+  | "bound_user_missing"
+  | "container_identity_missing"
+  | "container_user_mismatch"
+  | "exact_write_fence_rejected"
+  | "provider_egress_token_missing"
+  | "provider_egress_token_rejected"
+  | "provider_egress_token_validation_error"
+  | "validation_rpc_missing";
 
 interface HostedProviderEgressAuthorization {
   activeContainerIdentitySource: HostedProviderEgressActiveContainerIdentitySource | null;
   authorized: boolean;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
+  providerEgressTokenPresent: boolean;
+  rejectReason?: HostedProviderEgressRejectReason;
   runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
+  validationErrorCode?: string;
+  validationErrorName?: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }
 
@@ -1946,6 +1989,7 @@ async function authorizeHostedProviderEgress(input: {
         authorized: true,
         durationMs: Date.now() - startedAt,
         mode: "exact_headers",
+        providerEgressTokenPresent: false,
         runtimeAuthorityHeadersPresent,
         userId: input.userId,
         writeFence,
@@ -1957,6 +2001,8 @@ async function authorizeHostedProviderEgress(input: {
           authorized: false,
           durationMs: Date.now() - startedAt,
           mode: "exact_headers",
+          providerEgressTokenPresent: false,
+          rejectReason: "exact_write_fence_rejected",
           runtimeAuthorityHeadersPresent,
           userId: input.userId,
           writeFence,
@@ -1966,33 +2012,164 @@ async function authorizeHostedProviderEgress(input: {
     }
   }
 
-  const runnerContainerName = readHostedRunnerContainerName(input.ctx);
-  const containerUserId = readHostedRunnerContainerUserId(input);
-  const activeUserId = input.userId ?? containerUserId;
-  if (!activeUserId || !runnerContainerName || !containerUserId) {
+  const providerEgressToken = readHostedProviderEgressToken(input.request);
+  if (input.userId && providerEgressToken) {
+    return await authorizeHostedProviderEgressToken({
+      activeUserId: input.userId,
+      env: input.env,
+      providerEgressToken,
+      providerEgressTokenPresent: true,
+      runtimeAuthorityHeadersPresent,
+      startedAt,
+    });
+  }
+
+  if (input.providerKind !== "openai") {
+    if (!input.userId) {
+      return {
+        activeContainerIdentitySource: null,
+        authorized: false,
+        durationMs: Date.now() - startedAt,
+        mode: "missing_identity",
+        providerEgressTokenPresent: providerEgressToken !== null,
+        rejectReason: "bound_user_missing",
+        runtimeAuthorityHeadersPresent,
+        userId: null,
+        writeFence: null,
+      };
+    }
+
     return {
-      activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
-        containerUserId,
-        userId: input.userId,
-      }),
+      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
-      mode: "missing_identity",
+      mode: "provider_egress_token",
+      providerEgressTokenPresent: false,
+      rejectReason: "provider_egress_token_missing",
       runtimeAuthorityHeadersPresent,
+      userId: input.userId,
+      writeFence: null,
+    };
+  }
+
+  return await authorizeHostedProviderEgressActiveContainer({
+    ctx: input.ctx,
+    env: input.env,
+    providerEgressTokenPresent: providerEgressToken !== null,
+    runtimeAuthorityHeadersPresent,
+    startedAt,
+    userId: input.userId,
+  });
+}
+
+function readHostedProviderEgressToken(request: Request): string | null {
+  const token = request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)?.trim();
+  return token ? token : null;
+}
+
+async function authorizeHostedProviderEgressToken(input: {
+  activeUserId: string;
+  env: RunnerOutboundEnvironmentSource;
+  providerEgressToken: string;
+  providerEgressTokenPresent: boolean;
+  runtimeAuthorityHeadersPresent: boolean;
+  startedAt: number;
+}): Promise<HostedProviderEgressAuthorization> {
+  const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
+  if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
+    return {
+      activeContainerIdentitySource: null,
+      authorized: false,
+      durationMs: Date.now() - input.startedAt,
+      mode: "provider_egress_token",
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      rejectReason: "validation_rpc_missing",
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+      userId: input.activeUserId,
+      writeFence: null,
+    };
+  }
+
+  let rawValidation: unknown;
+  try {
+    rawValidation = await runner.validateRuntimeProviderEgressToken({
+      providerEgressToken: input.providerEgressToken,
+      userId: input.activeUserId,
+    });
+  } catch (error) {
+    const validationErrorName = readHostedExecutionSafeErrorName(error);
+    return {
+      activeContainerIdentitySource: null,
+      authorized: false,
+      durationMs: Date.now() - input.startedAt,
+      mode: "provider_egress_token",
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      rejectReason: "provider_egress_token_validation_error",
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+      userId: input.activeUserId,
+      validationErrorCode: deriveHostedExecutionErrorCode(error),
+      ...(validationErrorName ? { validationErrorName } : {}),
+      writeFence: null,
+    };
+  }
+
+  const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
+  return {
+    activeContainerIdentitySource: null,
+    authorized: validation.owns,
+    durationMs: Date.now() - input.startedAt,
+    mode: "provider_egress_token",
+    providerEgressTokenPresent: input.providerEgressTokenPresent,
+    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
+    runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+    userId: input.activeUserId,
+    writeFence: validation.writeFence,
+  };
+}
+
+async function authorizeHostedProviderEgressActiveContainer(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  providerEgressTokenPresent: boolean;
+  runtimeAuthorityHeadersPresent: boolean;
+  startedAt: number;
+  userId: string | null;
+}): Promise<HostedProviderEgressAuthorization> {
+  const containerIdentity = readHostedRunnerContainerIdentity({
+    containerName: input.ctx?.containerId,
+    source: input.env,
+  });
+  const containerUserId = containerIdentity?.userId ?? null;
+  const activeUserId = input.userId ?? containerUserId;
+  const activeContainerIdentitySource =
+    readHostedProviderEgressActiveContainerIdentitySource({
+      containerUserId,
+      userId: input.userId,
+    });
+
+  if (!containerIdentity || !activeUserId) {
+    return {
+      activeContainerIdentitySource,
+      authorized: false,
+      durationMs: Date.now() - input.startedAt,
+      mode: "missing_identity",
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      rejectReason: containerIdentity ? "bound_user_missing" : "container_identity_missing",
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
       userId: activeUserId,
       writeFence: null,
     };
   }
+
   if (containerUserId !== activeUserId) {
     return {
-      activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
-        containerUserId,
-        userId: input.userId,
-      }),
+      activeContainerIdentitySource,
       authorized: false,
-      durationMs: Date.now() - startedAt,
+      durationMs: Date.now() - input.startedAt,
       mode: "active_container",
-      runtimeAuthorityHeadersPresent,
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      rejectReason: "container_user_mismatch",
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
       userId: activeUserId,
       writeFence: null,
     };
@@ -2001,34 +2178,50 @@ async function authorizeHostedProviderEgress(input: {
   const runner = input.env.USER_RUNNER.getByName(activeUserId);
   if (typeof runner.validateActiveRuntimeWriteFence !== "function") {
     return {
-      activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
-        containerUserId,
-        userId: input.userId,
-      }),
+      activeContainerIdentitySource,
       authorized: false,
-      durationMs: Date.now() - startedAt,
+      durationMs: Date.now() - input.startedAt,
       mode: "active_container",
-      runtimeAuthorityHeadersPresent,
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      rejectReason: "active_validation_rpc_missing",
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
       userId: activeUserId,
       writeFence: null,
     };
   }
 
-  const validation = normalizeActiveRuntimeWriteFenceValidationResult(
-    await runner.validateActiveRuntimeWriteFence({
-      runnerContainerName,
+  let rawValidation: unknown;
+  try {
+    rawValidation = await runner.validateActiveRuntimeWriteFence({
+      runnerContainerName: containerIdentity.runnerContainerName,
       userId: activeUserId,
-    }),
-  );
+    });
+  } catch (error) {
+    const validationErrorName = readHostedExecutionSafeErrorName(error);
+    return {
+      activeContainerIdentitySource,
+      authorized: false,
+      durationMs: Date.now() - input.startedAt,
+      mode: "active_container",
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      rejectReason: "active_write_fence_validation_error",
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+      userId: activeUserId,
+      validationErrorCode: deriveHostedExecutionErrorCode(error),
+      ...(validationErrorName ? { validationErrorName } : {}),
+      writeFence: null,
+    };
+  }
+
+  const validation = normalizeActiveRuntimeWriteFenceValidationResult(rawValidation);
   return {
-    activeContainerIdentitySource: readHostedProviderEgressActiveContainerIdentitySource({
-      containerUserId,
-      userId: input.userId,
-    }),
+    activeContainerIdentitySource,
     authorized: validation.owns,
-    durationMs: Date.now() - startedAt,
+    durationMs: Date.now() - input.startedAt,
     mode: "active_container",
-    runtimeAuthorityHeadersPresent,
+    providerEgressTokenPresent: input.providerEgressTokenPresent,
+    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
+    runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
     userId: activeUserId,
     writeFence: validation.writeFence,
   };
@@ -2044,65 +2237,22 @@ function readHostedProviderEgressActiveContainerIdentitySource(input: {
   return input.containerUserId ? "container_name" : null;
 }
 
-function readHostedRunnerContainerName(ctx?: HostedRunnerOutboundContext): string | null {
-  const containerName = typeof ctx?.containerId === "string"
-    ? ctx.containerId.trim()
-    : "";
-  return containerName.length > 0 ? containerName : null;
-}
-
-function readHostedRunnerContainerUserId(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-}): string | null {
-  const containerId = readHostedRunnerContainerName(input.ctx);
-  if (!containerId) {
-    return null;
-  }
-  const versionSegment = readRunnerContainerWorkerVersionSegment(input.env);
-  const versionSuffix = versionSegment ? `--v-${versionSegment}` : null;
-  const userId = versionSuffix && containerId.endsWith(versionSuffix)
-    ? containerId.slice(0, -versionSuffix.length)
-    : containerId;
-  const normalized = userId.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readRunnerContainerWorkerVersionSegment(source: RunnerOutboundEnvironmentSource): string | null {
-  const metadata = source.CF_VERSION_METADATA;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return null;
-  }
-
-  const versionId = (metadata as { id?: unknown }).id;
-  return typeof versionId === "string"
-    ? sanitizeRunnerContainerNameSegment(versionId)
-    : null;
-}
-
-function sanitizeRunnerContainerNameSegment(value: string): string | null {
-  const sanitized = value
-    .trim()
-    .replace(/[^A-Za-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-
-  return sanitized.length > 0 ? sanitized : null;
-}
-
 function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {
   owns: boolean;
+  rejectReason: HostedProviderEgressRejectReason | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 } {
   if (typeof value === "boolean") {
     return {
       owns: false,
+      rejectReason: "active_write_fence_rejected",
       writeFence: null,
     };
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {
       owns: false,
+      rejectReason: "active_write_fence_rejected",
       writeFence: null,
     };
   }
@@ -2111,6 +2261,8 @@ function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {
   if (record.owns !== true) {
     return {
       owns: false,
+      rejectReason: readActiveRuntimeWriteFenceRejectReason(record.reason)
+        ?? "active_write_fence_rejected",
       writeFence: null,
     };
   }
@@ -2126,12 +2278,14 @@ function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {
   ) {
     return {
       owns: false,
+      rejectReason: "active_write_fence_rejected",
       writeFence: null,
     };
   }
 
   return {
     owns: true,
+    rejectReason: null,
     writeFence: {
       attemptId: record.attemptId,
       leaseGeneration: record.leaseGeneration,
@@ -2141,6 +2295,94 @@ function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {
         : null,
     },
   };
+}
+
+function normalizeProviderEgressTokenValidationResult(value: unknown): {
+  owns: boolean;
+  rejectReason: HostedProviderEgressRejectReason | null;
+  writeFence: HostedProviderEgressWriteFenceMetadata | null;
+} {
+  if (typeof value === "boolean") {
+    return {
+      owns: false,
+      rejectReason: "provider_egress_token_rejected",
+      writeFence: null,
+    };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      owns: false,
+      rejectReason: "provider_egress_token_rejected",
+      writeFence: null,
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.owns !== true) {
+    return {
+      owns: false,
+      rejectReason: readProviderEgressTokenRejectReason(record.reason)
+        ?? "provider_egress_token_rejected",
+      writeFence: null,
+    };
+  }
+  if (
+    typeof record.attemptId !== "string"
+    || typeof record.leaseGeneration !== "string"
+    || typeof record.userId !== "string"
+    || (
+      record.workspaceVersion !== null
+      && record.workspaceVersion !== undefined
+      && typeof record.workspaceVersion !== "string"
+    )
+  ) {
+    return {
+      owns: false,
+      rejectReason: "provider_egress_token_rejected",
+      writeFence: null,
+    };
+  }
+
+  return {
+    owns: true,
+    rejectReason: null,
+    writeFence: {
+      attemptId: record.attemptId,
+      leaseGeneration: record.leaseGeneration,
+      userId: record.userId,
+      workspaceVersion: typeof record.workspaceVersion === "string"
+        ? record.workspaceVersion
+        : null,
+    },
+  };
+}
+
+function readActiveRuntimeWriteFenceRejectReason(
+  value: unknown,
+): HostedActiveWriteFenceRejectReason | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  for (const reason of HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS) {
+    if (value === reason) {
+      return reason;
+    }
+  }
+  return null;
+}
+
+function readProviderEgressTokenRejectReason(
+  value: unknown,
+): HostedProviderEgressTokenRejectReason | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  for (const reason of HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS) {
+    if (value === reason) {
+      return reason;
+    }
+  }
+  return null;
 }
 
 function unauthorizedProviderEgress(input: {
@@ -2222,8 +2464,7 @@ function emitHostedProviderEgressDiagnostic(input: {
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
       activeContainerIdentitySource: input.authorization.activeContainerIdentitySource,
-      activeContainerSameUserOffTurnCaveat:
-        input.authorization.mode === "active_container" && input.authorization.authorized,
+      providerEgressTokenPresent: input.authorization.providerEgressTokenPresent,
       runtimeAuthorityHeadersPresent: input.authorization.runtimeAuthorityHeadersPresent,
       userIdPresent: input.authorization.userId !== null,
       writeFenceMetadataPresent: input.authorization.writeFence !== null,
@@ -2231,6 +2472,15 @@ function emitHostedProviderEgressDiagnostic(input: {
       writeFenceValidationMode: input.authorization.mode,
       ...(errorCode ? { errorCode } : {}),
       ...(errorName ? { errorName } : {}),
+      ...(input.authorization.rejectReason
+        ? { writeFenceValidationRejectReason: input.authorization.rejectReason }
+        : {}),
+      ...(input.authorization.validationErrorCode
+        ? { writeFenceValidationErrorCode: input.authorization.validationErrorCode }
+        : {}),
+      ...(input.authorization.validationErrorName
+        ? { writeFenceValidationErrorName: input.authorization.validationErrorName }
+        : {}),
     },
     level: input.authorization.authorized && !input.error ? "info" : "warn",
     message: "Hosted runner provider egress completed.",
@@ -2244,6 +2494,8 @@ function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
     stripped.delete(name);
   }
   stripped.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
+  stripped.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
+  stripped.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
   return stripped;
 }
 
@@ -2261,6 +2513,8 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
 function createHostedRunnerInternalRequest(source: Request): Request {
   const headers = new Headers(source.headers);
   headers.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
+  headers.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
+  headers.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
   return new Request(source, {
     headers,
   });

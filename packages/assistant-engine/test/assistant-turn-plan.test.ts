@@ -115,6 +115,15 @@ describe('assistant turn plan', () => {
       }),
     ).toBe('/tmp/hosted-runner-launch-alpha')
     expect(
+      resolveAssistantRequestedWorkingDirectory(hostedInput, {
+        currentWorkingDirectory: null,
+        env: {
+          MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        },
+        platform: 'linux',
+      }),
+    ).toBe('/tmp/hosted-runner-launch-alpha')
+    expect(
       resolveAssistantRequestedWorkingDirectory(
         createMessageInput({
           executionContext: null,

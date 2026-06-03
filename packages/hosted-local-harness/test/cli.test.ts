@@ -42,33 +42,33 @@ const updateHostedLocalHarnessState = vi.hoisted(() =>
   })),
 );
 
-vi.mock("../packages/hosted-local-harness/src/process.ts", () => ({
+vi.mock("../src/process.ts", () => ({
   runDoctorCommand: vi.fn(),
   runForegroundCommand,
 }));
 
-vi.mock("../scripts/dev-hosted-local/stack.ts", () => ({
+vi.mock("../src/dev-hosted-local/stack.ts", () => ({
   startHostedLocalDevStack,
   terminateKnownHostedLocalProcessResidue,
 }));
 
-vi.mock("../scripts/dev-hosted-local/runtime.ts", () => ({
+vi.mock("../src/dev-hosted-local/runtime.ts", () => ({
   cleanupHostedRunnerContainers,
 }));
 
-vi.mock("../scripts/dev-hosted-local/config.ts", () => ({
+vi.mock("../src/dev-hosted-local/config.ts", () => ({
   resolveHostedLocalDevConfig,
 }));
 
-vi.mock("../packages/hosted-local-harness/src/e2e.ts", async (importActual) => {
-  const actual = await importActual<typeof import("../packages/hosted-local-harness/src/e2e.ts")>();
+vi.mock("../src/e2e.ts", async (importActual) => {
+  const actual = await importActual<typeof import("../src/e2e.ts")>();
   return {
     ...actual,
     runHostedLocalE2eSuite,
   };
 });
 
-vi.mock("../packages/hosted-local-harness/src/state.ts", () => ({
+vi.mock("../src/state.ts", () => ({
   applyHostedLocalStateEnv: ({ env }: { env: NodeJS.ProcessEnv }) => ({
     ...env,
     MURPH_HOSTED_LOCAL_STATE_PATH: ".artifacts/hosted-local/test/state.json",
@@ -77,7 +77,7 @@ vi.mock("../packages/hosted-local-harness/src/state.ts", () => ({
   updateHostedLocalHarnessState,
 }));
 
-import { runHostedLocalCli } from "../packages/hosted-local-harness/src/cli.ts";
+import { runHostedLocalCli } from "../src/cli.ts";
 
 function createBufferedStdout(): { stdout: Writable; text: () => string } {
   const chunks: string[] = [];

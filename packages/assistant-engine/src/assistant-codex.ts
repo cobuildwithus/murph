@@ -7,7 +7,7 @@ import path from 'node:path'
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import type {
@@ -136,7 +136,7 @@ const HOSTED_CODEX_APP_SERVER_STABLE_IDENTITY_ENV_NAMES = [
   'HOME',
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   'HOSTED_ASSISTANT_APPROVAL_POLICY',
   'HOSTED_ASSISTANT_MODEL',
@@ -524,16 +524,16 @@ function isHostedRuntimeProcessEnv(env: NodeJS.ProcessEnv | undefined): boolean 
 }
 
 function resolveHostedCodexAppServerCommand(env: NodeJS.ProcessEnv): string {
-  const testCommand = normalizeNullableString(
-    env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV],
+  const commandOverride = normalizeNullableString(
+    env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
   )
 
   if (
     env.NODE_ENV?.trim() === 'test'
-    && testCommand
-    && path.isAbsolute(testCommand)
+    && commandOverride
+    && path.isAbsolute(commandOverride)
   ) {
-    return testCommand
+    return commandOverride
   }
 
   return HOSTED_CODEX_APP_SERVER_COMMAND
@@ -1115,8 +1115,8 @@ async function buildCodexAppServerProcessIdentity(input: {
     configTomlDigest,
     envDigest: hashStableCodexIdentity(identityEnv),
     hostedRuntimeProcess: input.hostedRuntimeProcess,
-    hostedTestCommand:
-      normalizeNullableString(input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]),
+    hostedCommandOverride:
+      normalizeNullableString(input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]),
     workingDirectory: input.workingDirectory,
   }
 

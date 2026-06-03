@@ -18,18 +18,11 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   prepareHostedWakeContext: vi.fn(),
   sendAssistantNotification: vi.fn(),
-  withHostedProcessEnvironment: vi.fn(
-    async (_input: unknown, run: () => Promise<unknown>) => await run(),
-  ),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
   prepareHostedWakeContext: mocks.prepareHostedWakeContext,
-}));
-
-vi.mock("../src/hosted-runtime/environment.ts", () => ({
-  withHostedProcessEnvironment: mocks.withHostedProcessEnvironment,
 }));
 
 vi.mock("@murphai/assistant-engine", async () => {
@@ -88,14 +81,25 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
   } as const;
 }
 
+function expectHostedTurnEnvironment(input: {
+  env?: Record<string, string>;
+  vaultRoot: string;
+}) {
+  return {
+    currentWorkingDirectory: null,
+    env: expect.objectContaining({
+      ...(input.env ?? {}),
+      MURPH_HOSTED_RUNTIME_PROCESS: "1",
+      VAULT: input.vaultRoot,
+    }),
+  };
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   mocks.emitHostedExecutionStructuredLog.mockReset();
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.withHostedProcessEnvironment.mockImplementation(
-    async (_input: unknown, run: () => Promise<unknown>) => await run(),
-  );
 });
 
 describe("executeHostedMailboxEvent", () => {
@@ -1289,6 +1293,12 @@ describe("executeHostedMailboxEvent", () => {
       },
       threadId: "hid_linq_thread_123",
       threadIsDirect: true,
+      turnEnvironment: expectHostedTurnEnvironment({
+        env: {
+          OPENAI_API_KEY: "secret",
+        },
+        vaultRoot: "/tmp/assistant-runtime-events",
+      }),
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
@@ -1489,16 +1499,6 @@ describe("executeHostedMailboxEvent", () => {
       CODEX_HOME: "/tmp/assistant-runtime-events-home/.codex-hosted",
     };
     const runtime = createRuntime();
-    let preparedInsideHostedEnvironment = false;
-    mocks.withHostedProcessEnvironment.mockImplementationOnce(async (_input, run) => {
-      expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
-      expect(mocks.hydrateHostedExecutionDefaultTarget).not.toHaveBeenCalled();
-      const result = await run();
-      preparedInsideHostedEnvironment =
-        mocks.prepareHostedWakeContext.mock.calls.length === 1
-        && mocks.hydrateHostedExecutionDefaultTarget.mock.calls.length === 1;
-      return result;
-    });
 
     await executeHostedMailboxEvent({
       wake,
@@ -1525,15 +1525,6 @@ describe("executeHostedMailboxEvent", () => {
         runtimeEnv,
       },
     );
-    expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
-      {
-        envOverrides: runtimeEnv,
-        operatorHomeRoot,
-        vaultRoot: "/tmp/assistant-runtime-events",
-      },
-      expect.any(Function),
-    );
-    expect(preparedInsideHostedEnvironment).toBe(true);
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
       actorId: "hid_linq_actor_123",
       bindingDeliveryTarget: "thread_123",
@@ -1558,6 +1549,13 @@ describe("executeHostedMailboxEvent", () => {
       responsePolicy: null,
       threadId: "hid_linq_thread_123",
       threadIsDirect: true,
+      turnEnvironment: expectHostedTurnEnvironment({
+        env: {
+          CODEX_HOME: "/tmp/assistant-runtime-events-home/.codex-hosted",
+          HOME: operatorHomeRoot,
+        },
+        vaultRoot: "/tmp/assistant-runtime-events",
+      }),
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
@@ -1794,6 +1792,9 @@ describe("executeHostedMailboxEvent", () => {
       responsePolicy: null,
       threadId: null,
       threadIsDirect: true,
+      turnEnvironment: expectHostedTurnEnvironment({
+        vaultRoot: "/tmp/assistant-runtime-events",
+      }),
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });

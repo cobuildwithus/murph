@@ -26,6 +26,7 @@ export interface RunnerWriteFenceToken {
   expiresAt: string;
   generation: string;
   leaseGeneration: string;
+  providerEgressToken: string | null;
   reason: HostedWorkspaceInvocationReason;
   runnerContainerName: string | null;
   startedAt: string;
@@ -47,13 +48,44 @@ export class RunnerWriteFenceAlreadyActiveError extends Error {
 
 export interface RunnerWriteFenceValidationResult {
   owns: boolean;
-  record: RunnerStateRecord;
+  record: RunnerStateRecord | null;
 }
+
+export type RunnerActiveWriteFenceValidationRejectReason =
+  | "expired_write_fence"
+  | "invalid_runner_container_name"
+  | "missing_runner_state"
+  | "missing_write_fence"
+  | "write_fence_mismatch";
+
+export type RunnerProviderEgressTokenValidationRejectReason =
+  | "expired_write_fence"
+  | "missing_provider_egress_token"
+  | "missing_runner_state"
+  | "missing_write_fence"
+  | "provider_egress_token_mismatch"
+  | "write_fence_mismatch";
 
 export type RunnerActiveWriteFenceValidationResult =
   | {
       owns: false;
+      reason: RunnerActiveWriteFenceValidationRejectReason;
+      record?: RunnerStateRecord;
+    }
+  | {
+      attemptId: string;
+      leaseGeneration: string;
+      owns: true;
       record: RunnerStateRecord;
+      userId: string;
+      workspaceVersion: string | null;
+    };
+
+export type RunnerProviderEgressTokenValidationResult =
+  | {
+      owns: false;
+      reason: RunnerProviderEgressTokenValidationRejectReason;
+      record?: RunnerStateRecord;
     }
   | {
       attemptId: string;
@@ -164,11 +196,13 @@ export class RunnerStateStore {
     const expiresAt = normalizeIsoDateOrNull(input.expiresAt ?? null)
       ?? new Date(Date.parse(startedAt) + 30 * 60_000).toISOString();
     const attemptId = createRuntimeWriteAttemptId();
+    const providerEgressToken = createProviderEgressToken();
 
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = expiresAt;
     meta.active_generation = nextGeneration;
     meta.active_kind = input.kind ?? "runtime";
+    meta.active_provider_egress_token_hash = await hashProviderEgressToken(providerEgressToken);
     meta.active_reason = input.reason;
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
@@ -183,6 +217,7 @@ export class RunnerStateStore {
       expiresAt,
       generation: nextGeneration.toString(),
       leaseGeneration: nextGeneration.toString(),
+      providerEgressToken,
       reason: input.reason,
       runnerContainerName: meta.active_runner_container_name,
       startedAt,
@@ -220,20 +255,6 @@ export class RunnerStateStore {
       token: input.lease,
       workspaceVersion: input.workspaceVersion,
     });
-  }
-
-  async ageActiveInvocationForTest(input: {
-    expiresAt?: string;
-    startedAt: string;
-  }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    if (!meta.active_attempt_id) {
-      throw new Error("Hosted runner has no write fence to age for test.");
-    }
-    meta.active_started_at = normalizeIsoDate(input.startedAt);
-    meta.active_expires_at = normalizeIsoDate(input.expiresAt ?? input.startedAt);
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
   }
 
   async clearWriteFenceAfterCompletion(input: {
@@ -410,12 +431,21 @@ export class RunnerStateStore {
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<RunnerWriteFenceValidationResult> {
-    let meta = this.requireMetaRowSync();
-    if (this.clearExpiredActiveRunSync(meta, Date.now())) {
-      this.writeMetaRowSync(meta);
-      meta = this.requireMetaRowSync();
+    const meta = this.selectMetaRowSync();
+    if (!meta) {
+      return {
+        owns: false,
+        record: null,
+      };
     }
+
     const token = this.readWriteFenceTokenSync(meta);
+    if (token && this.isWriteFenceTokenExpiredSync(token, Date.now())) {
+      return {
+        owns: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     if (
       !token
       || token.attemptId !== input.attemptId
@@ -443,21 +473,111 @@ export class RunnerStateStore {
     runnerContainerName: string;
     userId: string;
   }): Promise<RunnerActiveWriteFenceValidationResult> {
-    let meta = this.requireMetaRowSync();
-    if (this.clearExpiredActiveRunSync(meta, Date.now())) {
-      this.writeMetaRowSync(meta);
-      meta = this.requireMetaRowSync();
+    const runnerContainerName = normalizeRunnerContainerNameOrNull(input.runnerContainerName);
+    if (!runnerContainerName) {
+      return {
+        owns: false,
+        reason: "invalid_runner_container_name",
+      };
+    }
+
+    const meta = this.selectMetaRowSync();
+    if (!meta) {
+      return {
+        owns: false,
+        reason: "missing_runner_state",
+      };
     }
     const token = this.readWriteFenceTokenSync(meta);
-    const runnerContainerName = normalizeRunnerContainerNameOrNull(input.runnerContainerName);
+    if (token && this.isWriteFenceTokenExpiredSync(token, Date.now())) {
+      return {
+        owns: false,
+        reason: "expired_write_fence",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (!token) {
+      return {
+        owns: false,
+        reason: "missing_write_fence",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     if (
-      !token
-      || token.userId !== input.userId
-      || !runnerContainerName
+      token.userId !== input.userId
       || token.runnerContainerName !== runnerContainerName
     ) {
       return {
         owns: false,
+        reason: "write_fence_mismatch",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    return {
+      attemptId: token.attemptId,
+      leaseGeneration: token.leaseGeneration,
+      owns: true,
+      record: this.readStateFromMetaSync(meta),
+      userId: token.userId,
+      workspaceVersion: token.workspaceVersion,
+    };
+  }
+
+  async validateProviderEgressToken(input: {
+    providerEgressToken: string;
+    userId: string;
+  }): Promise<RunnerProviderEgressTokenValidationResult> {
+    const providerEgressToken = normalizeProviderEgressTokenOrNull(
+      input.providerEgressToken,
+    );
+    if (!providerEgressToken) {
+      return {
+        owns: false,
+        reason: "missing_provider_egress_token",
+      };
+    }
+
+    const meta = this.selectMetaRowSync();
+    if (!meta) {
+      return {
+        owns: false,
+        reason: "missing_runner_state",
+      };
+    }
+    const token = this.readWriteFenceTokenSync(meta);
+    if (token && this.isWriteFenceTokenExpiredSync(token, Date.now())) {
+      return {
+        owns: false,
+        reason: "expired_write_fence",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (!token) {
+      return {
+        owns: false,
+        reason: "missing_write_fence",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (token.userId !== input.userId) {
+      return {
+        owns: false,
+        reason: "write_fence_mismatch",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    const candidateHash = await hashProviderEgressToken(providerEgressToken);
+    if (
+      !providerEgressTokenHashMatches(
+        meta.active_provider_egress_token_hash,
+        candidateHash,
+      )
+    ) {
+      return {
+        owns: false,
+        reason: "provider_egress_token_mismatch",
         record: this.readStateFromMetaSync(meta),
       };
     }
@@ -478,8 +598,7 @@ export class RunnerStateStore {
       return false;
     }
 
-    const expiresAtMs = Date.parse(writeFence.expiresAt);
-    if (Number.isFinite(expiresAtMs) && nowMs < expiresAtMs) {
+    if (!this.isWriteFenceTokenExpiredSync(writeFence, nowMs)) {
       return false;
     }
 
@@ -491,6 +610,14 @@ export class RunnerStateStore {
     meta.last_error_at = failedAt;
     meta.last_error_code = errorCode;
     return true;
+  }
+
+  private isWriteFenceTokenExpiredSync(
+    token: RunnerWriteFenceToken,
+    nowMs: number,
+  ): boolean {
+    const expiresAtMs = Date.parse(token.expiresAt);
+    return Number.isFinite(expiresAtMs) && nowMs >= expiresAtMs;
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -542,6 +669,7 @@ export class RunnerStateStore {
         active_attempt_id,
         active_generation,
         active_kind,
+        active_provider_egress_token_hash,
         active_runner_container_name,
         active_reason,
         active_started_at,
@@ -573,6 +701,7 @@ export class RunnerStateStore {
         active_attempt_id,
         active_generation,
         active_kind,
+        active_provider_egress_token_hash,
         active_runner_container_name,
         active_reason,
         active_started_at,
@@ -584,13 +713,14 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.wake_at,
       meta.active_attempt_id,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
+      meta.active_provider_egress_token_hash,
       meta.active_runner_container_name,
       readHostedWorkspaceInvocationReasonOrNull(meta.active_reason),
       meta.active_started_at,
@@ -626,6 +756,7 @@ export class RunnerStateStore {
     meta.active_attempt_id = null;
     meta.active_expires_at = null;
     meta.active_kind = null;
+    meta.active_provider_egress_token_hash = null;
     meta.active_reason = null;
     meta.active_runner_container_name = null;
     meta.active_started_at = null;
@@ -656,6 +787,7 @@ export class RunnerStateStore {
         ?? new Date(Date.parse(meta.active_started_at) + 30 * 60_000).toISOString(),
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
+      providerEgressToken: null,
       reason: readHostedWorkspaceInvocationReasonOrDefault(meta.active_reason),
       runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),
       startedAt: meta.active_started_at,
@@ -708,6 +840,10 @@ function normalizeRunnerContainerNameOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function normalizeProviderEgressTokenOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 function createRuntimeWriteAttemptId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `runtime-write-${crypto.randomUUID()}`;
@@ -715,4 +851,54 @@ function createRuntimeWriteAttemptId(): string {
 
   const random = Math.random().toString(36).slice(2);
   return `runtime-write-${Date.now().toString(36)}-${random}`;
+}
+
+function createProviderEgressToken(): string {
+  if (typeof crypto === "undefined" || typeof crypto.getRandomValues !== "function") {
+    throw new Error("Hosted provider egress token generation requires Web Crypto.");
+  }
+
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `provider-egress-${toHex(bytes)}`;
+}
+
+async function hashProviderEgressToken(token: string): Promise<string> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new Error("Hosted provider egress token hashing requires Web Crypto.");
+  }
+
+  const bytes = new TextEncoder().encode(token);
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    "SHA-256",
+    bytes.buffer instanceof ArrayBuffer
+      ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+      : copyToArrayBuffer(bytes),
+  ));
+  return toHex(digest);
+}
+
+function providerEgressTokenHashMatches(
+  storedHash: string | null,
+  candidateHash: string,
+): boolean {
+  if (!storedHash || !/^[a-f0-9]{64}$/u.test(storedHash) || !/^[a-f0-9]{64}$/u.test(candidateHash)) {
+    return false;
+  }
+
+  let diff = 0;
+  for (let index = 0; index < storedHash.length; index += 1) {
+    diff |= storedHash.charCodeAt(index) ^ candidateHash.charCodeAt(index);
+  }
+  return diff === 0;
+}
+
+function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function toHex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

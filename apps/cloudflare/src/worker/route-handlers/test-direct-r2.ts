@@ -14,9 +14,6 @@ import type {
   DeclarativeRoute,
 } from "../routes.ts";
 import {
-  matchTestUserRoute,
-} from "../routes.ts";
-import {
   INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
   normalizeNonEmptyString,
 } from "../route-utils/json-body.ts";
@@ -27,6 +24,9 @@ import {
   isHostedWorkerTestEnvironment,
   requireHostedWorkerTestEnvironment,
 } from "../route-utils/test-env.ts";
+import {
+  matchHostedLocalTestUserRoute,
+} from "../route-utils/test-routes.ts";
 import {
   resolveDeployContainerSmokeObjectName,
 } from "./deploy-smoke.ts";
@@ -43,7 +43,7 @@ export const testDirectR2Routes: readonly DeclarativeRoute<WorkerRouteContext>[]
     async handle(context, params) {
       return handleTestDirectR2PresignedPutRoute(context, params.userId);
     },
-    match: matchTestUserRoute("/__test/users/", "/direct-r2-presigned-put"),
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/direct-r2-presigned-put"),
     methods: ["POST"],
     name: "test-direct-r2-presigned-put",
     wrongMethodResponse: "not-found",

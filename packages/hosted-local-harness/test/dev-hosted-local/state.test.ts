@@ -23,7 +23,7 @@ describe("hosted local state", () => {
   it("uses a unique temp path for overlapping state writes", async () => {
     const statePath = path.join(os.tmpdir(), "murph-hosted-local-state-test", "state.json");
     const { writeHostedLocalHarnessState } = await import(
-      "../../packages/hosted-local-harness/src/state.ts"
+      "../../src/state.ts"
     );
 
     await Promise.all([

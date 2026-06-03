@@ -2,72 +2,78 @@ import { access, chmod, mkdir, readFile, realpath, writeFile } from "node:fs/pro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  HostedAssistantConfigurationError,
-} from "@murphai/operator-config/hosted-assistant-config";
-import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
-
-import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
-} from "./launch-spec.ts";
-
-const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
-const DEFAULT_HOSTED_CODEX_PATH =
-  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-export const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV =
+export const HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV =
+  "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND";
+export const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL";
+export const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS";
+export const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS";
+export const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV =
   "MURPH_E2E_TRUSTED_MURPH_CLI_PATH";
 
-export async function maybeInstallHostedE2ECodexAppServerStub(input: {
-  codexHome: string;
-  runtimeEnv: Record<string, string>;
-}): Promise<void> {
-  const assistantProviderBaseUrl = readHostedE2ECodexAppServerStubBaseUrl(input.runtimeEnv);
+export class HostedLocalCodexAppServerStubConfigurationError extends Error {
+  readonly code: string;
 
-  if (!assistantProviderBaseUrl) {
-    return;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "HostedLocalCodexAppServerStubConfigurationError";
+    this.code = code;
   }
-
-  const trustedMurphCliPath = await resolveHostedE2ETrustedMurphCliPath(input.runtimeEnv);
-  if (trustedMurphCliPath) {
-    input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV] = trustedMurphCliPath;
-  } else {
-    delete input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV];
-  }
-
-  await installHostedE2ECodexShim({
-    codexHome: input.codexHome,
-    runtimeEnv: input.runtimeEnv,
-    source: buildHostedE2ECodexAppServerStubSource({
-      assistantProviderBaseUrl,
-      expectedThreadStartDynamicTools: readHostedE2ECodexAppServerStubExpectedDynamicTools(
-        input.runtimeEnv,
-      ),
-      turnDelayMs: readHostedE2ECodexAppServerStubTurnDelayMs(input.runtimeEnv),
-    }),
-  });
 }
 
-export function buildHostedE2ECodexAppServerStubSource(input: {
+export async function maybeInstallHostedLocalCodexAppServerStub(input: {
+  installPath: string;
+  runtimeCommandPath?: string | null;
+  runtimeEnv: Record<string, string | undefined>;
+}): Promise<boolean> {
+  const assistantProviderBaseUrl = readHostedLocalCodexAppServerStubBaseUrl(input.runtimeEnv);
+
+  if (!assistantProviderBaseUrl) {
+    return false;
+  }
+
+  const trustedMurphCliPath = await resolveHostedLocalTrustedMurphCliPath(input.runtimeEnv);
+
+  await installHostedLocalCodexAppServerShim({
+    installPath: input.installPath,
+    runtimeCommandPath: input.runtimeCommandPath ?? input.installPath,
+    runtimeEnv: input.runtimeEnv,
+    source: buildHostedLocalCodexAppServerStubSource({
+      assistantProviderBaseUrl,
+      expectedThreadStartDynamicTools: readHostedLocalCodexAppServerStubExpectedDynamicTools(
+        input.runtimeEnv,
+      ),
+      trustedMurphCliPath,
+      turnDelayMs: readHostedLocalCodexAppServerStubTurnDelayMs(input.runtimeEnv),
+    }),
+  });
+
+  return true;
+}
+
+export function buildHostedLocalCodexAppServerStubSource(input: {
   assistantProviderBaseUrl: string;
   expectedThreadStartDynamicTools?: readonly string[] | null;
+  trustedMurphCliPath?: string | null;
   turnDelayMs?: number | null;
 }): string {
   const turnDelayMs = input.turnDelayMs ?? 25;
   const expectedThreadStartDynamicTools = input.expectedThreadStartDynamicTools ?? [];
   return `#!/usr/bin/env node
-const childProcess = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
-const readline = require("node:readline");
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import readline from "node:readline";
 
 const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
 const expectedThreadStartDynamicTools = ${JSON.stringify(expectedThreadStartDynamicTools)};
-const trustedMurphCliPathEnv = ${JSON.stringify(HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV)};
+const configuredTrustedMurphCliPath = ${JSON.stringify(input.trustedMurphCliPath ?? null)};
+const trustedMurphCliPathEnv = ${JSON.stringify(HOSTED_LOCAL_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV)};
 const turnDelayMs = ${JSON.stringify(turnDelayMs)};
+const moduleRequire = createRequire(import.meta.url);
 const processThreadPrefix = String(process.pid % 1000000).padStart(6, "0");
 let threadCounter = 0;
 let turnCounter = 0;
@@ -570,10 +576,21 @@ function resolveE2EMurphPackageCliPath() {
   if (configuredCliPath) {
     return configuredCliPath;
   }
-  return resolveE2EMurphPackageCliPathFromTrustedRoot("/app");
+  const roots = [...new Set([process.cwd(), "/app"])];
+  for (const root of roots) {
+    const cliPath = resolveE2EMurphPackageCliPathFromTrustedRoot(root);
+    if (cliPath) {
+      return cliPath;
+    }
+  }
+  return null;
 }
 
 function resolveE2ETrustedMurphCliPathFromEnv() {
+  if (configuredTrustedMurphCliPath) {
+    return resolveE2ETrustedMurphCliPath(configuredTrustedMurphCliPath);
+  }
+
   const configured = process.env[trustedMurphCliPathEnv];
   if (typeof configured !== "string" || !configured.trim()) {
     return null;
@@ -607,7 +624,7 @@ function resolveE2ETrustedMurphCliPath(candidate) {
 function resolveE2EMurphPackageCliPathFromTrustedRoot(root) {
   try {
     const trustedRoot = path.resolve(root);
-    const entrypoint = require.resolve("@murphai/murph", {
+    const entrypoint = moduleRequire.resolve("@murphai/murph", {
       paths: [trustedRoot],
     });
     const cliPath = path.join(path.dirname(entrypoint), "bin.js");
@@ -965,31 +982,31 @@ rl.on("line", (line) => {
 const HOSTED_CODEX_DYNAMIC_TOOL_NAME_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_.-]{0,63})+$/u;
 
-async function resolveHostedE2ETrustedMurphCliPath(
-  runtimeEnv: Record<string, string>,
+async function resolveHostedLocalTrustedMurphCliPath(
+  runtimeEnv: Readonly<Record<string, string | undefined>>,
 ): Promise<string | null> {
-  const explicitPath = normalizeHostedE2ETrustedMurphCliPath(
-    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV],
+  const explicitPath = normalizeHostedLocalTrustedMurphCliPath(
+    runtimeEnv[HOSTED_LOCAL_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV],
   );
   if (explicitPath) {
-    return await validateHostedE2ETrustedMurphCliPath(explicitPath);
+    return await validateHostedLocalTrustedMurphCliPath(explicitPath);
   }
 
   const localWorkspaceCliPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../../cli/dist/bin.js",
   );
-  return await validateHostedE2ETrustedMurphCliPath(localWorkspaceCliPath);
+  return await validateHostedLocalTrustedMurphCliPath(localWorkspaceCliPath);
 }
 
-function normalizeHostedE2ETrustedMurphCliPath(value: string | undefined): string | null {
+function normalizeHostedLocalTrustedMurphCliPath(value: string | undefined): string | null {
   if (typeof value !== "string" || value.trim().length === 0) {
     return null;
   }
   return path.resolve(value.trim());
 }
 
-async function validateHostedE2ETrustedMurphCliPath(candidate: string): Promise<string | null> {
+async function validateHostedLocalTrustedMurphCliPath(candidate: string): Promise<string | null> {
   try {
     const cliPath = await realpath(candidate);
     if (path.basename(cliPath) !== "bin.js") {
@@ -1009,11 +1026,11 @@ async function validateHostedE2ETrustedMurphCliPath(candidate: string): Promise<
   }
 }
 
-function readHostedE2ECodexAppServerStubExpectedDynamicTools(
-  runtimeEnv: Record<string, string>,
+function readHostedLocalCodexAppServerStubExpectedDynamicTools(
+  runtimeEnv: Readonly<Record<string, string | undefined>>,
 ): readonly string[] {
   const rawValue =
-    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV];
+    runtimeEnv[HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV];
   if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
     return [];
   }
@@ -1023,30 +1040,30 @@ function readHostedE2ECodexAppServerStubExpectedDynamicTools(
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
   if (values.length === 0) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must list at least one dynamic tool name.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must list at least one dynamic tool name.`,
     );
   }
   if (values.length > 16) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must list at most 16 dynamic tool names.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must list at most 16 dynamic tool names.`,
     );
   }
 
   const seen = new Set<string>();
   for (const value of values) {
     if (!HOSTED_CODEX_DYNAMIC_TOOL_NAME_PATTERN.test(value)) {
-      throw new HostedAssistantConfigurationError(
-        "HOSTED_ASSISTANT_CONFIG_INVALID",
-        `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} contains an invalid dynamic tool name.`,
+      throw new HostedLocalCodexAppServerStubConfigurationError(
+        "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+        `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} contains an invalid dynamic tool name.`,
       );
     }
     if (seen.has(value)) {
-      throw new HostedAssistantConfigurationError(
-        "HOSTED_ASSISTANT_CONFIG_INVALID",
-        `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must not contain duplicate dynamic tool names.`,
+      throw new HostedLocalCodexAppServerStubConfigurationError(
+        "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+        `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV} must not contain duplicate dynamic tool names.`,
       );
     }
     seen.add(value);
@@ -1055,60 +1072,55 @@ function readHostedE2ECodexAppServerStubExpectedDynamicTools(
   return values;
 }
 
-function readHostedE2ECodexAppServerStubTurnDelayMs(
-  runtimeEnv: Record<string, string>,
+function readHostedLocalCodexAppServerStubTurnDelayMs(
+  runtimeEnv: Readonly<Record<string, string | undefined>>,
 ): number | null {
   const rawValue =
-    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV];
+    runtimeEnv[HOSTED_LOCAL_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV];
   if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
     return null;
   }
 
   const value = Number(rawValue.trim());
   if (!Number.isSafeInteger(value) || value < 0 || value > 60_000) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV} must be an integer from 0 to 60000.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV} must be an integer from 0 to 60000.`,
     );
   }
 
   return value;
 }
 
-async function installHostedE2ECodexShim(input: {
-  codexHome: string;
-  runtimeEnv: Record<string, string>;
+async function installHostedLocalCodexAppServerShim(input: {
+  installPath: string;
+  runtimeCommandPath: string;
+  runtimeEnv: Record<string, string | undefined>;
   source: string;
 }): Promise<void> {
-  const binDir = path.join(input.codexHome, HOSTED_CODEX_STUB_BIN_DIR_NAME);
-  const codexPath = path.join(binDir, "codex");
+  const binDir = path.dirname(input.installPath);
   await mkdir(binDir, {
     mode: 0o700,
     recursive: true,
   });
   await chmod(binDir, 0o700);
   await writeFile(
-    codexPath,
+    input.installPath,
     input.source,
     {
       encoding: "utf8",
       mode: 0o700,
     },
   );
-  await chmod(codexPath, 0o700);
-
-  input.runtimeEnv.PATH = prependHostedCodexPathSegment(
-    binDir,
-    input.runtimeEnv.PATH ?? process.env.PATH ?? DEFAULT_HOSTED_CODEX_PATH,
-  );
-  input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV] = codexPath;
+  await chmod(input.installPath, 0o700);
+  input.runtimeEnv[HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV] = input.runtimeCommandPath;
 }
 
-function readHostedE2ECodexAppServerStubBaseUrl(
-  runtimeEnv: Readonly<Record<string, string>>,
+function readHostedLocalCodexAppServerStubBaseUrl(
+  runtimeEnv: Readonly<Record<string, string | undefined>>,
 ): string | null {
   const rawBaseUrl = normalizeHostedCodexEnvString(
-    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
+    runtimeEnv[HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
   );
 
   if (!rawBaseUrl) {
@@ -1116,9 +1128,9 @@ function readHostedE2ECodexAppServerStubBaseUrl(
   }
 
   if (normalizeHostedCodexEnvString(runtimeEnv.NODE_ENV) !== "test") {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} is only available when NODE_ENV=test.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV} is only available when NODE_ENV=test.`,
     );
   }
 
@@ -1126,23 +1138,23 @@ function readHostedE2ECodexAppServerStubBaseUrl(
   try {
     url = new URL(rawBaseUrl);
   } catch {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must be an absolute URL.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must be an absolute URL.`,
     );
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must use http or https.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must use http or https.`,
     );
   }
 
   if (!isHostedLocalCodexTestHostname(normalizeHostedCodexUrlHostname(url.hostname))) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must point at a local test host.`,
+    throw new HostedLocalCodexAppServerStubConfigurationError(
+      "HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONFIG_INVALID",
+      `${HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must point at a local test host.`,
     );
   }
 
@@ -1201,11 +1213,4 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
 function normalizeHostedCodexEnvString(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
-}
-
-function prependHostedCodexPathSegment(segment: string, currentPath: string): string {
-  return [segment, currentPath]
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .join(path.delimiter);
 }

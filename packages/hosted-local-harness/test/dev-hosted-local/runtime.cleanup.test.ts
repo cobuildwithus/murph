@@ -5,6 +5,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hostedLocalHarnessRepoRoot as repoRoot } from "../../src/repo.ts";
 
 interface SpawnResult {
   exitCode: number | null;
@@ -85,7 +86,7 @@ async function importRuntimeWithSpawnSequence(
     };
   });
 
-  const runtime = await import("./runtime.ts");
+  const runtime = await import("../../src/dev-hosted-local/runtime.ts");
 
   return {
     cleanupHostedLocalOrphanedWorkerdProcesses:
@@ -464,7 +465,7 @@ describe("cleanupHostedRunnerContainers", () => {
     const localBuildId = "e2e-suite-build";
 
     try {
-      const { buildHostedRunnerLocalBuildId } = await import("./environment.ts");
+      const { buildHostedRunnerLocalBuildId } = await import("../../src/dev-hosted-local/environment.ts");
       const suffix = buildHostedRunnerLocalBuildId(localBuildId).replace(/^sha256-/u, "");
       const e2eRunnerStateDir = path.join(
         persistDir,
@@ -540,7 +541,7 @@ describe("cleanupHostedLocalOrphanedWorkerdProcesses", () => {
 
   it("kills only orphaned repo-local loopback workerd serve processes", async () => {
     const workerdPath = path.join(
-      process.cwd(),
+      repoRoot,
       "node_modules",
       ".pnpm",
       "@cloudflare+workerd-test",

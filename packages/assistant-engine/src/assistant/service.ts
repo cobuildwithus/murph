@@ -26,6 +26,7 @@ export type {
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,
   AssistantSessionResolutionFields,
+  AssistantTurnEnvironment,
 } from './service-contracts.js'
 export type {
   AssistantActiveTurnInputCheckpointHook,

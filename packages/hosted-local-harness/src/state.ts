@@ -72,7 +72,7 @@ export async function createHostedLocalHarnessState(
   input: CreateHostedLocalStateInput,
 ): Promise<HostedLocalHarnessState> {
   const { resolveHostedLocalDevConfig } = await import(
-    "../../../scripts/dev-hosted-local/config.ts"
+    "./dev-hosted-local/config.ts"
   );
   const config = tryResolveHostedLocalDevConfig(resolveHostedLocalDevConfig, input.env);
   const createdAt = new Date().toISOString();
@@ -258,9 +258,9 @@ function redactHostedLocalStateValue(value: string): string {
 }
 
 function tryResolveHostedLocalDevConfig(
-  resolveHostedLocalDevConfig: typeof import("../../../scripts/dev-hosted-local/config.ts").resolveHostedLocalDevConfig,
+  resolveHostedLocalDevConfig: typeof import("./dev-hosted-local/config.ts").resolveHostedLocalDevConfig,
   env: NodeJS.ProcessEnv,
-): import("../../../scripts/dev-hosted-local/types.ts").HostedLocalDevConfig | null {
+): import("./dev-hosted-local/types.ts").HostedLocalDevConfig | null {
   try {
     return resolveHostedLocalDevConfig(env);
   } catch {
@@ -269,14 +269,14 @@ function tryResolveHostedLocalDevConfig(
 }
 
 function formatWorkerBaseUrl(
-  config: import("../../../scripts/dev-hosted-local/types.ts").HostedLocalDevConfig,
+  config: import("./dev-hosted-local/types.ts").HostedLocalDevConfig,
 ): string {
   const host = formatHostedLocalListenHost(config.workerHost);
   return `${config.workerProtocol}://${host}:${config.workerPort}`;
 }
 
 function formatWebBaseUrl(
-  config: import("../../../scripts/dev-hosted-local/types.ts").HostedLocalDevConfig,
+  config: import("./dev-hosted-local/types.ts").HostedLocalDevConfig,
 ): string | null {
   if (config.skipWeb) {
     return null;

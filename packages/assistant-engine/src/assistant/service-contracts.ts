@@ -80,6 +80,12 @@ export type AssistantProviderRequestStartHook = (event: {
   startedAt: string
 }) => Promise<void> | void
 
+export interface AssistantTurnEnvironment {
+  /** Null means the caller has no safe per-turn process cwd and ambient process.cwd() must not decide hosted provider cwd. */
+  currentWorkingDirectory?: string | null
+  env?: NodeJS.ProcessEnv
+}
+
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
   acceptedTurnInput?: {
@@ -108,6 +114,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   showThinkingTraces?: boolean
+  turnEnvironment?: AssistantTurnEnvironment | null
   turnTrigger?: AssistantTurnTrigger
   workingDirectory?: string
 }

@@ -131,19 +131,26 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return await this.runner.validateActiveRuntimeWriteFence(input);
   }
 
-  async beginRuntimeWriteFenceForSmoke(input: {
+  async validateRuntimeProviderEgressToken(input: {
+    providerEgressToken: string;
     userId: string;
-    workspaceVersion: string;
-  }): ReturnType<HostedUserRunner["beginRuntimeWriteFenceForSmoke"]> {
-    return this.runner.beginRuntimeWriteFenceForSmoke(input);
+  }): ReturnType<HostedUserRunner["validateRuntimeProviderEgressToken"]> {
+    return await this.runner.validateRuntimeProviderEgressToken(input);
   }
 
-  async finishRuntimeWriteFenceForSmoke(input: {
+  async beginDeploySmokeRuntimeWriteFence(input: {
+    userId: string;
+    workspaceVersion: string;
+  }): ReturnType<HostedUserRunner["beginDeploySmokeRuntimeWriteFence"]> {
+    return this.runner.beginDeploySmokeRuntimeWriteFence(input);
+  }
+
+  async finishDeploySmokeRuntimeWriteFence(input: {
     attemptId: string;
     generation: string;
     userId: string;
-  }): ReturnType<HostedUserRunner["finishRuntimeWriteFenceForSmoke"]> {
-    return this.runner.finishRuntimeWriteFenceForSmoke(input);
+  }): ReturnType<HostedUserRunner["finishDeploySmokeRuntimeWriteFence"]> {
+    return this.runner.finishDeploySmokeRuntimeWriteFence(input);
   }
 
   async wake(input: TestWake): Promise<HostedRunnerStatusResponse> {
@@ -413,6 +420,10 @@ function getUserRunnerStub(userId: string) {
             runnerContainerName: string;
             userId: string;
           }): ReturnType<HostedUserRunner["validateActiveRuntimeWriteFence"]>;
+          validateRuntimeProviderEgressToken(input: {
+            providerEgressToken: string;
+            userId: string;
+          }): ReturnType<HostedUserRunner["validateRuntimeProviderEgressToken"]>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
           runnerStatus(): Promise<HostedRunnerStatusResponse>;

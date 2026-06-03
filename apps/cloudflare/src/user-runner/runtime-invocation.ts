@@ -31,9 +31,11 @@ import {
 } from "../runner-env.ts";
 import {
   invokeHostedExecutionContainerRunner,
-  resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "../runner-container.js";
+import {
+  readHostedRunnerContainerIdentity,
+} from "../hosted-runner-container-identity.js";
 import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
@@ -469,10 +471,14 @@ export class RuntimeInvocationService {
     const workspaceSnapshotPathHashSecret =
       await deriveHostedWorkspaceSnapshotPathHashSecret(configSource);
     const userEnv = runtimeConfig.userEnv ?? {};
-    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    const runnerContainerIdentity = readHostedRunnerContainerIdentity({
+      containerName: input.token.runnerContainerName,
       source: this.input.runnerRuntimeEnvSource,
-      userId: input.userId,
     });
+    if (!runnerContainerIdentity || runnerContainerIdentity.userId !== input.userId) {
+      throw new Error("Hosted runner container identity did not match the runtime invocation user.");
+    }
+    const runnerContainerName = runnerContainerIdentity.runnerContainerName;
     const job: HostedExecutionWorkspaceInvocationJobInput = {
       ...(workspaceSnapshotPathHashSecret
         ? {
@@ -487,6 +493,7 @@ export class RuntimeInvocationService {
         deadlineAt: input.token.expiresAt,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
+        providerEgressToken: input.token.providerEgressToken,
         reason: input.reason,
         ...(input.source ? { source: input.source } : {}),
         userId: input.userId,

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 import {
   buildHostedRunnerContainerEnv,
@@ -75,6 +78,7 @@ describe("hosted assistant runner env policy", () => {
   it("never allows runner-secret overrides to shadow hosted assistant bootstrap vars", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
   });

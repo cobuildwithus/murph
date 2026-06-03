@@ -39,6 +39,7 @@ import {
   executeClaimedAssistantCronJob,
 } from './cron/execution.ts'
 import type { AssistantRunEvent } from './automation/shared.ts'
+import type { AssistantTurnEnvironment } from './service-contracts.ts'
 import { resolveAssistantStatePaths } from './store/paths.ts'
 import type { AssistantOutboxDispatchMode } from './outbox.ts'
 import type { AssistantExecutionContext } from './execution-context.ts'
@@ -127,6 +128,7 @@ export interface ProcessDueAssistantCronJobsInput {
   limit?: number
   onEvent?: (event: AssistantRunEvent) => void
   signal?: AbortSignal
+  turnEnvironment?: AssistantTurnEnvironment | null
   vault: string
 }
 
@@ -545,6 +547,7 @@ export async function processDueAssistantCronJobsLocal(
       executionContext: input.executionContext,
       paths,
       signal: input.signal,
+      turnEnvironment: input.turnEnvironment ?? null,
       trigger: 'scheduled',
       vault: input.vault,
       job: claimed,

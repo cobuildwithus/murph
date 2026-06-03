@@ -18,7 +18,7 @@ const startHostedLocalDevStack = vi.fn(async () => ({
   workerBaseUrl: "http://127.0.0.1:8787",
 }));
 
-vi.mock("./stack.ts", () => ({
+vi.mock("../../src/dev-hosted-local/stack.ts", () => ({
   startHostedLocalDevStack,
 }));
 
@@ -32,7 +32,7 @@ describe("hosted local dev main", () => {
     vi.stubEnv("MURPH_DEV_READY_TOKEN", "token-ready-for-tests");
     const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    const { main } = await import("./main.ts");
+    const { main } = await import("../../src/dev-hosted-local/main.ts");
 
     await main();
 
@@ -79,7 +79,7 @@ describe("hosted local dev main", () => {
     waitForExit.mockImplementationOnce(async () => new Promise(() => {}));
 
     try {
-      const { main } = await import("./main.ts");
+      const { main } = await import("../../src/dev-hosted-local/main.ts");
 
       let settled = false;
       const mainPromise = main().then(() => {

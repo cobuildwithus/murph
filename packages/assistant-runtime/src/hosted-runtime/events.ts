@@ -13,6 +13,8 @@ import type {
 import {
   buildHostedAssistantContextFingerprintDetails,
   sendAssistantNotification,
+  type AssistantExecutionContext,
+  type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
 import {
   deriveHostedExecutionErrorCode,
@@ -27,7 +29,7 @@ import {
   prepareHostedWakeContext,
 } from "./context.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
-import { withHostedProcessEnvironment } from "./environment.ts";
+import { createHostedAssistantTurnEnvironment } from "./environment.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
   HostedMailboxEffect,
@@ -36,7 +38,6 @@ import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
-import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 
 type HostedMailboxOutcome = HostedMailboxEffect & {
   mailboxLane: HostedMailboxLane;
@@ -377,51 +378,35 @@ export async function executeHostedMailboxEvent(input: {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
   }
 
-  const runMailboxExecution = async () => {
-    const bootstrapResult = await prepareHostedWakeContext(
-      input.vaultRoot,
-      input.wake,
-      input.runtimeEnv,
-      input.runtime.resolvedConfig,
-      {
-        operatorHomeRoot: input.operatorHomeRoot ?? null,
-      },
-    );
-    const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
-      input.executionContext,
-      {
-        homeDirectory: input.operatorHomeRoot ?? undefined,
-        runtimeEnv: input.runtimeEnv,
-      },
-    );
-    const mailboxEffect = await handleHostedMailboxEvent({
-      wake: input.wake,
-      executionContext: bootstrappedExecutionContext,
-      forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
-      runtime: input.runtime,
-      ...(input.shouldYieldDeviceSync
-        ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
-        : {}),
-      sourceMailboxItemId: input.sourceMailboxItemId ?? null,
-      vaultRoot: input.vaultRoot,
-    });
-
-    return {
-      bootstrapResult,
-      mailboxEffect,
-    };
-  };
-  const { bootstrapResult, mailboxEffect } =
-    Object.keys(input.runtimeEnv).length > 0 && input.operatorHomeRoot
-    ? await withHostedProcessEnvironment(
-        {
-          envOverrides: { ...input.runtimeEnv },
-          operatorHomeRoot: input.operatorHomeRoot,
-          vaultRoot: input.vaultRoot,
-        },
-        runMailboxExecution,
-      )
-    : await runMailboxExecution();
+  const bootstrapResult = await prepareHostedWakeContext(
+    input.vaultRoot,
+    input.wake,
+    input.runtimeEnv,
+    input.runtime.resolvedConfig,
+    {
+      operatorHomeRoot: input.operatorHomeRoot ?? null,
+    },
+  );
+  const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
+    input.executionContext,
+    {
+      homeDirectory: input.operatorHomeRoot ?? undefined,
+      runtimeEnv: input.runtimeEnv,
+    },
+  );
+  const mailboxEffect = await handleHostedMailboxEvent({
+    wake: input.wake,
+    executionContext: bootstrappedExecutionContext,
+    forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
+    operatorHomeRoot: input.operatorHomeRoot ?? null,
+    runtime: input.runtime,
+    runtimeEnv: input.runtimeEnv,
+    ...(input.shouldYieldDeviceSync
+      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+      : {}),
+    sourceMailboxItemId: input.sourceMailboxItemId ?? null,
+    vaultRoot: input.vaultRoot,
+  });
 
   return {
     bootstrapResult,
@@ -440,10 +425,12 @@ async function handleHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
+  operatorHomeRoot: string | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  runtimeEnv: Readonly<Record<string, string>>;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
@@ -456,7 +443,9 @@ async function handleHostedMailboxEvent(input: {
     wake: input.wake,
     executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
+    operatorHomeRoot: input.operatorHomeRoot,
     runtime: input.runtime,
+    runtimeEnv: input.runtimeEnv,
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -469,10 +458,12 @@ async function executeHostedSystemWake(input: {
   wake: HostedExecutionSystemWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
+  operatorHomeRoot: string | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
   >;
+  runtimeEnv: Readonly<Record<string, string>>;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
@@ -494,6 +485,11 @@ async function executeHostedSystemWake(input: {
         executionContext: input.executionContext,
         forceQueueOnly: input.forceQueueOnlyAssistantNotification,
         sourceMailboxItemId: input.sourceMailboxItemId,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
@@ -538,6 +534,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   executionContext: AssistantExecutionContext;
   forceQueueOnly?: boolean;
   sourceMailboxItemId?: string | null;
+  turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
@@ -556,6 +553,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         input.forceQueueOnly === true,
         input.vaultRoot,
         input.sourceMailboxItemId ?? null,
+        input.turnEnvironment ?? null,
         (entry) => {
           redactedLogEntries.push(entry);
         },
@@ -1770,6 +1768,7 @@ function buildAssistantNotificationInput(
   forceQueueOnly: boolean,
   vault: string,
   sourceMailboxItemId: string | null,
+  turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): Parameters<typeof sendAssistantNotification>[0] {
   const route = wake.notification.route;
@@ -1838,6 +1837,7 @@ function buildAssistantNotificationInput(
     responsePolicy: wake.notification.responsePolicy ?? null,
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
+    turnEnvironment,
     turnTrigger: "automation-cron",
     vault,
   };

@@ -7,7 +7,7 @@ import type {
   HostedLocalChildProcess,
   HostedLocalChildProcessName,
   HostedLocalDevConfig,
-} from "./types.ts";
+} from "../../src/dev-hosted-local/types.ts";
 
 type SpawnChildProcess = (
   name: HostedLocalChildProcessName,
@@ -65,7 +65,7 @@ vi.mock("node:child_process", () => ({
   spawnSync: spawnSyncMock,
 }));
 
-vi.mock("./runtime.ts", () => ({
+vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
   runCommand: runCommandMock,
   spawnChildProcess: spawnChildProcessMock,
   terminateChildProcessAndWait: terminateChildProcessAndWaitMock,
@@ -132,7 +132,7 @@ describe("hosted-local Temporal lifecycle", () => {
   });
 
   it("injects web and worker Temporal env for managed local orchestration", async () => {
-    const { buildHostedLocalTemporalRuntimeEnv } = await import("./temporal.ts");
+    const { buildHostedLocalTemporalRuntimeEnv } = await import("../../src/dev-hosted-local/temporal.ts");
 
     const env = buildHostedLocalTemporalRuntimeEnv({
       config: {
@@ -163,7 +163,7 @@ describe("hosted-local Temporal lifecycle", () => {
   });
 
   it("injects non-TLS local Temporal env for auto mode", async () => {
-    const { buildHostedLocalTemporalRuntimeEnv } = await import("./temporal.ts");
+    const { buildHostedLocalTemporalRuntimeEnv } = await import("../../src/dev-hosted-local/temporal.ts");
 
     const env = buildHostedLocalTemporalRuntimeEnv({
       config: {
@@ -195,7 +195,7 @@ describe("hosted-local Temporal lifecycle", () => {
   });
 
   it("preserves caller-supplied external Temporal addresses without forcing TLS off", async () => {
-    const { buildHostedLocalTemporalRuntimeEnv } = await import("./temporal.ts");
+    const { buildHostedLocalTemporalRuntimeEnv } = await import("../../src/dev-hosted-local/temporal.ts");
 
     expect(buildHostedLocalTemporalRuntimeEnv({
       config: {
@@ -222,7 +222,7 @@ describe("hosted-local Temporal lifecycle", () => {
   });
 
   it("starts an external-mode worker without mutating the external Temporal schedule by default", async () => {
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     const runtime = await startHostedLocalTemporalRuntime({
       cloudflareHostedControlBaseUrl: "http://0.0.0.0:8787",
@@ -270,7 +270,7 @@ describe("hosted-local Temporal lifecycle", () => {
   });
 
   it("ensures the schedule before starting an opted-in external-mode worker with the worker env", async () => {
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     const runtime = await startHostedLocalTemporalRuntime({
       cloudflareHostedControlBaseUrl: "http://0.0.0.0:8787",
@@ -357,7 +357,7 @@ describe("hosted-local Temporal lifecycle", () => {
         pid: name === "temporal-server" ? 201 : 202,
       });
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       const runtime = await startHostedLocalTemporalRuntime({
@@ -452,7 +452,7 @@ describe("hosted-local Temporal lifecycle", () => {
         pid: name === "temporal-server" ? 211 : 212,
       });
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       await expect(startHostedLocalTemporalRuntime({
@@ -492,7 +492,7 @@ describe("hosted-local Temporal lifecycle", () => {
       server.once("error", reject);
       server.listen(port, "127.0.0.1", () => resolve());
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       const runtime = await startHostedLocalTemporalRuntime({
@@ -617,7 +617,7 @@ describe("hosted-local Temporal lifecycle", () => {
         status: 0,
       };
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       await expect(startHostedLocalTemporalRuntime({
@@ -659,7 +659,7 @@ describe("hosted-local Temporal lifecycle", () => {
       server.once("error", reject);
       server.listen(port, "127.0.0.1", () => resolve());
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       const runtime = await startHostedLocalTemporalRuntime({
@@ -717,7 +717,7 @@ describe("hosted-local Temporal lifecycle", () => {
         pid: name === "temporal-server" ? 211 : 212,
       });
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       const runtime = await startHostedLocalTemporalRuntime({
@@ -777,7 +777,7 @@ describe("hosted-local Temporal lifecycle", () => {
         pid: name === "temporal-server" ? 301 : 302,
       });
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     try {
       const runtime = await startHostedLocalTemporalRuntime({
@@ -817,7 +817,7 @@ describe("hosted-local Temporal lifecycle", () => {
       error: new Error("missing"),
       status: null,
     });
-    const { startHostedLocalTemporalRuntime } = await import("./temporal.ts");
+    const { startHostedLocalTemporalRuntime } = await import("../../src/dev-hosted-local/temporal.ts");
 
     await expect(startHostedLocalTemporalRuntime({
       cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",

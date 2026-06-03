@@ -20,6 +20,8 @@ import {
   readHostedRunnerInternalOperation,
 } from "../runner-outbound/diagnostics.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -224,7 +226,16 @@ export function createCloudflareHostedProviderFetch(
     assertCloudflareHostedProviderFetchUrl(url, options.providerFetchBaseUrls ?? []);
 
     const headers = new Headers(request.headers);
+    headers.delete(HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
+    headers.delete(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+    headers.delete(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+    headers.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
+    headers.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
+    const lease = await options.readCurrentLease?.() ?? null;
+    if (lease?.providerEgressToken) {
+      headers.set(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER, lease.providerEgressToken);
+    }
 
     const providerRequest = new Request(request, { headers });
     try {

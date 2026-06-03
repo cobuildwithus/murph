@@ -54,9 +54,6 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
-import {
-  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-} from "./runner-injected-credential.ts";
 import type {
   RunnerRuntimeWriteFenceToken,
 } from "./runner-outbound/write-fence.ts";
@@ -69,15 +66,11 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH =
   "/internal/deploy-codex-shell-smoke";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
   "/internal/direct-r2-presigned-put-smoke";
-const HOSTED_CONTAINER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_PATH =
-  "/internal/provider-egress-active-container-probe";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.4-mini";
-const HOSTED_CONTAINER_LINQ_DEFAULT_API_BASE_URL =
-  "https://api.linqapp.com/api/partner/v3";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
@@ -383,9 +376,6 @@ export async function startHostedContainerEntrypoint(input: {
       const isDirectR2PresignedPutSmokeRequest =
         request.method === "POST"
         && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
-      const isProviderEgressActiveContainerProbeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_PATH;
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
 
@@ -394,28 +384,10 @@ export async function startHostedContainerEntrypoint(input: {
         && !isOpenAiInterceptSmokeRequest
         && !isCodexShellSmokeRequest
         && !isDirectR2PresignedPutSmokeRequest
-        && !isProviderEgressActiveContainerProbeRequest
       ) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
-        return;
-      }
-
-      if (isProviderEgressActiveContainerProbeRequest) {
-        const boundUserId = readSingleHeaderValue(request, HOSTED_RUNNER_BOUND_USER_ID_HEADER);
-        discardUnreadRequestBody(request);
-        if (!boundUserId) {
-          writeJsonResponse(response, 401, {
-            error: "Hosted provider egress active-container probe requires a bound user.",
-          });
-          return;
-        }
-        const result = await runHostedContainerProviderEgressActiveContainerProbe({
-          boundUserId,
-          signal: requestAbort.signal,
-        }).catch((error) => createHostedContainerProviderEgressProbeFailure(error));
-        writeJsonResponse(response, result.ok === true ? 200 : 500, result);
         return;
       }
 
@@ -1567,55 +1539,6 @@ function readHostedContainerPositiveNumber(value: unknown, label: string): numbe
     throw new TypeError(`${label} must be a positive number.`);
   }
   return value;
-}
-
-async function runHostedContainerProviderEgressActiveContainerProbe(input: {
-  boundUserId: string;
-  signal: AbortSignal;
-}): Promise<Record<string, unknown>> {
-  const response = await fetch(createHostedContainerLinqPhoneNumbersUrl(), {
-    headers: {
-      authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-      [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: input.boundUserId,
-    },
-    method: "GET",
-    signal: input.signal,
-  });
-  const body = await response.arrayBuffer();
-  return {
-    ok: true,
-    probeOrigin: "container",
-    providerRequestOk: response.ok,
-    providerRequestStatus: response.status,
-    responseBodyBytes: body.byteLength,
-    runtimeAuthorityHeadersPresent: false,
-    writeFenceValidationMode: "active_container",
-  };
-}
-
-function createHostedContainerProviderEgressProbeFailure(error: unknown): Record<string, unknown> {
-  const details = buildHostedExecutionSafeErrorDetails(error);
-  const errorName = readHostedExecutionSafeErrorName(error);
-  return {
-    ok: false,
-    probeOrigin: "container",
-    providerRequestOk: false,
-    providerRequestStatus: null,
-    responseBodyBytes: null,
-    runtimeAuthorityHeadersPresent: false,
-    writeFenceValidationMode: "active_container",
-    ...(details ? { details } : {}),
-    error: summarizeHostedExecutionError(error),
-    ...(errorName ? { errorName } : {}),
-  };
-}
-
-function createHostedContainerLinqPhoneNumbersUrl(): URL {
-  const url = new URL(HOSTED_CONTAINER_LINQ_DEFAULT_API_BASE_URL);
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/phone_numbers`;
-  url.search = "";
-  url.hash = "";
-  return url;
 }
 
 async function runHostedContainerOpenAiInterceptSmoke(input: {

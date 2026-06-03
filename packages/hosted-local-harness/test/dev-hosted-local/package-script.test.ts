@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const repoRoot = path.resolve(import.meta.dirname, "../..");
+import { hostedLocalHarnessRepoRoot as repoRoot } from "../../src/repo.ts";
 
 describe("root hosted local dev package script", () => {
   it("routes root dev through the canonical hosted-local harness", async () => {

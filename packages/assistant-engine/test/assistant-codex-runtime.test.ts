@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream'
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -1355,12 +1355,12 @@ describe('assistant codex runtime', () => {
 
   it('uses the absolute hosted test stub command only in test environments', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-hosted-stub-home-')
-    const hostedTestCommand = path.join(hostedCodexHome, 'bin', 'codex')
+    const hostedCommandOverride = path.join(hostedCodexHome, 'bin', 'codex')
     const workingDirectory = await createTempDir('assistant-codex-hosted-stub-work-')
 
     for (const scenario of [
       {
-        command: hostedTestCommand,
+        command: hostedCommandOverride,
         nodeEnv: 'test',
       },
       {
@@ -1373,7 +1373,7 @@ describe('assistant codex runtime', () => {
         const child = new MockChildProcess()
 
         expect(options.env).toMatchObject({
-          [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: hostedTestCommand,
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: hostedCommandOverride,
           CODEX_HOME: hostedCodexHome,
           MURPH_HOSTED_RUNTIME_PROCESS: '1',
           NODE_ENV: scenario.nodeEnv,
@@ -1394,7 +1394,7 @@ describe('assistant codex runtime', () => {
       await expect(
         executeCodexAppServerTurn({
           env: {
-            [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: hostedTestCommand,
+            [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: hostedCommandOverride,
             CODEX_HOME: hostedCodexHome,
             MURPH_HOSTED_RUNTIME_PROCESS: '1',
             NODE_ENV: scenario.nodeEnv,
@@ -1555,6 +1555,82 @@ describe('assistant codex runtime', () => {
     expect(await snapshotExpectedHostedCodexRootProcess()).toBeNull()
   })
 
+  it.each([
+    {
+      name: 'attemptId',
+      secondEnv: {
+        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: 'attempt-two',
+      },
+    },
+    {
+      name: 'leaseGeneration',
+      secondEnv: {
+        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: '8',
+      },
+    },
+    {
+      name: 'workspaceVersion',
+      secondEnv: {
+        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: '42',
+      },
+    },
+  ] as const)(
+    'keeps hosted warm Codex identity stable when $name changes',
+    async (scenario) => {
+      const hostedCodexHome = await createTempDir('assistant-codex-stable-identity-home-')
+      const workingDirectory = await createTempDir('assistant-codex-stable-identity-work-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockHostedCodexIdentityServer(spawnedChildren)
+
+      const baseEnv = {
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
+        [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
+        CODEX_HOME: hostedCodexHome,
+        HOSTED_ASSISTANT_MODEL: 'gpt-stable-identity',
+        MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider-stable',
+        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: 'attempt-one',
+        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: '7',
+        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: '41',
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        NODE_ENV: 'test',
+        PATH: '/usr/bin',
+      }
+
+      await expect(
+        executeCodexAppServerTurn({
+          env: baseEnv,
+          prompt: `first ${scenario.name} identity turn`,
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-warm-identity-1-1',
+        turnId: 'turn-warm-identity-1-1',
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          env: {
+            ...baseEnv,
+            ...scenario.secondEnv,
+          },
+          prompt: `second ${scenario.name} identity turn`,
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-warm-identity-1-2',
+        turnId: 'turn-warm-identity-1-2',
+      })
+
+      expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+      const messages = readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
+      expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
+      expect(messages.filter((message) => message.method === 'thread/start'))
+        .toHaveLength(2)
+      expect(messages.filter((message) => message.method === 'turn/start'))
+        .toHaveLength(2)
+    },
+  )
+
   it('does not reuse hosted warm Codex after a CLI bridge off-invocation stop', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-cli-bridge-stop-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-cli-bridge-stop-work-')
@@ -1664,9 +1740,23 @@ describe('assistant codex runtime', () => {
       useSecondCodexHome: false,
     },
     {
-      name: 'bridge token',
+      name: 'stable bridge token',
       secondEnv: {
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
+      },
+      useSecondCodexHome: false,
+    },
+    {
+      name: 'stable bridge URL',
+      secondEnv: {
+        [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9175/',
+      },
+      useSecondCodexHome: false,
+    },
+    {
+      name: 'hosted command override',
+      secondEnv: {
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: '/tmp/hosted-codex-two',
       },
       useSecondCodexHome: false,
     },
@@ -1676,7 +1766,7 @@ describe('assistant codex runtime', () => {
       useSecondCodexHome: true,
     },
   ] as const)(
-    'starts a fresh hosted Codex app-server process when $name changes',
+    'starts a fresh hosted Codex app-server process when stable identity field $name changes',
     async (scenario) => {
       const firstCodexHome = await createTempDir('assistant-codex-warm-identity-home-a-')
       const secondCodexHome = scenario.useSecondCodexHome === true
@@ -6703,6 +6793,69 @@ function mockProcessGroupSignalsForChildren(children: readonly MockChildProcess[
       })
     }
     return true
+  })
+}
+
+function mockHostedCodexIdentityServer(children: MockChildProcess[]): void {
+  mockProcessGroupSignalsForChildren(children)
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+    const processNumber = children.length + 1
+    let threadCount = 0
+    let turnCount = 0
+    child.pid = 40_000 + children.length
+    children.push(child)
+
+    child.stdin.onWrite = (write) => {
+      for (const line of write.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) {
+          continue
+        }
+
+        const message = asRecord(JSON.parse(trimmed))
+        queueMicrotask(() => {
+          switch (message.method) {
+            case 'initialize':
+              child.stdout.write(jsonLine({ id: message.id, result: {} }))
+              break
+            case 'thread/start':
+              threadCount += 1
+              child.stdout.write(jsonLine({
+                id: message.id,
+                result: {
+                  thread: {
+                    id: `thread-warm-identity-${processNumber}-${threadCount}`,
+                  },
+                },
+              }))
+              break
+            case 'turn/start':
+              turnCount += 1
+              child.stdout.write(jsonLine({
+                id: message.id,
+                result: {
+                  turn: {
+                    id: `turn-warm-identity-${processNumber}-${turnCount}`,
+                  },
+                },
+              }))
+              child.stdout.write(jsonLine({
+                method: 'turn/completed',
+                params: {
+                  turn: {
+                    id: `turn-warm-identity-${processNumber}-${turnCount}`,
+                    status: 'completed',
+                  },
+                },
+              }))
+              break
+          }
+        })
+      }
+    }
+
+    return child
   })
 }
 

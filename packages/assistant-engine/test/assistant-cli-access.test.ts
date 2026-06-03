@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import { describe, expect, it } from "vitest";
@@ -89,7 +89,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
       [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
       MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
       MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_123",
@@ -120,7 +120,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]).toMatch(
       /assistant-engine[/\\]skills$/,
     );
-    expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]).toBe(
+    expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe(
       "/tmp/murph-home/.codex-hosted/bin/codex",
     );
     expect(env.OPENAI_API_KEY).toBe("openai-secret");

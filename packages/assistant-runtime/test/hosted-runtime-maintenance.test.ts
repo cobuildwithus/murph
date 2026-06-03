@@ -2435,6 +2435,13 @@ describe("runHostedAssistantAutomationLane", () => {
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
       signal: undefined,
+      turnEnvironment: {
+        currentWorkingDirectory: null,
+        env: {
+          MURPH_HOSTED_RUNTIME_PROCESS: "1",
+          VAULT: "/tmp/vault-root",
+        },
+      },
       vault: "/tmp/vault-root",
       vaultServices: expect.anything(),
     });

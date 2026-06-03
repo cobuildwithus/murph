@@ -3,6 +3,7 @@ import { createConnection } from "node:net";
 
 import {
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+  HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
@@ -24,6 +25,10 @@ import type {
 
 type HostedCliRuntimeBridgeModule =
   typeof import("../src/hosted-runtime/cli-runtime-bridge.ts");
+type HostedCliDeviceConnectLinkResult =
+  Awaited<ReturnType<typeof requestHostedCliDeviceConnectLink>>;
+type HostedRuntimeDeviceConnectLinkResult =
+  Awaited<ReturnType<HostedRuntimeDeviceSyncPort["createConnectLink"]>>;
 
 function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
   return {
@@ -218,6 +223,159 @@ test("hosted CLI runtime bridge creates device connect links through the runtime
     });
     assert.doesNotMatch(JSON.stringify(bridge.env), /opaque/u);
   });
+});
+
+test("hosted CLI runtime bridge drains accepted requests before clearing active invocation", async () => {
+  await stopHostedCliRuntimeBridge();
+  const bridge = await getOrCreateHostedCliRuntimeBridge();
+  const connectLinkStarted = createDeferred<void>();
+  const releaseConnectLink = createDeferred<void>();
+  const requestStarted = createDeferred<Promise<HostedCliDeviceConnectLinkResult>>();
+  let invocationSettled = false;
+  const deviceSyncPort = {
+    ...createDeviceSyncPortStub(),
+    createConnectLink: vi.fn(async ({ connectTarget }) => {
+      connectLinkStarted.resolve();
+      await releaseConnectLink.promise;
+      return {
+        authorizationUrl: `https://connect.example.test/${connectTarget}?state=opaque`,
+        connectUrl: `https://connect.example.test/${connectTarget}?state=opaque`,
+        expiresAt: "2026-05-03T20:15:00.000Z",
+        provider: connectTarget,
+        providerLabel: connectTarget.toUpperCase(),
+      };
+    }),
+  } satisfies HostedRuntimeDeviceSyncPort;
+
+  try {
+    const invocationPromise = bridge.runWithInvocation({ deviceSyncPort }, async () => {
+      const pendingRequest = requestHostedCliDeviceConnectLink({
+        bridge: {
+          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+        },
+        connectTarget: "whoop",
+      });
+      requestStarted.resolve(pendingRequest);
+      await connectLinkStarted.promise;
+    });
+    void invocationPromise.then(
+      () => {
+        invocationSettled = true;
+      },
+      () => {
+        invocationSettled = true;
+      },
+    );
+
+    await connectLinkStarted.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(invocationSettled, false);
+    const closingRequest = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      {
+        body: JSON.stringify({ connectTarget: "oura" }),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    assert.equal(closingRequest.status, 503);
+    assert.match(await closingRequest.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
+    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
+
+    releaseConnectLink.resolve();
+    const requestPromise = await requestStarted.promise;
+    const result = await requestPromise;
+    await invocationPromise;
+
+    assert.equal(invocationSettled, true);
+    assert.equal(result.provider, "whoop");
+    expect(deviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
+    expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
+      connectTarget: "whoop",
+    });
+    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
+
+    const nextDeviceSyncPort = createDeviceSyncPortStub();
+    await bridge.runWithInvocation({ deviceSyncPort: nextDeviceSyncPort }, async () => {
+      await requestHostedCliDeviceConnectLink({
+        bridge: {
+          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+        },
+        connectTarget: "oura",
+      });
+    });
+    expect(nextDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
+      connectTarget: "oura",
+    });
+  } finally {
+    releaseConnectLink.resolve();
+    await bridge.stop();
+  }
+});
+
+test("hosted CLI runtime bridge fails closed when accepted request drain times out", async () => {
+  await stopHostedCliRuntimeBridge();
+  vi.useFakeTimers();
+  const bridge = await getOrCreateHostedCliRuntimeBridge();
+  const connectLinkStarted = createDeferred<void>();
+  const deviceSyncPort = {
+    ...createDeviceSyncPortStub(),
+    createConnectLink: vi.fn(async (): Promise<HostedRuntimeDeviceConnectLinkResult> => {
+      connectLinkStarted.resolve();
+      return await new Promise<HostedRuntimeDeviceConnectLinkResult>(() => {});
+    }),
+  } satisfies HostedRuntimeDeviceSyncPort;
+
+  try {
+    const invocationPromise = bridge.runWithInvocation({ deviceSyncPort }, async () => {
+      const pendingRequest = fetch(
+        new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+        {
+          body: JSON.stringify({ connectTarget: "whoop" }),
+          headers: {
+            authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      void pendingRequest.catch(() => undefined);
+      await connectLinkStarted.promise;
+    });
+
+    await connectLinkStarted.promise;
+    const invocationRejected = assert.rejects(
+      invocationPromise,
+      /Hosted CLI bridge in-flight request drain timed out/u,
+    );
+    await vi.advanceTimersByTimeAsync(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS);
+    await invocationRejected;
+
+    const closingRequest = await fetch(
+      new URL(HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH, bridge.env[HOSTED_CLI_BRIDGE_URL_ENV]),
+      {
+        body: JSON.stringify({ connectTarget: "oura" }),
+        headers: {
+          authorization: `Bearer ${bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    assert.equal(closingRequest.status, 503);
+    assert.match(await closingRequest.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
+    assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
+    expect(deviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
+  } finally {
+    await bridge.stop();
+    vi.useRealTimers();
+  }
 });
 
 test("hosted CLI runtime bridge keeps stable env while swapping active invocations", async () => {
@@ -657,3 +815,13 @@ test("hosted CLI runtime bridge redacts downstream connect failures", async () =
     assert.doesNotMatch(text, /should not surface/u);
   });
 });
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}

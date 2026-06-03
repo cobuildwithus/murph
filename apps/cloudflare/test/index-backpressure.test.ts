@@ -84,7 +84,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     const harness = createUserRunnerDurableObject();
     await harness.durableObject.bindUser("member_123");
 
-    const lease = await harness.durableObject.beginRuntimeWriteFenceForSmoke({
+    const lease = await harness.durableObject.beginDeploySmokeRuntimeWriteFence({
       userId: "member_123",
       workspaceVersion: "7",
     });
@@ -105,7 +105,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       userId: "member_123",
     })).resolves.toBe(true);
 
-    await expect(harness.durableObject.finishRuntimeWriteFenceForSmoke({
+    await expect(harness.durableObject.finishDeploySmokeRuntimeWriteFence({
       attemptId: lease.attemptId,
       generation: lease.generation,
       userId: "member_123",

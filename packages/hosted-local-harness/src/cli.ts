@@ -2,8 +2,8 @@ import process from "node:process";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
-import type { HostedLocalDevConfig } from "../../../scripts/dev-hosted-local/types.ts";
-import type { HostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
+import type { HostedLocalDevConfig } from "./dev-hosted-local/types.ts";
+import type { HostedLocalDevStack } from "./dev-hosted-local/stack.ts";
 import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
@@ -67,7 +67,7 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
     printUpHelp(io.stdout ?? process.stdout);
     return;
   }
-  const { startHostedLocalDevStack } = await import("../../../scripts/dev-hosted-local/stack.ts");
+  const { startHostedLocalDevStack } = await import("./dev-hosted-local/stack.ts");
 
   const profiled = applyHostedLocalProfile({
     env: io.env ?? process.env,
@@ -368,7 +368,7 @@ async function runDoctor(args: readonly string[], io: HostedLocalCliIo): Promise
     return;
   }
   const { resolveHostedLocalDevConfig } = await import(
-    "../../../scripts/dev-hosted-local/config.ts"
+    "./dev-hosted-local/config.ts"
   );
   const profiled = applyHostedLocalProfile({
     env: io.env ?? process.env,

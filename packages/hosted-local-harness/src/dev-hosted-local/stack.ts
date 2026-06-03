@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  maybeInstallHostedLocalCodexAppServerStub,
+} from "../codex-app-server-stub.ts";
+
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDevVarsPath,
@@ -14,7 +18,10 @@ import {
   DEFAULT_WORKER_PORT,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
+  HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -146,6 +153,21 @@ const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
+const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
+  repoRoot,
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+);
+const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONTAINER_COMMAND =
+  "/app/.murph-hosted-local/codex-app-server-stub/codex";
+const HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BUNDLE_INSTALL_PATH = path.join(
+  HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
+  ".murph-hosted-local",
+  "codex-app-server-stub",
+  "codex",
+);
 
 export interface HostedLocalProcessResidueOwnership {
   cloudflareWorker: boolean;
@@ -296,10 +318,12 @@ export async function startHostedLocalDevStack(input: {
       ...initialEnv,
     };
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
+    const shouldInstallHostedLocalCodexAppServerStub =
+      Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim());
     const shouldPreserveTestNodeEnvForE2ECodexOverride =
       inputNodeEnv === "test"
       && (
-        Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim())
+        shouldInstallHostedLocalCodexAppServerStub
         || Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim())
       );
     const vercelEnv = shouldUseRemoteHostedCryptoKeys(rawVercelEnv)
@@ -361,6 +385,10 @@ export async function startHostedLocalDevStack(input: {
         ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
       },
     });
+    if (shouldInstallHostedLocalCodexAppServerStub) {
+      cloudflareDevVars[HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV] =
+        HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONTAINER_COMMAND;
+    }
     throwIfAbortSignalAborted(input.abortSignal);
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
     const runtimeEnv: NodeJS.ProcessEnv = {
@@ -550,6 +578,10 @@ export async function startHostedLocalDevStack(input: {
           workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
         }
       }
+      await maybeInstallHostedLocalCodexAppServerStubForRunnerBundle({
+        containerReachableHost,
+        rawVercelEnv,
+      });
 
       const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
       await cleanupHostedRunnerContainers({
@@ -1452,6 +1484,9 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "GOOGLE_AI_API_KEY",
   "GOOGLE_API_KEY",
   "HF_TOKEN",
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
   "VENICE_API_KEY",
   "XAI_API_KEY",
 ] as const;
@@ -1956,6 +1991,58 @@ function findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix: string)
 function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>): boolean {
   const value = env.MURPH_DEV_REUSE_EXISTING_WORKER?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
+}
+
+async function maybeInstallHostedLocalCodexAppServerStubForRunnerBundle(input: {
+  containerReachableHost: string;
+  rawVercelEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (!input.rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim()) {
+    return;
+  }
+
+  await maybeInstallHostedLocalCodexAppServerStub({
+    installPath: HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BUNDLE_INSTALL_PATH,
+    runtimeCommandPath: HOSTED_LOCAL_CODEX_APP_SERVER_STUB_CONTAINER_COMMAND,
+    runtimeEnv: {
+      NODE_ENV: "test",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+        rewriteHostedLocalCodexAppServerStubUrlForContainer(
+          input.rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
+          input.containerReachableHost,
+        ),
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
+        input.rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]:
+        input.rawVercelEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV],
+    },
+  });
+}
+
+function rewriteHostedLocalCodexAppServerStubUrlForContainer(
+  value: string | undefined,
+  containerReachableHost: string,
+): string | undefined {
+  if (!value) {
+    return value;
+  }
+
+  try {
+    const url = new URL(value);
+    if (isHostedLocalLoopbackHostname(url.hostname)) {
+      url.hostname = containerReachableHost;
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+function isHostedLocalLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "127.0.0.1"
+    || normalized === "localhost"
+    || normalized === "::1";
 }
 
 async function maybeResetHostedLocalTemporalDevState(input: {

@@ -46,7 +46,7 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 import {
   DEFAULT_DATABASE_URL,
-} from "../../../scripts/dev-hosted-local/constants.js";
+} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 
 const linqWebhookSecret = "linq-local-active-turn-latency-secret";
 const execFileAsync = promisify(execFile);

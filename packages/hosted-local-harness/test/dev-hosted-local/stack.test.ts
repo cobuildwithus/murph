@@ -9,9 +9,9 @@ import type {
   HostedLocalChildProcess,
   HostedLocalChildProcessName,
   HostedLocalDevConfig,
-} from "./types.ts";
-import type { HostedLocalWorkerPortMode } from "./runtime.ts";
-import type { HostedLocalTemporalRuntime } from "./temporal.ts";
+} from "../../src/dev-hosted-local/types.ts";
+import type { HostedLocalWorkerPortMode } from "../../src/dev-hosted-local/runtime.ts";
+import type { HostedLocalTemporalRuntime } from "../../src/dev-hosted-local/temporal.ts";
 
 type HostedLocalLinqWebhookSetup = {
   phoneNumbers: readonly string[] | null;
@@ -238,11 +238,11 @@ vi.mock("node:child_process", () => ({
   spawnSync,
 }));
 
-vi.mock("./config.ts", () => ({
+vi.mock("../../src/dev-hosted-local/config.ts", () => ({
   resolveHostedLocalDevConfig: vi.fn(() => defaultConfig),
 }));
 
-vi.mock("./environment.ts", () => ({
+vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   buildHostedRunnerLocalBuildId: vi.fn((value: string | undefined) => {
     const normalized = value?.trim();
     if (!normalized) {
@@ -328,24 +328,24 @@ vi.mock("./environment.ts", () => ({
   warnForMissingEnv: vi.fn(),
 }));
 
-vi.mock("./linq-webhook-tunnel.ts", () => ({
+vi.mock("../../src/dev-hosted-local/linq-webhook-tunnel.ts", () => ({
   registerHostedLocalLinqWebhookSubscription,
   resolveHostedLocalLinqWebhookSetup,
   waitForHostedLocalLinqWebhookTarget,
 }));
 
-vi.mock("./minio.ts", () => ({
+vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
   cleanupHostedLocalMinioContainerBestEffort,
   maybeStartHostedLocalMinio,
 }));
 
-vi.mock("./temporal.ts", () => ({
+vi.mock("../../src/dev-hosted-local/temporal.ts", () => ({
   buildHostedLocalTemporalRuntimeEnv,
   startHostedLocalTemporalRuntime,
   waitForHostedLocalTemporalPortRelease,
 }));
 
-vi.mock("./runtime.ts", () => ({
+vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
   assertHostedWebDevServerAvailable: vi.fn(async () => {}),
   assertHostedWebPortAvailable: vi.fn(async () => {}),
   cleanupHostedRunnerContainerLocalState,
@@ -371,7 +371,7 @@ vi.mock("./runtime.ts", () => ({
   waitForHealthyHttpEndpoint,
 }));
 
-vi.mock("./vercel.ts", () => ({
+vi.mock("../../src/dev-hosted-local/vercel.ts", () => ({
   ensureVercelLinkExists: vi.fn(async () => {}),
   parseHostedExecutionOidcIdentity: vi.fn(() => ({
     environment: "development",
@@ -426,7 +426,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -598,7 +598,7 @@ describe("hosted local dev stack", () => {
   });
 
   it("force-resets local Temporal residue before starting the stack", async () => {
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       forceResetLocalTemporal: true,
@@ -612,7 +612,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
     const stderrTarget = new CapturingWritable();
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -642,8 +642,8 @@ describe("hosted local dev stack", () => {
   });
 
   it("does not reset local Temporal before web port availability is proven", async () => {
-    const configModule = await import("./config.ts");
-    const runtimeModule = await import("./runtime.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       forceResetLocalTemporal: true,
@@ -655,7 +655,7 @@ describe("hosted local dev stack", () => {
     vi.mocked(runtimeModule.assertHostedWebPortAvailable).mockRejectedValueOnce(
       new Error("web port busy"),
     );
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: process.env,
@@ -673,7 +673,7 @@ describe("hosted local dev stack", () => {
 
   it("starts managed Temporal as part of the hosted-local process model", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       temporal: {
@@ -707,7 +707,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 203 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 204 }));
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -768,7 +768,7 @@ describe("hosted local dev stack", () => {
   it("rejects E2E isolation when a stack would overlap interactive dev defaults", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: {
@@ -782,7 +782,7 @@ describe("hosted local dev stack", () => {
 
   it("rejects E2E isolation when asked to reuse an interactive worker", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       linqWebhookTunnelMode: "disabled",
@@ -793,7 +793,7 @@ describe("hosted local dev stack", () => {
       workerPort: 32001,
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: {
@@ -815,7 +815,7 @@ describe("hosted local dev stack", () => {
 
   it("allows E2E isolation when ports, persist dir, and web artifacts are isolated", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       linqWebhookTunnelMode: "disabled",
@@ -830,7 +830,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
     vi.mocked(access).mockResolvedValueOnce(undefined);
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -908,7 +908,7 @@ describe("hosted local dev stack", () => {
 
   it("falls back to host Docker CLI plugins when inherited Docker config is already isolated", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       linqWebhookTunnelMode: "disabled",
@@ -923,7 +923,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
     vi.mocked(access).mockResolvedValueOnce(undefined);
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -956,7 +956,7 @@ describe("hosted local dev stack", () => {
 
   it("wires hosted-local MinIO endpoints into the Worker env before Cloudflare starts", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       linqWebhookTunnelMode: "disabled",
@@ -985,8 +985,8 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
 
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1031,7 +1031,7 @@ describe("hosted local dev stack", () => {
       }))
       .mockResolvedValueOnce(undefined);
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1059,7 +1059,7 @@ describe("hosted local dev stack", () => {
       }))
       .mockResolvedValueOnce(undefined);
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1085,7 +1085,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(webChild);
 
     try {
-      const { startHostedLocalDevStack } = await import("./stack.ts");
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
       const stack = await startHostedLocalDevStack({
         env: process.env,
@@ -1128,7 +1128,7 @@ describe("hosted local dev stack", () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
 
     try {
-      const { terminateKnownHostedLocalProcessResidue } = await import("./stack.ts");
+      const { terminateKnownHostedLocalProcessResidue } = await import("../../src/dev-hosted-local/stack.ts");
 
       terminateKnownHostedLocalProcessResidue({
         config: {
@@ -1199,7 +1199,7 @@ describe("hosted local dev stack", () => {
         [
           "-SIGKILL",
           "-f",
-          "cloudflared tunnel --no-autoupdate --config.*\\.tmp/cloudflared-linq-webhook\\.yml.*run.*dev",
+          "cloudflared tunnel --no-autoupdate --config.*packages/hosted-local-harness/\\.tmp/cloudflared-linq-webhook\\.yml.*run.*dev",
         ],
         ["-SIGKILL", "-f", "temporal server start-dev .*--port 7234"],
         ["-SIGKILL", "-f", "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker"],
@@ -1221,7 +1221,7 @@ describe("hosted local dev stack", () => {
 
   it("uses scoped process residue cleanup for the Linq tunnel", async () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       linqWebhookTunnelMode: "auto",
@@ -1241,7 +1241,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 113 }));
 
     try {
-      const { startHostedLocalDevStack } = await import("./stack.ts");
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
       const stack = await startHostedLocalDevStack({
         env: process.env,
@@ -1271,7 +1271,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1300,13 +1300,16 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 105 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 106 }));
 
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+        MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS:
+          "murph.send_progress_update",
+        MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: "37",
         NODE_ENV: "test",
       },
     });
@@ -1316,12 +1319,35 @@ describe("hosted local dev stack", () => {
     const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
     expect(resolveInput?.overrides).toMatchObject({
       MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+      MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS:
+        "murph.send_progress_update",
+      MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: "37",
       NODE_ENV: "test",
     });
 
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.NODE_ENV).toBe("test");
+    expect(cloudflareEnv.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
+    expect(cloudflareEnv.MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS)
+      .toBeUndefined();
+    expect(cloudflareEnv.MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS)
+      .toBeUndefined();
+    expect(cloudflareEnv.MURPH_HOSTED_CODEX_APP_SERVER_COMMAND).toBe(
+      "/app/.murph-hosted-local/codex-app-server-stub/codex",
+    );
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      expect.stringContaining(".murph-hosted-local/codex-app-server-stub/codex"),
+      expect.stringContaining("hosted-e2e-codex-shim"),
+      expect.objectContaining({
+        mode: 0o700,
+      }),
+    );
+    const stubWrite = vi.mocked(writeFile).mock.calls.find(([target]) =>
+      String(target).includes(".murph-hosted-local/codex-app-server-stub/codex")
+    );
+    expect(String(stubWrite?.[1])).toContain("murph.send_progress_update");
+    expect(String(stubWrite?.[1])).toContain("const turnDelayMs = 37;");
   });
 
   it("preserves test NODE_ENV for the local E2E Codex model provider base URL override", async () => {
@@ -1329,8 +1355,8 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 107 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 108 }));
 
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1358,8 +1384,8 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
 
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1398,13 +1424,13 @@ describe("hosted local dev stack", () => {
   });
 
   it("generates Health Commons once and starts the markdown watcher before web dev", async () => {
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipHealthCommonsWatch: false,
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1440,7 +1466,7 @@ describe("hosted local dev stack", () => {
 
   it("skips hosted web generated artifacts when the E2E aggregate already prepared them", async () => {
     const stderr = new CapturingWritable();
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1489,7 +1515,7 @@ describe("hosted local dev stack", () => {
   });
 
   it("can skip the runner container smoke proof for focused debugging", async () => {
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipRunnerSmoke: true,
@@ -1498,7 +1524,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 131 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 132 }));
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1516,7 +1542,7 @@ describe("hosted local dev stack", () => {
   it("marks a successful aggregate E2E runner container smoke proof by build id", async () => {
     vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
     vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipLinqWebhookRegister: true,
@@ -1528,11 +1554,11 @@ describe("hosted local dev stack", () => {
       createBufferedChild({ exitCode: null, name: "cloudflare", pid: 133 }),
     );
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const expectedBuildId = environmentModule.buildHostedRunnerLocalBuildId(
       "aggregate-smoke-build",
     );
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1555,7 +1581,7 @@ describe("hosted local dev stack", () => {
   });
 
   it("skips repeated aggregate E2E runner container smoke only for the proved build id", async () => {
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const expectedBuildId = environmentModule.buildHostedRunnerLocalBuildId(
       "aggregate-smoke-build",
     );
@@ -1565,7 +1591,7 @@ describe("hosted local dev stack", () => {
       `${JSON.stringify({ buildId: expectedBuildId })}\n`,
     );
     const stderrTarget = new CapturingWritable();
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipLinqWebhookRegister: true,
@@ -1577,7 +1603,7 @@ describe("hosted local dev stack", () => {
       createBufferedChild({ exitCode: null, name: "cloudflare", pid: 134 }),
     );
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1618,7 +1644,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 133 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 134 }));
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1640,7 +1666,7 @@ describe("hosted local dev stack", () => {
 
   it("keeps the runner container smoke proof fatal for E2E profiles", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipLinqWebhookRegister: true,
@@ -1657,7 +1683,7 @@ describe("hosted local dev stack", () => {
       createBufferedChild({ exitCode: null, name: "cloudflare", pid: 135 }),
     );
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1694,8 +1720,8 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "linq-tunnel", pid: 142 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 143 }));
 
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1718,7 +1744,7 @@ describe("hosted local dev stack", () => {
         "tunnel",
         "--no-autoupdate",
         "--config",
-        ".tmp/cloudflared-linq-webhook.yml",
+        "packages/hosted-local-harness/.tmp/cloudflared-linq-webhook.yml",
         "run",
         "dev",
       ],
@@ -1766,10 +1792,10 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 111 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 112 }));
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.shouldSyncLocalDatabaseSchema).mockReturnValueOnce(false);
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1795,11 +1821,11 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 122 }));
     vi.stubEnv("MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID", "stack-test-build-id");
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const expectedBuildId = environmentModule.buildHostedRunnerLocalBuildId(
       "stack-test-build-id",
     );
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1829,8 +1855,8 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
 
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1876,9 +1902,9 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 127 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 128 }));
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.readOptionalSimpleEnvFile).mockResolvedValue({});
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -1898,8 +1924,8 @@ describe("hosted local dev stack", () => {
   });
 
   it("generates a unique non-default local runner build id for each stack", async () => {
-    const environmentModule = await import("./environment.ts");
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
     const env = {
       ...process.env,
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: undefined,
@@ -1931,14 +1957,14 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 113 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 114 }));
 
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       forceResetLocalDatabase: true,
       forceResetLocalTemporal: false,
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -1969,7 +1995,7 @@ describe("hosted local dev stack", () => {
     });
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2040,7 +2066,7 @@ describe("hosted local dev stack", () => {
       };
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2067,7 +2093,7 @@ describe("hosted local dev stack", () => {
     });
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: process.env,
@@ -2079,7 +2105,7 @@ describe("hosted local dev stack", () => {
   });
 
   it("can start only the worker lane for focused hosted runtime debugging", async () => {
-    const configModule = await import("./config.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipWeb: true,
@@ -2088,7 +2114,7 @@ describe("hosted local dev stack", () => {
       createBufferedChild({ exitCode: null, name: "cloudflare", pid: 401 }),
     );
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2109,7 +2135,7 @@ describe("hosted local dev stack", () => {
       createBufferedChild({ exitCode: null, name: "web", pid: 460 }),
     );
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
@@ -2165,7 +2191,7 @@ describe("hosted local dev stack", () => {
     waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
     waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2188,8 +2214,8 @@ describe("hosted local dev stack", () => {
   });
 
   it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {
-    const configModule = await import("./config.ts");
-    const vercelModule = await import("./vercel.ts");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");
     vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
       ...defaultConfig,
       skipPrismaMigrate: true,
@@ -2200,7 +2226,7 @@ describe("hosted local dev stack", () => {
     );
     vi.stubEnv("VERCEL_OIDC_TOKEN", "provided-oidc-token");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2220,7 +2246,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 202 }));
     vi.stubEnv("MURPH_DEV_TEMP_DIR", ".tmp/local-dev-debug");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2243,7 +2269,7 @@ describe("hosted local dev stack", () => {
   it("rejects temp dir overrides outside the repo-local .tmp subtree", async () => {
     vi.stubEnv("MURPH_DEV_TEMP_DIR", "../unsafe-temp-dir");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: process.env,
@@ -2255,7 +2281,7 @@ describe("hosted local dev stack", () => {
   it("fails closed when local hosted dev is configured with a non-hosted assistant provider", async () => {
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "vercel-ai-gateway");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: process.env,
@@ -2273,14 +2299,14 @@ describe("hosted local dev stack", () => {
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
     vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.4-mini");
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ASSISTANT_MODEL: "stale-pulled-model",
       HOSTED_ASSISTANT_PROVIDER: "venice",
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2305,7 +2331,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 351 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 352 }));
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
@@ -2316,7 +2342,7 @@ describe("hosted local dev stack", () => {
       STRIPE_SECRET_KEY: "sk_test_local",
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2342,7 +2368,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 361 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 362 }));
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.readOptionalSimpleEnvFile)
       .mockResolvedValueOnce({
         HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -2357,7 +2383,7 @@ describe("hosted local dev stack", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2383,7 +2409,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 371 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 372 }));
 
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.readOptionalSimpleEnvFile)
       .mockResolvedValueOnce({
         HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -2398,7 +2424,7 @@ describe("hosted local dev stack", () => {
       STRIPE_SECRET_KEY: "sk_test_vercel",
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2420,13 +2446,13 @@ describe("hosted local dev stack", () => {
   });
 
   it("refuses live Stripe keys in local hosted dev unless explicitly allowed", async () => {
-    const environmentModule = await import("./environment.ts");
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.readHostedLocalStripeEnvFile).mockResolvedValueOnce({
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_live_like_monthly",
       STRIPE_SECRET_KEY: "sk_live_not_for_local_dev",
     });
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: process.env,
@@ -2444,7 +2470,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 402 }));
     vi.stubEnv("MURPH_DEV_CF_WRANGLER_LOG_LEVEL", "debug");
 
-    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: process.env,
@@ -2470,7 +2496,7 @@ describe("hosted local dev stack", () => {
       overrides: Partial<HostedLocalDevConfig>,
       run: () => Promise<void>,
     ): Promise<void> {
-      const configModule = await import("./config.ts");
+      const configModule = await import("../../src/dev-hosted-local/config.ts");
       vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
         ...defaultConfig,
         skipStripeListen: false,
@@ -2486,7 +2512,7 @@ describe("hosted local dev stack", () => {
       );
 
       await withListenerConfig({}, async () => {
-        const { startHostedLocalDevStack } = await import("./stack.ts");
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
         const stack = await startHostedLocalDevStack({
           env: process.env,
@@ -2517,7 +2543,7 @@ describe("hosted local dev stack", () => {
       });
 
       await withListenerConfig({}, async () => {
-        const { startHostedLocalDevStack } = await import("./stack.ts");
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
         const stack = await startHostedLocalDevStack({
           env: process.env,
@@ -2559,7 +2585,7 @@ describe("hosted local dev stack", () => {
       vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_shell_override");
 
       await withListenerConfig({}, async () => {
-        const { startHostedLocalDevStack } = await import("./stack.ts");
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
         const stack = await startHostedLocalDevStack({
           env: process.env,
@@ -2587,13 +2613,13 @@ describe("hosted local dev stack", () => {
         child: createBufferedChild({ exitCode: null, name: "stripe", pid: 913 }),
         secret: "whsec_captured_fresh",
       });
-      const environmentModule = await import("./environment.ts");
+      const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
       vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
         STRIPE_WEBHOOK_SECRET: "whsec_stale_from_vercel",
       });
 
       await withListenerConfig({}, async () => {
-        const { startHostedLocalDevStack } = await import("./stack.ts");
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
         const stack = await startHostedLocalDevStack({
           env: process.env,
@@ -2616,7 +2642,7 @@ describe("hosted local dev stack", () => {
 
     it("skips the listener when MURPH_DEV_SKIP_WEB=1 is set", async () => {
       await withListenerConfig({ skipWeb: true }, async () => {
-        const { startHostedLocalDevStack } = await import("./stack.ts");
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
         const stack = await startHostedLocalDevStack({
           env: process.env,
@@ -2631,7 +2657,7 @@ describe("hosted local dev stack", () => {
 
     it("skips the listener when MURPH_DEV_SKIP_STRIPE_LISTEN=1 is set", async () => {
       // default config already has skipStripeListen: true
-      const { startHostedLocalDevStack } = await import("./stack.ts");
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
       const stack = await startHostedLocalDevStack({
         env: process.env,
@@ -2668,7 +2694,7 @@ describe("hosted local dev stack", () => {
       });
 
       await withListenerConfig({}, async () => {
-        const { startHostedLocalDevStack } = await import("./stack.ts");
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
         const stack = await startHostedLocalDevStack({
           env: process.env,

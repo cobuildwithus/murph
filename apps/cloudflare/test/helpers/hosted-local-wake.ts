@@ -222,19 +222,63 @@ function formatHostedLocalWorkerControlFailure(input: {
   return details.join("\n\n");
 }
 
+function formatHostedLocalWorkerControlNetworkFailure(input: {
+  error: unknown;
+  harness: HostedLocalDevHarness;
+  method: string;
+  url: string;
+}): string {
+  const details = [
+    `${input.method} ${input.url} failed before an HTTP response was received.`,
+    input.error instanceof Error ? input.error.message : String(input.error),
+  ];
+  const stdout = input.harness.stdoutTail();
+  const stderr = input.harness.stderrTail();
+
+  if (stdout) {
+    details.push(`stdout:\n${stdout}`);
+  }
+
+  if (stderr) {
+    details.push(`stderr:\n${stderr}`);
+  }
+
+  return details.join("\n\n");
+}
+
 async function fetchHostedLocalWorkerControl(
   harness: HostedLocalDevHarness,
   url: URL,
   init: RequestInit,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES; attempt += 1) {
-    const response = await fetch(url, init);
+    let response: Response;
+    try {
+      response = await fetch(url, init);
+    } catch (error) {
+      throw new Error(formatHostedLocalWorkerControlNetworkFailure({
+        error,
+        harness,
+        method: init.method ?? "GET",
+        url: String(url),
+      }));
+    }
 
     if (response.ok) {
       return response;
     }
 
-    const body = await response.text();
+    let body: string;
+    try {
+      body = await response.text();
+    } catch (error) {
+      throw new Error(formatHostedLocalWorkerControlNetworkFailure({
+        error,
+        harness,
+        method: init.method ?? "GET",
+        url: String(url),
+      }));
+    }
     if (
       shouldRetryHostedLocalWorkerRestart({
         attempt,

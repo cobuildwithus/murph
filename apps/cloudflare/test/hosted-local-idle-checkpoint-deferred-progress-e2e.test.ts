@@ -108,29 +108,6 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
 
-    const phoneNumbersBaselineCount = requireLinqStub().countObservedRequests({
-      expectedMethod: "GET",
-      expectedPath: "/phone_numbers",
-    });
-    const providerProbe =
-      await requireScenario().harness.probeActiveContainerProviderEgressForTest(userId);
-    expect(providerProbe).toMatchObject({
-      ok: true,
-      probeOrigin: "container",
-      providerRequestOk: true,
-      providerRequestStatus: 200,
-      runtimeAuthorityHeadersPresent: false,
-      writeFenceValidationMode: "active_container",
-    });
-    expect(providerProbe.responseBodyBytes ?? -1).toBeGreaterThan(0);
-    const phoneNumberRequests = await requireLinqStub().waitForMatchingRequestCount({
-      expectedCount: phoneNumbersBaselineCount + 1,
-      expectedMethod: "GET",
-      expectedPath: "/phone_numbers",
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(phoneNumberRequests.at(-1)?.authorizationStatus).toBe("expected");
     const postTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
       previousWorkspaceVersion: activationWorkspaceVersion,
     });
@@ -182,29 +159,6 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
 
-    const secondPhoneNumbersBaselineCount = requireLinqStub().countObservedRequests({
-      expectedMethod: "GET",
-      expectedPath: "/phone_numbers",
-    });
-    const secondProviderProbe =
-      await requireScenario().harness.probeActiveContainerProviderEgressForTest(userId);
-    expect(secondProviderProbe).toMatchObject({
-      ok: true,
-      probeOrigin: "container",
-      providerRequestOk: true,
-      providerRequestStatus: 200,
-      runtimeAuthorityHeadersPresent: false,
-      writeFenceValidationMode: "active_container",
-    });
-    expect(secondProviderProbe.responseBodyBytes ?? -1).toBeGreaterThan(0);
-    const secondPhoneNumberRequests = await requireLinqStub().waitForMatchingRequestCount({
-      expectedCount: secondPhoneNumbersBaselineCount + 1,
-      expectedMethod: "GET",
-      expectedPath: "/phone_numbers",
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(secondPhoneNumberRequests.at(-1)?.authorizationStatus).toBe("expected");
     const secondPostTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
       previousWorkspaceVersion: idleWorkspaceVersion,
     });

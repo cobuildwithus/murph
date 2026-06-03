@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
-import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/types.ts";
+import type { HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/types";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
 } from "../hosted-execution-fixtures.ts";
@@ -74,11 +74,11 @@ const startHostedLocalDevStack = vi.fn(async () => ({
   workerRuntimeEnv: null,
 }));
 
-vi.mock("../../../../scripts/dev-hosted-local/config.ts", () => ({
+vi.mock("@murphai/hosted-local-harness/dev-hosted-local/config", () => ({
   resolveHostedLocalDevConfig: vi.fn(() => hostedLocalDevConfig),
 }));
 
-vi.mock("../../../../scripts/dev-hosted-local/stack.ts", () => ({
+vi.mock("@murphai/hosted-local-harness/dev-hosted-local/stack", () => ({
   startHostedLocalDevStack,
 }));
 

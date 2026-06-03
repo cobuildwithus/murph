@@ -9,6 +9,7 @@ import type {
 export interface HostedRuntimeBridgeCheckpointLease {
   attemptId: string;
   leaseGeneration: string;
+  providerEgressToken?: string | null;
   userId: string;
   workspaceVersion: string;
 }

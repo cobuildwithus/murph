@@ -115,6 +115,14 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
       record.leaseGeneration,
       "Hosted assistant workspace runtime job request.leaseGeneration",
     ),
+    ...(record.providerEgressToken === undefined
+      ? {}
+      : {
+          providerEgressToken: readNullableString(
+            record.providerEgressToken,
+            "Hosted assistant workspace runtime job request.providerEgressToken",
+          ),
+        }),
     reason,
     ...(record.source === undefined || record.source === null
       ? {}

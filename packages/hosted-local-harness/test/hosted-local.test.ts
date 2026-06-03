@@ -1,24 +1,26 @@
 import { readFile, rm } from "node:fs/promises";
+import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
 import {
   normalizeLegacyCloudflareHostedLocalE2eArgs,
-} from "../packages/hosted-local-harness/src/compat.ts";
+} from "../src/compat.ts";
 import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
-} from "../packages/hosted-local-harness/src/e2e.ts";
+} from "../src/e2e.ts";
 import {
   applyHostedLocalProfile,
   resolveHostedLocalProfile,
-} from "../packages/hosted-local-harness/src/profiles.ts";
+} from "../src/profiles.ts";
 import {
   resolveHostedLocalDevConfig,
-} from "./dev-hosted-local/config.ts";
+} from "../src/dev-hosted-local/config.ts";
 import {
   createHostedLocalHarnessState,
-} from "../packages/hosted-local-harness/src/state.ts";
+} from "../src/state.ts";
+import { hostedLocalHarnessRepoRoot as repoRoot } from "../src/repo.ts";
 
 describe("hosted-local harness", () => {
   test("keeps legacy Cloudflare E2E entrypoint on the no-bundle path", () => {
@@ -36,7 +38,9 @@ describe("hosted-local harness", () => {
   });
 
   test("keeps root hosted-local scripts canonical", async () => {
-    const rootPackage = JSON.parse(await readFile("package.json", "utf8")) as {
+    const rootPackage = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as {
       scripts?: Record<string, string>;
     };
     const scripts = rootPackage.scripts ?? {};
@@ -53,7 +57,7 @@ describe("hosted-local harness", () => {
 
   test("keeps Cloudflare package hosted-local E2E surface generic", async () => {
     const cloudflarePackage = JSON.parse(
-      await readFile("apps/cloudflare/package.json", "utf8"),
+      await readFile(path.join(repoRoot, "apps", "cloudflare", "package.json"), "utf8"),
     ) as { scripts?: Record<string, string> };
     const scripts = cloudflarePackage.scripts ?? {};
 
@@ -234,7 +238,7 @@ describe("hosted-local harness", () => {
     });
 
     try {
-      const text = await readFile(state.statePath, "utf8");
+      const text = await readFile(path.join(repoRoot, state.statePath), "utf8");
       expect(text).not.toContain("member-123");
       expect(text).not.toContain("chat-123");
       expect(text).not.toContain("hello from fixture");
@@ -247,7 +251,7 @@ describe("hosted-local harness", () => {
       expect(text).toContain('"MURPH_DEV_SKIP_WEB": "1"');
       expect(text).toContain("<REPO_ROOT>");
     } finally {
-      await rm(state.artifactDir, { force: true, recursive: true });
+      await rm(path.join(repoRoot, state.artifactDir), { force: true, recursive: true });
     }
   });
 });

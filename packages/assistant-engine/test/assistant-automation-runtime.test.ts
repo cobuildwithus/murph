@@ -7485,6 +7485,37 @@ describe('assistant automation run loop', () => {
     )
   })
 
+  it('passes hosted turn environment into due cron processing', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    const turnEnvironment = {
+      currentWorkingDirectory: null,
+      env: {
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        PATH: '/bin',
+      },
+    }
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      startDaemon: false,
+      turnEnvironment,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnEnvironment,
+      }),
+    )
+  })
+
   it('can finish a document-preservation retry pass without replying or outbox work', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],

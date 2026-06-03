@@ -22,6 +22,11 @@ import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
+  readHostedRunnerContainerIdentity,
+  resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
+  type HostedRunnerContainerIdentitySource,
+} from "./hosted-runner-container-identity.js";
+import {
   writeRunnerRuntimeWriteFenceHeaders,
   type RunnerRuntimeWriteFenceToken,
 } from "./runner-outbound/write-fence.ts";
@@ -44,8 +49,6 @@ const RUNNER_CODEX_SHELL_SMOKE_URL =
   "http://container/internal/deploy-codex-shell-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
-const RUNNER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_URL =
-  "http://container/internal/provider-egress-active-container-probe";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
@@ -175,11 +178,7 @@ export interface HostedExecutionContainerStubLike {
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerPrewarmForProcessingResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
-  expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
-  probeActiveContainerProviderEgressForTest?(
-    input: { userId: string },
-  ): Promise<RunnerContainerActiveContainerProviderEgressProbeResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
   wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
@@ -189,7 +188,7 @@ export interface HostedExecutionContainerNamespaceLike {
 }
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
-type RunnerContainerNameSource = Readonly<Record<string, unknown>>;
+type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
   userId: string;
@@ -243,24 +242,6 @@ interface HostedExecutionContainerSmokeHealthInput {
   };
   openAiIntercept?: boolean;
   openAiInterceptAuthority?: RunnerRuntimeWriteFenceToken & { userId: string };
-}
-
-export interface RunnerContainerActiveContainerProviderEgressProbeResult {
-  ok: true;
-  probeOrigin: "container";
-  providerRequestOk: boolean;
-  providerRequestStatus: number;
-  responseBodyBytes: number | null;
-  runtimeAuthorityHeadersPresent: false;
-  writeFenceValidationMode: "active_container";
-}
-
-function readRunnerContainerProbeFailureDetails(value: unknown): string {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-  const serialized = JSON.stringify(value);
-  return serialized ? ` details=${serialized.slice(0, 1_000)}` : "";
 }
 
 interface RunnerActivityTimeoutRenewable {
@@ -562,59 +543,6 @@ export class RunnerContainer extends Container {
       }
       return { kind: "unknown", reason: "container-rpc-error" };
     }
-  }
-
-  async expireActivityForTest(_input: { userId: string }): Promise<{ ok: true }> {
-    await this.onActivityExpired();
-    return { ok: true };
-  }
-
-  async probeActiveContainerProviderEgressForTest(
-    input: { userId: string },
-  ): Promise<RunnerContainerActiveContainerProviderEgressProbeResult> {
-    this.noteRunnerActivity("provider-egress-active-container-probe");
-    const probeSignal = AbortSignal.timeout(10_000);
-    const response = await this.containerFetch(
-      RUNNER_PROVIDER_EGRESS_ACTIVE_CONTAINER_PROBE_URL,
-      {
-        headers: {
-          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: input.userId,
-        },
-        method: "POST",
-        signal: probeSignal,
-      },
-    );
-    const payload = await readRunnerContainerMetadataJsonObject(response, {
-      signal: probeSignal,
-    });
-    if (!response.ok || payload.ok !== true) {
-      const error = typeof payload.error === "string" && payload.error.trim()
-        ? ` ${payload.error.trim()}`
-        : "";
-      const details = readRunnerContainerProbeFailureDetails(payload.details);
-      throw new Error(
-        `Hosted runner active-container provider egress probe failed with HTTP ${response.status}.${error}${details}`,
-      );
-    }
-    if (
-      payload.probeOrigin !== "container"
-      || typeof payload.providerRequestOk !== "boolean"
-      || typeof payload.providerRequestStatus !== "number"
-    ) {
-      throw new Error("Hosted runner active-container provider egress probe returned invalid metadata.");
-    }
-
-    return {
-      ok: true,
-      probeOrigin: "container",
-      providerRequestOk: payload.providerRequestOk,
-      providerRequestStatus: payload.providerRequestStatus,
-      responseBodyBytes: typeof payload.responseBodyBytes === "number"
-        ? payload.responseBodyBytes
-        : null,
-      runtimeAuthorityHeadersPresent: false,
-      writeFenceValidationMode: "active_container",
-    };
   }
 
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
@@ -1504,7 +1432,7 @@ export class RunnerContainer extends Container {
     };
   }
 
-  private noteRunnerActivity(stage: string): boolean {
+  protected noteRunnerActivity(stage: string): boolean {
     const renewActivityTimeout =
       (this as RunnerContainer & Partial<RunnerActivityTimeoutRenewable>).renewActivityTimeout;
 
@@ -2174,21 +2102,14 @@ export function resolveHostedExecutionRunnerContainerName(input: {
   source: RunnerContainerNameSource;
   userId: string;
 }): string {
-  const workerVersionSegment = readRunnerContainerWorkerVersionSegment(input.source);
-  return workerVersionSegment
-    ? `${input.userId}--v-${workerVersionSegment}`
-    : input.userId;
+  return resolveHostedExecutionRunnerContainerNameFromIdentity(input);
 }
 
 export function resolveHostedExecutionRunnerUserIdFromContainerName(input: {
   containerName: string;
   source: RunnerContainerNameSource;
 }): string {
-  const workerVersionSegment = readRunnerContainerWorkerVersionSegment(input.source);
-  const versionSuffix = workerVersionSegment ? `--v-${workerVersionSegment}` : null;
-  return versionSuffix && input.containerName.endsWith(versionSuffix)
-    ? input.containerName.slice(0, -versionSuffix.length)
-    : input.containerName;
+  return readHostedRunnerContainerIdentity(input)?.userId ?? input.containerName.trim();
 }
 
 function assertRunnerContainerEnsureProcessingUserIds(
@@ -2219,28 +2140,6 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
-}
-
-function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {
-  const metadata = source.CF_VERSION_METADATA;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return null;
-  }
-
-  const versionId = (metadata as { id?: unknown }).id;
-  return typeof versionId === "string"
-    ? sanitizeRunnerContainerNameSegment(versionId)
-    : null;
-}
-
-function sanitizeRunnerContainerNameSegment(value: string): string | null {
-  const sanitized = value
-    .trim()
-    .replace(/[^A-Za-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-
-  return sanitized.length > 0 ? sanitized : null;
 }
 
 function parseHostedExecutionContainerInvokeInput(

@@ -12,7 +12,7 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -398,13 +398,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("runs assistant automation inside the prepared hosted process environment", async () => {
+  it("passes hosted runtime environment explicitly without mutating process globals", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-phase-vault-"));
     const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "hosted-phase-home-"));
     const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
     const codexShimPath = path.join(codexHome, "bin/codex");
-    const previousCommand = process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV];
+    const previousCommand = process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV];
     const previousCodexHome = process.env.CODEX_HOME;
+    const previousHome = process.env.HOME;
     const previousHostedMarker = process.env[HOSTED_RUNTIME_PROCESS_ENV];
     const previousVault = process.env.VAULT;
     const restoreEnv = (key: string, value: string | undefined) => {
@@ -415,16 +416,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }
     };
 
-    process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV] = "ambient-command";
+    process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV] = "ambient-command";
     process.env.CODEX_HOME = "ambient-codex-home";
+    process.env.HOME = "ambient-home";
     process.env[HOSTED_RUNTIME_PROCESS_ENV] = "0";
     process.env.VAULT = "ambient-vault";
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
-      expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]).toBe(codexShimPath);
-      expect(process.env.CODEX_HOME).toBe(codexHome);
-      expect(process.env.HOME).toBe(operatorHomeRoot);
-      expect(process.env[HOSTED_RUNTIME_PROCESS_ENV]).toBe("1");
-      expect(process.env.VAULT).toBe(vaultRoot);
+    const runtimeEnv = {
+      CODEX_HOME: codexHome,
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: codexShimPath,
+      [HOSTED_RUNTIME_PROCESS_ENV]: "1",
+      NODE_ENV: "test",
+      PATH: "/usr/bin",
+    };
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe("ambient-command");
+      expect(process.env.CODEX_HOME).toBe("ambient-codex-home");
+      expect(process.env.HOME).toBe("ambient-home");
+      expect(process.env[HOSTED_RUNTIME_PROCESS_ENV]).toBe("0");
+      expect(process.env.VAULT).toBe("ambient-vault");
+      expect(laneInput.operatorHomeRoot).toBe(operatorHomeRoot);
+      expect(laneInput.runtimeEnv).toEqual(runtimeEnv);
+      expect(laneInput.vaultRoot).toBe(vaultRoot);
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -436,24 +448,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
         operatorHomeRoot,
-        runtimeEnv: {
-          CODEX_HOME: codexHome,
-          [HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV]: codexShimPath,
-          [HOSTED_RUNTIME_PROCESS_ENV]: "1",
-          NODE_ENV: "test",
-          PATH: "/usr/bin",
-        },
+        runtimeEnv,
         vaultRoot,
       }));
 
-      expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV])
+      expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV])
         .toBe("ambient-command");
       expect(process.env.CODEX_HOME).toBe("ambient-codex-home");
+      expect(process.env.HOME).toBe("ambient-home");
       expect(process.env[HOSTED_RUNTIME_PROCESS_ENV]).toBe("0");
       expect(process.env.VAULT).toBe("ambient-vault");
     } finally {
-      restoreEnv(HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV, previousCommand);
+      restoreEnv(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV, previousCommand);
       restoreEnv("CODEX_HOME", previousCodexHome);
+      restoreEnv("HOME", previousHome);
       restoreEnv(HOSTED_RUNTIME_PROCESS_ENV, previousHostedMarker);
       restoreEnv("VAULT", previousVault);
       await rm(vaultRoot, { force: true, recursive: true });

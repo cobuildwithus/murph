@@ -56,6 +56,8 @@ import {
   fetchHostedWebControlPlaneJson,
 } from "../src/runtime-platform/web-control-transport.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
@@ -225,6 +227,7 @@ async function fetchDirectHostedWorkspaceReadWithHeaders(input: {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-123",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2251,6 +2254,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-123",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2266,6 +2270,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
+      "provider-egress-token-123",
+    );
   });
 
   it("logs external provider transport failures with redacted underlying error text", async () => {
@@ -2282,6 +2289,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-456",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2339,6 +2347,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-456",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2352,7 +2361,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await hostedFetch(original, {
       body: "b",
-      headers: { "x-test": "1" },
+      headers: {
+        [HOSTED_PROVIDER_EGRESS_TOKEN_HEADER]: "stale-provider-egress-token",
+        "x-hosted-runtime-attempt-id": "runtime_write_stale",
+        "x-hosted-runtime-lease-generation": "99",
+        "x-hosted-runtime-workspace-version": "99",
+        [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: "proxy_token",
+        "x-test": "1",
+      },
       method: "PUT",
       signal: abortController.signal,
     });
@@ -2364,7 +2380,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(forwarded.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
+      "provider-egress-token-456",
+    );
+    expect(forwarded.headers.has(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(false);
     expect(forwarded.method).toBe("PUT");
     expect(await forwarded.text()).toBe("b");
 
@@ -2382,6 +2401,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-local",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2404,6 +2424,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-local",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2422,6 +2443,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
+      "provider-egress-token-local",
+    );
   });
 
   it("rejects configured local provider fetches outside the configured base path", async () => {
@@ -2484,6 +2508,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-linq-local",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2503,6 +2528,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
+      "provider-egress-token-linq-local",
+    );
   });
 
   it("does not require external provider fetches to carry a runtime write-fence lease", async () => {
@@ -2524,6 +2552,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+    expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
   });
 
   it("passes platform providerFetch without exact write-fence headers", async () => {
@@ -2535,6 +2564,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         readCurrentLease: () => ({
           attemptId: "runtime_write_123",
           leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-platform",
           userId: "member_123",
           workspaceVersion: "6",
         }),
@@ -2552,6 +2582,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
+      "provider-egress-token-platform",
+    );
   });
 
   it("keeps public Internet fetches free of runtime authority headers", async () => {
@@ -2572,7 +2605,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const authorityBearingRequest = new Request("https://cdn.linqapp.com/files/direct.png", {
       headers: {
         [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
-        "x-hosted-execution-runner-proxy-token": "proxy_token",
+        [HOSTED_PROVIDER_EGRESS_TOKEN_HEADER]: "provider-egress-token-public",
+        [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: "proxy_token",
         "x-hosted-runtime-attempt-id": "runtime_write_123",
         "x-hosted-runtime-lease-generation": "7",
         "x-hosted-runtime-workspace-version": "6",
@@ -2588,7 +2622,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
+    expect(request.headers.has(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(false);
     expect(request.headers.get("x-test")).toBe("retained");
   });
 

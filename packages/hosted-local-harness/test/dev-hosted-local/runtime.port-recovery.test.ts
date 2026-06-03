@@ -23,7 +23,7 @@ describe("assertHostedWebPortAvailable", () => {
     });
     const port = await listen(server);
 
-    const { assertHostedWebPortAvailable } = await import("./runtime.ts");
+    const { assertHostedWebPortAvailable } = await import("../../src/dev-hosted-local/runtime.ts");
 
     await expect(assertHostedWebPortAvailable({
       host: "127.0.0.1",
@@ -85,7 +85,7 @@ describe("assertHostedWebPortAvailable", () => {
       };
     });
 
-    const { assertHostedWebPortAvailable } = await import("./runtime.ts");
+    const { assertHostedWebPortAvailable } = await import("../../src/dev-hosted-local/runtime.ts");
 
     await expect(assertHostedWebPortAvailable({
       host: "127.0.0.1",

@@ -4,7 +4,6 @@ import {
   buildHostedRuntimeResolvedConfig,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -47,6 +46,8 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
 const REQUIRED_OPENAI_PROVIDER_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
 } as const;
+const LEGACY_CODEX_APP_SERVER_STUB_BASE_URL_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL";
 
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
@@ -244,7 +245,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
+      [LEGACY_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
@@ -257,8 +258,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-        "http://host.docker.internal:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
         "http://host.docker.internal:4222/v1",
       NODE_ENV: "production",
@@ -273,7 +272,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
+      [LEGACY_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
@@ -285,7 +284,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",

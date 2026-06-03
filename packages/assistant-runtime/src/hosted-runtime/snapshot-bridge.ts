@@ -178,6 +178,7 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
   return {
     attemptId: request.attemptId,
     leaseGeneration: request.leaseGeneration,
+    providerEgressToken: request.providerEgressToken ?? null,
     userId: request.userId,
     workspaceVersion: request.workspaceVersion,
   };

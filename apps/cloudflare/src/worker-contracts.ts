@@ -9,9 +9,38 @@ export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
 
+export type WorkerActiveRuntimeWriteFenceValidationRejectReason =
+  | "expired_write_fence"
+  | "invalid_runner_container_name"
+  | "missing_runner_state"
+  | "missing_write_fence"
+  | "write_fence_mismatch";
+
 export type WorkerActiveRuntimeWriteFenceValidationResult =
   | {
       owns: false;
+      reason?: WorkerActiveRuntimeWriteFenceValidationRejectReason;
+    }
+  | {
+      attemptId: string;
+      leaseGeneration: string;
+      owns: true;
+      userId: string;
+      workspaceVersion: string | null;
+    };
+
+export type WorkerProviderEgressTokenValidationRejectReason =
+  | "expired_write_fence"
+  | "missing_provider_egress_token"
+  | "missing_runner_state"
+  | "missing_write_fence"
+  | "provider_egress_token_mismatch"
+  | "write_fence_mismatch";
+
+export type WorkerProviderEgressTokenValidationResult =
+  | {
+      owns: false;
+      reason?: WorkerProviderEgressTokenValidationRejectReason;
     }
   | {
       attemptId: string;
@@ -22,7 +51,7 @@ export type WorkerActiveRuntimeWriteFenceValidationResult =
     };
 
 export interface WorkerUserRunnerStubLike {
-  beginRuntimeWriteFenceForSmoke?(input: {
+  beginDeploySmokeRuntimeWriteFence?(input: {
     userId: string;
     workspaceVersion: string;
   }): Promise<{
@@ -34,7 +63,7 @@ export interface WorkerUserRunnerStubLike {
   } | null>;
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
-  finishRuntimeWriteFenceForSmoke?(input: {
+  finishDeploySmokeRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
     userId: string;
@@ -63,6 +92,10 @@ export interface WorkerUserRunnerStubLike {
     runnerContainerName: string;
     userId: string;
   }): Promise<WorkerActiveRuntimeWriteFenceValidationResult>;
+  validateRuntimeProviderEgressToken?(input: {
+    providerEgressToken: string;
+    userId: string;
+  }): Promise<WorkerProviderEgressTokenValidationResult>;
 }
 
 export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {
@@ -112,7 +145,6 @@ export interface WorkerEnvironmentContract<
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST?: string;
   MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID?: string;
-  MURPH_HOSTED_LOCAL_TEST_ROUTES?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG?: string;

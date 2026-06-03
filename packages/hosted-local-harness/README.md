@@ -65,10 +65,14 @@ identifiers, payload-like env values, and sensitive command args are redacted.
 4. Diagnostic E2E scenarios that can intentionally fail while investigating
    provider behavior are opt-in by explicit scenario name and are excluded from
    `pnpm hosted-local e2e`.
-5. Programmatic users call `startHostedLocalHarness(...)`, not
-   `scripts/dev-hosted-local/*` directly.
+5. Programmatic users call `startHostedLocalHarness(...)` or declared
+   `@murphai/hosted-local-harness/*` package exports, not root scripts or
+   package `src/` paths directly.
 6. Every run writes a redacted state file under
    `.artifacts/hosted-local/<run-id>/state.json`.
+7. Test-only Codex app-server shims belong to this harness. Production runtime
+   packages should accept only a neutral command override and must not own
+   `MURPH_E2E_*` wiring or fake assistant directives.
 
 The old `scripts/dev-hosted-local.ts` and
 `apps/cloudflare/scripts/run-hosted-local-e2e.ts` files are compatibility

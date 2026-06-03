@@ -6,6 +6,8 @@ import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
   DEFAULT_STRIPE_ENV_FILE,
+  HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
+  HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
   HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
@@ -22,10 +24,6 @@ import {
   webDir,
 } from "./constants.ts";
 import { assertNoDeprecatedHostedLocalCodexBridgeEnv } from "./config.ts";
-import {
-  HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
-  HOSTED_WORKER_REQUIRED_SECRET_NAMES,
-} from "../../apps/cloudflare/scripts/deploy-automation/worker-secret-names.ts";
 import {
   createEcP256JwkPairJson,
   createEcP256SigningKeyJson,
@@ -951,7 +949,10 @@ export function buildWranglerLocalDevConfig(
 
   return {
     name: workerName,
-    main: toWranglerConfigRelativePath(configDir, path.join(cloudflareAppDir, "src", "index.ts")),
+    main: toWranglerConfigRelativePath(
+      configDir,
+      path.join(cloudflareAppDir, "src", resolveWranglerLocalDevWorkerEntrypoint(source)),
+    ),
     compatibility_date: "2026-03-27",
     compatibility_flags: ["nodejs_compat"],
     containers: [
@@ -1015,6 +1016,14 @@ export function buildWranglerLocalDevConfig(
     },
     vars,
   };
+}
+
+function resolveWranglerLocalDevWorkerEntrypoint(
+  source: Readonly<Record<string, string | undefined>>,
+): string {
+  return source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1"
+    ? "hosted-local-test-index.ts"
+    : "index.ts";
 }
 
 export function resolveWranglerLocalDevWorkerName(

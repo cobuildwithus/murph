@@ -20,14 +20,15 @@ import {
   resolveHostedLocalPersistentCryptoStatePath,
   resolveHostedLocalStripeEnvFilePath,
   shouldSyncLocalDatabaseSchema,
-} from "./environment.ts";
+} from "../../src/dev-hosted-local/environment.ts";
 import type {
   HostedExecutionOidcIdentity,
   HostedLocalDevConfig,
-} from "./types.ts";
+} from "../../src/dev-hosted-local/types.ts";
 import {
+  HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
-} from "./constants.ts";
+} from "../../src/dev-hosted-local/constants.ts";
 
 const localConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
@@ -1113,6 +1114,11 @@ describe("buildWranglerVarArgs", () => {
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://127.0.0.1:4222/v1",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+        MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS:
+          "murph.send_progress_update",
+        MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: "37",
+        [HOSTED_LOCAL_CODEX_APP_SERVER_COMMAND_ENV]:
+          "/app/.murph-hosted-local/codex-app-server-stub/codex",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         NODE_ENV: "test",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
@@ -1126,7 +1132,7 @@ describe("buildWranglerVarArgs", () => {
       "--var",
       "LINQ_ATTACHMENT_CDN_BASE_URL:http://127.0.0.1:4011/attachment-downloads",
       "--var",
-      "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL:http://127.0.0.1:4111/v1",
+      "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND:/app/.murph-hosted-local/codex-app-server-stub/codex",
       "--var",
       "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL:http://127.0.0.1:4222/v1",
       "--var",
@@ -1333,6 +1339,20 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(container.image_build_context).toBe("../../workspace/apps/cloudflare");
     expect(smokeContainer.image).toBe(container.image);
     expect(smokeContainer.image_build_context).toBe(container.image_build_context);
+  });
+
+  it("uses the hosted-local test Worker entrypoint only when test routes are enabled", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const productionLikeConfig = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "production",
+    });
+
+    expect(config.main).toBe("../src/hosted-local-test-index.ts");
+    expect(productionLikeConfig.main).toBe("../src/index.ts");
   });
 
   it("passes the local runner build id as a Docker build arg", () => {

@@ -24,8 +24,15 @@ export async function resolveAssistantTurnSharedPlan(
   resolved: ResolvedAssistantSession,
 ): Promise<AssistantTurnSharedPlan> {
   const includeOnboardingGuidance = input.includeEarlySessionOnboarding === true
-  const cliAccess = resolveAssistantCliAccessContext()
-  const requestedWorkingDirectory = resolveAssistantRequestedWorkingDirectory(input)
+  const turnEnvironment = input.turnEnvironment ?? {}
+  const cliAccess = resolveAssistantCliAccessContext(turnEnvironment.env)
+  const requestedWorkingDirectory = resolveAssistantRequestedWorkingDirectory(
+    input,
+    {
+      currentWorkingDirectory: turnEnvironment.currentWorkingDirectory,
+      env: turnEnvironment.env,
+    },
+  )
   const conversationPolicy = resolveAssistantConversationPolicy({
     message: {
       conversation: input.conversation,
@@ -69,7 +76,7 @@ export async function resolveAssistantTurnSharedPlan(
 export function resolveAssistantRequestedWorkingDirectory(
   input: AssistantMessageInput,
   options: {
-    currentWorkingDirectory?: string
+    currentWorkingDirectory?: string | null
     env?: NodeJS.ProcessEnv
     platform?: NodeJS.Platform
   } = {},
@@ -78,7 +85,10 @@ export function resolveAssistantRequestedWorkingDirectory(
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const env = options.env ?? process.env
   const platform = options.platform ?? process.platform
-  const currentWorkingDirectory = options.currentWorkingDirectory ?? process.cwd()
+  const currentWorkingDirectory =
+    options.currentWorkingDirectory === undefined
+      ? process.cwd()
+      : options.currentWorkingDirectory
   const explicitWorkingDirectoryMatchesVault =
     explicitWorkingDirectory !== null
     && path.resolve(explicitWorkingDirectory) === path.resolve(input.vault)
@@ -91,6 +101,7 @@ export function resolveAssistantRequestedWorkingDirectory(
     executionContext.hosted &&
     env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1' &&
     platform === 'linux' &&
+    currentWorkingDirectory !== null &&
     path.resolve(input.vault) === path.resolve(currentWorkingDirectory)
   ) {
     return HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY

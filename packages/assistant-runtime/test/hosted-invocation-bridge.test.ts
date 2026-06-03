@@ -40,6 +40,7 @@ import {
 const TEST_REQUEST = {
   attemptId: "attempt_bridge",
   leaseGeneration: "4",
+  providerEgressToken: "provider-egress-token-bridge",
   reason: "nudge",
   userId: "member_bridge",
   workspaceVersion: "7",
@@ -335,6 +336,7 @@ function createLease(
   return {
     attemptId: request.attemptId,
     leaseGeneration: request.leaseGeneration,
+    providerEgressToken: request.providerEgressToken ?? null,
     userId: request.userId,
     workspaceVersion: request.workspaceVersion,
   };

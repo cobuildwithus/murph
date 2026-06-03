@@ -135,13 +135,13 @@ export async function runDeployContainerOpenAiInterceptSmokeWithFence(
 
   const userRunner = context.env.USER_RUNNER.getByName(userId);
   if (
-    typeof userRunner.beginRuntimeWriteFenceForSmoke !== "function"
-    || typeof userRunner.finishRuntimeWriteFenceForSmoke !== "function"
+    typeof userRunner.beginDeploySmokeRuntimeWriteFence !== "function"
+    || typeof userRunner.finishDeploySmokeRuntimeWriteFence !== "function"
   ) {
     throw new TypeError("Hosted user runner does not support deploy-smoke write fences.");
   }
 
-  const lease = await userRunner.beginRuntimeWriteFenceForSmoke({
+  const lease = await userRunner.beginDeploySmokeRuntimeWriteFence({
     userId,
     workspaceVersion: DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
   });
@@ -161,7 +161,7 @@ export async function runDeployContainerOpenAiInterceptSmokeWithFence(
       },
     });
   } finally {
-    await userRunner.finishRuntimeWriteFenceForSmoke({
+    await userRunner.finishDeploySmokeRuntimeWriteFence({
       attemptId: lease.attemptId,
       generation: lease.generation,
       userId,

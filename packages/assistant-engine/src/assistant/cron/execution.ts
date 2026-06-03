@@ -9,8 +9,10 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { sendAssistantNotificationLocal } from '../../assistant-service.js'
+import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { errorMessage } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
@@ -228,6 +230,7 @@ export async function executeClaimedAssistantCronJob(input: {
   job: ResolvedAssistantCronJob
   paths: AssistantStatePaths
   signal?: AbortSignal
+  turnEnvironment?: AssistantTurnEnvironment | null
   trigger: AssistantCronTrigger
   vault: string
 }): Promise<{
@@ -276,8 +279,16 @@ export async function executeClaimedAssistantCronJob(input: {
       })
       status = 'succeeded'
     } else {
+      const automationTurn = buildAssistantAutomationTurnEnvelope({
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        executionContext: input.executionContext,
+        signal: input.signal,
+        turnEnvironment: input.turnEnvironment ?? null,
+        turnTrigger: 'automation-cron',
+      })
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
+        ...automationTurn,
         instructions: buildAssistantCronExecutionInstructions(claimedJob),
         deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
           job: claimedJob,
@@ -287,7 +298,6 @@ export async function executeClaimedAssistantCronJob(input: {
           job: claimedJob,
           trigger: input.trigger,
         }),
-        executionContext: input.executionContext,
         sessionId: claimedJob.target.sessionId,
         alias: claimedJob.target.alias,
         allowBindingRebind: claimedJob.target.sessionId !== null,
@@ -295,10 +305,8 @@ export async function executeClaimedAssistantCronJob(input: {
         identityId: claimedJob.target.identityId,
         participantId: claimedJob.target.participantId,
         threadId: claimedJob.target.threadId,
-        deliveryDispatchMode: input.deliveryDispatchMode,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',
-        turnTrigger: 'automation-cron',
         workingDirectory: input.vault,
       })
 

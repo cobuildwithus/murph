@@ -101,17 +101,6 @@ export function matchExactPath(...paths: readonly string[]): RouteMatcher {
   return (pathname) => (allowedPaths.has(pathname) ? {} : null);
 }
 
-export function matchTestUserRoute(prefix: string, suffix: string): RouteMatcher {
-  return (pathname) => {
-    if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
-      return null;
-    }
-
-    const userId = pathname.slice(prefix.length, pathname.length - suffix.length);
-    return userId.length > 0 ? { userId } : null;
-  };
-}
-
 export function respondToWrongMethod(response: WrongMethodResponse): Response {
   return response === "method-not-allowed" ? methodNotAllowed() : notFound();
 }

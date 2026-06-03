@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHostedExecutionOidcIdentity } from "./vercel.ts";
+import { parseHostedExecutionOidcIdentity } from "../../src/dev-hosted-local/vercel.ts";
 
 function createJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");

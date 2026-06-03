@@ -40,9 +40,6 @@ import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
 import {
-  withHostedProcessEnvironment,
-} from "./environment.ts";
-import {
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane,
 } from "./maintenance.ts";
@@ -418,23 +415,14 @@ export async function runHostedWorkspaceAssistantPhase(
           platformEnv: input.runtime.platformEnv,
           resolvedConfig: input.runtime.resolvedConfig,
         },
+        operatorHomeRoot: input.restored.operatorHomeRoot,
         runtimeAttemptId: input.request.attemptId,
+        runtimeEnv: input.runtimeEnv,
         signal: input.signal ?? undefined,
         vaultRoot: input.restored.vaultRoot,
         wake,
       });
-    const assistantMetrics = Object.keys(input.runtimeEnv).length === 0
-      ? await runAutomationLane()
-      : await withHostedProcessEnvironment(
-          {
-            envOverrides: {
-              ...input.runtimeEnv,
-            },
-            operatorHomeRoot: input.restored.operatorHomeRoot,
-            vaultRoot: input.restored.vaultRoot,
-          },
-          runAutomationLane,
-        );
+    const assistantMetrics = await runAutomationLane();
     const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
       deviceSyncMaintenanceRan: systemMailboxMaintenance.deviceSyncMaintenanceRan,
       input,

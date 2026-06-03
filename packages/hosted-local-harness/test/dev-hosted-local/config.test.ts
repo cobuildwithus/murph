@@ -7,7 +7,7 @@ import {
   parseWorkerProtocol,
   printHelp,
   resolveHostedLocalDevConfig,
-} from "./config.ts";
+} from "../../src/dev-hosted-local/config.ts";
 
 describe("resolveHostedLocalDevConfig", () => {
   it("returns the documented defaults", () => {

@@ -1,4 +1,7 @@
 import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
+import type {
+  AssistantTurnEnvironment,
+} from "@murphai/assistant-engine";
 import {
   HOSTED_CLI_BRIDGE_ENV_NAMES,
   HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
@@ -300,6 +303,27 @@ export function buildHostedRunnerExecutablePath(
   }
 
   return entries.join(":");
+}
+
+export function createHostedAssistantTurnEnvironment(input: {
+  operatorHomeRoot?: string | null;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+}): AssistantTurnEnvironment {
+  const env: NodeJS.ProcessEnv = {
+    ...input.runtimeEnv,
+    [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
+    VAULT: input.vaultRoot,
+  };
+
+  if (input.operatorHomeRoot) {
+    env.HOME = input.operatorHomeRoot;
+  }
+
+  return {
+    currentWorkingDirectory: null,
+    env,
+  };
 }
 
 export function sanitizeHostedAssistantRuntimeForwardedEnv(

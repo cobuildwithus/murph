@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { resolveOperatorHomeDirectory } from '@murphai/operator-config/operator-config'
@@ -28,7 +28,7 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   'HOME',
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_TEST_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   'LANG',
   'LANGUAGE',
   'LC_ALL',

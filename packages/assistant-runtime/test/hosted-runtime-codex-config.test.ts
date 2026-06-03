@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -19,19 +18,13 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
-  restoreHostedExecutionContext,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
-import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
   buildHostedRuntimeForwardedEnv,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
@@ -48,9 +41,6 @@ import {
   buildHostedCodexConfigToml,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
-import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV,
-} from "../src/hosted-runtime/codex-e2e-app-server-stub.ts";
 
 const temporaryPaths: string[] = [];
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
@@ -65,17 +55,12 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
-const HOSTED_CODEX_E2E_STUB_PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
-  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
-  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-  0x42, 0x60, 0x82,
-]);
+const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL";
+const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS";
+const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV =
+  "MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS";
 
 afterEach(async () => {
   await Promise.all(
@@ -343,728 +328,69 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
 });
 
-test("hosted Codex runtime config installs a local E2E app-server stub when configured", async () => {
+test("hosted Codex runtime config does not install the legacy E2E app-server stub", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
+
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-        "http://host.docker.internal:4123/v1",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "1234",
+        "http://127.0.0.1:4111/v1",
       NODE_ENV: "test",
       OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
-  const shimBinDir = path.join(result.codexHome, "bin");
-  const shimPath = path.join(shimBinDir, "codex");
-  assert.equal(
-    result.runtimeEnv.PATH?.startsWith(`${shimBinDir}${path.delimiter}`),
-    true,
+  await assert.rejects(
+    () => stat(path.join(result.codexHome, "bin", "codex")),
+    (error) => isRecord(error) && error.code === "ENOENT",
   );
-  assert.equal(
-    result.runtimeEnv.PATH,
-    [shimBinDir, buildHostedRunnerExecutablePath(undefined)].join(path.delimiter),
-  );
-  const shimSource = await readFile(shimPath, "utf8");
-  assert.match(shimSource, /^#!\/usr\/bin\/env node/u);
-  assert.match(shimSource, /hosted-e2e-codex-shim/u);
-  assert.match(shimSource, /http:\/\/host\.docker\.internal:4123\/v1/u);
-  assert.match(shimSource, /const turnDelayMs = 1234;/u);
-  assert.doesNotMatch(shimSource, /thread_hosted_local/u);
-  assert.doesNotMatch(shimSource, /HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS/u);
-  const shimMode = (await stat(shimPath)).mode & 0o777;
-  assert.equal(shimMode, 0o700);
+  assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV], undefined);
 });
 
-test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to Responses", async () => {
+test("hosted Codex runtime config rejects command override outside test mode", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseText: "shim response",
-  });
 
-  try {
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        NODE_ENV: "test",
-        PATH: process.env.PATH ?? "",
-        OPENAI_API_KEY: "secret-openai-key",
-      },
-    });
-    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const messages = await runHostedLocalCodexStubTurn(child);
-
-    assert.equal(requests.length, 1);
-    assert.match(requests[0]!, /hello hosted local/u);
-    assert.deepEqual(
-      messages.find((message) => message.type === "item.completed"),
-      {
-        item: {
-          id: "msg_turn_hosted_local_1",
-          text: "shim response",
-          type: "assistant.message",
-        },
-        params: {
-          turnId: "turn_hosted_local_1",
-        },
-        type: "item.completed",
-      },
-    );
-    const threadId = readHostedLocalCodexStubThreadId(messages);
-    assert.match(threadId, /^00000000-0000-4000-8000-[0-9]{12}$/u);
-    const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
-    const continuityEntries = parseHostedLocalCodexShimContinuityEntries(rolloutLog);
-    assert.deepEqual(continuityEntries, [
-      {
-        event: "thread.started",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        assistantText: "shim response",
-        event: "assistant.message",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-    ]);
-    await assert.rejects(readHostedLocalCodexShimContinuityLog(result.codexHome), {
-      code: "ENOENT",
-    });
-    assert.doesNotMatch(rolloutLog, /hello hosted local/u);
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex runtime local E2E app-server stub correlates dynamic tool calls to the active turn", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseText: JSON.stringify({
-      __murphE2eToolCalls: [
-        {
-          arguments: {
-            text: "Checking the current iMessage thread now.",
-          },
-          namespace: "murph",
-          tool: "send_progress_update",
-        },
-      ],
-      text: "I checked that and can keep helping from here.",
-    }),
-  });
-
-  try {
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        NODE_ENV: "test",
-        PATH: process.env.PATH ?? "",
-        OPENAI_API_KEY: "secret-openai-key",
-      },
-    });
-    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const messages = await runHostedLocalCodexStubTurn(child);
-    const threadId = readHostedLocalCodexStubThreadId(messages);
-    const toolCall = messages.find((message) => message.method === "item/tool/call");
-
-    assert.deepEqual(toolCall, {
-      id: 1000001,
-      method: "item/tool/call",
-      params: {
-        arguments: {
-          text: "Checking the current iMessage thread now.",
-        },
-        namespace: "murph",
-        threadId,
-        tool: "send_progress_update",
-        turnId: "turn_hosted_local_1",
-      },
-    });
-    assert.equal(requests.length, 1);
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex runtime local E2E app-server stub preserves ordinary JSON responses", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const requests: string[] = [];
-  const notificationDecision = JSON.stringify({
-    kind: "send_message",
-    privateSummary: "deliver",
-    text: "Time to sleep.",
-  });
-  const server = await startResponsesStubServer({
-    requests,
-    responseTexts: [
-      notificationDecision,
-      JSON.stringify({
-        __murphE2eVaultCliCommands: [],
-        text: "directive text",
-      }),
-    ],
-  });
-
-  try {
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        NODE_ENV: "test",
-        PATH: process.env.PATH ?? "",
-        OPENAI_API_KEY: "secret-openai-key",
-      },
-    });
-    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const messages = await runHostedLocalCodexStubTurn(
-      child,
-      ["notification decision", "explicit directive"],
-    );
-
-    assert.equal(requests.length, 2);
-    assert.deepEqual(
-      messages
-        .filter((message) => message.type === "item.completed")
-        .map((message) =>
-          typeof message.item === "object" && message.item !== null && "text" in message.item
-            ? (message.item as { text?: unknown }).text
-            : null
-        ),
-      [
-        notificationDecision,
-        "directive text",
-      ],
-    );
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex runtime local E2E app-server stub runs vault-cli directives through the package CLI", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const trustedCliRoot = await createTemporaryDirectory();
-  const shadowCwdRoot = await createTemporaryDirectory();
-  const trustedCliPackageRoot = path.join(trustedCliRoot, "packages", "cli");
-  const shadowCliPackageRoot = path.join(shadowCwdRoot, "packages", "cli");
-  const shadowCliNodeModulesScope = path.join(shadowCwdRoot, "node_modules", "@murphai");
-  const trustedCliDistDir = path.join(trustedCliPackageRoot, "dist");
-  const shadowCliDistDir = path.join(shadowCliPackageRoot, "dist");
-  const trustedCliArgsPath = path.join(trustedCliRoot, "vault-cli-args.json");
-  const shadowCliArgsPath = path.join(shadowCwdRoot, "shadow-vault-cli-args.json");
-  await mkdir(trustedCliDistDir, { recursive: true });
-  await mkdir(shadowCliDistDir, { recursive: true });
-  await mkdir(shadowCliNodeModulesScope, { recursive: true });
-  await symlink("../../packages/cli", path.join(shadowCliNodeModulesScope, "murph"));
-  await writeFile(
-    path.join(trustedCliPackageRoot, "package.json"),
-    JSON.stringify({
-      main: "./dist/index.js",
-      name: "@murphai/murph",
-    }),
-    "utf8",
-  );
-  await writeFile(
-    path.join(shadowCliPackageRoot, "package.json"),
-    JSON.stringify({
-      main: "./dist/index.js",
-      name: "@murphai/murph",
-    }),
-    "utf8",
-  );
-  await writeFile(path.join(trustedCliDistDir, "index.js"), "", "utf8");
-  await writeFile(path.join(shadowCliDistDir, "index.js"), "", "utf8");
-  await writeFile(
-    path.join(trustedCliDistDir, "bin.js"),
-    [
-      `#!${process.execPath}`,
-      "const fs = require('node:fs');",
-      "fs.writeFileSync(process.env.MURPH_E2E_VAULT_CLI_ARGS_PATH, JSON.stringify(process.argv.slice(2)));",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    path.join(shadowCliDistDir, "bin.js"),
-    [
-      `#!${process.execPath}`,
-      "const fs = require('node:fs');",
-      "fs.writeFileSync(process.env.MURPH_E2E_SHADOW_VAULT_CLI_ARGS_PATH, JSON.stringify(process.argv.slice(2)));",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  const trustedCliBinPath = path.join(trustedCliDistDir, "bin.js");
-  await chmod(trustedCliBinPath, 0o700);
-  await chmod(path.join(shadowCliDistDir, "bin.js"), 0o700);
-
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseText: JSON.stringify({
-      __murphE2eVaultCliCommands: [
-        {
-          args: [
-            "automation",
-            "save",
-            "Sleep reminder",
-            "--schedule-at",
-            "2026-04-08T03:03:00.000Z",
-          ],
-        },
-      ],
-      text: "directive text",
-    }),
-  });
-
-  try {
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV]:
-          trustedCliBinPath,
-        NODE_ENV: "test",
-        OPENAI_API_KEY: "secret-openai-key",
-      },
-    });
-    const trustedRuntimeCliPath =
-      result.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV];
-    assert.equal(typeof trustedRuntimeCliPath, "string");
-    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      cwd: shadowCwdRoot,
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_MURPH_CLI_PATH_ENV]: trustedRuntimeCliPath,
-        MURPH_E2E_SHADOW_VAULT_CLI_ARGS_PATH: shadowCliArgsPath,
-        MURPH_E2E_VAULT_CLI_ARGS_PATH: trustedCliArgsPath,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const messages = await runHostedLocalCodexStubTurn(child);
-
-    assert.equal(requests.length, 1);
-    assert.deepEqual(
-      JSON.parse(await readFile(trustedCliArgsPath, "utf8")),
-      [
-        "automation",
-        "save",
-        "Sleep reminder",
-        "--schedule-at",
-        "2026-04-08T03:03:00.000Z",
-      ],
-    );
-    await assert.rejects(readFile(shadowCliArgsPath, "utf8"), /ENOENT/u);
-    assert.deepEqual(
-      messages
-        .filter((message) => message.type === "item.completed")
-        .map((message) =>
-          typeof message.item === "object" && message.item !== null && "text" in message.item
-            ? (message.item as { text?: unknown }).text
-            : null
-        ),
-      ["directive text"],
-    );
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex runtime local E2E app-server stub enforces expected dynamic tools", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseTexts: ["first shim response", "second shim response"],
-  });
-
-  try {
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
-          "murph.send_progress_update",
-        NODE_ENV: "test",
-        PATH: process.env.PATH ?? "",
-        OPENAI_API_KEY: "secret-openai-key",
-      },
-    });
-    const missingToolChild = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const rejectedMessages = await runHostedLocalCodexStubThreadStart(
-      missingToolChild,
-      {},
-    );
-    assert.match(
-      readHostedLocalCodexStubRpcErrorMessage(rejectedMessages, 2),
-      /expected \[murph\.send_progress_update\] but received \[none\]/u,
-    );
-
-    const missingResumeToolChild = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const rejectedResumeMessages = await runHostedLocalCodexStubThreadStartThenResume(
-      missingResumeToolChild,
-      {
-        dynamicTools: [
-          {
-            inputSchema: {
-              type: "object",
-            },
-            name: "send_progress_update",
-            namespace: "murph",
-          },
-        ],
-      },
-      {},
-    );
-    assert.match(
-      readHostedLocalCodexStubRpcErrorMessage(rejectedResumeMessages, 20),
-      /thread\/resume dynamic tools mismatch: expected \[murph\.send_progress_update\] but received \[none\]/u,
-    );
-
-    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const messages = await runHostedLocalCodexStubTurn(
-      child,
-      ["hello hosted local", "resume hosted local"],
-      {
-        dynamicTools: [
-          {
-            inputSchema: {
-              type: "object",
-            },
-            name: "send_progress_update",
-            namespace: "murph",
-          },
-        ],
-      },
-    );
-
-    assert.equal(requests.length, 2);
-    const threadId = readHostedLocalCodexStubThreadId(messages);
-    const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
-    assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
-      {
-        dynamicToolNames: ["murph.send_progress_update"],
-        event: "thread.started",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        assistantText: "first shim response",
-        event: "assistant.message",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        dynamicToolNames: ["murph.send_progress_update"],
-        event: "thread.resumed",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        assistantText: "second shim response",
-        event: "assistant.message",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-    ]);
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex runtime local E2E app-server stub records resumed assistant context internally", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseTexts: ["first assistant reply", "second assistant reply"],
-  });
-
-  try {
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        NODE_ENV: "test",
-        PATH: process.env.PATH ?? "",
-        OPENAI_API_KEY: "secret-openai-key",
-      },
-    });
-    const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
-      env: {
-        ...process.env,
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        PATH: result.runtimeEnv.PATH,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const messages = await runHostedLocalCodexStubTurn(child, [
-      "first hosted local prompt",
-      "second hosted local prompt",
-    ]);
-
-    assert.equal(requests.length, 2);
-    assert.match(readResponsesRequestInput(requests[0]!), /first hosted local prompt/u);
-    assert.match(readResponsesRequestInput(requests[1]!), /second hosted local prompt/u);
-    assert.match(
-      readResponsesRequestInput(requests[1]!),
-      /Conversation so far:\\nAssistant:\\nfirst assistant reply/u,
-    );
-    const threadId = readHostedLocalCodexStubThreadId(messages);
-    const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
-    assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
-      {
-        event: "thread.started",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        assistantText: "first assistant reply",
-        event: "assistant.message",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        event: "thread.resumed",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-      {
-        assistantText: "second assistant reply",
-        event: "assistant.message",
-        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
-        threadId,
-      },
-    ]);
-    await assert.rejects(readHostedLocalCodexShimContinuityLog(result.codexHome), {
-      code: "ENOENT",
-    });
-    assert.doesNotMatch(rolloutLog, /first hosted local prompt/u);
-    assert.doesNotMatch(rolloutLog, /second hosted local prompt/u);
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex runtime local E2E app-server stub forwards local images", async () => {
-  const workspaceRoot = await createTemporaryDirectory();
-  const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
-  const vaultRoot = path.join(workspaceRoot, "vault");
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseText: "image observed",
-  });
-
-  try {
-    await mkdir(vaultRoot, { recursive: true });
-    const result = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-          `${readServerBaseUrl(server)}/v1`,
-        NODE_ENV: "test",
-        OPENAI_API_KEY: "secret-openai-key",
-        PATH: process.env.PATH ?? "",
-      },
-    });
-
-    const turn = await executeCodexAppServerTurn({
-      approvalPolicy: "never",
-      codexHome: result.runtimeEnv.CODEX_HOME,
-      env: {
-        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
-        HOME: operatorHomeRoot,
-        OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
-        PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
-      },
-      images: [
-        {
-          bytes: HOSTED_CODEX_E2E_STUB_PNG_BYTES,
-          mimeType: "image/png",
-        },
-      ],
-      prompt: "inspect hosted local image",
-      sandbox: "danger-full-access",
-      workingDirectory: vaultRoot,
-    });
-
-    assert.equal(turn.finalMessage, "image observed");
-    assert.equal(requests.length, 1);
-    assert.equal(responsesRequestInputContains(requests[0]!, "inspect hosted local image"), true);
-    assert.equal(responsesRequestHasInputImageDataUrl(requests[0]!, "image/png"), true);
-    assert.equal(responsesRequestInputContains(requests[0]!, "murph-codex-"), false);
-  } finally {
-    await closeHttpServer(server);
-  }
-});
-
-test("hosted Codex rollout snapshot restores thread-id resume without SQLite", async () => {
-  const workspaceRoot = await createTemporaryDirectory();
-  const vaultRoot = path.join(workspaceRoot, "vault");
-  const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
-  const requests: string[] = [];
-  const server = await startResponsesStubServer({
-    requests,
-    responseTexts: ["first restored reply", "second restored reply"],
-  });
-
-  try {
-    await mkdir(vaultRoot, { recursive: true });
-    const runtimeEnv = {
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-        `${readServerBaseUrl(server)}/v1`,
-      NODE_ENV: "test",
-      OPENAI_API_KEY: "secret-openai-key",
-      PATH: process.env.PATH ?? "",
-    };
-    const prepared = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv,
-    });
-    const firstResult = await executeCodexAppServerTurn({
-      approvalPolicy: "never",
-      codexHome: prepared.runtimeEnv.CODEX_HOME,
-      env: {
-        CODEX_HOME: prepared.runtimeEnv.CODEX_HOME,
-        HOME: operatorHomeRoot,
-        OPENAI_API_KEY: prepared.runtimeEnv.OPENAI_API_KEY,
-        PATH: prepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
-      },
-      prompt: "first prompt before teardown",
-      sandbox: "danger-full-access",
-      workingDirectory: vaultRoot,
-    });
-    assert.equal(firstResult.finalMessage, "first restored reply");
-    assert.ok(firstResult.threadId);
-    assert.ok(firstResult.rolloutRelativePath);
-
-    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
-      recursive: true,
-    });
-    await writeFile(
-      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
-      JSON.stringify({
-        resumeState: {
-          codexRolloutRelativePath: firstResult.rolloutRelativePath,
-          providerSessionId: firstResult.threadId,
-          resumeRouteId: "route-test",
-        },
-        target: {
-          adapter: "codex-cli",
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/hosted-local-codex",
+          NODE_ENV: "production",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
-      "utf8",
-    );
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV)
+      && error.message.includes("NODE_ENV=test"),
+  );
+});
 
-    const snapshot = await snapshotHostedExecutionContext({
-      operatorHomeRoot,
-      vaultRoot,
-    });
-    const restoredWorkspaceRoot = await createTemporaryDirectory();
-    const restored = await restoreHostedExecutionContext({
-      bundle: snapshot.bundle,
-      workspaceRoot: restoredWorkspaceRoot,
-    });
-    await assert.rejects(
-      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "state_1.sqlite"), "utf8"),
-      { code: "ENOENT" },
-    );
+test("hosted Codex runtime config rejects relative command overrides", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
 
-    const restoredPrepared = await prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot: restored.operatorHomeRoot,
-      runtimeEnv,
-    });
-    const secondResult = await executeCodexAppServerTurn({
-      approvalPolicy: "never",
-      codexHome: restoredPrepared.runtimeEnv.CODEX_HOME,
-      env: {
-        CODEX_HOME: restoredPrepared.runtimeEnv.CODEX_HOME,
-        HOME: restored.operatorHomeRoot,
-        OPENAI_API_KEY: restoredPrepared.runtimeEnv.OPENAI_API_KEY,
-        PATH: restoredPrepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
-      },
-      prompt: "second prompt after restore",
-      resumeSessionId: firstResult.threadId,
-      sandbox: "danger-full-access",
-      workingDirectory: restored.vaultRoot,
-    });
-
-    assert.equal(secondResult.finalMessage, "second restored reply");
-    assert.equal(secondResult.threadId, firstResult.threadId);
-    assert.match(
-      readResponsesRequestInput(requests[1]!),
-      /Conversation so far:\\nAssistant:\\nfirst restored reply/u,
-    );
-    assert.match(readResponsesRequestInput(requests[1]!), /second prompt after restore/u);
-  } finally {
-    await closeHttpServer(server);
-  }
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "codex-local-shim",
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "secret-openai-key",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV)
+      && error.message.includes("absolute path"),
+  );
 });
 
 testHostedCodexAuthE2e(
@@ -1326,28 +652,6 @@ test("hosted Codex runtime config rejects the removed local Codex provider", asy
   );
 });
 
-test("hosted Codex runtime config rejects the local E2E app-server stub for non-local hosts", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-
-  await assert.rejects(
-    () =>
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot,
-        runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-            "https://provider.example.test/v1",
-          NODE_ENV: "test",
-          OPENAI_API_KEY: "secret-openai-key",
-        },
-      }),
-    (error) =>
-      error instanceof HostedAssistantConfigurationError
-      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
-      && error.message.includes("local test host"),
-  );
-});
-
 test("hosted Codex runtime config rejects the model provider base URL override outside test mode", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -1413,28 +717,7 @@ test("hosted Codex runtime config rejects https model provider base URL override
   );
 });
 
-test("hosted Codex runtime config rejects the local E2E app-server stub outside test mode", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-
-  await assert.rejects(
-    () =>
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot,
-        runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
-            "http://127.0.0.1:4123/v1",
-          OPENAI_API_KEY: "secret-openai-key",
-        },
-      }),
-    (error) =>
-      error instanceof HostedAssistantConfigurationError
-      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
-      && error.message.includes("NODE_ENV=test"),
-  );
-});
-
-test("hosted Codex runtime config requires Vercel credentials even for the local E2E stub", async () => {
+test("hosted Codex runtime config requires model credentials even when legacy E2E stub env is present", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
   await assert.rejects(
@@ -1573,40 +856,76 @@ test("hosted runtime launch env policy forwards the test-only model provider bas
   );
 });
 
-test("hosted runtime launch env policy forwards the E2E Codex turn delay probe control", () => {
+test("hosted runtime launch env policy forwards the neutral hosted Codex command override", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/hosted-local-codex",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
+    "/tmp/hosted-local-codex",
+  );
+});
+
+test("hosted runtime launch env policy does not forward E2E Codex app-server stub controls", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+    ),
+    false,
+  );
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
       HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
     ),
-    true,
+    false,
   );
-  assert.equal(
-    buildHostedRuntimeForwardedEnv({
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "6000",
-      NODE_ENV: "test",
-      OPENAI_API_KEY: "openai-key",
-    })[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV],
-    "6000",
-  );
-});
-
-test("hosted runtime launch env policy forwards the E2E Codex expected dynamic-tools control", () => {
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
       HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
     ),
-    true,
+    false,
   );
-  assert.equal(
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(buildHostedRuntimeForwardedEnv({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          "http://127.0.0.1:4111/v1",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "6000",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
+          "murph.send_progress_update",
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "openai-key",
+      })).filter(([key]) => key.startsWith("MURPH_E2E_CODEX_APP_SERVER_STUB_")),
+    ),
+    {},
+  );
+  assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+        "http://127.0.0.1:4111/v1",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "6000",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:
         "murph.send_progress_update",
       NODE_ENV: "test",
       OPENAI_API_KEY: "openai-key",
-    })[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV],
-    "murph.send_progress_update",
+    }),
+    {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    },
   );
 });
 
@@ -2056,46 +1375,6 @@ function readResponsesRequestInput(body: string): string {
   return stringifyResponsesRequestInput(parsed.input);
 }
 
-function responsesRequestInputContains(body: string, token: string): boolean {
-  const parsed = parseJsonObject(body);
-  return stringifyResponsesRequestInput(parsed?.input).includes(token);
-}
-
-function responsesRequestHasInputImageDataUrl(body: string, mimeType: string): boolean {
-  const parsed = parseJsonObject(body);
-  return collectResponseInputPartsByType(parsed?.input, "input_image").some((part) =>
-    typeof part.image_url === "string"
-      && part.image_url.startsWith(`data:${mimeType};base64,`)
-  );
-}
-
-function collectResponseInputPartsByType(
-  value: unknown,
-  type: string,
-): Record<string, unknown>[] {
-  const matches: Record<string, unknown>[] = [];
-  const visit = (candidate: unknown): void => {
-    if (!candidate || typeof candidate !== "object") {
-      return;
-    }
-    if (Array.isArray(candidate)) {
-      for (const item of candidate) {
-        visit(item);
-      }
-      return;
-    }
-    const record = candidate as Record<string, unknown>;
-    if (record.type === type) {
-      matches.push(record);
-    }
-    for (const child of Object.values(record)) {
-      visit(child);
-    }
-  };
-  visit(value);
-  return matches;
-}
-
 function stringifyResponsesRequestInput(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -2124,35 +1403,6 @@ function isResponsesAutocompactionRequest(body: string): boolean {
   );
 }
 
-async function readHostedLocalCodexShimContinuityLog(codexHome: string): Promise<string> {
-  return await readFile(
-    path.join(codexHome, "rollouts", "hosted-e2e-codex-shim.jsonl"),
-    "utf8",
-  );
-}
-
-async function readHostedLocalCodexShimRolloutLog(
-  codexHome: string,
-  threadId: string,
-): Promise<string> {
-  const rolloutDirectory = path.join(codexHome, "sessions", "2026", "05", "06");
-  const fileNames = await readdir(rolloutDirectory);
-  const rolloutFileName = fileNames.find((fileName) =>
-    fileName.endsWith(`-${threadId}.jsonl`)
-  );
-  assert.ok(rolloutFileName, `Expected rollout file for thread ${threadId}.`);
-  return await readFile(path.join(rolloutDirectory, rolloutFileName), "utf8");
-}
-
-function parseHostedLocalCodexShimContinuityEntries(
-  log: string,
-): Record<string, unknown>[] {
-  return log
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
 function readServerBaseUrl(server: Server): string {
   const address = server.address();
   assert(address && typeof address === "object");
@@ -2170,388 +1420,6 @@ async function closeHttpServer(server: Server): Promise<void> {
       resolve();
     });
   });
-}
-
-async function runHostedLocalCodexStubTurn(
-  child: ReturnType<typeof spawn>,
-  prompts: readonly string[] = ["hello hosted local"],
-  threadStartParams: Record<string, unknown> = {},
-): Promise<Record<string, unknown>[]> {
-  const childStdin = child.stdin;
-  const childStdout = child.stdout;
-  const childStderr = child.stderr;
-  assert(childStdin);
-  assert(childStdout);
-  assert(childStderr);
-
-  const messages: Record<string, unknown>[] = [];
-  let stdoutBuffer = "";
-  let stderr = "";
-  let activeThreadId: string | null = null;
-
-  const completed = new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Timed out waiting for hosted local Codex stub turn. stderr: ${stderr}`));
-    }, 5_000);
-    let resolved = false;
-
-    const finish = (error?: Error): void => {
-      if (resolved) {
-        return;
-      }
-
-      resolved = true;
-      clearTimeout(timeout);
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    };
-
-    child.once("error", finish);
-    child.once("exit", (code, signal) => {
-      if (resolved) {
-        return;
-      }
-
-      finish(new Error(
-        `Hosted local Codex stub exited before completing turn: ${code ?? signal}. stderr: ${stderr}`,
-      ));
-    });
-    childStderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    childStdout.on("data", (chunk) => {
-      stdoutBuffer += String(chunk);
-      const lines = stdoutBuffer.split(/\r?\n/u);
-      stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          continue;
-        }
-
-        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-        messages.push(parsed);
-        const parsedId = typeof parsed.id === "number" ? parsed.id : null;
-        if (parsedId === 2) {
-          activeThreadId = readHostedLocalCodexStubThreadId(messages);
-          writeHostedLocalCodexStubTurnStart(
-            childStdin,
-            3,
-            prompts[0]!,
-            activeThreadId,
-          );
-        }
-        if (parsed.method === "item/tool/call" && parsedId !== null) {
-          childStdin.write(`${JSON.stringify({
-            id: parsedId,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: "inputText",
-                  text: "progress update sent",
-                },
-              ],
-            },
-          })}\n`);
-          continue;
-        }
-        if (parsed.method === "turn/completed") {
-          const completedTurns = messages.filter((message) =>
-            message.method === "turn/completed"
-          ).length;
-          if (completedTurns >= prompts.length) {
-            finish();
-            continue;
-          }
-          assert(activeThreadId, "Expected active hosted local Codex thread id.");
-          writeHostedLocalCodexStubResume(
-            childStdin,
-            20 + completedTurns,
-            activeThreadId,
-            readHostedLocalCodexStubThreadResumeParams(threadStartParams),
-          );
-          writeHostedLocalCodexStubTurnStart(
-            childStdin,
-            30 + completedTurns,
-            prompts[completedTurns]!,
-            activeThreadId,
-          );
-        }
-      }
-    });
-  });
-
-  try {
-    childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 2,
-      method: "thread/start",
-      params: threadStartParams,
-    })}\n`);
-
-    await completed;
-    return messages;
-  } finally {
-    childStdin.end();
-    child.kill();
-  }
-}
-
-async function runHostedLocalCodexStubThreadStart(
-  child: ReturnType<typeof spawn>,
-  threadStartParams: Record<string, unknown>,
-): Promise<Record<string, unknown>[]> {
-  const childStdin = child.stdin;
-  const childStdout = child.stdout;
-  const childStderr = child.stderr;
-  assert(childStdin);
-  assert(childStdout);
-  assert(childStderr);
-
-  const messages: Record<string, unknown>[] = [];
-  let stdoutBuffer = "";
-  let stderr = "";
-
-  const completed = new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Timed out waiting for hosted local Codex stub thread/start. stderr: ${stderr}`));
-    }, 5_000);
-    let resolved = false;
-
-    const finish = (error?: Error): void => {
-      if (resolved) {
-        return;
-      }
-
-      resolved = true;
-      clearTimeout(timeout);
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    };
-
-    child.once("error", finish);
-    child.once("exit", (code, signal) => {
-      if (resolved) {
-        return;
-      }
-
-      finish(new Error(
-        `Hosted local Codex stub exited before thread/start response: ${code ?? signal}. stderr: ${stderr}`,
-      ));
-    });
-    childStderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    childStdout.on("data", (chunk) => {
-      stdoutBuffer += String(chunk);
-      const lines = stdoutBuffer.split(/\r?\n/u);
-      stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          continue;
-        }
-
-        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-        messages.push(parsed);
-        if (parsed.id === 2) {
-          finish();
-        }
-      }
-    });
-  });
-
-  try {
-    childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 2,
-      method: "thread/start",
-      params: threadStartParams,
-    })}\n`);
-
-    await completed;
-    return messages;
-  } finally {
-    childStdin.end();
-    child.kill();
-  }
-}
-
-async function runHostedLocalCodexStubThreadStartThenResume(
-  child: ReturnType<typeof spawn>,
-  threadStartParams: Record<string, unknown>,
-  threadResumeParams: Record<string, unknown>,
-): Promise<Record<string, unknown>[]> {
-  const childStdin = child.stdin;
-  const childStdout = child.stdout;
-  const childStderr = child.stderr;
-  assert(childStdin);
-  assert(childStdout);
-  assert(childStderr);
-
-  const messages: Record<string, unknown>[] = [];
-  let stdoutBuffer = "";
-  let stderr = "";
-
-  const completed = new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Timed out waiting for hosted local Codex stub thread/resume. stderr: ${stderr}`));
-    }, 5_000);
-    let resolved = false;
-
-    const finish = (error?: Error): void => {
-      if (resolved) {
-        return;
-      }
-
-      resolved = true;
-      clearTimeout(timeout);
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    };
-
-    child.once("error", finish);
-    child.once("exit", (code, signal) => {
-      if (resolved) {
-        return;
-      }
-
-      finish(new Error(
-        `Hosted local Codex stub exited before thread/resume response: ${code ?? signal}. stderr: ${stderr}`,
-      ));
-    });
-    childStderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    childStdout.on("data", (chunk) => {
-      stdoutBuffer += String(chunk);
-      const lines = stdoutBuffer.split(/\r?\n/u);
-      stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          continue;
-        }
-
-        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-        messages.push(parsed);
-        if (parsed.id === 2) {
-          writeHostedLocalCodexStubResume(
-            childStdin,
-            20,
-            readHostedLocalCodexStubThreadId(messages),
-            threadResumeParams,
-          );
-        }
-        if (parsed.id === 20) {
-          finish();
-        }
-      }
-    });
-  });
-
-  try {
-    childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 2,
-      method: "thread/start",
-      params: threadStartParams,
-    })}\n`);
-
-    await completed;
-    return messages;
-  } finally {
-    childStdin.end();
-    child.kill();
-  }
-}
-
-function readHostedLocalCodexStubRpcErrorMessage(
-  messages: readonly Record<string, unknown>[],
-  id: number,
-): string {
-  const message = messages.find((candidate) => candidate.id === id);
-  const error = isRecord(message?.error) ? message.error : null;
-  if (typeof error?.message !== "string") {
-    throw new Error(`Expected hosted local Codex stub RPC error for id ${id}.`);
-  }
-  return error.message;
-}
-
-function writeHostedLocalCodexStubResume(
-  childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
-  id: number,
-  threadId: string,
-  threadResumeParams: Record<string, unknown> = {},
-): void {
-  childStdin.write(`${JSON.stringify({
-    id,
-    method: "thread/resume",
-    params: {
-      ...threadResumeParams,
-      threadId,
-    },
-  })}\n`);
-}
-
-function readHostedLocalCodexStubThreadResumeParams(
-  threadStartParams: Record<string, unknown>,
-): Record<string, unknown> {
-  return Array.isArray(threadStartParams.dynamicTools)
-    ? { dynamicTools: threadStartParams.dynamicTools }
-    : {};
-}
-
-function writeHostedLocalCodexStubTurnStart(
-  childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
-  id: number,
-  prompt: string,
-  threadId: string,
-): void {
-  childStdin.write(`${JSON.stringify({
-    id,
-    method: "turn/start",
-    params: {
-      input: [
-        {
-          text: prompt,
-          type: "text",
-        },
-      ],
-      threadId,
-    },
-  })}\n`);
-}
-
-function readHostedLocalCodexStubThreadId(messages: readonly Record<string, unknown>[]): string {
-  for (const message of messages) {
-    if (message.id !== 2 || !isRecord(message.result)) {
-      continue;
-    }
-    const thread = message.result.thread;
-    if (!isRecord(thread) || typeof thread.id !== "string") {
-      continue;
-    }
-    return thread.id;
-  }
-
-  throw new Error("Expected hosted local Codex stub thread/start response.");
 }
 
 function assertHostedCodexAutoCompactTokenLimit(config: string): void {

@@ -99,7 +99,7 @@ async function loadRuntimeWithStripeChild(
     return { ...actual, spawn };
   });
 
-  const runtime = await import("./runtime.ts");
+  const runtime = await import("../../src/dev-hosted-local/runtime.ts");
   return { runtime, spawn };
 }
 
@@ -219,7 +219,7 @@ describe("spawnStripeListenerWithSecretCapture", () => {
       return { ...actual, spawn };
     });
 
-    const runtime = await import("./runtime.ts");
+    const runtime = await import("../../src/dev-hosted-local/runtime.ts");
     await expect(
       runtime.spawnStripeListenerWithSecretCapture({
         args: ["listen"],

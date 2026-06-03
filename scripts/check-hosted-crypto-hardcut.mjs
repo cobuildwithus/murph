@@ -38,11 +38,6 @@ const recursiveScanTargets = [
     honorAllowedPaths: false,
     root: ".github/workflows",
   },
-  {
-    extensions: codeTextFileExtensions,
-    honorAllowedPaths: true,
-    root: "scripts/dev-hosted-local",
-  },
 ];
 
 const explicitScanFiles = [

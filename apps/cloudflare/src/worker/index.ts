@@ -1,15 +1,6 @@
 import {
-  readHostedExecutionEnvironment,
-} from "../env.ts";
-import {
   handleHostedEmailIngress,
 } from "../hosted-email/worker-ingress.ts";
-import {
-  notFound,
-} from "../json.ts";
-import {
-  asWorkerStringEnvironment,
-} from "../worker-contracts.ts";
 import type {
   WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
@@ -23,30 +14,13 @@ import {
   workerPublicRoutes,
 } from "./public-routes.ts";
 import {
-  handleDeclarativeRoute,
-} from "./routes.ts";
+  createWorkerFetchHandler,
+} from "./fetch-handler.ts";
 
-export async function handleWorkerFetch(
-  request: Request,
-  env: WorkerEnvironmentSource,
-): Promise<Response> {
-  const url = new URL(request.url);
-  const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { env, request, url });
-  if (publicResponse) {
-    return publicResponse;
-  }
-
-  const stringEnv = asWorkerStringEnvironment(env);
-  const environment = readHostedExecutionEnvironment(stringEnv);
-  return (
-    await handleDeclarativeRoute(workerInternalRoutes, {
-      env,
-      environment,
-      request,
-      url,
-    })
-  ) ?? notFound();
-}
+export const handleWorkerFetch = createWorkerFetchHandler({
+  internalRoutes: workerInternalRoutes,
+  publicRoutes: workerPublicRoutes,
+});
 
 export default {
   async fetch(

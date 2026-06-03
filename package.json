@@ -83,6 +83,7 @@
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
     "@cobuild/review-gpt": "^0.5.90",
+    "@murphai/hosted-local-harness": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "@types/node": "^25.6.2",
     "@vitest/coverage-v8": "^4.1.6",

@@ -2,8 +2,6 @@ import {
   type HostedRunnerStatusResponse,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationReason,
-  type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -26,15 +24,14 @@ import type { HostedExecutionEnvironment } from "../env.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
   WorkerActiveRuntimeWriteFenceValidationResult,
+  WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
-import type {
-  RunnerWriteFenceToken,
-} from "./runner-state-store.js";
 import {
   RunnerStateStore,
+  type RunnerWriteFenceToken,
 } from "./runner-state-store.js";
 import type {
   DurableObjectStateLike,
@@ -69,23 +66,22 @@ import {
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
 import {
-  RunnerTestControls,
-  type HostedRunnerStuckInvocationTestResult,
-} from "./test-controls.js";
+  readRunnerWriteFenceAlreadyActiveRecord,
+} from "./write-fence-errors.js";
 
 export type { DurableObjectStateLike } from "./types.js";
 
 export class HostedUserRunner {
-  private readonly stateStore: RunnerStateStore;
-  private readonly runtimeProcessing: RuntimeProcessingController;
-  private readonly testControls: RunnerTestControls;
+  protected readonly stateStore: RunnerStateStore;
+  protected readonly runtimeInvocation: RuntimeInvocationService;
+  protected readonly runtimeProcessing: RuntimeProcessingController;
   private readonly userDataDeletionInput: HostedRunnerUserDataDeletionServiceInput;
   private readonly workspaceSnapshotSessions: WorkspaceSnapshotSessionService;
   private readonly runnerStoreCache: RunnerStoreCache;
 
   constructor(
     state: DurableObjectStateLike,
-    private readonly env: HostedExecutionEnvironment,
+    protected readonly env: HostedExecutionEnvironment,
     bucket: R2BucketLike,
     runnerRuntimeEnvSource: Readonly<Record<string, unknown>> = {},
     runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null = (
@@ -115,6 +111,7 @@ export class HostedUserRunner {
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
       watchdog,
     });
+    this.runtimeInvocation = runtimeInvocation;
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
@@ -125,12 +122,6 @@ export class HostedUserRunner {
       watchdog,
     });
     this.runtimeProcessing = runtimeProcessing;
-    this.testControls = new RunnerTestControls({
-      env,
-      runtimeInvocation,
-      runtimeProcessing,
-      stateStore: this.stateStore,
-    });
     this.userDataDeletionInput = {
       bucket,
       runnerContainerNamespace,
@@ -240,19 +231,58 @@ export class HostedUserRunner {
   }): Promise<WorkerActiveRuntimeWriteFenceValidationResult> {
     const validation = await this.stateStore.validateActiveWriteFence(input);
     if (!validation.owns) {
-      const writeFence = validation.record.writeFence;
+      const record = validation.record ?? null;
+      const writeFence = record?.writeFence ?? null;
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           activeWriteFencePresent: writeFence !== null,
-          activeWriteFenceUserMatches: validation.record.userId === input.userId,
+          activeWriteFenceRejectReason: validation.reason,
+          activeWriteFenceUserMatches: record?.userId === input.userId,
         },
         level: "warn",
         message: "Hosted runner active runtime write fence validation rejected.",
         phase: "wake.running",
         userId: input.userId,
       });
-      return { owns: false };
+      return {
+        owns: false,
+        reason: validation.reason,
+      };
+    }
+    return {
+      attemptId: validation.attemptId,
+      leaseGeneration: validation.leaseGeneration,
+      owns: true,
+      userId: validation.userId,
+      workspaceVersion: validation.workspaceVersion,
+    };
+  }
+
+  async validateRuntimeProviderEgressToken(input: {
+    providerEgressToken: string;
+    userId: string;
+  }): Promise<WorkerProviderEgressTokenValidationResult> {
+    const validation = await this.stateStore.validateProviderEgressToken(input);
+    if (!validation.owns) {
+      const record = validation.record ?? null;
+      const writeFence = record?.writeFence ?? null;
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          activeWriteFencePresent: writeFence !== null,
+          providerEgressTokenRejectReason: validation.reason,
+          activeWriteFenceUserMatches: record?.userId === input.userId,
+        },
+        level: "warn",
+        message: "Hosted runner provider egress token validation rejected.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+      return {
+        owns: false,
+        reason: validation.reason,
+      };
     }
     return {
       attemptId: validation.attemptId,
@@ -289,35 +319,61 @@ export class HostedUserRunner {
     return await this.workspaceSnapshotSessions.delete(input);
   }
 
-  async beginRuntimeWriteFenceForSmoke(input: {
+  async beginDeploySmokeRuntimeWriteFence(input: {
     userId: string;
     workspaceVersion: string;
   }): Promise<RunnerWriteFenceToken | null> {
-    return await this.testControls.beginRuntimeWriteFenceForSmoke(input);
+    await this.stateStore.bindUser(input.userId);
+    const existing = await this.stateStore.readState();
+    if (existing.writeFence) {
+      await this.runtimeProcessing.syncWatchdogAlarm(existing);
+      return null;
+    }
+
+    let token: RunnerWriteFenceToken;
+    try {
+      token = await this.stateStore.beginWriteFence({
+        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
+        kind: "runtime",
+        reason: "manual",
+        runnerContainerName: input.userId,
+        userId: input.userId,
+      });
+    } catch (error) {
+      const activeRecord = readRunnerWriteFenceAlreadyActiveRecord(error);
+      if (!activeRecord) {
+        throw error;
+      }
+      await this.runtimeProcessing.syncWatchdogAlarm(activeRecord);
+      return null;
+    }
+    const bound = await this.stateStore.bindWriteFenceWorkspaceVersion({
+      token,
+      workspaceVersion: input.workspaceVersion,
+    });
+    await this.runtimeProcessing.syncWatchdogAlarm(
+      await this.stateStore.readState(),
+    );
+    return bound;
   }
 
-  async finishRuntimeWriteFenceForSmoke(input: {
+  async finishDeploySmokeRuntimeWriteFence(input: {
     attemptId: string;
     generation: string;
     userId: string;
   }): Promise<{ completed: boolean }> {
-    return await this.testControls.finishRuntimeWriteFenceForSmoke(input);
-  }
-
-  async runUntilIdleForTest(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    return await this.testControls.runUntilIdleForTest(input);
-  }
-
-  async startStuckInvocationForTest(input: {
-    expiresInMs?: number;
-    reason?: HostedWorkspaceInvocationReason;
-    startedAgoMs?: number;
-    userId: string;
-  }): Promise<HostedRunnerStuckInvocationTestResult> {
-    return await this.testControls.startStuckInvocationForTest(input);
+    const result = await this.stateStore.clearWriteFenceIdentityAfterCompletion({
+      attemptId: input.attemptId,
+      finishedAt: new Date().toISOString(),
+      generation: input.generation,
+      userId: input.userId,
+    });
+    if (result.completed) {
+      await this.runtimeProcessing.syncWatchdogAlarm(
+        await this.stateStore.readState(),
+      );
+    }
+    return { completed: result.completed };
   }
 
   private async readHostedRuntimeStatusFromWeb(

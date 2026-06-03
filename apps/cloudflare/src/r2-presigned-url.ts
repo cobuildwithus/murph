@@ -325,11 +325,7 @@ function isHostedR2LocalPresignSource(
   source: Readonly<Record<string, string | undefined>>,
 ): boolean {
   const profile = normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_PROFILE);
-  const testRoutesEnabled =
-    normalizeHostedR2PresignMarker(source.NODE_ENV) === "test"
-    && normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_TEST_ROUTES) === "1";
   return normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED) === "1"
-    || testRoutesEnabled
     || profile === "dev"
     || profile === "worker-only"
     || profile === "e2e:stub"

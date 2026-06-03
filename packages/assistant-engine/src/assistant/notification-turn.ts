@@ -116,6 +116,7 @@ export interface AssistantNotificationInput
       | 'onTraceEvent'
       | 'operatorAuthority'
       | 'showThinkingTraces'
+      | 'turnEnvironment'
       | 'turnTrigger'
       | 'workingDirectory'
     > {
@@ -420,7 +421,8 @@ function buildAssistantNotificationObservabilityDetails(input: {
   const channel = input.input.channel ?? input.session.binding.channel ?? null
   const providerOptions = input.route.providerOptions
   const bindingDelivery = input.session.binding.delivery
-  const linqBaseUrl = readAssistantNotificationUrlDetails(process.env.LINQ_API_BASE_URL)
+  const env = input.input.turnEnvironment?.env ?? process.env
+  const linqBaseUrl = readAssistantNotificationUrlDetails(env.LINQ_API_BASE_URL)
   const providerBaseUrl = readAssistantNotificationUrlDetails(
     readAssistantNotificationStringProperty(providerOptions, 'baseUrl'),
   )
@@ -565,6 +567,7 @@ function buildAssistantNotificationMessageInput(
     showThinkingTraces: input.showThinkingTraces,
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
+    turnEnvironment: input.turnEnvironment ?? null,
     turnTrigger: input.turnTrigger ?? 'automation-cron',
     userMessageContent: null,
     vault: input.vault,

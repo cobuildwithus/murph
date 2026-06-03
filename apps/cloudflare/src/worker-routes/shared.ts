@@ -1,7 +1,5 @@
 import type {
   HostedRunnerStatusResponse,
-  HostedWorkspaceInvocationReason,
-  HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimeEnsureProcessingRequest,
@@ -16,7 +14,6 @@ import type {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { readRequestBodyText } from "../json.ts";
 import type {
-  HostedRunnerStuckInvocationTestResult,
   HostedRunnerUserDataDeletionResult,
 } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
@@ -65,17 +62,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   recordHostedWorkspaceSnapshotOrphanCandidate?(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
-  runUntilIdleForTest?(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult>;
-  runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
-  startStuckInvocationForTest?(input: {
-    expiresInMs?: number;
-    reason?: HostedWorkspaceInvocationReason;
-    startedAgoMs?: number;
-    userId: string;
-  }): Promise<HostedRunnerStuckInvocationTestResult>;
   runnerStatus(input?: { logLimit?: number }): Promise<HostedRunnerStatusResponse>;
 }
 

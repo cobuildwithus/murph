@@ -886,6 +886,7 @@ export interface HostedWorkspaceInvocationRequest {
   deadlineAt?: string | null;
   idleCheckpointDelayMs?: number | null;
   leaseGeneration: string;
+  providerEgressToken?: string | null;
   reason: HostedWorkspaceInvocationReason;
   source?: HostedWorkspaceInvocationSource | null;
   userId: string;

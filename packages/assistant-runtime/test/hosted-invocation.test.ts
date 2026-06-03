@@ -94,6 +94,7 @@ describe("runHostedWorkspaceInvocation", () => {
       readCurrentLease: () => ({
         attemptId: job.request.attemptId,
         leaseGeneration: job.request.leaseGeneration,
+        providerEgressToken: job.request.providerEgressToken ?? null,
         userId: job.request.userId,
         workspaceVersion: job.request.workspaceVersion,
       }),
@@ -182,6 +183,7 @@ describe("runHostedWorkspaceInvocation", () => {
       readCurrentLease: () => ({
         attemptId: job.request.attemptId,
         leaseGeneration: job.request.leaseGeneration,
+        providerEgressToken: job.request.providerEgressToken ?? null,
         userId: job.request.userId,
         workspaceVersion: job.request.workspaceVersion,
       }),
@@ -199,6 +201,7 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(createHostedWorkspaceInvocationLease(job)).toEqual({
       attemptId: job.request.attemptId,
       leaseGeneration: job.request.leaseGeneration,
+      providerEgressToken: job.request.providerEgressToken,
       userId: job.request.userId,
       workspaceVersion: job.request.workspaceVersion,
     });
@@ -210,6 +213,7 @@ function createWorkspaceJob(): HostedAssistantWorkspaceRuntimeJobInput {
     request: {
       attemptId: "attempt_invocation",
       leaseGeneration: "3",
+      providerEgressToken: "provider-egress-token-invocation",
       reason: "nudge",
       userId: "member_invocation",
       workspaceVersion: "7",

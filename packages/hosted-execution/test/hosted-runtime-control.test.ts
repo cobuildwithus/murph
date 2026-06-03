@@ -210,6 +210,7 @@ describe("hosted runtime control contracts", () => {
       deadlineAt: "2026-04-27T00:10:00.000Z",
       idleCheckpointDelayMs: 180_000,
       leaseGeneration: "7",
+      providerEgressToken: "provider-egress-token-contract",
       reason: "nudge" as const,
       userId: "member_123",
       workspaceVersion: "4",

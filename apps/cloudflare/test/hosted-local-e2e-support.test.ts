@@ -1,9 +1,11 @@
 import { createServer as createNetServer } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "@murphai/hosted-local-harness/codex-app-server-stub";
 
 import {
   buildHostedLocalDeviceSyncProviderEnvClearances,

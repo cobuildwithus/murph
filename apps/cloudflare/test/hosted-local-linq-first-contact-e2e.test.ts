@@ -14,8 +14,8 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV,
+} from "@murphai/hosted-local-harness/codex-app-server-stub";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,

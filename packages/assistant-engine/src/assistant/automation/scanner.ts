@@ -4,6 +4,7 @@ import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import {
   assistantInputIdFromInboxCaptureId,
   type AssistantInputCandidate,
@@ -61,6 +62,7 @@ export async function scanAssistantAutomationOnce(input: {
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
   state: Pick<AssistantAutomationState, 'autoReply'>
+  turnEnvironment?: AssistantTurnEnvironment | null
   inputSource: AssistantInputSource
   vault: string
   vaultServices?: VaultServices
@@ -176,6 +178,7 @@ export async function scanAssistantAutomationOnce(input: {
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+      turnEnvironment: input.turnEnvironment ?? null,
       inputSource: input.inputSource,
       vault: input.vault,
     })

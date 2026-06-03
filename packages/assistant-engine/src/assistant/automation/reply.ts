@@ -12,6 +12,7 @@ import {
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
+import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { sanitizeAssistantPortableStateString } from '../redaction.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
@@ -90,6 +91,7 @@ import {
   type AssistantAutoReplyScanResult,
   type AssistantRunEvent,
 } from './shared.js'
+import { buildAssistantAutomationTurnEnvelope } from './turn-envelope.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
@@ -291,6 +293,7 @@ export async function processAssistantAutoReplyGroup(input: {
   requestId: string | null
   signal?: AbortSignal
   sessionMaxAgeMs: number | null
+  turnEnvironment?: AssistantTurnEnvironment | null
   inputSource?: AssistantActiveTurnInputSource
   vault: string
 }): Promise<AssistantAutoReplyProcessResult> {
@@ -368,6 +371,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   requestId: string | null
   signal?: AbortSignal
   sessionMaxAgeMs: number | null
+  turnEnvironment?: AssistantTurnEnvironment | null
   inputSource?: AssistantActiveTurnInputSource
   vault: string
 }): Promise<AssistantAutoReplyResolvedGroupOutcome> {
@@ -458,6 +462,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     activeTurnInput: activeTurnHooks?.admit,
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
     source: context.firstItem.summary.source,
+    turnEnvironment: input.turnEnvironment ?? null,
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
@@ -1124,6 +1129,7 @@ async function executeAssistantAutoReply(input: {
   prompt: string
   replyInputId: string
   source: string
+  turnEnvironment?: AssistantTurnEnvironment | null
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
@@ -1133,16 +1139,22 @@ async function executeAssistantAutoReply(input: {
   )
 
   try {
+    const automationTurn = buildAssistantAutomationTurnEnvelope({
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      executionContext: input.executionContext,
+      signal: watchdog.signal,
+      turnEnvironment: input.turnEnvironment ?? null,
+      turnTrigger: 'automation-auto-reply',
+    })
     const result = await sendAssistantMessage({
       vault: input.vault,
+      ...automationTurn,
       acceptedTurnInput: {
         initialInputs: input.acceptedTurnInputInitialInputs ?? null,
       },
       conversation,
-      abortSignal: watchdog.signal,
       activeTurnCheckpoint: input.activeTurnCheckpoint,
       activeTurnInput: input.activeTurnInput,
-      executionContext: input.executionContext,
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
@@ -1150,7 +1162,6 @@ async function executeAssistantAutoReply(input: {
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
-      deliveryDispatchMode: input.deliveryDispatchMode,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
@@ -1159,7 +1170,6 @@ async function executeAssistantAutoReply(input: {
           input.inputIds[0] ?? input.replyInputId,
         [AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]: input.inputIds.join(','),
       },
-      turnTrigger: 'automation-auto-reply',
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: watchdog.onProviderEvent,
       onProviderRequestStarted: input.onProviderRequestStarted

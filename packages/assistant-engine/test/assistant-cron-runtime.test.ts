@@ -588,6 +588,40 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('passes hosted turn environment into scheduled notification sends', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-turn-env-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'turn-env')
+    const turnEnvironment = {
+      currentWorkingDirectory: null,
+      env: {
+        MURPH_HOSTED_RUNTIME_PROCESS: '1',
+        PATH: '/bin',
+      },
+    }
+
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T08:00:00.000Z',
+      },
+    }))
+    await processDueAssistantCronJobsLocal({
+      limit: 1,
+      turnEnvironment,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnEnvironment,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+  })
+
   it('persists the private summary when a scheduled notification turn returns no response', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-private-summary-',

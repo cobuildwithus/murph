@@ -13,9 +13,12 @@ import type {
 
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
-  resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "../runner-container.js";
+import {
+  readHostedRunnerContainerIdentity,
+  resolveHostedExecutionRunnerContainerName,
+} from "../hosted-runner-container-identity.js";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
   buildRunnerRecordTimingLogDetails,
@@ -373,10 +376,17 @@ export class RuntimeProcessingController {
       });
     }
 
-    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    const runnerContainerIdentity = readHostedRunnerContainerIdentity({
+      containerName: resolveHostedExecutionRunnerContainerName({
+        source: this.input.runnerRuntimeEnvSource,
+        userId: input.input.userId,
+      }),
       source: this.input.runnerRuntimeEnvSource,
-      userId: input.input.userId,
     });
+    if (!runnerContainerIdentity || runnerContainerIdentity.userId !== input.input.userId) {
+      throw new Error("Hosted runner container identity did not match the runtime start user.");
+    }
+    const runnerContainerName = runnerContainerIdentity.runnerContainerName;
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({

@@ -1,9 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "@murphai/hosted-local-harness/codex-app-server-stub";
 import {
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
@@ -590,7 +592,7 @@ export function resolveHostedAssistantLocalDevEnv(
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+      [HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         normalizedAssistantProviderStubBaseUrl,
       NODE_ENV: "test",
       OPENAI_API_KEY: "stub-local-openai-key",

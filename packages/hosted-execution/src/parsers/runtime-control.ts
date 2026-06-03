@@ -1174,6 +1174,14 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
       record.leaseGeneration,
       "Hosted workspace invocation request leaseGeneration",
     ),
+    ...(record.providerEgressToken === undefined
+      ? {}
+      : {
+          providerEgressToken: readNullableString(
+            record.providerEgressToken,
+            "Hosted workspace invocation request providerEgressToken",
+          ),
+        }),
     reason,
     ...(record.source === undefined || record.source === null
       ? {}

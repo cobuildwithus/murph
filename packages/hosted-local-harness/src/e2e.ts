@@ -127,6 +127,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-typing-prewarm-e2e.test.ts",
     name: "linq-typing-prewarm",
+    processIsolation: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
@@ -497,21 +498,68 @@ function buildHostedLocalE2eSuiteEnv(input: {
   env: NodeJS.ProcessEnv;
   injectSkipRunnerBundleEnv: boolean;
 }): NodeJS.ProcessEnv {
+  const localBuildId =
+    input.env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim()
+    || input.env.MURPH_HOSTED_LOCAL_RUN_ID?.trim()
+    || `hosted-local-e2e-${randomUUID()}`;
+  const e2eDefaults = buildHostedLocalE2eIsolationDefaults({
+    env: input.env,
+    localBuildId,
+  });
   const env: NodeJS.ProcessEnv = {
     ...input.env,
+    ...e2eDefaults,
     HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
       input.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "600000",
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-    [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]:
-      input.env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim()
-      || input.env.MURPH_HOSTED_LOCAL_RUN_ID?.trim()
-      || `hosted-local-e2e-${randomUUID()}`,
+    [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: localBuildId,
   };
   if (input.injectSkipRunnerBundleEnv) {
     env.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
   }
   delete env.MURPH_DEV_CF_WRANGLER_LOG_LEVEL;
   return env;
+}
+
+function buildHostedLocalE2eIsolationDefaults(input: {
+  env: NodeJS.ProcessEnv;
+  localBuildId: string;
+}): NodeJS.ProcessEnv {
+  const offset = buildHostedLocalE2ePortOffset(input.localBuildId);
+  const suffix = buildHostedLocalE2eSafeSuffix(input.localBuildId);
+  return {
+    MURPH_DEV_CF_PERSIST_DIR:
+      input.env.MURPH_DEV_CF_PERSIST_DIR?.trim()
+      || `.tmp/hosted-local-e2e/${suffix}/wrangler`,
+    MURPH_DEV_WEB_PORT:
+      input.env.MURPH_DEV_WEB_PORT?.trim()
+      || String(30_000 + offset),
+    MURPH_DEV_WORKER_PORT:
+      input.env.MURPH_DEV_WORKER_PORT?.trim()
+      || String(40_000 + offset),
+    NEXT_DIST_DIR_MODE:
+      input.env.NEXT_DIST_DIR_MODE?.trim()
+      || "smoke",
+    NEXT_DIST_DIR_SUFFIX:
+      input.env.NEXT_DIST_DIR_SUFFIX?.trim()
+      || `e2e-${suffix}`,
+  };
+}
+
+function buildHostedLocalE2ePortOffset(value: string): number {
+  let hash = 0;
+  for (const char of value) {
+    hash = ((hash * 33) + char.charCodeAt(0)) >>> 0;
+  }
+  return hash % 10_000;
+}
+
+function buildHostedLocalE2eSafeSuffix(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return normalized.slice(0, 80) || "run";
 }
 
 async function cleanupHostedLocalE2eRunnerArtifacts(
@@ -523,12 +571,12 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
     cleanupHostedRunnerContainers,
     cleanupHostedRunnerImages,
   } =
-    await import("../../../scripts/dev-hosted-local/runtime.ts");
+    await import("./dev-hosted-local/runtime.ts");
   const {
     cleanupHostedLocalMinioBuildContainersBestEffort,
     cleanupHostedLocalMinioE2eContainersBestEffort,
   } =
-    await import("../../../scripts/dev-hosted-local/minio.ts");
+    await import("./dev-hosted-local/minio.ts");
 
   cleanupHostedLocalOrphanedWorkerdProcesses();
   await cleanupHostedRunnerContainers({

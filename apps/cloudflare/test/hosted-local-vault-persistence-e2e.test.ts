@@ -6,8 +6,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+  HOSTED_LOCAL_CODEX_APP_SERVER_STUB_BASE_URL_ENV as HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "@murphai/hosted-local-harness/codex-app-server-stub";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -29,7 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_DATABASE_URL,
-} from "../../../scripts/dev-hosted-local/constants.ts";
+} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,

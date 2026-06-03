@@ -15,8 +15,8 @@ import {
 
 import {
   DEFAULT_DATABASE_URL,
-} from "../../../../scripts/dev-hosted-local/constants.ts";
-import { loadHostedLocalBaseEnvironment } from "../../../../scripts/dev-hosted-local/environment.ts";
+} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
+import { loadHostedLocalBaseEnvironment } from "@murphai/hosted-local-harness/dev-hosted-local/environment";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
