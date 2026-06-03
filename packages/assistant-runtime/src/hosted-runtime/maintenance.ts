@@ -37,7 +37,10 @@ import {
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
-import { readHostedAssistantRuntimeState } from "./context.ts";
+import {
+  readHostedAssistantRuntimeState,
+  type HostedAssistantRuntimeReadinessState,
+} from "./context.ts";
 import type {
   HostedExecutionRedactedLogEntry,
   HostedRuntimeEvent,
@@ -101,9 +104,14 @@ interface HostedAssistantAutomationReadiness {
 }
 
 async function resolveHostedAssistantAutomationReadiness(input: {
+  assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
+  operatorHomeRoot?: string | null;
   skipAssistantAutomation: boolean;
 }): Promise<HostedAssistantAutomationReadiness> {
-  const assistantState = await readHostedAssistantRuntimeState();
+  const assistantState = input.assistantRuntimeState
+    ?? await readHostedAssistantRuntimeState({
+      homeDirectory: input.operatorHomeRoot ?? undefined,
+    });
 
   return {
     activeProfileId: assistantState.assistantActiveProfileId,
@@ -161,6 +169,7 @@ export async function runHostedAssistantAutomationLane(input: {
   preferredInputIds?: readonly string[] | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
+  assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -169,6 +178,8 @@ export async function runHostedAssistantAutomationLane(input: {
   const startedAt = Date.now();
   const readinessStartedAt = Date.now();
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
+    assistantRuntimeState: input.assistantRuntimeState ?? null,
+    operatorHomeRoot: input.operatorHomeRoot ?? null,
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
   const readinessElapsedMs = elapsedSince(readinessStartedAt);

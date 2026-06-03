@@ -2475,6 +2475,72 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("uses prepared hosted assistant readiness without re-reading ambient config", async () => {
+    const result = await runHostedAssistantAutomationLane({
+      assistantRuntimeState: {
+        assistantActiveProfileId: "platform-default",
+        assistantActiveProfileManagedBy: "platform",
+        assistantActiveProfileReady: true,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: true,
+        assistantConfigStatus: "hosted-env",
+        assistantConfigured: true,
+        assistantProvider: "codex-cli",
+      },
+      wake: {
+        eventId: "evt_prepared_assistant_state",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_prepared_assistant_state",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.readHostedAssistantRuntimeState).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
+    expect(result.nextWakeAt).toBe("2026-04-08T01:00:00.000Z");
+  });
+
+  it("falls back to the restored operator home when readiness is not supplied", async () => {
+    const operatorHomeRoot = "/tmp/murph-hosted-operator-home";
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_direct_assistant_state",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      operatorHomeRoot,
+      requestId: "req_direct_assistant_state",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.readHostedAssistantRuntimeState).toHaveBeenCalledWith({
+      homeDirectory: operatorHomeRoot,
+    });
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
+  });
+
   it("retries provider-start latency traces when staged rows have not landed yet", async () => {
     const latencyTraceRecord = vi.fn()
       .mockResolvedValueOnce({

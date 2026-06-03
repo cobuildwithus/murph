@@ -67,6 +67,18 @@ type HostedAssistantRuntimeState = Pick<
   assistantConfigPresent: boolean;
 };
 
+export type HostedAssistantRuntimeReadinessState = Pick<
+  HostedAssistantRuntimeState,
+  | "assistantActiveProfileId"
+  | "assistantActiveProfileManagedBy"
+  | "assistantActiveProfileReady"
+  | "assistantConfigInvalid"
+  | "assistantConfigPresent"
+  | "assistantConfigStatus"
+  | "assistantConfigured"
+  | "assistantProvider"
+>;
+
 type HostedAssistantAutoReplyChannelState = Pick<
   HostedBootstrapResult,
   "emailAutoReplyEnabled" | "linqAutoReplyEnabled" | "telegramAutoReplyEnabled"
@@ -139,8 +151,8 @@ export async function prepareHostedAssistantAutomationForWake(
   options: {
     operatorHomeRoot?: string | null;
   } = {},
-): Promise<void> {
-  await bootstrapHostedAssistantRuntimeState(
+): Promise<HostedAssistantRuntimeReadinessState> {
+  return await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
     wake,
     runtimeEnv,
@@ -163,8 +175,8 @@ export async function prepareHostedAssistantAutoReplyForWake(
   options: {
     operatorHomeRoot?: string | null;
   } = {},
-): Promise<void> {
-  await prepareHostedAssistantAutomationForWake(
+): Promise<HostedAssistantRuntimeReadinessState> {
+  return await prepareHostedAssistantAutomationForWake(
     vaultRoot,
     wake,
     runtimeEnv,
@@ -349,20 +361,12 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
   return resolveHostedAssistantAutoReplyState(afterState.autoReply.map((entry) => entry.channel));
 }
 
-export async function readHostedAssistantRuntimeState(): Promise<Pick<
-  HostedAssistantRuntimeState,
-  | "assistantActiveProfileId"
-  | "assistantActiveProfileManagedBy"
-  | "assistantActiveProfileReady"
-  | "assistantConfigInvalid"
-  | "assistantConfigPresent"
-  | "assistantConfigStatus"
-  | "assistantConfigured"
-  | "assistantProvider"
->> {
-  const operatorConfig = await readOperatorConfig();
+export async function readHostedAssistantRuntimeState(input: {
+  homeDirectory?: string;
+} = {}): Promise<HostedAssistantRuntimeReadinessState> {
+  const operatorConfig = await readOperatorConfig(input.homeDirectory);
   const hostedAssistantConfig = operatorConfig?.hostedAssistant
-    ?? (await resolveHostedAssistantConfig());
+    ?? (await resolveHostedAssistantConfig(input.homeDirectory));
   const hostedAssistantState = resolveHostedAssistantOperatorDefaultsState(hostedAssistantConfig);
   const activeProfile = resolveActiveHostedAssistantProfile(hostedAssistantConfig);
   const assistantConfigStatus = operatorConfig?.hostedAssistantInvalid === true

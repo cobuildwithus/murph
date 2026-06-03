@@ -213,6 +213,17 @@ async function runHostedWorkspaceDurableCheckpointEffects(
   }
 }
 
+const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
+  assistantActiveProfileId: null,
+  assistantActiveProfileManagedBy: null,
+  assistantActiveProfileReady: true,
+  assistantConfigInvalid: false,
+  assistantConfigPresent: true,
+  assistantConfigStatus: "hosted-env",
+  assistantConfigured: true,
+  assistantProvider: "codex-cli",
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
@@ -263,7 +274,9 @@ beforeEach(() => {
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
-  mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(undefined);
+  mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(
+    PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE,
+  );
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.readAssistantAutomationState.mockResolvedValue({
@@ -416,6 +429,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedAssistantAutomationForWake.mockImplementationOnce(
       async () => {
         callOrder.push("prepare");
+        return PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE;
       },
     );
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
@@ -451,6 +465,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         operatorHomeRoot,
       },
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantRuntimeState: PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE,
+      }),
     );
     expect(callOrder).toEqual(["prepare", "run"]);
   });

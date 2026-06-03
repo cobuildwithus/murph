@@ -403,7 +403,7 @@ export async function runHostedWorkspaceAssistantPhase(
       ? foregroundReplayInputIds
       : input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const runAutomationLane = async () => {
-      await prepareHostedAssistantAutomationForWake(
+      const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
         wake,
         buildHostedAssistantAutomationBootstrapEnv(input),
@@ -413,6 +413,7 @@ export async function runHostedWorkspaceAssistantPhase(
         },
       );
       return await runHostedAssistantAutomationLane({
+        assistantRuntimeState,
         executionContext,
         foregroundReplayInputIds,
         foregroundReplayPromptInputIds,
