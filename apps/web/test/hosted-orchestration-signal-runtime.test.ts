@@ -469,6 +469,61 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
+  it("uses explicit Prisma and Temporal dependencies for manual runtime signals", async () => {
+    const explicitPrisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
+        await callback({ kind: "explicit-tx" })
+      ),
+      kind: "explicit-prisma",
+    };
+    mocks.getPrisma.mockReturnValue(explicitPrisma);
+    const explicitPrismaInput = mocks.getPrisma();
+    mocks.getPrisma.mockClear();
+
+    await signalHostedManualRunRuntime({
+      client: buildClient(),
+      environment: {
+        NODE_ENV: "test",
+        HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
+        HOSTED_TEMPORAL_TASK_QUEUE: "explicit-testkit-task-queue",
+      },
+      prisma: explicitPrismaInput,
+      userId: "member_123",
+    });
+
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: explicitPrisma,
+    });
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: explicitPrisma,
+      userId: "member_123",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.manual-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "explicit-tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        args: [{
+          options: {
+            ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
+            prewarmTaskQueue: "explicit-testkit-task-queue-prewarm",
+            readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+          },
+          userId: "member_123",
+        }],
+        taskQueue: "explicit-testkit-task-queue",
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+  });
+
   it("ensures workspace before device-sync mailbox pointer signals", async () => {
     await signalHostedDeviceSyncMailboxRuntime({
       client: buildClient(),

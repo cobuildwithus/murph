@@ -108,30 +108,52 @@ describe("prisma module", () => {
     });
   });
 
-  it("can reset the non-production Prisma client between ephemeral databases", async () => {
+  it("creates independent factory clients for ephemeral databases", async () => {
     process.env = {
       ...process.env,
       NODE_ENV: "test",
-      DATABASE_URL: "postgresql://example.invalid/first?sslmode=require",
     };
 
-    const prismaModule = await import("@/src/lib/prisma");
-    const prismaA = prismaModule.getPrisma() as { $disconnect: () => Promise<void> };
-
-    process.env.DATABASE_URL = "postgresql://example.invalid/second?sslmode=require";
-    await prismaModule.resetPrismaClientForTest();
-    const prismaB = prismaModule.getPrisma();
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prismaA = createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/first?sslmode=require",
+      poolMax: 1,
+    });
+    const prismaB = createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/second?sslmode=require",
+      poolMax: 1,
+    });
 
     expect(prismaA).not.toBe(prismaB);
-    expect(prismaA.$disconnect).toHaveBeenCalledTimes(1);
     expect(PrismaPg).toHaveBeenNthCalledWith(1, {
       connectionString: "postgresql://example.invalid/first?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 30_000,
-      max: 5,
+      max: 1,
     });
     expect(PrismaPg).toHaveBeenNthCalledWith(2, {
       connectionString: "postgresql://example.invalid/second?sslmode=require",
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      max: 1,
+    });
+  });
+
+  it("falls back to the default pool size for invalid factory pool limits", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "test",
+    };
+
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+
+    createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/db?sslmode=require",
+      poolMax: Number.POSITIVE_INFINITY,
+    });
+
+    expect(PrismaPg).toHaveBeenCalledWith({
+      connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 30_000,
       max: 5,

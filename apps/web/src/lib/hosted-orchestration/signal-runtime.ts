@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
 
 import {
   buildHostedExecutionRuntimeControlWake,
@@ -48,7 +49,9 @@ export interface HostedRuntimeSignalResult {
 
 export interface SignalHostedUserRuntimeWorkflowInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   ensureWorkspace?: boolean;
+  prisma?: PrismaClient;
   signal: HostedRuntimeSignal;
   taskQueue?: string | null;
   userId: string;
@@ -56,35 +59,45 @@ export interface SignalHostedUserRuntimeWorkflowInput {
 
 export interface SignalHostedMailboxAppendInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
   mailboxItemId: string;
+  prisma?: PrismaClient;
   source: string;
 }
 
 export interface SignalHostedDeviceSyncRecoveryInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   eventId?: string | null;
   occurredAt?: string | null;
+  prisma?: PrismaClient;
   userId: string;
 }
 
 export interface SignalHostedBrowserVaultRefreshInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
+  prisma?: PrismaClient;
   userId: string;
 }
 
 export interface SignalHostedManualRunInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
+  prisma?: PrismaClient;
   userId: string;
 }
 
 export interface SignalHostedRuntimeRecheckInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   userId: string;
 }
 
 export interface SignalHostedRuntimePrewarmInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   eventId: string;
   occurredAt: string;
   source?: HostedRuntimePrewarmSource;
@@ -95,7 +108,9 @@ export type HostedDeviceSyncRecoverySignalIntent = "device-sync-reconcile-recove
 
 export interface SignalHostedDeviceSyncMailboxInput {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   mailboxItemId: string;
+  prisma?: PrismaClient;
   recoveryIntent?: HostedDeviceSyncRecoverySignalIntent | null;
 }
 
@@ -113,6 +128,7 @@ export async function signalHostedMailboxAppendRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   const mailboxItem = await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
+    prisma: input.prisma,
   });
 
   if (!mailboxItem) {
@@ -125,7 +141,9 @@ export async function signalHostedMailboxAppendRuntime(
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    environment: input.environment,
     ensureWorkspace: true,
+    prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,
@@ -142,9 +160,11 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
+    environment: input.environment,
     eventId: input.eventId ?? null,
     kind: "runtime.device-sync-recovery-requested",
     occurredAt: input.occurredAt ?? null,
+    prisma: input.prisma,
     runtimeSignalKind: "device_sync_recovery_requested",
     source: "device-sync-recovery",
     userId: input.userId,
@@ -156,7 +176,9 @@ export async function signalHostedDeviceSyncBackgroundMaintenanceRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    environment: input.environment,
     ensureWorkspace: true,
+    prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "device_sync_recovery_requested",
     }),
@@ -167,11 +189,13 @@ export async function signalHostedDeviceSyncBackgroundMaintenanceRuntime(
 export async function signalHostedBrowserVaultRefreshRuntime(
   input: SignalHostedBrowserVaultRefreshInput,
 ): Promise<HostedRuntimeSignalResult> {
-  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId);
+  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, input.prisma ?? getPrisma());
   try {
     return await signalHostedUserRuntimeWorkflow({
       client: input.client,
+      environment: input.environment,
       ensureWorkspace: false,
+      prisma: input.prisma,
       signal: parseHostedRuntimeSignal({
         kind: "browser_vault_refresh_requested",
       }),
@@ -182,9 +206,11 @@ export async function signalHostedBrowserVaultRefreshRuntime(
       buildHostedBrowserVaultRefreshRuntimeControlFallback(input.userId);
     return signalHostedRuntimeControlMailboxRequest({
       client: input.client,
+      environment: input.environment,
       eventId: fallbackControl.eventId,
       kind: "runtime.browser-vault-refresh-requested",
       occurredAt: fallbackControl.occurredAt,
+      prisma: input.prisma,
       source: "browser-vault-refresh",
       userId: input.userId,
     });
@@ -196,7 +222,9 @@ export async function signalHostedManualRunRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
+    environment: input.environment,
     kind: "runtime.manual-requested",
+    prisma: input.prisma,
     source: "manual",
     userId: input.userId,
   });
@@ -207,6 +235,7 @@ export async function signalHostedRuntimeRecheckRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    environment: input.environment,
     ensureWorkspace: false,
     signal: parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
@@ -220,6 +249,7 @@ export async function signalHostedRuntimePrewarm(
 ): Promise<HostedRuntimeSignalResult> {
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    environment: input.environment,
     ensureWorkspace: false,
     signal: parseHostedRuntimeSignal({
       eventId: buildHostedRuntimePrewarmEventId({
@@ -239,6 +269,7 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 ): Promise<HostedRuntimeSignalResult> {
   const mailboxItem = await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
+    prisma: input.prisma,
   });
 
   if (!mailboxItem) {
@@ -251,18 +282,22 @@ export async function signalHostedDeviceSyncMailboxRuntime(
   if (shouldSignalRecovery) {
     return signalHostedDeviceSyncRecoveryRuntime({
       client: input.client,
+      environment: input.environment,
       eventId: buildHostedDeviceSyncRecoveryRuntimeControlEventId({
         mailboxItemId: mailboxItem.id,
         recoveryIntent: input.recoveryIntent ?? null,
       }),
       occurredAt: mailboxItem.occurredAt,
+      prisma: input.prisma,
       userId: mailboxItem.userId,
     });
   }
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    environment: input.environment,
     ensureWorkspace: true,
+    prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,
@@ -276,14 +311,16 @@ export async function signalHostedDeviceSyncMailboxRuntime(
 
 async function signalHostedRuntimeControlMailboxRequest(input: {
   client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
   eventId?: string | null;
   kind: HostedExecutionRuntimeControlWakeKind;
   occurredAt?: string | null;
+  prisma?: PrismaClient;
   runtimeSignalKind?: "device_sync_recovery_requested" | null;
   source: string;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
-  const prisma = getPrisma();
+  const prisma = input.prisma ?? getPrisma();
   await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
   const deterministicEventId = normalizeHostedRuntimeControlEventId(input.eventId);
   const occurredAt = normalizeHostedRuntimeControlOccurredAt(input.occurredAt)
@@ -303,7 +340,9 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
+    environment: input.environment,
     ensureWorkspace: false,
+    prisma,
     signal: input.runtimeSignalKind === "device_sync_recovery_requested"
       ? parseHostedRuntimeSignal({
         kind: "device_sync_recovery_requested",
@@ -402,6 +441,7 @@ function normalizeHostedRuntimeControlOccurredAt(
 export async function signalHostedUserRuntimeWorkflow(
   input: SignalHostedUserRuntimeWorkflowInput,
 ): Promise<HostedRuntimeSignalResult> {
+  const environment = input.environment ?? process.env;
   const client =
     input.client === undefined
       ? await readHostedRuntimeTemporalSignalClientIfConfigured()
@@ -411,19 +451,19 @@ export async function signalHostedUserRuntimeWorkflow(
   }
 
   if (input.ensureWorkspace === true) {
-    await ensureHostedRuntimeWorkspaceForActiveUser(input.userId);
+    await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, input.prisma ?? getPrisma());
   }
 
   const workflowId = hostedUserRuntimeWorkflowId(input.userId);
   const taskQueue =
     input.taskQueue?.trim()
-    || readHostedRuntimeTemporalEnvironment().taskQueue
+    || readHostedRuntimeTemporalEnvironment(environment).taskQueue
     || HOSTED_USER_RUNTIME_TASK_QUEUE;
   const signal = parseHostedRuntimeSignal(input.signal);
 
   await client.workflow.signalWithStart(HOSTED_USER_RUNTIME_WORKFLOW_TYPE, {
     args: [{
-      options: readHostedRuntimeTemporalWorkflowOptions(),
+      options: readHostedRuntimeTemporalWorkflowOptions(environment),
       userId: input.userId,
     }],
     signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,

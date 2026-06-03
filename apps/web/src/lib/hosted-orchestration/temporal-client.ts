@@ -64,14 +64,12 @@ export async function readHostedRuntimeTemporalSignalClientIfConfigured(): Promi
   return cachedClient;
 }
 
-export function resetHostedRuntimeTemporalSignalClientForTesting(): void {
-  cachedClient = null;
-}
-
-async function createHostedRuntimeTemporalSignalClient(): Promise<
+export async function createHostedRuntimeTemporalSignalClient(
+  source: NodeJS.ProcessEnv = process.env,
+): Promise<
   HostedRuntimeTemporalSignalClient | null
 > {
-  const environment = readHostedRuntimeTemporalEnvironment();
+  const environment = readHostedRuntimeTemporalEnvironment(source);
   if (!environment.address) {
     return null;
   }

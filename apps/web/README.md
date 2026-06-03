@@ -33,6 +33,11 @@ Routes and pages that only need connect-target metadata should use the narrower
 `@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
 runtime factories into static analysis.
 
+Hosted E2E orchestration helpers live under `apps/web/test/support`, not
+`apps/web/src`. Application source should expose production runtime seams such
+as client factories and dependency-bearing functions; the testkit owns smoke-env
+adaptation, seed composition, and cross-app E2E imports.
+
 ## Experiment detail data sources
 
 The experiment detail page composes two narrow data sources:

@@ -2,21 +2,31 @@ export {
   bindHostedActiveLinqHomeChat,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
-} from "./lib/hosted-onboarding/hosted-member-test-seed";
+} from "./hosted-member-seeds";
 
-import { createHostedWebSmokeEnvironment } from "../next-artifacts";
-import { PrismaPg } from "@prisma/adapter-pg";
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
-import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
+import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
+import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
+import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
+
+const hostedPrismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
-  "./lib/hosted-mailbox/store.ts",
+  "../../src/lib/hosted-mailbox/store.ts",
   import.meta.url,
 ).href;
 const hostedWorkspaceStoreModuleSpecifier = new URL(
-  "./lib/hosted-workspace/store.ts",
+  "../../src/lib/hosted-workspace/store.ts",
+  import.meta.url,
+).href;
+const hostedTemporalClientModuleSpecifier = new URL(
+  "../../src/lib/hosted-orchestration/temporal-client.ts",
+  import.meta.url,
+).href;
+const hostedSignalRuntimeModuleSpecifier = new URL(
+  "../../src/lib/hosted-orchestration/signal-runtime.ts",
   import.meta.url,
 ).href;
 const hostedTestingHostOnlyEnv = {
@@ -25,28 +35,21 @@ const hostedTestingHostOnlyEnv = {
   DOCKER_DEFAULT_PLATFORM: process.env.DOCKER_DEFAULT_PLATFORM,
 };
 
-interface HostedMailboxAppendForTestPrismaClient {
+type HostedTestPrismaClient =
+  & HostedTestPrismaFactoryClient
+  & HostedWorkspaceSeedForTestPrismaClient
+  & HostedUsageDiagnosticsForTestPrismaClient;
+
+interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
 }
 
-type HostedTestPrismaClient =
-  & HostedMailboxAppendForTestPrismaClient
-  & HostedWorkspaceSeedForTestPrismaClient
-  & HostedUsageDiagnosticsForTestPrismaClient;
-
-interface HostedTestPrismaClientConstructor {
-  new (options: {
-    adapter: PrismaPg;
-    transactionOptions: {
-      maxWait: number;
-      timeout: number;
-    };
+interface HostedTestPrismaModule {
+  createPrismaClient(input: {
+    databaseUrl: string;
+    poolMax?: number;
   }): HostedTestPrismaClient;
-}
-
-interface HostedTestPrismaClientModule {
-  PrismaClient: HostedTestPrismaClientConstructor;
 }
 
 interface HostedMailboxAppendForTestStoreModule {
@@ -128,6 +131,46 @@ interface HostedWorkspaceSeedForTestStoreModule {
   }>;
 }
 
+export interface HostedWebTestkitDeps {
+  environment: NodeJS.ProcessEnv;
+  hostedMailboxStore: HostedMailboxAppendForTestStoreModule;
+  hostedWorkspaceStore: HostedWorkspaceSeedForTestStoreModule;
+  prisma: HostedTestPrismaClient;
+}
+
+export interface HostedWebSignalTestkitDeps extends HostedWebTestkitDeps {
+  temporalSignalClient: HostedRuntimeTemporalSignalClient | null;
+}
+
+interface HostedTemporalClientModule {
+  createHostedRuntimeTemporalSignalClient(
+    source?: NodeJS.ProcessEnv,
+  ): Promise<HostedRuntimeTemporalSignalClient | null>;
+}
+
+interface HostedRuntimeSignalModule {
+  signalHostedManualRunRuntime(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    prisma?: HostedTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
+  signalHostedMailboxAppendRuntime(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    expectedUserId?: string | null;
+    mailboxItemId: string;
+    prisma?: HostedTestPrismaClient;
+    source: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
+}
+
 export interface HostedMailboxAppendForTestResponse {
   duplicate: boolean;
   inserted: boolean;
@@ -191,14 +234,9 @@ export async function appendHostedExecutionWakeForTest(input: {
   wake: HostedExecutionWake | unknown;
 }): Promise<HostedMailboxAppendForTestResponse> {
   const wake = parseHostedExecutionWake(input.wake);
-  const modules = await loadHostedMailboxAppendForTestModules(
-    applyHostedMailboxAppendForTestEnvironment(input.environment),
-  );
-  const prisma = await createHostedTestPrisma(modules.environment);
-
-  try {
-    const append = await prisma.$transaction(async (tx) =>
-      modules.appendHostedMailboxEnvelopeTx({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const append = await deps.prisma.$transaction(async (tx) =>
+      deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
         envelope: wake,
         tx,
       }));
@@ -211,9 +249,7 @@ export async function appendHostedExecutionWakeForTest(input: {
         seq: append.item.laneSeq.toString(),
       },
     };
-  } finally {
-    await prisma.$disconnect();
-  }
+  });
 }
 
 export async function seedHostedWorkspaceCheckpointForTest(input: {
@@ -228,29 +264,24 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
   status: "updated" | "conflict";
   version: string;
 }> {
-  const modules = await loadHostedWorkspaceSeedForTestModules(
-    applyHostedMailboxAppendForTestEnvironment(input.environment),
-  );
-  const prisma = await createHostedTestPrisma(modules.environment);
-
-  try {
-    const workspace = await modules.ensureHostedWorkspace({
-      prisma,
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const workspace = await deps.hostedWorkspaceStore.ensureHostedWorkspace({
+      prisma: deps.prisma,
       userId: input.userId,
     });
-    const checkpoint = await modules.checkpointHostedWorkspace({
+    const checkpoint = await deps.hostedWorkspaceStore.checkpointHostedWorkspace({
       expectedVersion: workspace.version,
       nextWakeAt: input.nextWakeAt ?? null,
       nextWakeReason: input.nextWakeReason ?? null,
-      prisma,
+      prisma: deps.prisma,
       reason: "import",
       redactedStatusJson: input.redactedStatusJson ?? null,
       snapshotRef: input.snapshotRef,
       userId: input.userId,
     });
     if (checkpoint.workspace) {
-      await modules.publishLatestBrowserVaultReplicaRef({
-        prisma,
+      await deps.hostedWorkspaceStore.publishLatestBrowserVaultReplicaRef({
+        prisma: deps.prisma,
         replicaRef: input.browserVaultReplicaRef,
         userId: input.userId,
       });
@@ -260,9 +291,7 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
       status: checkpoint.status,
       version: checkpoint.workspace?.version ?? workspace.version,
     };
-  } finally {
-    await prisma.$disconnect();
-  }
+  });
 }
 
 export async function listHostedAiUsageForTest(input: {
@@ -270,11 +299,8 @@ export async function listHostedAiUsageForTest(input: {
   limit?: number;
   memberId: string;
 }): Promise<HostedAiUsageForTestRow[]> {
-  const environment = applyHostedMailboxAppendForTestEnvironment(input.environment);
-  const prisma = await createHostedTestPrisma(environment);
-
-  try {
-    const rows = await prisma.hostedAiUsage.findMany({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const rows = await deps.prisma.hostedAiUsage.findMany({
       orderBy: [
         { providerRequestOrdinal: "asc" },
         { occurredAt: "asc" },
@@ -299,9 +325,7 @@ export async function listHostedAiUsageForTest(input: {
       servedModel: row.servedModel,
       totalTokens: row.totalTokens,
     }));
-  } finally {
-    await prisma.$disconnect();
-  }
+  });
 }
 
 export async function listHostedRuntimeLogsForTest(input: {
@@ -309,11 +333,8 @@ export async function listHostedRuntimeLogsForTest(input: {
   limit?: number;
   userId: string;
 }): Promise<HostedRuntimeLogForTestRow[]> {
-  const environment = applyHostedMailboxAppendForTestEnvironment(input.environment);
-  const prisma = await createHostedTestPrisma(environment);
-
-  try {
-    const rows = await prisma.hostedRuntimeLog.findMany({
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const rows = await deps.prisma.hostedRuntimeLog.findMany({
       orderBy: {
         at: "asc",
       },
@@ -331,9 +352,7 @@ export async function listHostedRuntimeLogsForTest(input: {
       phase: row.phase,
       redactedJson: normalizeHostedTestingRedactedJson(row.redactedJson),
     }));
-  } finally {
-    await prisma.$disconnect();
-  }
+  });
 }
 
 export async function signalHostedManualRunRuntimeForTest(input: {
@@ -343,13 +362,14 @@ export async function signalHostedManualRunRuntimeForTest(input: {
   signalAccepted: true;
   workflowId: string;
 }> {
-  applyHostedMailboxAppendForTestEnvironment(input.environment);
-  const temporalClientModule = await import("./lib/hosted-orchestration/temporal-client");
-  temporalClientModule.resetHostedRuntimeTemporalSignalClientForTesting();
-  const signalModule = await import("./lib/hosted-orchestration/signal-runtime");
-
-  return await signalModule.signalHostedManualRunRuntime({
-    userId: input.userId,
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedManualRunRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
   });
 }
 
@@ -362,21 +382,82 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
   signalAccepted: true;
   workflowId: string;
 }> {
-  applyHostedMailboxAppendForTestEnvironment(input.environment);
-  const temporalClientModule = await import("./lib/hosted-orchestration/temporal-client");
-  temporalClientModule.resetHostedRuntimeTemporalSignalClientForTesting();
-  const signalModule = await import("./lib/hosted-orchestration/signal-runtime");
-
-  return await signalModule.signalHostedMailboxAppendRuntime({
-    expectedUserId: input.expectedUserId ?? null,
-    mailboxItemId: input.mailboxItemId,
-    source: input.source ?? "hosted-local-e2e",
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedMailboxAppendRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      expectedUserId: input.expectedUserId ?? null,
+      mailboxItemId: input.mailboxItemId,
+      prisma: deps.prisma,
+      source: input.source ?? "hosted-local-e2e",
+    });
   });
 }
 
-function applyHostedMailboxAppendForTestEnvironment(
+export async function createHostedWebTestkitDeps(
   source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
+): Promise<HostedWebTestkitDeps> {
+  const environment = applyHostedWebTestkitEnvironment(source);
+  const [
+    hostedMailboxStore,
+    hostedWorkspaceStore,
+  ] = await Promise.all([
+    loadHostedMailboxAppendForTestModules(),
+    loadHostedWorkspaceSeedForTestModules(),
+  ]);
+  const prisma = await createHostedTestPrisma(environment);
+
+  return {
+    environment,
+    hostedMailboxStore,
+    hostedWorkspaceStore,
+    prisma,
+  };
+}
+
+export async function createHostedWebSignalTestkitDeps(
+  source: NodeJS.ProcessEnv = process.env,
+): Promise<HostedWebSignalTestkitDeps> {
+  const deps = await createHostedWebTestkitDeps(source);
+  try {
+    const temporalClientModule = await loadHostedTemporalClientModule();
+    return {
+      ...deps,
+      temporalSignalClient:
+        await temporalClientModule.createHostedRuntimeTemporalSignalClient(deps.environment),
+    };
+  } catch (error) {
+    await deps.prisma.$disconnect();
+    throw error;
+  }
+}
+
+async function withHostedWebTestkitDeps<T>(
+  source: NodeJS.ProcessEnv | undefined,
+  callback: (deps: HostedWebTestkitDeps) => Promise<T>,
+): Promise<T> {
+  const deps = await createHostedWebTestkitDeps(source ?? process.env);
+  try {
+    return await callback(deps);
+  } finally {
+    await deps.prisma.$disconnect();
+  }
+}
+
+async function withHostedWebSignalTestkitDeps<T>(
+  source: NodeJS.ProcessEnv | undefined,
+  callback: (deps: HostedWebSignalTestkitDeps) => Promise<T>,
+): Promise<T> {
+  const deps = await createHostedWebSignalTestkitDeps(source ?? process.env);
+  try {
+    return await callback(deps);
+  } finally {
+    await deps.prisma.$disconnect();
+  }
+}
+
+function applyHostedWebTestkitEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const runtimeEnv = createHostedWebSmokeEnvironment(source);
   for (const [key, value] of Object.entries(runtimeEnv)) {
     if (value === undefined) {
@@ -399,43 +480,35 @@ function restoreHostedTestingHostOnlyEnv(): void {
   }
 }
 
-async function loadHostedMailboxAppendForTestModules(
-  environment: NodeJS.ProcessEnv,
-): Promise<HostedMailboxAppendForTestStoreModule & { environment: NodeJS.ProcessEnv }> {
+async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxAppendForTestStoreModule> {
   const hostedMailboxStoreModule = await import(hostedMailboxStoreModuleSpecifier);
-
-  if (environment.DATABASE_URL) {
-    process.env.DATABASE_URL = environment.DATABASE_URL;
-  }
-
   const typedHostedMailboxStoreModule =
     hostedMailboxStoreModule as HostedMailboxAppendForTestStoreModule;
 
   return {
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
-    environment,
   };
 }
 
-async function loadHostedWorkspaceSeedForTestModules(
-  environment: NodeJS.ProcessEnv,
-): Promise<HostedWorkspaceSeedForTestStoreModule & { environment: NodeJS.ProcessEnv }> {
+async function loadHostedWorkspaceSeedForTestModules(): Promise<HostedWorkspaceSeedForTestStoreModule> {
   const hostedWorkspaceStoreModule = await import(hostedWorkspaceStoreModuleSpecifier);
-
-  if (environment.DATABASE_URL) {
-    process.env.DATABASE_URL = environment.DATABASE_URL;
-  }
-
   const typedHostedWorkspaceStoreModule =
     hostedWorkspaceStoreModule as HostedWorkspaceSeedForTestStoreModule;
 
   return {
     checkpointHostedWorkspace: typedHostedWorkspaceStoreModule.checkpointHostedWorkspace,
-    environment,
     ensureHostedWorkspace: typedHostedWorkspaceStoreModule.ensureHostedWorkspace,
     publishLatestBrowserVaultReplicaRef:
       typedHostedWorkspaceStoreModule.publishLatestBrowserVaultReplicaRef,
   };
+}
+
+async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientModule> {
+  return await import(hostedTemporalClientModuleSpecifier) as HostedTemporalClientModule;
+}
+
+async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModule> {
+  return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
 }
 
 async function createHostedTestPrisma(
@@ -445,55 +518,12 @@ async function createHostedTestPrisma(
     throw new Error("Hosted test helpers require DATABASE_URL.");
   }
 
-  const prismaClientPackageName = "@prisma/client";
-  const prismaClientModule: unknown = await import(prismaClientPackageName);
+  const prismaModule = await import(hostedPrismaModuleSpecifier) as HostedTestPrismaModule;
 
-  if (!isHostedTestPrismaClientModule(prismaClientModule)) {
-    throw new TypeError("Hosted test helpers could not load PrismaClient.");
-  }
-
-  return new prismaClientModule.PrismaClient({
-    adapter: new PrismaPg({
-      connectionString: normalizeTestPrismaConnectionString(environment.DATABASE_URL),
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
-      max: 1,
-    }),
-    transactionOptions: {
-      maxWait: 10_000,
-      timeout: 15_000,
-    },
+  return prismaModule.createPrismaClient({
+    databaseUrl: environment.DATABASE_URL,
+    poolMax: 1,
   });
-}
-
-function isHostedTestPrismaClientModule(
-  value: unknown,
-): value is HostedTestPrismaClientModule {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  return typeof Reflect.get(value, "PrismaClient") === "function";
-}
-
-function normalizeTestPrismaConnectionString(databaseUrl: string): string {
-  let parsed: URL;
-
-  try {
-    parsed = new URL(databaseUrl);
-  } catch {
-    return databaseUrl;
-  }
-
-  let changed = false;
-  for (const key of ["sslcert", "sslkey", "sslrootcert"] as const) {
-    if (parsed.searchParams.get(key) === "system") {
-      parsed.searchParams.delete(key);
-      changed = true;
-    }
-  }
-
-  return changed ? parsed.toString() : databaseUrl;
 }
 
 function normalizeHostedTestingLimit(value: number): number {

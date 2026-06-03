@@ -122,7 +122,7 @@
         "packages/cloudflare-hosted-control/src/routes.ts"
       ],
       "#hosted-web-testing": [
-        "apps/web/src/testing.ts"
+        "apps/web/test/support/hosted-web-testkit.ts"
       ],
       "@murphai/messaging-ingress/linq-webhook": [
         "packages/messaging-ingress/src/linq-webhook.ts"

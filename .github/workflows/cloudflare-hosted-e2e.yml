@@ -8,6 +8,7 @@ on:
       - "apps/cloudflare/**"
       - "apps/web/src/lib/hosted-orchestration/**"
       - "apps/web/test/hosted-orchestration-*.test.ts"
+      - "apps/web/test/support/**"
       - "packages/assistant-engine/**"
       - "packages/assistant-runtime/**"
       - "packages/cloudflare-hosted-control/**"

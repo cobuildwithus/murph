@@ -1,23 +1,28 @@
-import { createHostedWebSmokeEnvironment } from "../../../next-artifacts";
+import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 
-const prismaModuleSpecifier = new URL("../prisma.ts", import.meta.url).href;
-const contactPrivacyModuleSpecifier = new URL("./contact-privacy.ts", import.meta.url).href;
+const prismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
+const contactPrivacyModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/contact-privacy.ts",
+  import.meta.url,
+).href;
 const hostedMemberIdentityStoreModuleSpecifier = new URL(
-  "./hosted-member-identity-store.ts",
+  "../../src/lib/hosted-onboarding/hosted-member-identity-store.ts",
   import.meta.url,
 ).href;
 const hostedMemberRoutingStoreModuleSpecifier = new URL(
-  "./hosted-member-routing-store.ts",
+  "../../src/lib/hosted-onboarding/hosted-member-routing-store.ts",
   import.meta.url,
 ).href;
-const hostedMemberStoreModuleSpecifier = new URL("./hosted-member-store.ts", import.meta.url)
-  .href;
+const hostedMemberStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/hosted-member-store.ts",
+  import.meta.url,
+).href;
 const hostedMemberBillingStoreModuleSpecifier = new URL(
-  "./hosted-member-billing-store.ts",
+  "../../src/lib/hosted-onboarding/hosted-member-billing-store.ts",
   import.meta.url,
 ).href;
 const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
-  "../hosted-crypto/domain-root-store.ts",
+  "../../src/lib/hosted-crypto/domain-root-store.ts",
   import.meta.url,
 ).href;
 const hostedMemberSeedHostOnlyEnv = {
@@ -47,8 +52,10 @@ interface HostedMemberSeedPrismaClient {
 }
 
 interface HostedMemberSeedPrismaModule {
-  getPrisma(): HostedMemberSeedPrismaClient;
-  resetPrismaClientForTest(): Promise<void>;
+  createPrismaClient(input: {
+    databaseUrl: string;
+    poolMax?: number;
+  }): HostedMemberSeedPrismaClient;
 }
 
 interface HostedMemberStoreModule {
@@ -119,9 +126,9 @@ interface HostedMemberRoutingStoreModule {
 }
 
 interface HostedMemberSeedModules {
+  createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createHostedPhoneLookupKey: ContactPrivacyModule["createHostedPhoneLookupKey"];
-  getPrisma: HostedMemberSeedPrismaModule["getPrisma"];
   provisionHostedCryptoDomainRootsForUserTx:
     HostedCryptoDomainRootStoreModule["provisionHostedCryptoDomainRootsForUserTx"];
   readHostedPhoneHint: ContactPrivacyModule["readHostedPhoneHint"];
@@ -141,10 +148,12 @@ export async function seedHostedActiveMember(
     throw new Error("Hosted member seed requires MURPH_E2E_MEMBER_ID.");
   }
 
-  const modules = await loadHostedMemberSeedModules(
-    applyHostedMemberSeedEnvironment(input.environment),
-  );
-  const prisma = modules.getPrisma();
+  const environment = applyHostedMemberSeedEnvironment(input.environment);
+  const modules = await loadHostedMemberSeedModules(environment);
+  const prisma = createHostedMemberSeedPrisma({
+    environment,
+    modules,
+  });
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -177,15 +186,17 @@ export async function seedHostedActiveLinqMember(
     throw new Error("Hosted Linq member seed requires member id, member phone, and home phone.");
   }
 
-  const modules = await loadHostedMemberSeedModules(
-    applyHostedMemberSeedEnvironment(input.environment),
-  );
+  const environment = applyHostedMemberSeedEnvironment(input.environment);
+  const modules = await loadHostedMemberSeedModules(environment);
   const phoneLookupKey = modules.createHostedPhoneLookupKey(input.memberPhone);
   if (!phoneLookupKey) {
     throw new Error("Hosted Linq member seed requires a valid member phone.");
   }
 
-  const prisma = modules.getPrisma();
+  const prisma = createHostedMemberSeedPrisma({
+    environment,
+    modules,
+  });
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -246,10 +257,12 @@ export async function bindHostedActiveLinqHomeChat(input: {
     );
   }
 
-  const modules = await loadHostedMemberSeedModules(
-    applyHostedMemberSeedEnvironment(input.environment),
-  );
-  const prisma = modules.getPrisma();
+  const environment = applyHostedMemberSeedEnvironment(input.environment);
+  const modules = await loadHostedMemberSeedModules(environment);
+  const prisma = createHostedMemberSeedPrisma({
+    environment,
+    modules,
+  });
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -270,7 +283,13 @@ function applyHostedMemberSeedEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const runtimeEnv = createHostedWebSmokeEnvironment(source);
-  Object.assign(process.env, runtimeEnv);
+  for (const [key, value] of Object.entries(runtimeEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
   restoreHostedMemberSeedHostOnlyEnv();
   clearHostedMemberSeedGlobals();
   return runtimeEnv;
@@ -312,7 +331,6 @@ async function loadHostedMemberSeedModules(
   }
 
   const typedPrismaModule = prismaModule as HostedMemberSeedPrismaModule;
-  await typedPrismaModule.resetPrismaClientForTest();
   const typedContactPrivacyModule = contactPrivacyModule as ContactPrivacyModule;
   const typedHostedCryptoDomainRootStoreModule =
     hostedCryptoDomainRootStoreModule as HostedCryptoDomainRootStoreModule;
@@ -325,9 +343,9 @@ async function loadHostedMemberSeedModules(
     hostedMemberBillingStoreModule as HostedMemberBillingStoreModule;
 
   return {
+    createPrismaClient: typedPrismaModule.createPrismaClient,
     createHostedMember: typedHostedMemberStoreModule.createHostedMember,
     createHostedPhoneLookupKey: typedContactPrivacyModule.createHostedPhoneLookupKey,
-    getPrisma: typedPrismaModule.getPrisma,
     provisionHostedCryptoDomainRootsForUserTx:
       typedHostedCryptoDomainRootStoreModule.provisionHostedCryptoDomainRootsForUserTx,
     readHostedPhoneHint: typedContactPrivacyModule.readHostedPhoneHint,
@@ -339,6 +357,21 @@ async function loadHostedMemberSeedModules(
     writeHostedMemberStripeBillingRefTx:
       typedHostedMemberBillingStoreModule.writeHostedMemberStripeBillingRefTx,
   };
+}
+
+function createHostedMemberSeedPrisma(input: {
+  environment: NodeJS.ProcessEnv;
+  modules: HostedMemberSeedModules;
+}): HostedMemberSeedPrismaClient {
+  const databaseUrl = input.environment.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("Hosted member seed helpers require DATABASE_URL.");
+  }
+
+  return input.modules.createPrismaClient({
+    databaseUrl,
+    poolMax: 1,
+  });
 }
 
 async function seedHostedMemberBillingRefTx(input: {
