@@ -1,512 +1,195 @@
-I stress-tested the uploaded guide against current `main` and would **rewrite it as a much narrower “Milestone 3” hard cut**. The uploaded guide still contains useful invariants, but it also carries obsolete migration shape from before the direct-runtime and Warm Codex work landed. The final guide should not talk about reintroducing flags, extracting under the old child path, adding a generic managed-process registry, or keeping Codex single-use as the target. Those are no longer the architecture on `main`.   
+# Package-Owned Hosted Invocation Migration Guide
 
-# Final hard cut migration guide: package-owned hosted invocation
+## Status
 
-## Current state on `main`
+This guide is for the current `main` branch after the direct-runtime and hosted Warm Codex milestones have already landed. It replaces the older lifecycle guide language that still discusses deleting the per-run Node child, adding a direct-runtime flag, introducing a generic managed-process registry, or keeping Codex single-use as the target.
 
-Current `main` has already landed the big lifecycle cuts:
+The remaining simplification is narrower:
+
+```text
+Move hosted invocation semantics out of apps/cloudflare and into packages/assistant-runtime.
+Leave apps/cloudflare as the container/platform/transport adapter.
+Leave packages/assistant-engine as the Warm Codex process owner.
+```
+
+This is a hard-cut ownership cleanup, not a new lifecycle subsystem.
+
+---
+
+## Current architecture on `main`
+
+Current steady state is effectively:
 
 ```text
 UserRunner DO
   -> warm RunnerContainer
     -> container-entrypoint
-      -> apps/cloudflare hosted-workspace-invocation
-        -> assistant-runtime runHostedWorkspaceRuntimeJobInProcess
-          -> assistant-engine single-slot hosted Warm Codex
+      -> apps/cloudflare/src/hosted-workspace-invocation.ts
+        -> apps/cloudflare/src/runtime-bridge-workspace.ts
+          -> packages/assistant-runtime/runHostedWorkspaceRuntimeJobInProcess(...)
+            -> packages/assistant-engine hosted Warm Codex
 ```
 
-The old `node-runner` production path is gone from current source search results; remaining hits are docs/old completed plans, not active source files. 
+The old per-invocation Node child path is already gone from active production source. Warm Codex is already owned by assistant-engine. RunnerContainer and container-entrypoint already own lifecycle, wake routing, abort handling, process cleanup, and warm-container recycling.
 
-The remaining architectural issue is narrower: `apps/cloudflare/src/hosted-workspace-invocation.ts` still builds runtime config, creates the runtime wake signal, constructs Cloudflare platform/fetch/mailbox bridge pieces, builds runtime bridge job options, and directly calls `runHostedWorkspaceRuntimeJobInProcess`.  
+The remaining problem is that `apps/cloudflare` still owns too much hosted runtime behavior:
 
-Also, `apps/cloudflare/src/runtime-bridge-workspace.ts` still owns a lot of runtime semantics: it builds `HostedWorkspaceRuntimeJobOptions`, owns checkpoint snapshot construction, mailbox import bridge construction, lease checks, snapshot lifecycle logs, and mailbox payload decode glue.    
+```text
+runtime job option construction
+checkpoint snapshot orchestration
+idle_shutdown checkpoint semantics
+mailbox import bridge behavior
+lease checks during checkpoint
+runtime wake interruption during snapshot/checkpoint
+direct call into runHostedWorkspaceRuntimeJobInProcess(...)
+```
 
-Cloudflare should keep lifecycle and platform transport. It should not own hosted runtime behavior.
+Those are Murph hosted runtime semantics, not Cloudflare platform concerns.
 
-## Target architecture
+---
 
-The final hard-cut target should be:
+## Final target
 
 ```text
 UserRunner DO
   -> warm RunnerContainer
     -> container-entrypoint active invocation slot
-      -> Cloudflare platform adapters
+      -> Cloudflare adapter
+          routes, request parsing, active slot, abort, wake route,
+          platform ports, mailbox decoder, process cleanup
       -> assistant-runtime runHostedWorkspaceInvocation(...)
-        -> assistant-runtime hosted bridge/checkpoint/mailbox runtime semantics
-        -> assistant-engine hosted Warm Codex
-      -> container process cleanup proof
+          hosted invocation assembly, mailbox/checkpoint bridge,
+          idle_shutdown checkpoint semantics, runtime wake/checkpoint interaction
+      -> assistant-engine Warm Codex
+          app-server process, RPC state, turn correlation, expected root snapshot
 ```
 
-This is intentionally not another lifecycle subsystem. It is a deletion/ownership cleanup.
+The key invariant:
+
+```text
+Cloudflare owns transport and lifecycle.
+assistant-runtime owns hosted invocation semantics.
+assistant-engine owns Codex process semantics.
+```
+
+---
 
 ## Non-goals
 
-Do **not** add:
+Do not add:
 
 ```text
-runtime feature flag
-old/new package invocation fallback
+feature flag or dual path
 new Cloudflare runtime service wrapper
 generic managed-process registry
-new scheduler / queue / demand owner
+new queue/scheduler/demand owner
 long-lived CLI bridge
-new warm-Codex lifecycle path
+new Warm Codex lifecycle path
 cross-invocation Codex authority redesign
+Temporal workflow changes
+write-fence protocol changes
+runtime wake protocol changes
 ```
 
-Warm Codex already belongs to assistant-engine. RunnerContainer already owns lifecycle. Entrypoint already owns process cleanup. The package-owned invocation cut should not create a fourth owner.
+This migration should delete ownership ambiguity. It should not introduce another manager.
 
-## Ownership boundary
+---
 
-### Cloudflare owns
+## Hard-cut success criteria
+
+After the cut:
 
 ```text
-HTTP routes
-active invocation slot
-request parsing
-architecture-version handshake
-runtime wake route and pending wake state
-request abort wiring
-RunnerContainer lifecycle
-warm-container recycle policy
-/proc cleanup
-expected Warm Codex root cleanup
-Cloudflare platform port implementations
-Cloudflare web-control fetch
-Cloudflare egress/provider fetch wiring
-R2/artifact transport implementation
-write-fence transport calls
-Cloudflare-specific mailbox payload decryption adapter
-metadata-only container diagnostics
+apps/cloudflare no longer imports runHostedWorkspaceRuntimeJobInProcess.
+apps/cloudflare no longer constructs HostedWorkspaceRuntimeJobOptions.
+apps/cloudflare no longer owns checkpoint/mailbox runtime bridge semantics.
+apps/cloudflare/src/runtime-bridge-workspace.ts is deleted or adapter-only.
+assistant-runtime exports package-owned runHostedWorkspaceInvocation(...).
+Cloudflare passes explicit platform, vaultRoot, mailbox decoder, wake signal, lease reader, and abort signal.
+Warm Codex remains assistant-engine-owned.
+RunnerContainer/container-entrypoint lifecycle behavior is unchanged.
+No runtime flag, fallback matrix, or parallel invocation path is introduced.
 ```
 
-RunnerContainer already has the right post-success/failure policy: failed invocations destroy the warm container, successful invocations can keep it warm, and success-count recycling is present. 
+---
 
-### assistant-runtime owns
+## The most important correction to the previous draft
+
+Do **not** pass a separate `authority` object to the package invocation API.
+
+The job already carries:
 
 ```text
-hosted invocation assembly
-HostedWorkspaceRuntimeJobOptions construction
-runtime bridge semantics
-mailbox import bridge behavior
-checkpoint snapshot orchestration
-idle_shutdown checkpoint request construction
-lease/current-authority validation semantics
-runtime wake interaction with checkpointing
-workspace restore / mailbox import / foreground/background runtime
+job.request.attemptId
+job.request.leaseGeneration
+job.request.userId
+job.request.workspaceVersion
 ```
 
-### assistant-engine owns
+Duplicating those fields as a separate `HostedInvocationAuthority` creates a stale-field hazard where `job.request` and `authority` can disagree. The package should derive immutable starting authority from `job.request`.
 
-```text
-Codex app-server process
-single-slot hosted Warm Codex
-Codex RPC ids
-pending RPC map
-turn correlation
-poison/stop/reuse decisions
-expected Codex root process snapshot
-```
-
-The Warm Codex state machine already has a process object, ignored-response tracking, process-scoped ids, idle/running/stopping/stopped state, and stop/poison behavior.   
-
-## Hard-cut principle
-
-After this migration:
-
-```text
-apps/cloudflare does not construct HostedWorkspaceRuntimeJobOptions.
-apps/cloudflare does not own checkpoint/mailbox runtime semantics.
-apps/cloudflare passes platform adapters, roots, decoder, wake signal, and authority.
-assistant-runtime owns the invocation behavior.
-```
-
-This is the core simplification.
-
-# Final migration plan
-
-## Step 0: Freeze the cut scope
-
-This is a **Milestone 3 package-owned invocation hard cut**.
-
-Do not touch:
-
-```text
-RunnerContainer lifecycle
-container-entrypoint route topology
-Warm Codex process state
-Codex authority model
-Temporal workflow ordering
-write-fence protocol
-runtime wake protocol
-```
-
-Do touch:
-
-```text
-apps/cloudflare/src/hosted-workspace-invocation.ts
-apps/cloudflare/src/runtime-bridge-workspace.ts
-packages/assistant-runtime/src/hosted-runtime/*
-package exports/tests/docs
-```
-
-The cut succeeds only if behavior is preserved and ownership is simpler.
-
-## Step 1: Add the package-owned invocation API
-
-Add a new package module:
-
-```text
-packages/assistant-runtime/src/hosted-runtime/invocation.ts
-```
-
-Export:
+If mutable authority is needed after checkpoints, pass a **lease reader** capability:
 
 ```ts
-export interface HostedInvocationAuthority {
-  attemptId: string;
-  leaseGeneration: string;
-  userId: string;
-  workspaceVersion: string;
-}
-
-export interface HostedInvocationRoots {
-  vaultRoot: string;
-}
-
-export interface HostedInvocationBridge {
-  consumePendingRuntimeWake?: () => boolean;
-  decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
-  readCurrentLease?: () =>
-    | HostedInvocationAuthority
-    | null
-    | Promise<HostedInvocationAuthority | null>;
-  snapshotDiagnosticsHashSecret?: string | null;
-}
-
-export interface HostedWorkspaceInvocationInput {
-  job: HostedAssistantWorkspaceRuntimeJobInput;
-  authority: HostedInvocationAuthority;
-  roots: HostedInvocationRoots;
-  platform: HostedRuntimePlatform;
-  runtimeWakeSignal: RuntimeWakeSignal;
-  bridge: HostedInvocationBridge;
-  signal?: AbortSignal | null;
-}
-
-export async function runHostedWorkspaceInvocation(
-  input: HostedWorkspaceInvocationInput,
-): Promise<HostedWorkspaceInvocationResult> {
-  // build runtime job options
-  // call runHostedWorkspaceRuntimeJobInProcess
-}
+type HostedInvocationLeaseReader = () =>
+  | HostedInvocationLease
+  | null
+  | Promise<HostedInvocationLease | null>;
 ```
 
-Keep this API small. Do not introduce a giant `HostedInvocationScope` bag unless every field has a clear owner.
+That reader reflects the active write-fenced lease after Cloudflare platform checkpoint callbacks update the current workspace version.
 
-## Step 2: Move bridge semantics into assistant-runtime
-
-Create:
-
-```text
-packages/assistant-runtime/src/hosted-runtime/invocation-bridge.ts
-packages/assistant-runtime/src/hosted-runtime/snapshot-bridge.ts
-packages/assistant-runtime/src/hosted-runtime/mailbox-bridge.ts
-```
-
-Move these out of `apps/cloudflare/src/runtime-bridge-workspace.ts`:
-
-```text
-HostedWorkspaceMailboxPayloadDecoder interface
-createHostedWorkspaceRuntimeBridgeJobOptions
-createHostedRuntimeBridgeLeaseFromWorkspaceRequest
-checkpoint lease validation
-idle_shutdown checkpoint request enforcement
-mailbox import bridge construction
-snapshot lifecycle/metric log construction
-v2 snapshot orchestration
-runtime wake interruption during snapshot/checkpoint
-```
-
-The existing Cloudflare bridge currently creates runtime job options directly. That exact semantic owner should move. 
-
-The existing bridge also enforces idle-shutdown snapshot construction. Preserve that exactly in package code. 
-
-## Step 3: Do not move Cloudflare transport into assistant-runtime
-
-Do **not** move these into assistant-runtime:
-
-```text
-createCloudflareHostedProviderFetch
-readCloudflareHostedProviderFetchBaseUrls
-createCloudflareHostedMailboxPayloadDecoder
-web-control base URLs / allowlist
-Cloudflare internal hosts
-Cloudflare write-fence transport
-Cloudflare R2 transport implementation
-container process cleanup
-expected Codex root cleanup
-```
-
-The most important trap is mailbox payload decrypt. `runtime-bridge-workspace.ts` currently has a legacy decrypt path that reads hosted worker env, builds crypto env, fetches ingress root keys through web-control, and uses callback signing. That is Cloudflare/web-control transport, not assistant-runtime semantics. Keep it in Cloudflare behind a decoder interface. 
-
-Package code should only see:
-
-```ts
-decodeMailboxPayload.decode(...)
-```
-
-It should not know how Cloudflare obtains root keys.
-
-## Step 4: Move or neutralize snapshot-local helpers
-
-The current snapshot bridge uses local snapshot archive helpers and runtime-state archive planning. The semantic snapshot orchestration should be package-owned; Cloudflare should not directly own archive/checkpoint behavior. 
-
-There are two acceptable routes.
-
-Preferred route:
-
-```text
-Move node-local snapshot archive helpers into @murphai/runtime-state/node
-or assistant-runtime hosted-runtime/snapshot-bridge.
-```
-
-Fallback route for a smaller first cut:
-
-```text
-Keep only a narrow HostedWorkspaceSnapshotArchiveBuilder adapter in Cloudflare,
-but move orchestration, lease checks, wake checks, and checkpoint session flow
-into assistant-runtime.
-```
-
-Do not let `assistant-runtime` import from `apps/cloudflare`. That would invert the dependency and make the architecture worse.
-
-## Step 5: Shrink Cloudflare hosted invocation adapter
-
-After package extraction, `apps/cloudflare/src/hosted-workspace-invocation.ts` should become a thin adapter.
-
-It should do only:
-
-```text
-resolve warmRoot / vaultRoot
-clear browser-vault warm source state
-build or validate runtime launch spec
-rebind parser toolchain to container-image paths
-create RuntimeWakeSignal
-build Cloudflare HostedRuntimePlatform
-build Cloudflare mailbox payload decoder
-call assistant-runtime runHostedWorkspaceInvocation(...)
-assert/parse result
-```
-
-It should stop doing:
-
-```text
-constructing HostedWorkspaceRuntimeJobOptions
-constructing checkpoint snapshot behavior
-owning mailbox import behavior
-owning lease validation semantics
-calling runHostedWorkspaceRuntimeJobInProcess directly
-```
-
-Current `hosted-workspace-invocation.ts` calls `runHostedWorkspaceRuntimeJobInProcess` directly; that should disappear. 
-
-Target shape:
-
-```ts
-const result = await runHostedWorkspaceInvocation({
-  job,
-  authority: {
-    attemptId: job.request.attemptId,
-    leaseGeneration: job.request.leaseGeneration,
-    userId: job.request.userId,
-    workspaceVersion: job.request.workspaceVersion,
-  },
-  roots: {
-    vaultRoot,
-  },
-  platform,
-  runtimeWakeSignal,
-  bridge: {
-    consumePendingRuntimeWake: () => runtimeWakeSignal.consumePending(),
-    decodeMailboxPayload,
-    readCurrentLease: () => currentLease,
-    snapshotDiagnosticsHashSecret:
-      job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
-  },
-  signal: options.signal ?? null,
-});
-```
-
-## Step 6: Delete or rename `runtime-bridge-workspace.ts`
-
-After extraction, this file should not remain with its current name and semantic weight.
-
-Either delete it or reduce it to a Cloudflare-specific adapter:
-
-```text
-apps/cloudflare/src/cloudflare-mailbox-payload-decoder.ts
-apps/cloudflare/src/cloudflare-hosted-invocation-adapter.ts
-```
-
-Do not leave a file called `runtime-bridge-workspace.ts` in Cloudflare if it still owns checkpoint/mailbox runtime behavior. That name will attract future runtime semantics back into Cloudflare.
-
-## Step 7: Add hard static guards
-
-Add tests that fail if the boundary regresses:
-
-```text
-apps/cloudflare does not import runHostedWorkspaceRuntimeJobInProcess
-apps/cloudflare does not construct HostedWorkspaceRuntimeJobOptions
-apps/cloudflare/src/runtime-bridge-workspace.ts does not exist, or is adapter-only
-apps/cloudflare does not import runtime-state/node snapshot archive planning directly
-assistant-runtime does not import apps/cloudflare
-assistant-runtime hosted invocation receives explicit roots/platform/decoder/signal
-hosted invocation path does not use withHostedProcessEnvironment
-```
-
-A source-level test similar to the existing ambient env/cwd guard is appropriate.
-
-## Step 8: Preserve exact behavior with focused tests
-
-Before deleting the old Cloudflare bridge, add package tests for:
-
-```text
-create package invocation options from platform + roots + decoder
-idle_shutdown-only snapshot request enforcement
-runtime wake interrupt during snapshot
-lease mismatch fails before snapshot
-lease mismatch fails before direct R2 put
-lease mismatch fails before web checkpoint
-mailbox conversation import decode path
-mailbox decode mismatch behavior
-snapshot lifecycle logs remain metadata-only
-snapshot temp directory cleanup
-snapshot session abort on failure before checkpoint
-localWorkspaceCleanForWarmReuse behavior
-```
-
-The checkpoint flow currently checks lease before snapshot, before direct R2 upload, and before web checkpoint. Preserve those stages.  
-
-## Step 9: Keep rollout as a hard cut
-
-Do not add a runtime flag.
-
-This is package code motion plus ownership cleanup. Rollback remains:
-
-```text
-deploy previous known-good image
-destroy affected warm containers
-preserve durable checkpoint truth
-```
-
-No permanent fallback. No parallel invocation paths.
-
-# Final guide text
-
-## Goal
-
-Move hosted invocation assembly out of Cloudflare and into assistant-runtime so Cloudflare is only a runner/platform adapter.
-
-Final target:
-
-```text
-UserRunner DO
-  -> RunnerContainer
-    -> container-entrypoint
-      -> Cloudflare adapter: routes, wake, platform ports, cleanup
-      -> assistant-runtime: hosted invocation semantics
-      -> assistant-engine: Warm Codex process semantics
-```
-
-## Success criteria
-
-```text
-- apps/cloudflare no longer constructs HostedWorkspaceRuntimeJobOptions.
-- apps/cloudflare no longer calls runHostedWorkspaceRuntimeJobInProcess directly.
-- apps/cloudflare no longer owns checkpoint/mailbox runtime bridge semantics.
-- runtime-bridge-workspace.ts is deleted or Cloudflare-adapter-only.
-- assistant-runtime exports package-owned runHostedWorkspaceInvocation(...).
-- Cloudflare passes explicit platform, roots, authority, decoder, wake signal, and abort signal.
-- Warm Codex remains assistant-engine-owned.
-- RunnerContainer/container-entrypoint lifecycle behavior is unchanged.
-- No feature flag or dual path is introduced.
-```
-
-## Implementation order
-
-```text
-1. Add assistant-runtime hosted invocation API.
-2. Move runtime bridge/job-option construction into assistant-runtime.
-3. Move checkpoint snapshot orchestration into assistant-runtime or runtime-state/node.
-4. Keep Cloudflare mailbox decrypt/web-control/R2/fetch adapters in Cloudflare.
-5. Replace Cloudflare direct call to runHostedWorkspaceRuntimeJobInProcess with package runHostedWorkspaceInvocation.
-6. Delete or shrink apps/cloudflare/src/runtime-bridge-workspace.ts.
-7. Add static boundary tests.
-8. Run focused bridge, entrypoint, runtime, and Warm Codex tests.
-9. Deploy as hard cut; rollback by previous image + warm-container reset.
-```
-
-## Files to create
-
-```text
-packages/assistant-runtime/src/hosted-runtime/invocation.ts
-packages/assistant-runtime/src/hosted-runtime/invocation-bridge.ts
-packages/assistant-runtime/src/hosted-runtime/snapshot-bridge.ts
-packages/assistant-runtime/src/hosted-runtime/mailbox-bridge.ts
-```
-
-## Files to shrink/delete
-
-```text
-apps/cloudflare/src/hosted-workspace-invocation.ts
-apps/cloudflare/src/runtime-bridge-workspace.ts
-```
-
-## Files to keep Cloudflare-owned
-
-```text
-apps/cloudflare/src/container-entrypoint.ts
-apps/cloudflare/src/runner-container.ts
-apps/cloudflare/src/runtime-platform.ts
-apps/cloudflare/src/runtime-bridge-mailbox-payload-decode.ts
-apps/cloudflare/src/runner-env.ts
-apps/cloudflare/src/hosted-env-policy.ts
-apps/cloudflare/src/runner-native-parser-toolchain.ts
-```
+---
 
 ## Package API
 
+Create a focused package module, preferably with a dedicated public subpath:
+
+```text
+packages/assistant-runtime/src/hosted-runtime/invocation.ts
+```
+
+Add package export:
+
+```json
+{
+  "exports": {
+    "./hosted-invocation": {
+      "types": "./dist/hosted-invocation.d.ts",
+      "import": "./dist/hosted-invocation.js",
+      "default": "./dist/hosted-invocation.js"
+    }
+  }
+}
+```
+
+Use a small API:
+
 ```ts
-export interface HostedInvocationAuthority {
+export interface HostedInvocationLease {
   attemptId: string;
   leaseGeneration: string;
   userId: string;
   workspaceVersion: string;
 }
 
-export interface HostedInvocationRoots {
-  vaultRoot: string;
-}
-
-export interface HostedInvocationBridge {
-  consumePendingRuntimeWake?: () => boolean;
-  decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
-  readCurrentLease?: () =>
-    | HostedInvocationAuthority
-    | null
-    | Promise<HostedInvocationAuthority | null>;
-  snapshotDiagnosticsHashSecret?: string | null;
+export interface HostedWorkspaceMailboxPayloadDecoder {
+  decode(
+    input: HostedWorkspaceMailboxPayloadDecodeInput,
+  ): Promise<HostedWorkspaceMailboxPayloadDecodeResult>;
 }
 
 export interface HostedWorkspaceInvocationInput {
   job: HostedAssistantWorkspaceRuntimeJobInput;
-  authority: HostedInvocationAuthority;
-  roots: HostedInvocationRoots;
   platform: HostedRuntimePlatform;
+  vaultRoot: string;
+  mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
   runtimeWakeSignal: RuntimeWakeSignal;
-  bridge: HostedInvocationBridge;
+  readCurrentLease?: (() =>
+    | HostedInvocationLease
+    | null
+    | Promise<HostedInvocationLease | null>);
+  snapshotDiagnosticsHashSecret?: string | null;
   signal?: AbortSignal | null;
 }
 
@@ -515,149 +198,455 @@ export async function runHostedWorkspaceInvocation(
 ): Promise<HostedWorkspaceInvocationResult>;
 ```
 
-## Cloudflare adapter shape
+Why this shape:
+
+```text
+job.request is the immutable invocation authority.
+readCurrentLease is the mutable write-fence/current-version view.
+vaultRoot is the only root the runtime bridge needs directly.
+platform owns artifact/workspace/mailbox/device/effects ports.
+mailboxPayloadDecoder hides Cloudflare-specific decrypt/web-control transport.
+runtimeWakeSignal is the single wake source; package code can derive consumePendingRuntimeWake from it.
+signal is the host abort boundary.
+```
+
+Avoid a large `HostedInvocationScope` bag unless a field has an actual owner and consumer.
+
+---
+
+## New package internals
+
+Start with **two** new internal modules, not four:
+
+```text
+packages/assistant-runtime/src/hosted-runtime/invocation.ts
+packages/assistant-runtime/src/hosted-runtime/invocation-bridge.ts
+```
+
+Split a third module only if the file becomes too large:
+
+```text
+packages/assistant-runtime/src/hosted-runtime/snapshot-bridge.ts
+```
+
+Avoid creating a file-per-concept taxonomy up front. Fewer files are easier to maintain until size forces a split.
+
+Move from `apps/cloudflare/src/runtime-bridge-workspace.ts` into assistant-runtime:
+
+```text
+createHostedWorkspaceRuntimeBridgeJobOptions
+createHostedRuntimeBridgeLeaseFromWorkspaceRequest
+idle_shutdown-only checkpoint request enforcement
+checkpoint lease validation
+mailbox import bridge construction
+snapshot session orchestration
+snapshot lifecycle/metric log construction
+runtime wake interruption during snapshot/checkpoint
+localWorkspaceCleanForWarmReuse behavior
+```
+
+The package-owned `runHostedWorkspaceInvocation(...)` should:
 
 ```ts
-export async function runCloudflareHostedWorkspaceInvocation(
-  input: HostedExecutionWorkspaceInvocationJobInput,
-  options: HostedWorkspaceInvocationOptions,
-): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-  const warmRoot = await resolveWarmRoot(input.request.userId);
-  const vaultRoot = path.join(warmRoot, "durable", "vault");
-
-  await clearHostedBrowserVaultWarmSourceStateHash({ vaultRoot });
-
-  const job = {
-    ...input,
-    runtime: buildHostedExecutionJobRuntime({
-      requestedRuntime: input.runtime ?? {},
-      supervisorEnv: options.supervisorEnv,
-    }),
-  };
-
-  const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-  options.onRuntimeWakeReady?.(() => {
-    runtimeWakeSignal.notify();
-    return true;
+export async function runHostedWorkspaceInvocation(
+  input: HostedWorkspaceInvocationInput,
+): Promise<HostedWorkspaceInvocationResult> {
+  const jobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+    platform: input.platform,
+    request: input.job.request,
+    runtime: input.job.runtime ?? {},
+    vaultRoot: input.vaultRoot,
+    decodeMailboxPayload: input.mailboxPayloadDecoder,
+    readCurrentLease:
+      input.readCurrentLease ??
+      (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request)),
+    runtimeWakeSignal: input.runtimeWakeSignal,
+    snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
   });
 
-  const lease = createMutableLease(job.request);
-  const platform = buildCloudflarePlatform({ lease, job, supervisorEnv: options.supervisorEnv });
-  const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({ lease });
-
-  const result = await runHostedWorkspaceInvocation({
-    job,
-    authority: {
-      attemptId: job.request.attemptId,
-      leaseGeneration: job.request.leaseGeneration,
-      userId: job.request.userId,
-      workspaceVersion: job.request.workspaceVersion,
-    },
-    roots: { vaultRoot },
-    platform,
-    runtimeWakeSignal,
-    bridge: {
-      consumePendingRuntimeWake: () => runtimeWakeSignal.consumePending(),
-      decodeMailboxPayload,
-      readCurrentLease: () => lease.current,
-      snapshotDiagnosticsHashSecret:
-        job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
-    },
-    signal: options.signal ?? null,
+  return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
+    ...jobOptions,
+    runtimeWakeSignal: input.runtimeWakeSignal,
+    signal: input.signal ?? null,
   });
-
-  return assertHostedExecutionRunnerJobResult(result, job);
 }
 ```
 
-## Boundary tests
+The bridge should derive:
 
-Add these as hard-cut tests:
-
-```text
-1. apps/cloudflare hosted invocation source does not contain runHostedWorkspaceRuntimeJobInProcess.
-2. apps/cloudflare source does not construct HostedWorkspaceRuntimeJobOptions.
-3. assistant-runtime hosted invocation source does not import apps/cloudflare.
-4. runtime-bridge-workspace.ts is absent or contains only Cloudflare adapter names.
-5. package invocation preserves browser-vault clearing via Cloudflare adapter.
-6. package invocation preserves runtime wake pending/consume semantics.
-7. package snapshot bridge preserves lease checks before snapshot, direct upload, and checkpoint.
-8. package snapshot bridge aborts snapshot sessions on pre-checkpoint failure.
-9. package mailbox bridge preserves conversation import behavior.
-10. Cloudflare mailbox decoder remains the only code that reads Cloudflare web-control crypto env.
+```ts
+consumePendingRuntimeWake: () => input.runtimeWakeSignal.consumePending()
 ```
 
-## Risk controls
+Do not pass both `runtimeWakeSignal` and `consumePendingRuntimeWake` from Cloudflare. That duplicates one source of truth.
 
-### Main risk: dependency inversion
+---
 
-Do not let `assistant-runtime` import Cloudflare files. If a helper cannot move without importing `apps/cloudflare`, split it into:
+## What must stay in Cloudflare
+
+Keep Cloudflare-specific transport and lifecycle in `apps/cloudflare`:
 
 ```text
-package-owned orchestration
-Cloudflare-owned adapter
+container-entrypoint.ts
+runner-container.ts
+runtime-platform.ts
+runtime-bridge-mailbox-payload-decode.ts
+runner-env.ts
+hosted-env-policy.ts
+runner-native-parser-toolchain.ts
+internal-hosts.ts
+web-control-plane.ts
+runner-outbound/*
 ```
 
-### Main risk: hidden behavior change in snapshot checkpointing
-
-Snapshot logic is the riskiest part of the move. Preserve:
+Specifically, do not move these into assistant-runtime:
 
 ```text
-idle_shutdown-only construction
-lease check before snapshot
+createCloudflareHostedProviderFetch
+readCloudflareHostedProviderFetchBaseUrls
+createCloudflareHostedMailboxPayloadDecoder
+Cloudflare web-control base URLs and allowlists
+write-fence HTTP/header transport
+Cloudflare R2/direct upload transport implementation
+container /proc cleanup
+expected Warm Codex root cleanup
+RunnerContainer lifecycle
+```
+
+### Important simplification: delete the legacy decoder fallback from the package path
+
+`runtime-bridge-workspace.ts` currently contains a legacy mailbox decrypt fallback that can read hosted worker env, build crypto env, call web-control, and fetch ingress root keys. In the current direct hosted path, Cloudflare passes an explicit decoder and sets `requireMailboxPayloadDecoder: true`.
+
+The package-owned invocation should require an explicit `mailboxPayloadDecoder`. Do not move the legacy decrypt fallback into assistant-runtime. If any non-Cloudflare tests use the fallback, convert them to pass a fake decoder.
+
+This keeps assistant-runtime from learning Cloudflare web-control crypto transport.
+
+---
+
+## Snapshot bridge relocation
+
+The snapshot bridge is the riskiest part of the move because it currently uses helper modules under `apps/cloudflare`:
+
+```text
+workspace-snapshot-local.ts
+workspace-snapshot-cleanup.ts
+legacy-workspace-snapshot-materialization.ts
+hosted-bundle-validation.ts
+hosted-runtime-redaction.ts
+```
+
+Do not let assistant-runtime import these through relative paths or app package paths.
+
+Use one of these approaches:
+
+### Preferred
+
+Move runtime-generic helpers into package-owned modules:
+
+```text
+packages/assistant-runtime/src/hosted-runtime/snapshot-bridge.ts
+packages/runtime-state/src/node/... if the helper is generic archive/runtime-state logic
+```
+
+### Acceptable first cut
+
+If a helper is still Cloudflare-specific, keep it behind a narrow capability passed from Cloudflare:
+
+```ts
+export interface HostedWorkspaceSnapshotArchiveBuilder {
+  buildEncryptedSnapshot(input: HostedWorkspaceSnapshotArchiveBuildInput):
+    Promise<HostedWorkspaceSnapshotArchiveBuildResult>;
+  cleanupTemporaryDirectory(path: string): Promise<void>;
+}
+```
+
+But do not pass a broad service object. Prefer moving generic code.
+
+Preserve exact snapshot invariants:
+
+```text
+idle_shutdown-only checkpoint construction
+lease check before snapshot planning
 lease check before direct object upload
-runtime wake check before checkpoint
+runtime wake check before web checkpoint
 lease check before web checkpoint
-snapshot session abort on failure
-legacy refs cleanup
-localWorkspaceCleanForWarmReuse
-metadata-only logs
+snapshot session abort on pre-checkpoint failure
+legacy refs materialization/cleanup behavior
+localWorkspaceCleanForWarmReuse calculation
+metadata-only lifecycle/metric logs
+temporary directory cleanup
 ```
 
-### Main risk: over-abstraction
+---
 
-Do not add:
+## Cloudflare adapter after migration
+
+Rename the Cloudflare wrapper to make ownership explicit:
 
 ```text
-HostedRuntimeService
-HostedInvocationManager
-RuntimeBridgeCoordinator
-CloudflareRuntimeService
+apps/cloudflare/src/cloudflare-hosted-workspace-invocation.ts
 ```
 
-The package function is the abstraction. Everything else should be a helper.
+or keep the filename but make the function name explicit:
+
+```ts
+runCloudflareHostedWorkspaceInvocation(...)
+```
+
+The adapter should only:
+
+```text
+resolve warmRoot / vaultRoot
+ensure warm launcher directories and permissions
+clear browser-vault warm source state
+build/validate runtime launch spec from request + frozen supervisor env
+rebind native parser toolchain to container-image paths
+create RuntimeWakeSignal
+build Cloudflare HostedRuntimePlatform
+build Cloudflare mailbox payload decoder
+call assistant-runtime runHostedWorkspaceInvocation(...)
+assert/parse result
+```
+
+It should not:
+
+```text
+construct HostedWorkspaceRuntimeJobOptions
+call runHostedWorkspaceRuntimeJobInProcess
+own checkpoint snapshot orchestration
+own mailbox import behavior
+own lease validation semantics
+own snapshot lifecycle logs
+own runtime wake/checkpoint semantics
+```
+
+Target adapter shape:
+
+```ts
+const result = await runHostedWorkspaceInvocation({
+  job,
+  platform,
+  vaultRoot,
+  mailboxPayloadDecoder: decodeMailboxPayload,
+  runtimeWakeSignal,
+  readCurrentLease: () => currentLease,
+  snapshotDiagnosticsHashSecret:
+    job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
+  signal: options.signal ?? null,
+});
+```
+
+---
+
+## Warm launcher roots
+
+Current code still creates:
+
+```text
+home
+cache
+tmp
+hf-home
+```
+
+Do not delete these in this migration. They were preserved intentionally as non-lifecycle side effects of the old runner. Removing them is a separate root audit.
+
+For this hard cut:
+
+```text
+keep warm root hashing
+keep safe 0700 directory creation
+keep vaultRoot = warmRoot/durable/vault
+do not add new root concepts
+```
+
+After the package-owned invocation cut is stable, separately audit whether `home`, `cache`, `tmp`, and `hf-home` still have users. Delete unused roots only with focused tests.
+
+---
+
+## Import-boundary policy
+
+Current `main` already has a boundary rule that prevents most Cloudflare source from importing assistant-engine or operator-config internals directly, except the narrow hosted Codex lifecycle import in `container-entrypoint.ts`.
+
+Preserve and extend this approach:
+
+```text
+apps/cloudflare may import assistant-runtime hosted-invocation surface.
+apps/cloudflare may import assistant-engine hosted-codex-lifecycle only from container-entrypoint.
+assistant-runtime must not import apps/cloudflare.
+assistant-runtime should use explicit focused operator-config subpaths, not broad root barrels.
+```
+
+Add source guards:
+
+```text
+apps/cloudflare does not import runHostedWorkspaceRuntimeJobInProcess
+apps/cloudflare does not import HostedWorkspaceRuntimeJobOptions
+apps/cloudflare does not import @murphai/runtime-state/node snapshot planning directly
+apps/cloudflare/src/runtime-bridge-workspace.ts is absent or adapter-only
+packages/assistant-runtime/src does not import apps/cloudflare
+packages/assistant-runtime/src does not import Cloudflare internal-host/web-control files
+```
+
+---
+
+## Hard-cut implementation order
+
+### Step 1: Add package API and exports
+
+Add:
+
+```text
+packages/assistant-runtime/src/hosted-runtime/invocation.ts
+packages/assistant-runtime/src/hosted-invocation.ts       // public re-export if preferred
+package.json export "./hosted-invocation"
+```
+
+Keep the first implementation thin and tested.
+
+### Step 2: Move bridge semantics
+
+Move runtime-generic parts of `runtime-bridge-workspace.ts` into assistant-runtime.
+
+Delete or avoid moving:
+
+```text
+legacy mailbox decrypt fallback
+Cloudflare web-control env reading
+Cloudflare callback signing
+Cloudflare internal host allowlists
+```
+
+### Step 3: Move snapshot helpers or introduce narrow archive capability
+
+Move generic snapshot orchestration and helpers to package code. If a helper cannot move without importing Cloudflare, define a narrow capability instead of a service object.
+
+### Step 4: Update Cloudflare adapter
+
+Replace:
+
+```ts
+createHostedWorkspaceRuntimeBridgeJobOptions(...)
+runHostedWorkspaceRuntimeJobInProcess(...)
+```
+
+with:
+
+```ts
+runHostedWorkspaceInvocation(...)
+```
+
+Keep runtime env projection and parser toolchain rebinding in Cloudflare for this cut.
+
+### Step 5: Delete or reduce `runtime-bridge-workspace.ts`
+
+The file should either be gone or renamed/reduced to Cloudflare-only adapter glue.
+
+Do not keep a semantically heavy `runtime-bridge-workspace.ts` in `apps/cloudflare`; it will attract future runtime behavior back into the app.
+
+### Step 6: Add static boundary tests
+
+Add tests for the import and source guards above.
+
+### Step 7: Add package behavior tests
+
+Add focused package tests for:
+
+```text
+package invocation creates equivalent HostedWorkspaceRuntimeJobOptions
+runtime wake interrupts snapshot/checkpoint
+idle_shutdown-only snapshot enforcement
+lease mismatch before snapshot
+lease mismatch before direct upload
+lease mismatch before web checkpoint
+snapshot session abort before checkpoint
+localWorkspaceCleanForWarmReuse
+mailbox conversation import decode path
+mailbox decode mismatch behavior
+metadata-only snapshot logs
+temporary directory cleanup
+```
+
+### Step 8: Run existing lifecycle tests
+
+Run:
+
+```text
+apps/cloudflare container-entrypoint tests
+apps/cloudflare hosted-workspace-invocation tests
+assistant-runtime hosted-runtime tests
+assistant-engine Warm Codex tests
+workspace-boundary import policy tests
+hosted-local smoke/E2E if available
+```
+
+### Step 9: Hard cut deploy
+
+No runtime flag. No fallback path.
+
+Rollback:
+
+```text
+redeploy previous known-good image
+destroy affected warm containers
+preserve durable checkpoint truth
+```
+
+---
 
 ## Definition of done
 
-The migration is complete when:
-
 ```text
-container-entrypoint owns routes, active slot, wake state, aborts, cleanup
-RunnerContainer owns container lifecycle
-apps/cloudflare owns concrete platform adapters
-assistant-runtime owns hosted invocation assembly
-assistant-engine owns Warm Codex process state
+Cloudflare:
+  owns routes, active slot, wake route, abort, platform ports, decoder, cleanup.
+
+assistant-runtime:
+  owns hosted invocation assembly, mailbox bridge, checkpoint bridge, runtime semantics.
+
+assistant-engine:
+  owns Warm Codex process state.
+
+apps/cloudflare:
+  does not construct HostedWorkspaceRuntimeJobOptions.
+  does not call runHostedWorkspaceRuntimeJobInProcess.
+  does not own checkpoint/mailbox semantics.
+  does not import runtime-state/node snapshot archive planning.
+  does not expose Cloudflare web-control crypto to assistant-runtime.
+
+assistant-runtime:
+  exports runHostedWorkspaceInvocation(...)
+  accepts explicit platform, vaultRoot, decoder, wake signal, lease reader, abort signal.
+  does not import apps/cloudflare.
 ```
 
-Mechanically:
+---
+
+## Final simplifications versus the previous guide
 
 ```text
-apps/cloudflare/src/hosted-workspace-invocation.ts is a thin adapter
-apps/cloudflare/src/runtime-bridge-workspace.ts is deleted or adapter-only
-apps/cloudflare does not call runHostedWorkspaceRuntimeJobInProcess
-apps/cloudflare does not construct HostedWorkspaceRuntimeJobOptions
-assistant-runtime exports runHostedWorkspaceInvocation(...)
-all lifecycle behavior remains unchanged
+Removed duplicate HostedInvocationAuthority input.
+Removed ManagedProcessRegistry language; Warm Codex already has expected-root hooks.
+Removed feature flag / dual-path rollout.
+Removed memory-threshold recycle from this migration; count-based recycle already exists.
+Removed old Node child deletion steps; already done on main.
+Removed Codex authority redesign; separate future project.
+Removed broad HostedInvocationScope bag.
+Reduced proposed new files from four to two initially.
+Required explicit mailbox decoder; no legacy Cloudflare decrypt fallback in package code.
+Kept warm launcher root deletion out of scope.
 ```
 
-## My final recommendation
+---
 
-Do this as the next cleanup, but keep it narrow. The correct hard cut is not “another migration framework.” It is:
+## Final recommendation
+
+Ship this as a focused Milestone 3 hard cut:
 
 ```text
-move hosted invocation semantics into assistant-runtime
-leave Cloudflare with transport/platform/lifecycle only
-delete the ambiguous Cloudflare runtime bridge owner
+Move hosted invocation semantics into assistant-runtime.
+Keep Cloudflare transport/lifecycle only.
+Keep Warm Codex untouched.
+Delete or shrink the Cloudflare runtime bridge owner.
 ```
 
-That is worth it because it removes the last major ownership ambiguity left after direct runtime and Warm Codex.
+This is worthwhile because it removes the last major ownership ambiguity left after direct runtime and Warm Codex. It is not worthwhile if it becomes a framework rewrite, a second lifecycle owner, or a broad Cloudflare/runtime service abstraction.

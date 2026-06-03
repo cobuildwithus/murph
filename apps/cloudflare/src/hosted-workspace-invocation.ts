@@ -1,15 +1,18 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
   clearHostedBrowserVaultWarmSourceStateHash,
   createCoalescingRuntimeWakeSignal,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime";
+import {
+  createHostedWorkspaceInvocationLease,
+  runHostedWorkspaceInvocation as runPackageHostedWorkspaceInvocation,
+} from "@murphai/assistant-runtime/hosted-invocation";
 import {
   readHostedRunnerCommitTimeoutMs,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -23,12 +26,11 @@ import {
   readCloudflareHostedProviderFetchBaseUrls,
 } from "./runtime-platform.ts";
 import {
-  createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
-  createHostedWorkspaceRuntimeBridgeJobOptions,
-} from "./runtime-bridge-workspace.ts";
-import {
   createCloudflareHostedMailboxPayloadDecoder,
 } from "./runtime-bridge-mailbox-payload-decode.ts";
+import {
+  createCloudflareHostedWorkspaceSnapshotArchiveBuilder,
+} from "./workspace-snapshot-archive-builder.ts";
 import {
   buildHostedRunnerContainerEnv,
   buildHostedRunnerContainerPlatformEnv,
@@ -48,14 +50,6 @@ import {
   createHostedRunnerNativeParserToolchain,
   isHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
-import {
-  CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
-  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
-} from "./internal-hosts.ts";
-import {
-  LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-} from "./web-control-plane.ts";
-
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
 const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
 const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
@@ -141,7 +135,7 @@ export async function runHostedWorkspaceInvocation(
     userId: readHostedExecutionRunnerJobUserId(job),
   });
 
-  let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(job.request);
+  let currentLease = createHostedWorkspaceInvocationLease(job);
   const boundUserId = readHostedExecutionRunnerJobUserId(job);
   const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls({
     ...options.supervisorEnv,
@@ -177,28 +171,17 @@ export async function runHostedWorkspaceInvocation(
     timeoutMs: readHostedRunnerCommitTimeoutMs(job.runtime?.commitTimeoutMs ?? null),
   });
 
-  const jobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
-    consumePendingRuntimeWake: () => runtimeWakeSignal.consumePending(),
-    decodeMailboxPayload,
+  const result = await runPackageHostedWorkspaceInvocation({
+    job,
+    mailboxPayloadDecoder: decodeMailboxPayload,
     platform,
-    requireMailboxPayloadDecoder: true,
-    request: job.request,
-    runtime: job.runtime ?? {},
+    readCurrentLease: () => currentLease,
+    runtimeWakeSignal,
+    snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
     snapshotDiagnosticsHashSecret:
       job.diagnostics?.workspaceSnapshotPathHashSecret ?? null,
-    vaultRoot: path.join(warmRoot, "durable", "vault"),
-    webControlAllowHttpHosts: [
-      CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
-      ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-    ],
-    webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-    webControlFetch,
-  });
-
-  const result = await runHostedWorkspaceRuntimeJobInProcess(job, {
-    ...jobOptions,
-    runtimeWakeSignal,
     signal: options.signal ?? null,
+    vaultRoot: path.join(warmRoot, "durable", "vault"),
   });
   return assertHostedExecutionRunnerJobResult(result, job);
 }
@@ -234,18 +217,58 @@ async function resolveHostedRunnerWarmLauncherRoot(
 }
 
 async function ensureHostedRunnerWarmLauncherDirectories(root: string): Promise<void> {
-  const directories = [
-    root,
-    ...HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES.map((name) =>
-      path.join(root, name)
-    ),
-  ];
+  await ensureHostedRunnerWarmLauncherDirectory(path.dirname(root));
+  await ensureHostedRunnerWarmLauncherDirectory(root);
+
   await Promise.all(
-    directories.map(async (directory) => {
-      await mkdir(directory, { mode: 0o700, recursive: true });
-      await chmod(directory, 0o700);
-    }),
+    HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES.map((name) =>
+      ensureHostedRunnerWarmLauncherDirectory(path.join(root, name))
+    ),
   );
+}
+
+async function ensureHostedRunnerWarmLauncherDirectory(directory: string): Promise<void> {
+  const existing = await readHostedRunnerWarmLauncherDirectoryEntry(directory);
+  if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) {
+    await rm(directory, { force: true, recursive: true });
+  }
+
+  const repaired = existing && existing.isDirectory() && !existing.isSymbolicLink()
+    ? existing
+    : null;
+  if (!repaired) {
+    try {
+      await mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, "EEXIST")) {
+        throw error;
+      }
+    }
+  }
+
+  const verified = await lstat(directory);
+  if (!verified.isDirectory() || verified.isSymbolicLink()) {
+    throw new Error("Hosted runner warm launcher path is not a real directory.");
+  }
+  await chmod(directory, 0o700);
+}
+
+async function readHostedRunnerWarmLauncherDirectoryEntry(directory: string) {
+  try {
+    return await lstat(directory);
+  } catch (error) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+  return Reflect.get(error, "code") === code;
 }
 
 function resolveHostedRunnerWarmLauncherRootPath(userId: string): string {

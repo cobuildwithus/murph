@@ -1,3 +1,5 @@
+import { lstatSync } from "node:fs";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
 
@@ -22,9 +24,45 @@ describe("runHostedRunnerSmokeDetailed", () => {
 
   it("spawns a temp-cwd child and returns the parsed smoke result", async () => {
     const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const restoredEnv = new Map([
+      "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+      "LD_PRELOAD",
+      "MURPH_SMOKE_AMBIENT_POISON",
+      "NODE_OPTIONS",
+      "OPENAI_API_KEY",
+    ].map((key) => [key, process.env[key]]));
+    process.env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK = "fixture-callback-secret";
+    process.env.LD_PRELOAD = "/tmp/fixture-preload.so";
+    process.env.MURPH_SMOKE_AMBIENT_POISON = "fixture-poison";
+    process.env.NODE_OPTIONS = "--require fixture-poison";
+    process.env.OPENAI_API_KEY = "fixture-openai-secret";
     const module = await import("../src/hosted-runner-smoke.ts");
 
-    spawnMock.mockImplementation((_file: string, _args: string[], options: { cwd: string }) => {
+    spawnMock.mockImplementation((_file: string, _args: string[], options: {
+      cwd: string;
+      env: Record<string, string | undefined>;
+    }) => {
+      const expectedLauncherEnv = {
+        HF_HOME: path.join(options.cwd, "hf-home"),
+        HOME: path.join(options.cwd, "home"),
+        TEMP: path.join(options.cwd, "tmp"),
+        TMP: path.join(options.cwd, "tmp"),
+        TMPDIR: path.join(options.cwd, "tmp"),
+        XDG_CACHE_HOME: path.join(options.cwd, "cache"),
+      };
+      expect(options.env).toMatchObject(expectedLauncherEnv);
+      expect(options.env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
+      expect(options.env.LD_PRELOAD).toBeUndefined();
+      expect(options.env.MURPH_SMOKE_AMBIENT_POISON).toBeUndefined();
+      expect(options.env.NODE_OPTIONS).toBeUndefined();
+      expect(options.env.OPENAI_API_KEY).toBeUndefined();
+      for (const directory of new Set(Object.values(expectedLauncherEnv))) {
+        const entry = lstatSync(directory);
+        expect(entry.isDirectory()).toBe(true);
+        expect(entry.isSymbolicLink()).toBe(false);
+        expect(entry.mode & 0o777).toBe(0o700);
+      }
+
       const child = new EventEmitter() as EventEmitter & {
         kill: ReturnType<typeof vi.fn>;
         pid: number;
@@ -90,34 +128,44 @@ describe("runHostedRunnerSmokeDetailed", () => {
       return child;
     });
 
-    const result = await module.runHostedRunnerSmokeDetailed({
-      bundle: "bundle-base64",
-      expectedTranscriptSnippet: "hello",
-      expectedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
-      wavRelativePath: "raw/smoke/hosted-runner.wav",
-    });
+    try {
+      const result = await module.runHostedRunnerSmokeDetailed({
+        bundle: "bundle-base64",
+        expectedTranscriptSnippet: "hello",
+        expectedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+        wavRelativePath: "raw/smoke/hosted-runner.wav",
+      });
 
-    expect(result.childCwdIsIsolated).toBe(true);
-    expect(result.codexAppServerHelpBytes).toBe(2048);
-    expect(result.codexCommandDiscovered).toBe(true);
-    expect(result.codexHostedConfigShellEnvironmentPolicyAllowlisted).toBe(true);
-    expect(result.codexHostedCliSchemaVaultOptionHidden).toBe(true);
-    expect(result.codexHostedCliVaultCommandProofCount).toBe(
-      HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
-    );
-    expect(result.codexHostedCliVaultWriteProofCount).toBe(
-      HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-    );
-    expect(result.codexHostedShellMurphPathBytes).toBe(1536);
-    expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
-    expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
-    expect(result.codexVersion).toBe("codex-cli 0.125.0");
-    expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
-    expect(result.murphCommandDiscovered).toBe(true);
-    expect(result.normalizedTranscriptSha256).toBe("c".repeat(64));
-    expect(result.pdfParserProviderId).toBe("poppler.pdf");
-    expect(result.pythonVersion).toBe("Python 3.11.2");
-    expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
-    expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
+      expect(result.childCwdIsIsolated).toBe(true);
+      expect(result.codexAppServerHelpBytes).toBe(2048);
+      expect(result.codexCommandDiscovered).toBe(true);
+      expect(result.codexHostedConfigShellEnvironmentPolicyAllowlisted).toBe(true);
+      expect(result.codexHostedCliSchemaVaultOptionHidden).toBe(true);
+      expect(result.codexHostedCliVaultCommandProofCount).toBe(
+        HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+      );
+      expect(result.codexHostedCliVaultWriteProofCount).toBe(
+        HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+      );
+      expect(result.codexHostedShellMurphPathBytes).toBe(1536);
+      expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
+      expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
+      expect(result.codexVersion).toBe("codex-cli 0.125.0");
+      expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
+      expect(result.murphCommandDiscovered).toBe(true);
+      expect(result.normalizedTranscriptSha256).toBe("c".repeat(64));
+      expect(result.pdfParserProviderId).toBe("poppler.pdf");
+      expect(result.pythonVersion).toBe("Python 3.11.2");
+      expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
+      expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
+    } finally {
+      for (const [key, value] of restoredEnv) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
   });
 });

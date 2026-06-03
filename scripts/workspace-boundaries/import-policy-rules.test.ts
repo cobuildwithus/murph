@@ -81,6 +81,57 @@ import /* keep */ {
     expect(failure).toBeNull();
   });
 
+  it("rejects Cloudflare source imports of hosted invocation internals from assistant-runtime root", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { runHostedWorkspaceRuntimeJobInProcess } from "@murphai/assistant-runtime";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-runtime",
+    });
+
+    expect(failure).toContain("@murphai/assistant-runtime/hosted-invocation");
+  });
+
+  it("rejects Cloudflare source imports of old app-local runtime bridge files", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedWorkspaceRuntimeBridgeJobOptions } from "./runtime-bridge-workspace.ts";',
+      sourceMember: "apps/cloudflare",
+      specifier: "./runtime-bridge-workspace.ts",
+    });
+
+    expect(failure).toContain("hosted workspace bridge ownership lives");
+  });
+
+  it("rejects Cloudflare source imports of package-owned snapshot planning helpers", () => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/workspace-snapshot-archive-builder.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { collectHostedWorkspaceSnapshotArchivePlan } from "@murphai/runtime-state/node";',
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/runtime-state/node",
+    });
+
+    expect(failure).toContain("snapshot planning and diagnostics belong");
+  });
+
+  it("rejects assistant-runtime source imports of app-local Cloudflare runtime surfaces", () => {
+    const filePath = path.join(
+      repoRoot,
+      "packages/assistant-runtime/src/hosted-runtime/snapshot-bridge.ts",
+    );
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { readHostedExecutionWorkerEnvironment } from "./hosted-execution-worker-env.ts";',
+      sourceMember: "packages/assistant-runtime",
+      specifier: "./hosted-execution-worker-env.ts",
+    });
+
+    expect(failure).toContain("explicit hosted invocation capabilities");
+  });
+
   it("allows Cloudflare to import hosted Codex process hooks from the assistant-engine owner", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
     const failure = verifyWorkspaceImportPolicy({
@@ -99,6 +150,41 @@ import {
     expect(failure).toBeNull();
   });
 
+  it.each([
+    [
+      "extra named imports",
+      `
+import {
+  snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer,
+  debugHostedCodexLifecycle,
+} from "@murphai/assistant-engine/hosted-codex-lifecycle";
+      `,
+    ],
+    [
+      "default imports",
+      'import hostedCodexLifecycle from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+    ],
+    [
+      "namespace imports",
+      'import * as hostedCodexLifecycle from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+    ],
+    [
+      "dynamic imports",
+      'const hostedCodexLifecycle = await import("@murphai/assistant-engine/hosted-codex-lifecycle");',
+    ],
+  ])("rejects Cloudflare %s from hosted Codex lifecycle", (_label, source) => {
+    const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source,
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+    });
+
+    expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
+  });
+
   it("rejects Cloudflare hosted Codex process hook imports outside the container entrypoint", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/runner-container.ts");
     const failure = verifyWorkspaceImportPolicy({
@@ -114,6 +200,30 @@ import {
     });
 
     expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
+  });
+
+  it.each([
+    [
+      "aliased lifecycle re-exports",
+      'export { snapshotExpectedHostedCodexRootProcess as snapshotHostedCodexRoot } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+    ],
+    [
+      "type-only lifecycle re-exports",
+      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/hosted-codex-lifecycle";',
+    ],
+  ])("rejects assistant-runtime hosted-runtime-contracts %s", (_label, source) => {
+    const filePath = path.join(
+      repoRoot,
+      "packages/assistant-runtime/src/hosted-runtime-contracts.ts",
+    );
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source,
+      sourceMember: "packages/assistant-runtime",
+      specifier: "@murphai/assistant-engine/hosted-codex-lifecycle",
+    });
+
+    expect(failure).toContain("hosted-runtime-contracts must not route");
   });
 
   it("rejects unrelated direct Cloudflare imports from assistant-engine", () => {

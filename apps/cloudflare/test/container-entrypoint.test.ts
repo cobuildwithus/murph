@@ -15,6 +15,8 @@ import {
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
+  snapshotExpectedHostedCodexRootProcess: vi.fn(),
+  stopHostedWarmCodexAppServer: vi.fn(),
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -37,6 +39,11 @@ vi.mock("../src/hosted-workspace-invocation.js", async () => {
   };
 });
 
+vi.mock("@murphai/assistant-engine/hosted-codex-lifecycle", () => ({
+  snapshotExpectedHostedCodexRootProcess: mocks.snapshotExpectedHostedCodexRootProcess,
+  stopHostedWarmCodexAppServer: mocks.stopHostedWarmCodexAppServer,
+}));
+
 import {
   classifyRunnerJobError,
   createRequestAbortController,
@@ -54,6 +61,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
+  mocks.snapshotExpectedHostedCodexRootProcess.mockResolvedValue(null);
+  mocks.stopHostedWarmCodexAppServer.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -330,6 +339,31 @@ describe("startHostedContainerEntrypoint", () => {
       poisoned: false,
       service: "cloudflare-hosted-runner-node",
     });
+  });
+
+  it("uses the default hosted Codex lifecycle hook when the server closes", async () => {
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+
+    mocks.stopHostedWarmCodexAppServer.mockClear();
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+
+    expect(mocks.stopHostedWarmCodexAppServer).toHaveBeenCalledTimes(1);
+    expect(mocks.stopHostedWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
   });
 
   it("accepts runtime wakes only after the active invocation reports readiness", async () => {

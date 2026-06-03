@@ -4,6 +4,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createHostedWorkspaceRuntimeBridgeJobOptions as createPackageHostedWorkspaceRuntimeBridgeJobOptions,
+  type HostedWorkspaceMailboxPayloadDecoder,
+  type HostedWorkspaceRuntimeBridgeOptionsInput,
+} from "@murphai/assistant-runtime/hosted-invocation";
 import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceReadResponse,
@@ -20,8 +25,8 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
-  createHostedWorkspaceRuntimeBridgeJobOptions,
-} from "../src/runtime-bridge-workspace.ts";
+  createCloudflareHostedWorkspaceSnapshotArchiveBuilder,
+} from "../src/workspace-snapshot-archive-builder.ts";
 import {
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
@@ -33,9 +38,31 @@ type HostedCheckpointSnapshotInput =
   Parameters<ReturnType<typeof createHostedWorkspaceRuntimeBridgeJobOptions>["createCheckpointSnapshot"]>[0];
 
 const cleanupPaths: string[] = [];
+const blockedMailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+  async decode() {
+    return {
+      reasonCode: "test.mailbox_payload_decoder_not_configured",
+      retryable: false,
+      status: "blocked",
+    };
+  },
+};
 const testDataKey = encodeHostedWorkspaceSnapshotV2DataKey(
   Uint8Array.from({ length: 32 }, (_, index) => index + 1),
 );
+
+function createHostedWorkspaceRuntimeBridgeJobOptions(
+  input: Omit<
+    HostedWorkspaceRuntimeBridgeOptionsInput,
+    "decodeMailboxPayload" | "snapshotArchiveBuilder"
+  >,
+) {
+  return createPackageHostedWorkspaceRuntimeBridgeJobOptions({
+    ...input,
+    decodeMailboxPayload: blockedMailboxPayloadDecoder,
+    snapshotArchiveBuilder: createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
+  });
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();

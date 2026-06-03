@@ -14,7 +14,7 @@ import {
   type HostedRuntimeBridgeCheckpointLeaseError,
   type HostedRuntimeBridgeCheckpointContext,
   type HostedRuntimeBridgeCheckpointLease,
-} from "../src/runtime-bridge-checkpoint.ts";
+} from "@murphai/assistant-runtime/hosted-invocation";
 
 const BASE_LEASE: HostedRuntimeBridgeCheckpointLease = {
   attemptId: "attempt_1",

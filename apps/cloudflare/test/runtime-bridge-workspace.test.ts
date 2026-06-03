@@ -7,11 +7,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedSecureBoxAad,
-  sealHostedSecureBox,
-  serializeHostedSecureBoxEnvelope,
-} from "@murphai/runtime-state";
-import {
   listHostedBundleArtifacts,
   readHostedBundleTextFile,
   createHostedPortableWorkspaceManifestFromBundle,
@@ -26,8 +21,6 @@ import {
   writeHostedWorkspaceSkippedInlineFiles,
 } from "@murphai/runtime-state/node";
 import {
-  buildHostedMailboxPayloadScope,
-  buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -42,6 +35,11 @@ import {
   recordHostedMaterializedArtifactPaths,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
+import {
+  createHostedWorkspaceRuntimeBridgeJobOptions as createPackageHostedWorkspaceRuntimeBridgeJobOptions,
+  type HostedWorkspaceMailboxPayloadDecoder,
+  type HostedWorkspaceRuntimeBridgeOptionsInput,
+} from "@murphai/assistant-runtime/hosted-invocation";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
@@ -60,11 +58,8 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
-  createHostedMailboxEncryptionEnvironmentFromIngressRoot,
-} from "../src/hosted-mailbox-encryption.ts";
-import {
-  createHostedWorkspaceRuntimeBridgeJobOptions,
-} from "../src/runtime-bridge-workspace.ts";
+  createCloudflareHostedWorkspaceSnapshotArchiveBuilder,
+} from "../src/workspace-snapshot-archive-builder.ts";
 import {
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
@@ -74,6 +69,37 @@ const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 const workspaceSnapshotEncryptionScheme:
   typeof HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME =
     HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME;
+type TestHostedWorkspaceRuntimeBridgeOptionsInput = Omit<
+  HostedWorkspaceRuntimeBridgeOptionsInput,
+  "decodeMailboxPayload" | "snapshotArchiveBuilder"
+> & {
+  decodeMailboxPayload?: HostedWorkspaceMailboxPayloadDecoder;
+  requireMailboxPayloadDecoder?: boolean;
+  snapshotArchiveBuilder?: HostedWorkspaceRuntimeBridgeOptionsInput["snapshotArchiveBuilder"];
+};
+
+const blockedMailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+  async decode() {
+    return {
+      reasonCode: "test.mailbox_payload_decoder_not_configured",
+      retryable: false,
+      status: "blocked",
+    };
+  },
+};
+
+function createHostedWorkspaceRuntimeBridgeJobOptions(
+  input: TestHostedWorkspaceRuntimeBridgeOptionsInput,
+): HostedWorkspaceRuntimeJobOptions {
+  return createPackageHostedWorkspaceRuntimeBridgeJobOptions({
+    ...input,
+    decodeMailboxPayload: input.requireMailboxPayloadDecoder === true
+      ? input.decodeMailboxPayload
+      : input.decodeMailboxPayload ?? blockedMailboxPayloadDecoder,
+    snapshotArchiveBuilder:
+      input.snapshotArchiveBuilder ?? createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
+  });
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -2167,11 +2193,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
   });
 
-  it("decrypts sidecar mailbox payloads through the bridge using the sidecar payload schema", async () => {
+  it("imports sidecar mailbox payloads through an explicit bridge decoder", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
-    const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-    const rootKeyId = "udrk:ingress:bridge-sidecar";
     const item = {
       createdAt: "2026-05-01T00:00:00.000Z",
       dedupeKey: "event:member-channels-sidecar",
@@ -2188,18 +2212,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       updatedAt: "2026-05-01T00:00:00.000Z",
       userId: "member_bridge_sidecar",
     };
-    const metadata = {
-      dedupeKey: item.dedupeKey,
-      itemId: item.id,
-      kind: item.kind,
-      lane: item.lane,
-      laneSeq: item.laneSeq,
-      occurredAt: item.occurredAt,
-      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-      payloadStorage: "sidecar" as const,
-      userId: item.userId,
-    };
-    const payload = {
+    const wake = {
       eventId: item.dedupeKey,
       kind: item.kind,
       memberChannels: {
@@ -2210,33 +2223,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       occurredAt: item.occurredAt,
       userId: item.userId,
     };
-    const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
-    const payloadCiphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
-      aad: buildHostedSecureBoxAad({
-        ...buildHostedMailboxPayloadSecureBoxAad(metadata),
-        domain: "ingress",
-        lane: "mailbox-payload",
-        scope,
-        userId: item.userId,
-      }),
-      domain: "ingress",
-      lane: "mailbox-payload",
-      plaintext: new TextEncoder().encode(JSON.stringify(payload)),
-      rootKey,
-      rootKeyId,
-      scope,
-    }));
-    const readEncryptionUsers: string[] = [];
+    const decodeMailboxPayload = {
+      decode: vi.fn(async () => ({
+        status: "decoded" as const,
+        wake,
+      })),
+    };
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      decodeMailboxPayload,
       platform: createPlatform({ putArtifact: async () => {} }),
-      readEncryptionEnvironment: ({ userId }) => {
-        readEncryptionUsers.push(userId);
-        return createHostedMailboxEncryptionEnvironmentFromIngressRoot({
-          rootKey,
-          rootKeyId,
-        });
-      },
-      requireMailboxPayloadDecoder: false,
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
@@ -2251,7 +2246,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expect(options.importItem({
       item,
       payload: {
-        payloadCiphertext,
+        payloadCiphertext: "opaque-sidecar-ciphertext",
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         requestId: "request_bridge_sidecar",
         source: "sidecar",
@@ -2272,7 +2267,21 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       reasonCode: "system_mailbox.queued",
       status: "imported",
     });
-    expect(readEncryptionUsers).toEqual([item.userId]);
+    expect(decodeMailboxPayload.decode).toHaveBeenCalledWith({
+      itemRef: {
+        dedupeKey: item.dedupeKey,
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+        occurredAt: item.occurredAt,
+        userId: item.userId,
+      },
+      payloadCiphertext: "opaque-sidecar-ciphertext",
+      payloadRequestId: "request_bridge_sidecar",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadSource: "sidecar",
+    });
   });
 
   it("prefers mailbox payload decoders over encryption readers for system mailbox imports", async () => {
@@ -2296,13 +2305,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         wake,
       })),
     };
-    const readEncryptionEnvironment = vi.fn(() => {
-      throw new Error("legacy decrypt should not run");
-    });
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       decodeMailboxPayload,
       platform: createPlatform({ putArtifact: async () => {} }),
-      readEncryptionEnvironment,
       request: createBridgeRequest(item.userId),
       runtime: {
         platformEnv: {},
@@ -2334,19 +2339,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
       payloadSource: "sidecar",
     });
-    expect(readEncryptionEnvironment).not.toHaveBeenCalled();
   });
 
   it("fails closed when mailbox decoding is required but no decoder is provided", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
-    const readEncryptionEnvironment = vi.fn(() => {
-      throw new Error("legacy decrypt should not be constructed");
-    });
-
     expect(() => createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({ putArtifact: async () => {} }),
-      readEncryptionEnvironment,
       requireMailboxPayloadDecoder: true,
       request: createBridgeRequest("member_bridge_decoder_required"),
       runtime: {
@@ -2356,7 +2355,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       },
       vaultRoot,
     })).toThrow("Hosted mailbox payload decoder is required for this invocation.");
-    expect(readEncryptionEnvironment).not.toHaveBeenCalled();
   });
 
   it("imports conversation mailbox items with empty platform env when a decoder is provided", async () => {
@@ -2393,9 +2391,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         wake,
       })),
     };
-    const readEncryptionEnvironment = vi.fn(() => {
-      throw new Error("legacy decrypt should not run");
-    });
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       decodeMailboxPayload,
       platform: createPlatform({
@@ -2404,7 +2399,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         },
         putArtifact: async () => {},
       }),
-      readEncryptionEnvironment,
       request: createBridgeRequest(item.userId),
       runtime: {
         platformEnv: {},
@@ -2461,14 +2455,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
       payloadSource: "inline",
     });
-    expect(readEncryptionEnvironment).not.toHaveBeenCalled();
   });
 
   it("captures server-owned return targets from decoded conversation wakes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
-    const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-    const rootKeyId = "udrk:ingress:bridge-return-target";
     const wake = buildHostedExecutionTelegramConversationMessageWake({
       eventId: "evt_bridge_return_target",
       occurredAt: "2026-05-01T00:00:00.000Z",
@@ -2507,39 +2498,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       },
       state: "route",
     } as const;
-    const payloadCiphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
-      aad: buildHostedSecureBoxAad({
-        ...buildHostedMailboxPayloadSecureBoxAad({
-          dedupeKey: item.dedupeKey,
-          itemId: item.id,
-          kind: item.kind,
-          lane: item.lane,
-          laneSeq: item.laneSeq,
-          occurredAt: item.occurredAt,
-          payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-          payloadStorage: "inline",
-          userId: item.userId,
-        }),
-        domain: "ingress",
-        lane: "mailbox-payload",
-        scope: buildHostedMailboxPayloadScope("inline"),
-        userId: item.userId,
-      }),
-      domain: "ingress",
-      lane: "mailbox-payload",
-      plaintext: new TextEncoder().encode(JSON.stringify(wake)),
-      rootKey,
-      rootKeyId,
-      scope: buildHostedMailboxPayloadScope("inline"),
-    }));
+    const decodeMailboxPayload = {
+      decode: vi.fn(async () => ({
+        status: "decoded" as const,
+        wake,
+      })),
+    };
     const recordedReturnTargets: Array<"imessage" | "telegram" | null> = [];
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      decodeMailboxPayload,
       platform: createPlatform({ putArtifact: async () => {} }),
-      readEncryptionEnvironment: () =>
-        createHostedMailboxEncryptionEnvironmentFromIngressRoot({
-          rootKey,
-          rootKeyId,
-        }),
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
@@ -2554,7 +2522,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expect(options.importItem({
       item,
       payload: {
-        payloadCiphertext,
+        payloadCiphertext: "opaque-return-target-ciphertext",
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         requestId: "request_bridge_return_target",
         source: "inline",

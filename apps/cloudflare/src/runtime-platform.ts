@@ -123,7 +123,7 @@ import {
 import {
   checkpointHostedRuntimeBridgeWebWorkspace,
   type HostedRuntimeBridgeCheckpointLease,
-} from "./runtime-bridge-checkpoint.ts";
+} from "@murphai/assistant-runtime/hosted-invocation";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
 type HostedWebControlTransport =

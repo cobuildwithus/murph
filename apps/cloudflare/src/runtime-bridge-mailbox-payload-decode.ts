@@ -3,10 +3,8 @@ import {
 } from "./internal-hosts.ts";
 import type {
   HostedRuntimeBridgeCheckpointLease,
-} from "./runtime-bridge-checkpoint.ts";
-import type {
   HostedWorkspaceMailboxPayloadDecoder,
-} from "./runtime-bridge-workspace.ts";
+} from "@murphai/assistant-runtime/hosted-invocation";
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
   parseHostedMailboxPayloadDecodeResponse,

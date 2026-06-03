@@ -365,6 +365,17 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
+    path.relative(repoRoot, filePath).replace(/\\/g, "/")
+      === "packages/assistant-runtime/src/hosted-runtime-contracts.ts"
+    && (
+      specifier === "@murphai/assistant-engine"
+      || specifier.startsWith("@murphai/assistant-engine/")
+    )
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from assistant-engine; hosted-runtime-contracts must not route concrete assistant-engine lifecycle ownership through assistant-runtime.`;
+  }
+
+  if (
     sourceMember === "apps/cloudflare"
     && specifier === "@murphai/assistant-runtime"
     && importsNamedBindingsFromSpecifier(source, specifier, [
@@ -375,6 +386,57 @@ export function verifyWorkspaceImportPolicy({
     ])
   ) {
     return `${path.relative(repoRoot, filePath)} imports hosted email transport codecs from ${JSON.stringify(specifier)}; Cloudflare transport code must use @murphai/assistant-runtime/hosted-email so the assistant-runtime root stays on the canonical hosted runtime surface.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
+    && specifier === "@murphai/assistant-runtime"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedWorkspaceRuntimeJobOptions",
+      "runHostedWorkspaceRuntimeJobInProcess",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted workspace invocation internals from ${JSON.stringify(specifier)}; apps/cloudflare/src must use @murphai/assistant-runtime/hosted-invocation so hosted invocation assembly stays package-owned.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
+    && (
+      specifier.includes("runtime-bridge-workspace")
+      || specifier.includes("runtime-bridge-checkpoint")
+    )
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}; hosted workspace bridge ownership lives in @murphai/assistant-runtime/hosted-invocation, not app-local Cloudflare bridge files.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
+    && specifier === "@murphai/runtime-state/node"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "collectHostedWorkspaceSnapshotArchivePlan",
+      "createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports workspace snapshot planning from ${JSON.stringify(specifier)}; app Cloudflare code may build encrypted archives, but snapshot planning and diagnostics belong to @murphai/assistant-runtime/hosted-invocation.`;
+  }
+
+  if (
+    sourceMember === "packages/assistant-runtime"
+    && filePath.includes(`${path.sep}packages${path.sep}assistant-runtime${path.sep}src${path.sep}`)
+    && (
+      specifier.includes("apps/cloudflare")
+      || specifier.includes("hosted-execution-worker-env")
+      || specifier.includes("hosted-mailbox-encryption")
+      || specifier.includes("internal-hosts")
+      || specifier.includes("runtime-crypto-context")
+      || specifier.includes("web-callback-auth")
+      || specifier.includes("web-control-plane")
+    )
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare runtime surface ${JSON.stringify(specifier)}; packages/assistant-runtime/src must depend on explicit hosted invocation capabilities instead of app-local Cloudflare modules.`;
   }
 
   if (
@@ -619,6 +681,7 @@ export function verifyWorkspaceImportPolicy({
         )
         && !isAllowedCloudflareAssistantEngineOwnerImport({
           filePath,
+          source,
           specifier,
         })
       )
@@ -702,6 +765,7 @@ function isWorkspacePackageSpecifier(specifier) {
 
 function isAllowedCloudflareAssistantEngineOwnerImport({
   filePath,
+  source,
   specifier,
 }) {
   const relativeFilePath = path.relative(repoRoot, filePath).replace(/\\/g, "/");
@@ -709,6 +773,10 @@ function isAllowedCloudflareAssistantEngineOwnerImport({
   return (
     relativeFilePath === "apps/cloudflare/src/container-entrypoint.ts"
     && specifier === "@murphai/assistant-engine/hosted-codex-lifecycle"
+    && importsOnlyNamedBindingsFromSpecifier(source, specifier, [
+      "snapshotExpectedHostedCodexRootProcess",
+      "stopHostedWarmCodexAppServer",
+    ])
   );
 }
 
@@ -750,6 +818,63 @@ function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
       ).test(source)
     ),
   );
+}
+
+function importsOnlyNamedBindingsFromSpecifier(source, specifier, allowedBindingNames) {
+  const optionalTrivia = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n\r]*(?:\r?\n|$))*`;
+  const specifierPattern = escapeRegExp(specifier);
+
+  if (new RegExp(
+    String.raw`\bimport${optionalTrivia}\(${optionalTrivia}["']${specifierPattern}["']${optionalTrivia}\)`,
+    "mu",
+  ).test(source)) {
+    return false;
+  }
+
+  if (new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?(?:[A-Za-z_$][\w$]*${optionalTrivia},${optionalTrivia})?\*${optionalTrivia}as${optionalTrivia}[A-Za-z_$][\w$]*${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "mu",
+  ).test(source)) {
+    return false;
+  }
+
+  if (new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?[A-Za-z_$][\w$]*(?:${optionalTrivia},${optionalTrivia}\{[^}]*\})?${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "mu",
+  ).test(source)) {
+    return false;
+  }
+
+  const allowed = new Set(allowedBindingNames);
+  const namedImportPattern = new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}\{(?<bindings>[^}]*)\}${optionalTrivia}from${optionalTrivia}["']${specifierPattern}["']`,
+    "gmu",
+  );
+  const matches = [...source.matchAll(namedImportPattern)];
+
+  if (matches.length === 0) {
+    return false;
+  }
+
+  return matches.every((match) => {
+    const bindings = stripImportBindingComments(match.groups?.bindings ?? "")
+      .split(",")
+      .map((binding) => binding.trim())
+      .filter(Boolean)
+      .map((binding) => binding.split(/\s+as\s+/iu)[0]?.trim())
+      .filter(Boolean);
+
+    return (
+      bindings.length > 0
+      && bindings.every((binding) => allowed.has(binding))
+    );
+  });
+}
+
+function stripImportBindingComments(value) {
+  return value
+    .replace(/\/\*[\s\S]*?\*\//gu, "")
+    .replace(/\/\/[^\n\r]*(?:\r?\n|$)/gu, "\n");
 }
 
 function extractNamespaceImportAliasesFromSpecifier(source, specifier) {

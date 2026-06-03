@@ -3,9 +3,13 @@ import path from "node:path";
 
 import {
   readHostedMaterializedArtifactPaths,
-  type HostedRuntimeArtifactReader,
-  type HostedWorkspaceRuntimeJobOptions,
-} from "@murphai/assistant-runtime";
+} from "./materialized-artifact-state.ts";
+import type {
+  HostedRuntimeArtifactReader,
+} from "./platform.ts";
+import type {
+  HostedWorkspaceRuntimeJobOptions,
+} from "../hosted-runtime.ts";
 import {
   type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";

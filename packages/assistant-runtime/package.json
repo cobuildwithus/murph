@@ -36,6 +36,11 @@
       "import": "./dist/hosted-runtime-worker-contracts.js",
       "default": "./dist/hosted-runtime-worker-contracts.js"
     },
+    "./hosted-invocation": {
+      "types": "./dist/hosted-invocation.d.ts",
+      "import": "./dist/hosted-invocation.js",
+      "default": "./dist/hosted-invocation.js"
+    },
     "./hosted-provider-effects": {
       "types": "./dist/hosted-provider-effects.d.ts",
       "import": "./dist/hosted-provider-effects.js",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { test } from "vitest";
 
@@ -22,6 +22,9 @@ import {
 import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestPublic,
 } from "@murphai/assistant-runtime/hosted-email";
+import {
+  createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeasePublic,
+} from "@murphai/assistant-runtime/hosted-invocation";
 import {
   sendHostedProviderTelegramMessage as sendHostedProviderTelegramMessagePublic,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
@@ -53,6 +56,9 @@ import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestDirect,
 } from "../src/hosted-email.ts";
 import {
+  createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeaseDirect,
+} from "../src/hosted-invocation.ts";
+import {
   sendHostedProviderTelegramMessage as sendHostedProviderTelegramMessageDirect,
 } from "../src/hosted-provider-effects.ts";
 import {
@@ -77,6 +83,7 @@ const expectedAssistantRuntimePublicExportKeys = [
   "./hosted-assistant-env",
   "./hosted-assistant-env-constants",
   "./hosted-email",
+  "./hosted-invocation",
   "./hosted-provider-effects",
   "./hosted-runtime-contracts",
   "./hosted-runtime-worker-contracts",
@@ -200,6 +207,10 @@ test("hosted-email subpath export stays wired to the hosted email source surface
   assert.equal(parseHostedEmailSendRequestPublic, parseHostedEmailSendRequestDirect);
 });
 
+test("hosted-invocation subpath export stays wired to the package invocation source surface", () => {
+  assert.equal(createHostedWorkspaceInvocationLeasePublic, createHostedWorkspaceInvocationLeaseDirect);
+});
+
 test("hosted-provider-effects subpath stays wired to the hosted provider effects source surface", () => {
   assert.equal(sendHostedProviderTelegramMessagePublic, sendHostedProviderTelegramMessageDirect);
 });
@@ -244,4 +255,22 @@ test("package manifest public exports stay covered by entrypoint wiring tests", 
     Object.keys(manifest.exports).sort(),
     [...expectedAssistantRuntimePublicExportKeys].sort(),
   );
+});
+
+test("package manifest public exports map to source and built entrypoint targets", () => {
+  const manifest = readPackageManifest();
+  assert.ok(manifest.exports);
+
+  for (const exportKey of expectedAssistantRuntimePublicExportKeys) {
+    const target: unknown = manifest.exports[exportKey];
+    assert.ok(isObjectRecord(target));
+    const sourceStem = exportKey === "." ? "index" : exportKey.slice(2);
+    const importTarget = `./dist/${sourceStem}.js`;
+    const typesTarget = `./dist/${sourceStem}.d.ts`;
+
+    assert.equal(target.import, importTarget);
+    assert.equal(target.default, importTarget);
+    assert.equal(target.types, typesTarget);
+    assert.equal(existsSync(new URL(`../src/${sourceStem}.ts`, import.meta.url)), true);
+  }
 });
