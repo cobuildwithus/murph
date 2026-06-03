@@ -1411,7 +1411,7 @@ describe('assistant codex runtime', () => {
     }
   })
 
-  it('reuses one hosted Codex app-server process for matching warm identities', async () => {
+  it('reuses one hosted Codex app-server process across noisy hosted env changes', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-work-')
     let child: MockChildProcess | null = null
@@ -1495,13 +1495,24 @@ describe('assistant codex runtime', () => {
 
     const hostedEnv = (turn: string) => ({
       CODEX_HOME: hostedCodexHome,
+      CI: turn === 'one' ? '1' : '0',
+      COLORTERM: turn === 'one' ? 'truecolor' : '24bit',
+      FORCE_COLOR: turn === 'one' ? '1' : '0',
+      LANG: turn === 'one' ? 'en_US.UTF-8' : 'C.UTF-8',
+      LANGUAGE: turn === 'one' ? 'en_US' : 'C',
+      LC_ALL: turn === 'one' ? 'en_US.UTF-8' : 'C.UTF-8',
+      LC_CTYPE: turn === 'one' ? 'en_US.UTF-8' : 'C.UTF-8',
       MURPH_HOSTED_CODEX_BOUND_USER_ID: `member_${turn}`,
       MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: `attempt_${turn}`,
       MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: turn === 'one' ? '7' : '8',
       MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: turn === 'one' ? '41' : '42',
       MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NO_COLOR: turn === 'one' ? '1' : '0',
       NODE_ENV: 'test',
       PATH: '/usr/bin',
+      PATHEXT: turn === 'one' ? '.COM;.EXE;.BAT' : '.EXE;.CMD',
+      SystemDrive: turn === 'one' ? 'C:' : 'D:',
+      SystemRoot: turn === 'one' ? 'C:\\Windows' : 'D:\\Windows',
     })
 
     await expect(
@@ -1514,6 +1525,8 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-warm-one',
       turnId: 'turn-warm-one',
     })
+    const warmPid = requireMockChildProcess(child).pid
+    expect(warmPid).toBe(987_654_321)
 
     await expect(
       executeCodexAppServerTurn({
@@ -1527,6 +1540,7 @@ describe('assistant codex runtime', () => {
     })
 
     const spawnedChild = requireMockChildProcess(child)
+    expect(spawnedChild.pid).toBe(warmPid)
     const messages = readWrittenRpcMessages(spawnedChild)
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     expect(messages.filter((message) => message.method === 'initialize')).toHaveLength(1)
