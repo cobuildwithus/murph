@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
+  recordHostedIngressRuntimeMilestone: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   recordHostedIngressAssistantInputStaged:
     mocks.recordHostedIngressAssistantInputStaged,
   recordHostedIngressProviderStarted: mocks.recordHostedIngressProviderStarted,
+  recordHostedIngressRuntimeMilestone: mocks.recordHostedIngressRuntimeMilestone,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -684,6 +686,11 @@ describe("hosted runtime internal web routes", () => {
       recorded: true,
       unmatchedCount: 0,
     });
+    mocks.recordHostedIngressRuntimeMilestone.mockResolvedValue({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
 
     const stagedResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
@@ -692,9 +699,12 @@ describe("hosted runtime internal web routes", () => {
           assistantInputId: "input_1",
           at: FIXED_NOW,
           mailboxItemId: "mailbox_item_1",
+          runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
           runtimeAttemptId: "attempt_routes_1",
+          runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
           source: "linq",
           type: "assistant_input_staged",
+          workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
         },
       },
       runtimeWriteFenceHeaders(),
@@ -711,8 +721,11 @@ describe("hosted runtime internal web routes", () => {
       at: FIXED_NOW,
       authenticatedUserId: "member_routes_1",
       mailboxItemId: "mailbox_item_1",
+      runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
       runtimeAttemptId: "attempt_routes_1",
+      runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
       source: "linq",
+      workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
     });
 
     const providerResponse = await runtimeLatencyRoute.POST(jsonRequest(
@@ -741,6 +754,34 @@ describe("hosted runtime internal web routes", () => {
       at: FIXED_NOW,
       authenticatedUserId: "member_routes_1",
       providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_routes_1",
+      source: "linq",
+    });
+
+    const milestoneResponse = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      {
+        event: {
+          at: FIXED_NOW,
+          milestone: "mailbox_import_done",
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          type: "runtime_milestone",
+        },
+      },
+      runtimeWriteFenceHeaders(),
+    ));
+
+    expect(milestoneResponse.status).toBe(200);
+    expect(parseHostedRuntimeLatencyTraceResponse(await milestoneResponse.json())).toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledWith({
+      at: FIXED_NOW,
+      authenticatedUserId: "member_routes_1",
+      milestone: "mailbox_import_done",
       runtimeAttemptId: "attempt_routes_1",
       source: "linq",
     });
@@ -779,6 +820,7 @@ describe("hosted runtime internal web routes", () => {
     expect(unsafeResponse.status).toBe(400);
     expect(mocks.recordHostedIngressAssistantInputStaged).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedIngressProviderStarted).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(1);
   });
 
   it("accepts max-cardinality provider latency callbacks under the shared body limit", async () => {

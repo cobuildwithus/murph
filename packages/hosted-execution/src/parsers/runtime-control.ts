@@ -14,6 +14,7 @@ import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
@@ -46,6 +47,8 @@ import {
   type HostedRuntimeIssueExportResponse,
   type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
   type HostedRuntimeLatencyTraceEvent,
+  type HostedRuntimeLatencyTraceMilestone,
+  type HostedRuntimeLatencyTraceMilestoneEvent,
   type HostedRuntimeLatencyTraceProviderStartedEvent,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
@@ -234,14 +237,24 @@ const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_STAGED_KEYS = new Set([
   "assistantInputId",
   "at",
   "mailboxItemId",
+  "runnerJobAcceptedAt",
   "runtimeAttemptId",
+  "runtimePhaseStartedAt",
   "source",
   "type",
+  "workspaceRestoreDoneAt",
 ]);
 const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
   "assistantInputIds",
   "at",
   "providerRequestOrdinal",
+  "runtimeAttemptId",
+  "source",
+  "type",
+]);
+const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
+  "at",
+  "milestone",
   "runtimeAttemptId",
   "source",
   "type",
@@ -545,6 +558,8 @@ export function parseHostedRuntimeLatencyTraceEvent(
       return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
     case "provider_started":
       return parseHostedRuntimeLatencyTraceProviderStartedEvent(record);
+    case "runtime_milestone":
+      return parseHostedRuntimeLatencyTraceMilestoneEvent(record);
     default:
       throw new TypeError("Hosted runtime latency trace event type is not supported.");
   }
@@ -605,6 +620,14 @@ function parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(
       record.mailboxItemId,
       "Hosted runtime latency trace mailboxItemId",
     ),
+    ...(record.runnerJobAcceptedAt === undefined
+      ? {}
+      : {
+          runnerJobAcceptedAt: readNullableString(
+            record.runnerJobAcceptedAt,
+            "Hosted runtime latency trace runnerJobAcceptedAt",
+          ),
+        }),
     ...(record.runtimeAttemptId === undefined
       ? {}
       : {
@@ -613,8 +636,24 @@ function parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(
             "Hosted runtime latency trace runtimeAttemptId",
           ),
         }),
+    ...(record.runtimePhaseStartedAt === undefined
+      ? {}
+      : {
+          runtimePhaseStartedAt: readNullableString(
+            record.runtimePhaseStartedAt,
+            "Hosted runtime latency trace runtimePhaseStartedAt",
+          ),
+        }),
     source: parseHostedIngressLatencySource(record.source),
     type: "assistant_input_staged",
+    ...(record.workspaceRestoreDoneAt === undefined
+      ? {}
+      : {
+          workspaceRestoreDoneAt: readNullableString(
+            record.workspaceRestoreDoneAt,
+            "Hosted runtime latency trace workspaceRestoreDoneAt",
+          ),
+        }),
   };
 }
 
@@ -659,6 +698,41 @@ function parseHostedRuntimeLatencyTraceProviderStartedEvent(
         }),
     source: parseHostedIngressLatencySource(record.source),
     type: "provider_started",
+  };
+}
+
+function parseHostedRuntimeLatencyTraceMilestone(
+  value: unknown,
+): HostedRuntimeLatencyTraceMilestone {
+  return parseAllowedString(
+    value,
+    "Hosted runtime latency trace milestone",
+    HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
+  );
+}
+
+function parseHostedRuntimeLatencyTraceMilestoneEvent(
+  record: Record<string, unknown>,
+): HostedRuntimeLatencyTraceMilestoneEvent {
+  assertAllowedObjectKeys(
+    record,
+    HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS,
+    "Hosted runtime latency trace runtime_milestone event",
+  );
+
+  return {
+    at: requireString(record.at, "Hosted runtime latency trace at"),
+    milestone: parseHostedRuntimeLatencyTraceMilestone(record.milestone),
+    ...(record.runtimeAttemptId === undefined
+      ? {}
+      : {
+          runtimeAttemptId: readNullableString(
+            record.runtimeAttemptId,
+            "Hosted runtime latency trace runtimeAttemptId",
+          ),
+        }),
+    source: parseHostedIngressLatencySource(record.source),
+    type: "runtime_milestone",
   };
 }
 

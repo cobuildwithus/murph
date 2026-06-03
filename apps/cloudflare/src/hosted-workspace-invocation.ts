@@ -61,6 +61,7 @@ const HOSTED_RUNNER_WARM_LAUNCHER_DIRECTORY_NAMES = [
 
 export interface HostedWorkspaceInvocationOptions {
   onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+  runnerJobAcceptedAt?: string | null;
   signal?: AbortSignal;
   supervisorEnv: Readonly<Record<string, string | undefined>>;
 }
@@ -172,6 +173,9 @@ export async function runHostedWorkspaceInvocation(
 
   const result = await runPackageHostedWorkspaceInvocation({
     job,
+    ...(options.runnerJobAcceptedAt
+      ? { latencyMilestones: { runnerJobAcceptedAt: options.runnerJobAcceptedAt } }
+      : {}),
     mailboxPayloadDecoder: decodeMailboxPayload,
     platform,
     readCurrentLease: () => currentLease,

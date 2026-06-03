@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type {
+  HostedRuntimeLatencyTraceMilestone,
+  HostedRuntimeLatencyTraceStagedMilestones,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
@@ -325,6 +327,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
     context?: HostedWorkspaceRuntimeJobImportContext,
   ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   signal?: AbortSignal | null;
@@ -335,6 +338,7 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
   ): void;
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }
@@ -360,6 +364,33 @@ export class HostedRuntimeCheckpointInterruptedByWakeError extends Error {
   constructor(message = "Hosted runtime checkpoint was interrupted by a pending runtime wake.") {
     super(message);
     this.name = "HostedRuntimeCheckpointInterruptedByWakeError";
+  }
+}
+
+function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
+  at: string;
+  latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  milestone: HostedRuntimeLatencyTraceMilestone;
+  runtimeAttemptId: string;
+}): void {
+  if (!input.latencyTracePort) {
+    return;
+  }
+
+  try {
+    void input.latencyTracePort.record({
+      event: {
+        at: input.at,
+        milestone: input.milestone,
+        runtimeAttemptId: input.runtimeAttemptId,
+        source: "linq",
+        type: "runtime_milestone",
+      },
+    }).catch(() => {
+      // Latency traces are diagnostic-only and must not affect runtime progress.
+    });
+  } catch {
+    // Latency traces are diagnostic-only and must not affect runtime progress.
   }
 }
 
@@ -432,6 +463,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const emitPhaseLog = phaseLogger.emit;
 
   try {
+    const runtimePhaseStartedAt = new Date().toISOString();
+    const initialAssistantInputLatencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
+      ...(options.latencyMilestones ?? {}),
+      runtimePhaseStartedAt,
+    };
     emitPhaseLog({
       input,
       requestId,
@@ -492,6 +528,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           recordMessagingReturnTarget: (target) => {
             hostedCliBridgeMessagingReturnTarget = target;
           },
+          latencyMilestones: initialAssistantInputLatencyMilestones,
           runtimeAttemptId: input.request.attemptId,
           signal: runtimeAbortController.signal,
         },
@@ -528,6 +565,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
+    const workspaceRestoreDoneAt = new Date().toISOString();
+    initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     emitPhaseLog({
       details: {
         materializedArtifactPathCount: restored.materializedArtifactPaths.size,
@@ -662,6 +701,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runtimeAbortController.signal,
     );
     const initialMailboxImport = initialMailboxImportResult.result;
+    const mailboxImportDoneAt = new Date().toISOString();
     emitPhaseLog({
       details: {
         bootstrapPending: initialMailboxImportResult.bootstrapPending,
@@ -675,6 +715,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       requestId,
       stage: "mailbox.import.initial",
       status: "done",
+    });
+    recordHostedRuntimeLatencyMilestoneBestEffort({
+      at: mailboxImportDoneAt,
+      latencyTracePort: guardedRuntime.platform.latencyTracePort ?? null,
+      milestone: "mailbox_import_done",
+      runtimeAttemptId: input.request.attemptId,
     });
     assertRuntimeNotAborted();
     if (initialMailboxImportResult.bootstrapPending) {
@@ -2122,6 +2168,13 @@ function createAbortGuardedHostedRuntimePlatform(
       ? {
           logPort: {
             write: (request) => guard(() => platform.logPort!.write(request)),
+          },
+        }
+      : {}),
+    ...(platform.latencyTracePort
+      ? {
+          latencyTracePort: {
+            record: (request) => guard(() => platform.latencyTracePort!.record(request)),
           },
         }
       : {}),

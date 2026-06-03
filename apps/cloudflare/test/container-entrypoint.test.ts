@@ -1534,6 +1534,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(runnerSpy).toHaveBeenCalledTimes(1);
       const options = runnerSpy.mock.calls[0]?.[1];
       expect(options?.onRuntimeWakeReady).toEqual(expect.any(Function));
+      expect(options?.runnerJobAcceptedAt).toEqual(expect.any(String));
       expect(options?.signal).toEqual(expect.any(AbortSignal));
       expect(options?.supervisorEnv).toBeDefined();
       expect(Object.isFrozen(options?.supervisorEnv)).toBe(true);

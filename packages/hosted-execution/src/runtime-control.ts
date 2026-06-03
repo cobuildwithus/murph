@@ -594,8 +594,24 @@ export type HostedIngressLatencySource =
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
+export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
+  "runner_job_accepted",
+  "runtime_phase_started",
+  "workspace_restore_done",
+  "mailbox_import_done",
+] as const;
 
-export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent {
+export type HostedRuntimeLatencyTraceMilestone =
+  (typeof HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES)[number];
+
+export interface HostedRuntimeLatencyTraceStagedMilestones {
+  runnerJobAcceptedAt?: string | null;
+  runtimePhaseStartedAt?: string | null;
+  workspaceRestoreDoneAt?: string | null;
+}
+
+export interface HostedRuntimeLatencyTraceAssistantInputStagedEvent
+  extends HostedRuntimeLatencyTraceStagedMilestones {
   assistantInputId: string;
   at: string;
   mailboxItemId: string;
@@ -613,9 +629,18 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
   type: "provider_started";
 }
 
+export interface HostedRuntimeLatencyTraceMilestoneEvent {
+  at: string;
+  milestone: HostedRuntimeLatencyTraceMilestone;
+  runtimeAttemptId?: string | null;
+  source: HostedIngressLatencySource;
+  type: "runtime_milestone";
+}
+
 export type HostedRuntimeLatencyTraceEvent =
   | HostedRuntimeLatencyTraceAssistantInputStagedEvent
-  | HostedRuntimeLatencyTraceProviderStartedEvent;
+  | HostedRuntimeLatencyTraceProviderStartedEvent
+  | HostedRuntimeLatencyTraceMilestoneEvent;
 
 export interface HostedRuntimeLatencyTraceRequest {
   event: HostedRuntimeLatencyTraceEvent;

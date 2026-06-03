@@ -258,6 +258,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLatencyMilestonesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026060300_hosted_latency_milestones/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -293,6 +300,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026052700_hosted_ingress_latency_trace",
       "2026052700_hosted_runtime_log_event_cooldown_index",
       "2026052800_hosted_signup_welcome_email_attempt",
+      "2026060300_hosted_latency_milestones",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -452,6 +460,21 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedIngressLatencyTraceMigrationSql).not.toContain(
       'REFERENCES "hosted_member"("id")',
+    );
+    expect(hostedLatencyMilestonesMigrationSql).toContain(
+      'ALTER TABLE "hosted_ingress_latency_trace"',
+    );
+    expect(hostedLatencyMilestonesMigrationSql).toContain(
+      'ADD COLUMN "runner_job_accepted_at" TIMESTAMP(3)',
+    );
+    expect(hostedLatencyMilestonesMigrationSql).toContain(
+      'ADD COLUMN "runtime_phase_started_at" TIMESTAMP(3)',
+    );
+    expect(hostedLatencyMilestonesMigrationSql).toContain(
+      'ADD COLUMN "workspace_restore_done_at" TIMESTAMP(3)',
+    );
+    expect(hostedLatencyMilestonesMigrationSql).toContain(
+      'ADD COLUMN "mailbox_import_done_at" TIMESTAMP(3)',
     );
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).toContain(
       'ADD COLUMN "signup_welcome_email_attempted_at" TIMESTAMP(3)',

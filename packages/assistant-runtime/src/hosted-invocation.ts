@@ -1,3 +1,7 @@
+import type {
+  HostedRuntimeLatencyTraceStagedMilestones,
+} from "@murphai/hosted-execution/runtime-control";
+
 import {
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
@@ -32,6 +36,7 @@ export type {
 
 export interface HostedWorkspaceInvocationInput {
   job: HostedAssistantWorkspaceRuntimeJobInput;
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedRuntimePlatform;
   readCurrentLease: () =>
@@ -65,6 +70,7 @@ export async function runHostedWorkspaceInvocation(
 
   return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
     ...options,
+    latencyMilestones: input.latencyMilestones ?? null,
     runtimeWakeSignal,
     signal: input.signal ?? null,
   });

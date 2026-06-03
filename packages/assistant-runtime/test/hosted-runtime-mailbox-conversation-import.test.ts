@@ -18,6 +18,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedMailboxItem,
+  HostedRuntimeLatencyTraceRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -207,6 +208,78 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test("adds runtime latency milestones to Linq staged trace callbacks", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_latency",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_latency",
+          parts: [
+            {
+              type: "text",
+              value: "latency trace message body",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox capture unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item,
+      latencyMilestones: {
+        runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
+        runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
+        workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+      },
+      runtime: createRuntime({
+        platform: {
+          latencyTracePort: {
+            async record(request) {
+              latencyTraceRequests.push(request);
+              return {
+                matchedCount: 1,
+                recorded: true,
+                unmatchedCount: 0,
+              };
+            },
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_latency_trace_1",
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    expect(latencyTraceRequests.map((request) => request.event)).toEqual([
+      expect.objectContaining({
+        mailboxItemId: item.item.id,
+        runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
+        runtimeAttemptId: "attempt_latency_trace_1",
+        runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
+        source: "linq",
+        type: "assistant_input_staged",
+        workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+      }),
+    ]);
+    assert.equal(JSON.stringify(latencyTraceRequests).includes("latency trace message body"), false);
   });
 
   test("self-heals Linq auto-reply before staging a mailbox input", async () => {
@@ -2458,14 +2531,18 @@ async function writeVaultFile(
   await writeFile(absolutePath, bytes);
 }
 
-function createRuntime(input: Partial<Pick<
+type RuntimeTestConfigInput = Partial<Pick<
   NormalizedHostedAssistantRuntimeConfig,
   | "forwardedEnv"
   | "parserToolchain"
   | "platformEnv"
   | "resolvedConfig"
   | "userEnv"
->> = {}): Pick<
+>> & {
+  platform?: Partial<NormalizedHostedAssistantRuntimeConfig["platform"]>;
+};
+
+function createRuntime(input: RuntimeTestConfigInput = {}): Pick<
   NormalizedHostedAssistantRuntimeConfig,
   | "forwardedEnv"
   | "parserToolchain"
@@ -2490,6 +2567,7 @@ function createRuntime(input: Partial<Pick<
         },
         async sendEmail() {},
       },
+      ...(input.platform ?? {}),
     },
     platformEnv: input.platformEnv ?? {},
     resolvedConfig: input.resolvedConfig ?? {

@@ -10,6 +10,9 @@ import {
   isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageContact,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeLatencyTraceStagedMilestones,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -201,12 +204,16 @@ export function createHostedConversationMailboxImportItem(input: {
   vaultRoot: string;
 }): (
   item: HostedMailboxResolvedImportItem,
-  context?: { runtimeAttemptId?: string | null },
+  context?: {
+    latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+    runtimeAttemptId?: string | null;
+  },
 ) => Promise<HostedMailboxItemImportOutcome> {
   return (item, context) =>
     importHostedConversationMailboxItem({
       ...input,
       item,
+      latencyMilestones: context?.latencyMilestones ?? null,
       runtimeAttemptId: context?.runtimeAttemptId ?? null,
     });
 }
@@ -217,6 +224,7 @@ export async function importHostedConversationMailboxItem(input: {
   loadAttachmentEvidenceCapture?: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
   item: HostedMailboxResolvedImportItem;
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
@@ -303,6 +311,7 @@ export async function importHostedConversationMailboxItem(input: {
   recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
     inputId: stagedInput.inputId,
     item: input.item,
+    latencyMilestones: input.latencyMilestones ?? null,
     runtime: input.runtime,
     runtimeAttemptId: input.runtimeAttemptId ?? null,
     wake: decoded.wake,
@@ -331,6 +340,7 @@ export async function importHostedConversationMailboxItem(input: {
 function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(input: {
   inputId: string;
   item: HostedMailboxResolvedImportItem;
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
   runtimeAttemptId?: string | null;
   wake: HostedExecutionConversationMessageWake;
@@ -349,9 +359,18 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
         assistantInputId: input.inputId,
         at: new Date().toISOString(),
         mailboxItemId: input.item.item.id,
+        ...(input.latencyMilestones?.runnerJobAcceptedAt === undefined
+          ? {}
+          : { runnerJobAcceptedAt: input.latencyMilestones.runnerJobAcceptedAt }),
         runtimeAttemptId: input.runtimeAttemptId ?? null,
+        ...(input.latencyMilestones?.runtimePhaseStartedAt === undefined
+          ? {}
+          : { runtimePhaseStartedAt: input.latencyMilestones.runtimePhaseStartedAt }),
         source: "linq",
         type: "assistant_input_staged",
+        ...(input.latencyMilestones?.workspaceRestoreDoneAt === undefined
+          ? {}
+          : { workspaceRestoreDoneAt: input.latencyMilestones.workspaceRestoreDoneAt }),
       },
     }).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.

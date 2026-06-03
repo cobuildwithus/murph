@@ -13,6 +13,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   recordHostedIngressAssistantInputStaged,
   recordHostedIngressProviderStarted,
+  recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -38,17 +39,28 @@ export const POST = withJsonError(async (request: Request) => {
         at: traceRequest.event.at,
         authenticatedUserId,
         mailboxItemId: traceRequest.event.mailboxItemId,
+        runnerJobAcceptedAt: traceRequest.event.runnerJobAcceptedAt,
         runtimeAttemptId,
+        runtimePhaseStartedAt: traceRequest.event.runtimePhaseStartedAt,
         source: traceRequest.event.source,
+        workspaceRestoreDoneAt: traceRequest.event.workspaceRestoreDoneAt,
       })
-    : await recordHostedIngressProviderStarted({
-        assistantInputIds: traceRequest.event.assistantInputIds,
-        at: traceRequest.event.at,
-        authenticatedUserId,
-        providerRequestOrdinal: traceRequest.event.providerRequestOrdinal,
-        runtimeAttemptId,
-        source: traceRequest.event.source,
-      });
+    : traceRequest.event.type === "provider_started"
+      ? await recordHostedIngressProviderStarted({
+          assistantInputIds: traceRequest.event.assistantInputIds,
+          at: traceRequest.event.at,
+          authenticatedUserId,
+          providerRequestOrdinal: traceRequest.event.providerRequestOrdinal,
+          runtimeAttemptId,
+          source: traceRequest.event.source,
+        })
+      : await recordHostedIngressRuntimeMilestone({
+          at: traceRequest.event.at,
+          authenticatedUserId,
+          milestone: traceRequest.event.milestone,
+          runtimeAttemptId,
+          source: traceRequest.event.source,
+        });
 
   if (result.unmatchedCount > 0) {
     const eventType = traceRequest.event.type;

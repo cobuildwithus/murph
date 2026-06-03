@@ -34,6 +34,7 @@ import {
   type HostedMailboxItem,
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
+  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -288,6 +289,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
 
     try {
       process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
@@ -309,6 +311,7 @@ describe("hosted workspace runtime entrypoint", () => {
           throw new Error("Phase-boundary test should not import mailbox items.");
         },
         platform: createPlatform({
+          latencyTraceRequests,
           mailboxPort: createMailboxPort({ events: [], fetchRequests, items: [] }),
           workspacePort: createWorkspacePort({
             checkpointRequests: [],
@@ -367,6 +370,14 @@ describe("hosted workspace runtime entrypoint", () => {
         fetchedCount: 0,
         importedCount: 0,
       }));
+      expect(latencyTraceRequests.map((request) => request.event)).toEqual([
+        expect.objectContaining({
+          milestone: "mailbox_import_done",
+          runtimeAttemptId: "attempt_synthetic_phase_boundaries",
+          source: "linq",
+          type: "runtime_milestone",
+        }),
+      ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "system" },
@@ -7608,6 +7619,7 @@ function createPlatform(input: {
   artifactPutCalls?: Array<{ byteLength: number; sha256: string }>;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   events?: string[];
+  latencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort | null;
   runtimeLivenessIntervalMs?: number | null;
@@ -7658,6 +7670,20 @@ function createPlatform(input: {
                 }
               });
               return { loggedCount: request.entries.length };
+            },
+          },
+        }
+      : {}),
+    ...(input.latencyTraceRequests
+      ? {
+          latencyTracePort: {
+            async record(request: HostedRuntimeLatencyTraceRequest) {
+              input.latencyTraceRequests?.push(request);
+              return {
+                matchedCount: 1,
+                recorded: true,
+                unmatchedCount: 0,
+              };
             },
           },
         }

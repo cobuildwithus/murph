@@ -515,6 +515,7 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
+      const runnerJobAcceptedAt = new Date().toISOString();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -560,6 +561,7 @@ export async function startHostedContainerEntrypoint(input: {
             hostedContainerPoisoned = true;
           }
         },
+        runnerJobAcceptedAt,
         signal: requestAbort.signal,
       });
       directInvocationReturned = true;
@@ -2275,11 +2277,13 @@ async function runHostedWorkspaceInvocation(
   runtime: HostedContainerRuntimeDependencies,
   options?: {
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    runnerJobAcceptedAt?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
   return await runtime.runWorkspaceInvocation(input, {
     onRuntimeWakeReady: options?.onRuntimeWakeReady,
+    runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
     signal: options?.signal,
     supervisorEnv: runtime.startupConfig.supervisorEnv,
   });
@@ -2291,6 +2295,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   options?: {
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
     onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    runnerJobAcceptedAt?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {

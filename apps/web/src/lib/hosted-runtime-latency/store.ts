@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   type HostedIngressLatencySource,
+  type HostedRuntimeLatencyTraceMilestone,
 } from "@murphai/hosted-execution/runtime-control";
 import { type PrismaClient } from "@prisma/client";
 
@@ -19,6 +20,12 @@ type HostedIngressLatencyPrismaClient = Pick<
 type HostedIngressLatencyTraceRow = Awaited<
   ReturnType<PrismaClient["hostedIngressLatencyTrace"]["findFirst"]>
 >;
+
+type HostedIngressLatencyRuntimeMilestoneField =
+  | "runnerJobAcceptedAt"
+  | "runtimePhaseStartedAt"
+  | "workspaceRestoreDoneAt"
+  | "mailboxImportDoneAt";
 
 const HOSTED_INGRESS_LATENCY_DEFAULT_WINDOW_HOURS = 24;
 const HOSTED_INGRESS_LATENCY_MAX_WINDOW_HOURS = 24 * 7;
@@ -141,12 +148,27 @@ export async function recordHostedIngressAssistantInputStaged(input: {
   authenticatedUserId: string;
   mailboxItemId: string;
   prisma?: HostedIngressLatencyPrismaClient;
+  runnerJobAcceptedAt?: Date | string | null;
   runtimeAttemptId?: string | null;
+  runtimePhaseStartedAt?: Date | string | null;
   source: HostedIngressLatencySource | string;
+  workspaceRestoreDoneAt?: Date | string | null;
 }): Promise<HostedIngressLatencyWriteResult> {
   const prisma = input.prisma ?? getPrisma();
   const source = normalizeHostedIngressLatencySource(input.source);
   const at = normalizeDate(input.at, "Hosted ingress latency assistant input staged at");
+  const runnerJobAcceptedAt = normalizeOptionalDate(
+    input.runnerJobAcceptedAt,
+    "Hosted ingress latency runner job accepted at",
+  );
+  const runtimePhaseStartedAt = normalizeOptionalDate(
+    input.runtimePhaseStartedAt,
+    "Hosted ingress latency runtime phase started at",
+  );
+  const workspaceRestoreDoneAt = normalizeOptionalDate(
+    input.workspaceRestoreDoneAt,
+    "Hosted ingress latency workspace restore done at",
+  );
   const assistantInputId = requireSafeLatencyIdentifier(
     input.assistantInputId,
     "Hosted ingress latency assistantInputId",
@@ -187,6 +209,17 @@ export async function recordHostedIngressAssistantInputStaged(input: {
         trace.assistantInputStagedAt && trace.assistantInputStagedAt <= at
           ? trace.assistantInputStagedAt
           : at,
+      ...readEarlierDateUpdate("runnerJobAcceptedAt", trace.runnerJobAcceptedAt, runnerJobAcceptedAt),
+      ...readEarlierDateUpdate(
+        "runtimePhaseStartedAt",
+        trace.runtimePhaseStartedAt,
+        runtimePhaseStartedAt,
+      ),
+      ...readEarlierDateUpdate(
+        "workspaceRestoreDoneAt",
+        trace.workspaceRestoreDoneAt,
+        workspaceRestoreDoneAt,
+      ),
       ...(trace.runtimeAttemptId || !runtimeAttemptId ? {} : { runtimeAttemptId }),
     },
     where: {
@@ -267,6 +300,46 @@ export async function recordHostedIngressProviderStarted(input: {
     matchedCount: matchedRows.length,
     recorded: matchedRows.length > 0,
     unmatchedCount: assistantInputIds.filter((id) => !matchedIds.has(id)).length,
+  };
+}
+
+export async function recordHostedIngressRuntimeMilestone(input: {
+  at?: Date | string | null;
+  authenticatedUserId: string;
+  milestone: HostedRuntimeLatencyTraceMilestone;
+  prisma?: HostedIngressLatencyPrismaClient;
+  runtimeAttemptId?: string | null;
+  source: HostedIngressLatencySource | string;
+}): Promise<HostedIngressLatencyWriteResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const source = normalizeHostedIngressLatencySource(input.source);
+  const at = normalizeDate(input.at, "Hosted ingress latency runtime milestone at");
+  const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
+  const userId = requireSafeLatencyIdentifier(
+    input.authenticatedUserId,
+    "Hosted ingress latency userId",
+  );
+
+  if (!runtimeAttemptId) {
+    return {
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    };
+  }
+
+  const matchedCount = await updateHostedIngressLatencyRuntimeMilestone(prisma, {
+    at,
+    milestone: input.milestone,
+    runtimeAttemptId,
+    source,
+    userId,
+  });
+
+  return {
+    matchedCount,
+    recorded: matchedCount > 0,
+    unmatchedCount: 0,
   };
 }
 
@@ -533,6 +606,52 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
   });
 }
 
+async function updateHostedIngressLatencyRuntimeMilestone(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    at: Date;
+    milestone: HostedRuntimeLatencyTraceMilestone;
+    runtimeAttemptId: string;
+    source: HostedIngressLatencySource;
+    userId: string;
+  },
+): Promise<number> {
+  const baseWhere = {
+    runtimeAttemptId: input.runtimeAttemptId,
+    source: input.source,
+    userId: input.userId,
+  };
+
+  const field = readHostedIngressLatencyRuntimeMilestoneField(input.milestone);
+  const result = await prisma.hostedIngressLatencyTrace.updateMany({
+    data: {
+      [field]: input.at,
+    },
+    where: {
+      ...baseWhere,
+      AND: [
+        { OR: [{ [field]: null }, { [field]: { gt: input.at } }] },
+      ],
+    },
+  });
+  return result.count;
+}
+
+function readHostedIngressLatencyRuntimeMilestoneField(
+  milestone: HostedRuntimeLatencyTraceMilestone,
+): HostedIngressLatencyRuntimeMilestoneField {
+  switch (milestone) {
+    case "runner_job_accepted":
+      return "runnerJobAcceptedAt";
+    case "runtime_phase_started":
+      return "runtimePhaseStartedAt";
+    case "workspace_restore_done":
+      return "workspaceRestoreDoneAt";
+    case "mailbox_import_done":
+      return "mailboxImportDoneAt";
+  }
+}
+
 async function updateHostedIngressLatencyTraceEarliestMilestone(
   prisma: HostedIngressLatencyPrismaClient,
   input: {
@@ -568,6 +687,22 @@ function normalizeDate(value: Date | string | null | undefined, label: string): 
     throw new TypeError(`${label} must be a valid date.`);
   }
   return date;
+}
+
+function normalizeOptionalDate(value: Date | string | null | undefined, label: string): Date | null {
+  return value === undefined || value === null ? null : normalizeDate(value, label);
+}
+
+function readEarlierDateUpdate<Field extends string>(
+  field: Field,
+  existing: Date | null | undefined,
+  next: Date | null,
+): Partial<Record<Field, Date>> {
+  if (!next || (existing && existing <= next)) {
+    return {};
+  }
+
+  return { [field]: next } as Partial<Record<Field, Date>>;
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {

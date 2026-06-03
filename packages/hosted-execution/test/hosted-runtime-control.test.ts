@@ -617,18 +617,24 @@ describe("hosted runtime control contracts", () => {
         assistantInputId: "input_1",
         at: "2026-04-26T00:00:00.000Z",
         mailboxItemId: "mailbox_item_1",
+        runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
         runtimeAttemptId: "attempt_1",
+        runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
         source: "linq",
         type: "assistant_input_staged",
+        workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
       },
     })).toEqual({
       event: {
         assistantInputId: "input_1",
         at: "2026-04-26T00:00:00.000Z",
         mailboxItemId: "mailbox_item_1",
+        runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
         runtimeAttemptId: "attempt_1",
+        runtimePhaseStartedAt: "2026-04-26T00:00:00.200Z",
         source: "linq",
         type: "assistant_input_staged",
+        workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
       },
     });
     expect(parseHostedRuntimeLatencyTraceRequest({
@@ -648,6 +654,23 @@ describe("hosted runtime control contracts", () => {
         runtimeAttemptId: null,
         source: "linq",
         type: "provider_started",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "mailbox_import_done",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "runtime_milestone",
+      },
+    })).toEqual({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "mailbox_import_done",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "runtime_milestone",
       },
     });
     expect(parseHostedRuntimeLatencyTraceResponse({
@@ -689,6 +712,14 @@ describe("hosted runtime control contracts", () => {
         type: "provider_started",
       },
     })).toThrow(/message is not allowed/u);
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "provider_done",
+        source: "linq",
+        type: "runtime_milestone",
+      },
+    })).toThrow(/milestone/u);
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {

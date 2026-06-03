@@ -190,6 +190,7 @@ describe("runHostedWorkspaceInvocation", () => {
 
     await expect(runHostedWorkspaceInvocation(job, {
       onRuntimeWakeReady,
+      runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
       signal: abortController.signal,
       supervisorEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
@@ -209,6 +210,9 @@ describe("runHostedWorkspaceInvocation", () => {
     });
     expect(capturedInput.vaultRoot).toBe(expectedVaultRoot);
     expect(capturedInput.mailboxPayloadDecoder).toBeTruthy();
+    expect(capturedInput.latencyMilestones).toEqual({
+      runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
+    });
     expect(capturedInput.platform).toBeTruthy();
     expect(typeof capturedInput.readCurrentLease).toBe("function");
     expect(capturedInput.snapshotArchiveBuilder).toBeTruthy();

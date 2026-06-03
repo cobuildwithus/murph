@@ -2,6 +2,7 @@ import {
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressAssistantInputStaged,
   recordHostedIngressProviderStarted,
+  recordHostedIngressRuntimeMilestone,
   recordHostedIngressTemporalSignalAccepted,
   readHostedIngressLatencyDashboard,
   type HostedIngressLatencyDashboardInput,
@@ -185,6 +186,67 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.providerStartAt?.toISOString()).toBe("2026-06-02T19:10:22.000Z");
     expect(trace?.providerRequestOrdinal).toBe(0);
   });
+
+  it("records runtime milestones only after the staged row owns the exact attempt", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T20:00:00.000Z")),
+    });
+
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+    });
+    const earlyMilestoneResult = await recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T20:00:03.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "runner_job_accepted",
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    expect(earlyMilestoneResult).toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    expect(prisma.readTrace()?.runnerJobAcceptedAt).toBeNull();
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_latency_1",
+      at: instant("2026-06-02T20:00:05.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runnerJobAcceptedAt: instant("2026-06-02T20:00:01.000Z"),
+      runtimeAttemptId: "attempt_latency_1",
+      runtimePhaseStartedAt: instant("2026-06-02T20:00:02.000Z"),
+      source: "linq",
+      workspaceRestoreDoneAt: instant("2026-06-02T20:00:04.000Z"),
+    });
+
+    const result = await recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T20:00:06.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "mailbox_import_done",
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    const trace = prisma.readTrace();
+    expect(result).toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    expect(trace?.runnerJobAcceptedAt?.toISOString()).toBe("2026-06-02T20:00:01.000Z");
+    expect(trace?.runtimePhaseStartedAt?.toISOString()).toBe("2026-06-02T20:00:02.000Z");
+    expect(trace?.workspaceRestoreDoneAt?.toISOString()).toBe("2026-06-02T20:00:04.000Z");
+    expect(trace?.mailboxImportDoneAt?.toISOString()).toBe("2026-06-02T20:00:06.000Z");
+    expect(trace?.runtimeAttemptId).toBe("attempt_latency_1");
+  });
 });
 
 function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {
@@ -229,14 +291,29 @@ function createLatencyWritePrisma(input: {
         assistantInputId: null,
         assistantInputStagedAt: null,
         createdAt: instant("2026-06-02T12:00:00.000Z"),
+        mailboxImportDoneAt: null,
         providerRequestOrdinal: null,
         providerStartAt: null,
+        runnerJobAcceptedAt: null,
         runtimeAttemptId: null,
+        runtimePhaseStartedAt: null,
         temporalSignalAcceptedAt: null,
         updatedAt: instant("2026-06-02T12:00:00.000Z"),
+        workspaceRestoreDoneAt: null,
       };
     }
     return trace;
+  });
+  const updateMany = vi.fn(async (args: LatencyTraceUpdateManyInput) => {
+    if (!trace || !matchesLatencyTraceUpdateManyWhere(trace, args.where)) {
+      return { count: 0 };
+    }
+    trace = {
+      ...trace,
+      ...args.data,
+      updatedAt: instant("2026-06-02T12:00:00.000Z"),
+    };
+    return { count: 1 };
   });
   const update = vi.fn(async (args: LatencyTraceUpdateInput) => {
     if (!trace) {
@@ -253,6 +330,7 @@ function createLatencyWritePrisma(input: {
     $queryRaw: queryRaw,
     hostedIngressLatencyTrace: {
       findMany,
+      updateMany,
       upsert,
       update,
     },
@@ -281,11 +359,15 @@ type MutableLatencyTrace = LatencyTraceCreateInput & {
   assistantInputId: string | null;
   assistantInputStagedAt: Date | null;
   createdAt: Date;
+  mailboxImportDoneAt: Date | null;
   providerRequestOrdinal: number | null;
   providerStartAt: Date | null;
+  runnerJobAcceptedAt: Date | null;
   runtimeAttemptId: string | null;
+  runtimePhaseStartedAt: Date | null;
   temporalSignalAcceptedAt: Date | null;
   updatedAt: Date;
+  workspaceRestoreDoneAt: Date | null;
 };
 
 type LatencyTraceCreateInput = {
@@ -305,6 +387,11 @@ type LatencyTraceUpdateInput = {
   };
 };
 
+type LatencyTraceUpdateManyInput = {
+  data: Partial<Omit<MutableLatencyTrace, "id">>;
+  where: unknown;
+};
+
 type LatencyTraceUpsertInput = {
   create: LatencyTraceCreateInput;
   update: Record<string, never>;
@@ -312,3 +399,16 @@ type LatencyTraceUpsertInput = {
     mailboxItemId: string;
   };
 };
+
+function matchesLatencyTraceUpdateManyWhere(
+  trace: MutableLatencyTrace,
+  where: unknown,
+): boolean {
+  if (!where || typeof where !== "object") {
+    return false;
+  }
+  const record = where as Record<string, unknown>;
+  return record.runtimeAttemptId === trace.runtimeAttemptId
+    && record.source === trace.source
+    && record.userId === trace.userId;
+}
