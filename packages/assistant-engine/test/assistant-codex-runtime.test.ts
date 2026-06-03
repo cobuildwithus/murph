@@ -1864,6 +1864,95 @@ describe('assistant codex runtime', () => {
     expect(requireMockChildProcess(child).killed).toBe(false)
   })
 
+  it('rejects stale unsupported warm server requests before replying', async () => {
+    const hostedCodexHome = await createTempDir('assistant-codex-warm-stale-unsupported-request-home-')
+    const workingDirectory = await createTempDir('assistant-codex-warm-stale-unsupported-request-work-')
+    let child: MockChildProcess | null = null
+
+    codexMocks.spawn.mockImplementation(() => {
+      const spawnedChild = new MockChildProcess()
+      spawnedChild.pid = 22_550
+      child = spawnedChild
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
+
+          await writeHostedWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 1,
+            threadId: 'thread-stale-unsupported-request',
+            turnId: 'turn-stale-unsupported-request-one',
+          })
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              status: 'completed',
+              turnId: 'turn-stale-unsupported-request-one',
+            },
+          }))
+
+          await writeHostedWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 2,
+            threadId: 'thread-stale-unsupported-request',
+            turnId: 'turn-stale-unsupported-request-two',
+          })
+          spawnedChild.stdout.write(jsonLine({
+            id: 99,
+            method: 'approval/request',
+            params: {
+              reason: 'stale unsupported request shape',
+              turnId: 'turn-stale-unsupported-request-one',
+            },
+          }))
+        })()
+      })
+
+      return spawnedChild
+    })
+
+    const hostedEnv = {
+      CODEX_HOME: hostedCodexHome,
+      MURPH_HOSTED_RUNTIME_PROCESS: '1',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'first stale unsupported request turn',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      turnId: 'turn-stale-unsupported-request-one',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        env: hostedEnv,
+        prompt: 'second stale unsupported request turn',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
+      context: {
+        eventMethod: 'approval/request',
+        eventTurnIdPresent: true,
+        expectedTurnIdPresent: true,
+        retryable: true,
+      },
+    })
+
+    expect(
+      readWrittenRpcMessages(requireMockChildProcess(child)).some(
+        (message) => message.id === 99,
+      ),
+    ).toBe(false)
+  })
+
   it('poisons hosted warm Codex on unknown RPC responses during an active turn', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-late-rpc-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-late-rpc-work-')

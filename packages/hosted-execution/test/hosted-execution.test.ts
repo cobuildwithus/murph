@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,9 @@ import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
+import type {
+  HostedExpectedCodexRootProcess as HostedExpectedCodexRootProcessFromRuntimeControl,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   assessBrowserVaultReplicaFreshness,
   getBrowserVaultReplicaFreshness,
@@ -451,6 +454,9 @@ describe("hosted execution coverage gaps", () => {
       string,
       unknown
     >;
+    type RuntimeControlCodexRootProcess = HostedExpectedCodexRootProcessFromRuntimeControl;
+    // @ts-expect-error HostedExpectedCodexRootProcess must stay on the runtime-control subpath.
+    type RootCodexRootProcess = import("@murphai/hosted-execution").HostedExpectedCodexRootProcess;
 
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
@@ -460,6 +466,14 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expectTypeOf<RuntimeControlCodexRootProcess>().toEqualTypeOf<{
+      commandLineDigest: string;
+      owner: "codex-app-server";
+      pid: number;
+      processGroupId: number | null;
+      startTimeTicksFromProcStat: string;
+      uid: number | null;
+    }>();
     expect(rootModule.parseAssistantUsageRecord).toBeTypeOf("function");
     expect(assistantUsageModule.parseAssistantUsageRecord).toBeTypeOf("function");
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);

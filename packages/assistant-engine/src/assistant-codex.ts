@@ -1590,6 +1590,15 @@ async function runCodexAppServerTurnOnProcess(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       const requestMethod = typeof message.method === 'string' ? message.method : null
+      const requestTurnId = extractCodexTurnIdFromMessage(message)
+      if (requestTurnId) {
+        const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
+        if (correlationError) {
+          rejectOnce(correlationError)
+          return
+        }
+      }
+
       const dynamicToolRequest = readMurphDynamicToolRequest(message)
       if (!dynamicToolRequest) {
         denyUnsupportedCodexServerRequest({
@@ -1629,7 +1638,9 @@ async function runCodexAppServerTurnOnProcess(
         return
       }
 
-      const correlationError = validateWarmTurnEventCorrelation(message, requestMethod)
+      const correlationError = requestTurnId
+        ? null
+        : validateWarmTurnEventCorrelation(message, requestMethod)
       if (correlationError) {
         rejectOnce(correlationError)
         return
