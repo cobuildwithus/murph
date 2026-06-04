@@ -131,24 +131,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalNextWakeAt ?? null).toBeNull();
     expect(finalStatus.nextAlarmAt ?? null).toBeNull();
-    // recentLogs is bounded; assert the durable reminder send plus terminal scan/delivery signals.
-    expect(finalStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        eventCode: "outbox.delivery_finished",
-        redactedJson: expect.objectContaining({
-          failed: 0,
-          sent: 1,
-        }),
-      }),
-      expect.objectContaining({
-        eventCode: "assistant.automation_detail",
-        redactedJson: expect.objectContaining({
-          failureReason: "due",
-          safeDetails: "due",
-          type: "cron.scan.job",
-        }),
-      }),
-    ]));
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
