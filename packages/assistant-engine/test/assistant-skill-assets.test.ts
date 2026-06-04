@@ -133,10 +133,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Use this skill only when the current prompt includes the `Conversation onboarding:` activation',
     )
-    expect(raw).toContain('roughly 7-8 short assistant messages')
+    expect(raw).toContain('roughly 8-9 short assistant messages')
     expect(raw).toContain(
       'age plus gender first, then the wearable/app checkpoint',
     )
+    expect(raw).toContain('then movement/training context')
     expect(raw).toContain('then current health protocols or experiments')
     expect(raw).toContain('then current supplements with brand or product names')
     expect(raw).toContain('roughly how long they have taken them or since when')
@@ -167,6 +168,35 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
+    )
+    expect(raw).toContain(
+      'current fitness level, activity, workout routine, and movement/training context',
+    )
+    expect(raw).toContain('rough, stream-of-consciousness context dump')
+    expect(raw).toContain(
+      'Include a short examples list to help the user formulate a typed reply or voice memo',
+    )
+    expect(raw).toContain('keep the examples in list form, not one long paragraph')
+    expect(raw).toContain('- usual weekly exercise rhythm')
+    expect(raw).toContain('- classes, lifting, running, cardio, sports, or walking')
+    expect(raw).toContain('- races or training blocks like a 5K, marathon, or triathlon')
+    expect(raw).toContain(
+      '- recent benchmarks like VO2 max, mile time, lifts, pace, or zones',
+    )
+    expect(raw).toContain(
+      '- injuries, limitations, or anything they are trying to improve',
+    )
+    expect(raw).toContain(
+      'stream-of-consciousness voice memo if that is easier',
+    )
+    expect(raw).toContain(
+      'If the user sends a voice memo and the assistant will inspect, transcribe, summarize, or save it',
+    )
+    expect(raw).toContain(
+      'call `send_progress_update` before reading the content or using file/transcription tools',
+    )
+    expect(raw).toContain(
+      'Save useful movement/training context to Context memory',
     )
     expect(raw).toContain(
       'whether they are already trying any health protocols or experiments',
@@ -212,24 +242,30 @@ describe('assistant skill assets', () => {
     const wearableIndex = raw.indexOf(
       '4. Data sources and wearables. This is a required onboarding checkpoint',
     )
+    const hostedWearableIndex = raw.indexOf(
+      '5. Hosted wearable handling.',
+    )
+    const movementIndex = raw.indexOf('6. Movement and training context.')
     const protocolsIndex = raw.indexOf(
-      '6. Current protocols or experiments.',
+      '7. Current protocols or experiments.',
     )
     const supplementsIndex = raw.indexOf(
-      '7. Supplements.',
+      '8. Supplements.',
     )
     const bloodTestsIndex = raw.indexOf(
-      '8. Blood tests.',
+      '9. Blood tests.',
     )
-    const orientationIndex = raw.indexOf('9. Orientation.')
+    const orientationIndex = raw.indexOf('10. Orientation.')
     const firstExperimentIndex = raw.indexOf(
-      '10. First experiment or logging decision.',
+      '11. First experiment or logging decision.',
     )
     expect(nameContextIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThan(nameContextIndex)
     expect(wearableIndex).toBeGreaterThan(highLevelIndex)
-    expect(protocolsIndex).toBeGreaterThan(wearableIndex)
+    expect(hostedWearableIndex).toBeGreaterThan(wearableIndex)
+    expect(movementIndex).toBeGreaterThan(hostedWearableIndex)
+    expect(protocolsIndex).toBeGreaterThan(movementIndex)
     expect(supplementsIndex).toBeGreaterThan(protocolsIndex)
     expect(bloodTestsIndex).toBeGreaterThan(supplementsIndex)
     expect(orientationIndex).toBeGreaterThan(bloodTestsIndex)
@@ -264,10 +300,31 @@ describe('assistant skill assets', () => {
     )
     expect(raw.slice(nameContextIndex, highLevelIndex)).toContain('```text')
     expect(raw.slice(highLevelIndex, wearableIndex)).not.toContain('```text')
+    const movementSection = raw.slice(movementIndex, protocolsIndex)
+    const movementExamples = [
+      '- usual weekly exercise rhythm',
+      '- classes, lifting, running, cardio, sports, or walking',
+      '- races or training blocks like a 5K, marathon, or triathlon',
+      '- recent benchmarks like VO2 max, mile time, lifts, pace, or zones',
+      '- injuries, limitations, or anything they are trying to improve',
+    ]
+    for (const movementExample of movementExamples) {
+      expect(movementSection).toContain(movementExample)
+    }
+    expect(movementSection).toContain(
+      'stream-of-consciousness voice memo if that is easier',
+    )
+    expect(movementSection).toContain(
+      'call `send_progress_update` before reading the content or using file/transcription tools',
+    )
+    expect(movementSection).toContain(
+      'Save useful movement/training context to Context memory',
+    )
+    expect(movementSection).not.toContain('```text')
     expect(raw.slice(protocolsIndex, supplementsIndex)).not.toContain('```text')
     expect(raw.slice(supplementsIndex, bloodTestsIndex)).not.toContain('```text')
     expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
-    expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(4)
+    expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
     const removedFixedScripts = [
       'One high-level setup detail first: what age and gender should I use for context? You can skip either.',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',
@@ -292,10 +349,10 @@ describe('assistant skill assets', () => {
       'If they send PDFs or pasted lab results, handle them through normal attachment/message intake',
     )
     expect(raw).toContain(
-      'broad health context, supplements, protocols, experiments, dated age context, gender, or interests go to memory',
+      'broad health context, movement/training context, supplements, protocols, experiments, dated age context, gender, or interests go to memory',
     )
     expect(raw).toContain(
-      'supplement names and timing, current protocols or experiments',
+      'movement/training context, fitness benchmarks, supplement names and timing, current protocols or experiments',
     )
     expect(raw).toContain(
       'Age: save as dated Context memory using the current prompt\'s local date',
@@ -303,7 +360,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('User was 20 years old on 2026-02-01.')
     expect(raw).toContain('Do not infer or store a birthday from age alone')
     expect(raw).toContain(
-      'high-level age/gender prompt, wearable/app checkpoint, current protocol/experiment prompt, supplement prompt, and blood-test prompt have been asked',
+      'high-level age/gender prompt, wearable/app checkpoint, movement/training prompt, current protocol/experiment prompt, supplement prompt, and blood-test prompt have been asked',
     )
     expect(raw).toContain(
       'verify that every useful setup answer they supplied has already been persisted',
@@ -318,6 +375,9 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('one lightweight, bounded experiment at a time')
     expect(raw).toContain('retrospective baseline')
+    expect(raw).toContain(
+      'One question per turn. Keep each turn short: one paragraph and at most one question, except the movement/training context turn may include a compact examples list',
+    )
     expect(raw).toContain(
       'Useful setup answers are persisted canonically when the user shared them',
     )
