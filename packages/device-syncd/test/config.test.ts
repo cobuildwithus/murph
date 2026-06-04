@@ -15,6 +15,7 @@ import {
   hasConfiguredDeviceSyncProviderConfigs,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncProviderNames,
+  listJunctionLinkDeviceConnectRouteEntries,
   loadDeviceSyncEnvironment,
   resolveConfiguredDeviceSyncConnectTarget,
   parseConfiguredDeviceSyncRuntimeConfig,
@@ -31,6 +32,49 @@ import {
 } from "../src/providers/junction-connect-sources.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
+
+const JUNCTION_LINK_TOKEN_FILTER_PROVIDER_SLUGS = new Set([
+  "abbott_libreview",
+  "accuchek_ble",
+  "apple_health_kit",
+  "beurer_api",
+  "beurer_ble",
+  "contour_ble",
+  "cronometer",
+  "dexcom",
+  "dexcom_v3",
+  "eight_sleep",
+  "fitbit",
+  "freestyle_libre",
+  "freestyle_libre_ble",
+  "garmin",
+  "google_fit",
+  "hammerhead",
+  "health_connect",
+  "ihealth",
+  "kardia",
+  "manual",
+  "map_my_fitness",
+  "my_fitness_pal",
+  "my_fitness_pal_v2",
+  "omron",
+  "omron_ble",
+  "onetouch_ble",
+  "oura",
+  "peloton",
+  "polar",
+  "renpho",
+  "runkeeper",
+  "samsung_health",
+  "strava",
+  "tandem_source",
+  "ultrahuman",
+  "wahoo",
+  "whoop",
+  "whoop_v2",
+  "withings",
+  "zwift",
+]);
 
 test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
   assert.equal(computeRetryDelayMs(1), 15_000);
@@ -233,6 +277,38 @@ test("Junction default provider filter excludes non-Link connect routes", () => 
   assert.throws(
     () => listConfiguredDeviceSyncConnectTargets(sdkOnlyConfigs),
     /unsupported Junction Link provider slugs: accuchek_ble/u,
+  );
+});
+
+test("Junction Link route slugs stay on the external Link token provider enum", () => {
+  const linkRoutes = listJunctionLinkDeviceConnectRouteEntries();
+  const linkRouteSlugs = linkRoutes.map(({ route }) => route.sourceProviderSlug);
+  const unsupportedLinkRouteSlugs = linkRouteSlugs.filter((providerSlug) =>
+    !JUNCTION_LINK_TOKEN_FILTER_PROVIDER_SLUGS.has(providerSlug)
+  );
+
+  assert.deepEqual(unsupportedLinkRouteSlugs, []);
+
+  const whoopRoute = linkRoutes.find(({ source }) => source.connectSourceId === "whoop");
+  const whoopJunctionLinkIdentity = whoopRoute
+    ? {
+        connectSourceId: whoopRoute.source.connectSourceId,
+        connectTarget: whoopRoute.route.connectTarget,
+        sourceProviderSlug: whoopRoute.route.sourceProviderSlug,
+      }
+    : null;
+
+  assert.deepEqual(whoopJunctionLinkIdentity, {
+    connectSourceId: "whoop",
+    connectTarget: "whoop",
+    sourceProviderSlug: "whoop_v2",
+  });
+  assert.equal(linkRouteSlugs.includes("whoop"), false);
+  assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("whoop_v2"), true);
+  assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes("whoop"), false);
+  assert.throws(
+    () => normalizeJunctionProviderFilter(["whoop"]),
+    /unsupported Junction Link provider slugs: whoop/u,
   );
 });
 
