@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile, rm, stat } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
 import { test } from "vitest";
 
 import { initializeVault, upsertEvent } from "@murphai/core";
-import { createUnwiredVaultServices } from "@murphai/vault-usecases";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 
 import { registerBloodTestCommands } from "../src/commands/health-blood-test-save.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
@@ -33,6 +33,23 @@ interface BloodTestSaveResult {
   lookupId: string;
   ledgerFile?: string;
   created: boolean;
+}
+
+interface BloodTestScaffoldResult {
+  vault: string;
+  noun: "blood-test";
+  payload: {
+    results?: Array<{
+      analyte?: string;
+      value?: number;
+      textValue?: string;
+      referenceRange?: {
+        text?: string;
+      };
+      flag?: string;
+      unit?: string;
+    }>;
+  };
 }
 
 interface StoredBloodTestEvent {
@@ -79,7 +96,7 @@ function createBloodTestCli() {
   });
   cli.use(incurErrorBridge);
 
-  registerBloodTestCommands(cli, createUnwiredVaultServices());
+  registerBloodTestCommands(cli, createIntegratedVaultServices());
   return cli;
 }
 
@@ -181,6 +198,16 @@ test("blood-test save schema exposes typed fields while blood-test import-json r
     /key=value|semicolon-separated|compact/u,
   );
 
+  const saveHelp = await runRawInProcessCli(cli, ["blood-test", "save", "--help"]);
+  assert.match(
+    saveHelp,
+    /\{"analyte":"Apolipoprotein B","value":87,"unit":"mg\/dL"/u,
+  );
+  assert.match(
+    saveHelp,
+    /\{"analyte":"ANA","textValue":"Negative","flag":"normal","referenceRange":\{"text":"Negative"\}\}/u,
+  );
+
   const importJsonSchema = await readCommandSchema(cli, ["blood-test", "import-json"]);
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
@@ -188,6 +215,37 @@ test("blood-test save schema exposes typed fields while blood-test import-json r
   await assert.rejects(async () => {
     await readCommandSchema(cli, ["blood-test", "upsert"]);
   });
+});
+
+test("blood-test scaffold includes numeric and text result examples", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-scaffold-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    const scaffold = await runInProcessJsonCli<BloodTestScaffoldResult>(cli, [
+      "blood-test",
+      "scaffold",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(scaffold.exitCode, null, JSON.stringify(scaffold.envelope));
+    const payload = requireData(scaffold.envelope).payload;
+    assert.deepEqual(payload.results?.map((result) => result.analyte), [
+      "Apolipoprotein B",
+      "ANA",
+    ]);
+    assert.equal(payload.results?.[0]?.value, 87);
+    assert.equal(payload.results?.[1]?.textValue, "Negative");
+    assert.equal(payload.results?.[1]?.referenceRange?.text, "Negative");
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
 });
 
 test("blood-test save maps typed fields and can revise a saved event id", async () => {
@@ -358,6 +416,94 @@ test("blood-test save maps typed fields and can revise a saved event id", async 
         flag: "unknown",
       },
     ]);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test import-json points valueText typo at textValue", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-value-text-",
+  );
+  const payloadPath = path.join(parentRoot, "blood-test.json");
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        title: "ANA panel",
+        testName: "ana_panel",
+        results: [
+          {
+            analyte: "ANA",
+            valueText: "Negative",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.equal(
+      imported.envelope.error.message,
+      "results[0].valueText is not supported. Did you mean results[0].textValue?",
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save points valueText typo at textValue", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-value-text-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const saved = await runInProcessJsonCli(cli, [
+      "blood-test",
+      "save",
+      "ANA panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "ana_panel",
+      "--result",
+      JSON.stringify({
+        analyte: "ANA",
+        valueText: "Negative",
+      }),
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.equal(
+      saved.envelope.error.message,
+      "--result.valueText is not supported. Did you mean --result.textValue?",
+    );
   } finally {
     await rm(parentRoot, {
       force: true,

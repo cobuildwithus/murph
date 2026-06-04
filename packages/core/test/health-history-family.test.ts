@@ -861,6 +861,32 @@ test("blood-test writes accept textValue-only results and reject empty or incomp
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
+
+  await assert.rejects(
+    () => {
+      const typoInput = JSON.parse(
+        JSON.stringify({
+          vaultRoot,
+          occurredAt: "2026-03-05T12:00:00.000Z",
+          title: "Blood panel with typo",
+          testName: "typo_panel",
+          results: [
+            {
+              analyte: "ANA",
+              valueText: "Negative",
+            },
+          ],
+        }),
+      );
+
+      return appendBloodTest(typoInput);
+    },
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message ===
+        "results[0].valueText is not supported. Did you mean results[0].textValue?",
+  );
 });
 
 test("isBloodTestHistoryRecord matches blood-category and specimen-driven test records", () => {

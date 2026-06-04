@@ -210,6 +210,13 @@ function normalizeBloodTestResult(
     throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an object.`);
   }
 
+  if ("valueText" in value) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      `${fieldName}.valueText is not supported. Did you mean ${fieldName}.textValue?`,
+    );
+  }
+
   const result = stripUndefined({
     analyte: requireString(value.analyte, `${fieldName}.analyte`, 160),
     slug: normalizeSlugLike(value.slug, `${fieldName}.slug`, 160),

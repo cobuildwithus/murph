@@ -167,6 +167,17 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     );
   }
 
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "valueText")
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "--result.valueText is not supported. Did you mean --result.textValue?",
+    );
+  }
+
   const parsed = bloodTestResultSchema.safeParse(value);
   if (!parsed.success) {
     throw new VaultCliError(
@@ -507,6 +518,7 @@ export function registerBloodTestCommands(
           fastingStatus: "fasting",
           result: [
             '{"analyte":"Apolipoprotein B","value":87,"unit":"mg/dL","flag":"normal","referenceRange":{"text":"<90"}}',
+            '{"analyte":"ANA","textValue":"Negative","flag":"normal","referenceRange":{"text":"Negative"}}',
           ],
           vault: "./vault",
         },

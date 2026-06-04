@@ -462,6 +462,14 @@ const checkedHealthEntityDefinitions = [
           },
           flag: "normal",
         },
+        {
+          analyte: "ANA",
+          textValue: "Negative",
+          referenceRange: {
+            text: "Negative",
+          },
+          flag: "normal",
+        },
       ],
     },
   },
