@@ -951,3 +951,39 @@ it("calls the hosted-local run-until-idle route with idle checkpoint reason", as
     await harness.stop();
   }
 });
+
+it("calls the hosted-local run-until-idle route with alarm reason", async () => {
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    return Response.json({ nextWakeAt: null, status: "idle" });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+  });
+
+  try {
+    await expect(harness.runHostedAlarmInvocationForTest("member_alarm_invocation"))
+      .resolves.toEqual({ nextWakeAt: null, status: "idle" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [request, init] = fetch.mock.calls[0]!;
+    expect(String(request)).toBe(
+      "http://127.0.0.1:8787/__test/users/member_alarm_invocation/run-until-idle?reason=alarm",
+    );
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer oidc-token");
+    expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_alarm_invocation");
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init).toMatchObject({
+      method: "POST",
+    });
+  } finally {
+    await harness.stop();
+  }
+});

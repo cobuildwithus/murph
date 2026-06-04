@@ -7,7 +7,7 @@ import type {
 import {
   shouldExpireHostedLocalLinqWaitInFlightForStatus,
   shouldNudgeHostedLocalLinqWaitForStatus,
-  shouldRunHostedLocalLinqWaitManualInvocationForStatus,
+  shouldRunHostedLocalLinqWaitAlarmInvocationForStatus,
 } from "./hosted-local-linq-support.js";
 
 describe("hosted local Linq wait recovery policy", () => {
@@ -34,10 +34,15 @@ describe("hosted local Linq wait recovery policy", () => {
       now,
       status: createStatus({ inFlight: true, lag: "0", pendingDeliveryEffects: 1 }),
     })).toBe(false);
-    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
       now,
       pendingDeliveryFirstObservedAt: now - 20_000,
-      status: createStatus({ inFlight: true, lag: "0", pendingDeliveryEffects: 1 }),
+      status: createStatus({
+        inFlight: true,
+        lag: "0",
+        nextWakeAt: new Date(now - 1).toISOString(),
+        pendingDeliveryEffects: 1,
+      }),
     })).toBe(false);
     expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
       now,
@@ -64,18 +69,35 @@ describe("hosted local Linq wait recovery policy", () => {
     })).toBe(true);
   });
 
-  it("runs a manual invocation after pending delivery effects have remained recoverable", () => {
+  it("runs an alarm invocation after pending delivery effects have remained recoverable and due", () => {
     const now = Date.now();
 
-    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
       now,
       pendingDeliveryFirstObservedAt: now - 1_999,
-      status: createStatus({ lag: "0", pendingDeliveryEffects: 1 }),
+      status: createStatus({
+        lag: "0",
+        nextWakeAt: new Date(now - 1).toISOString(),
+        pendingDeliveryEffects: 1,
+      }),
     })).toBe(false);
-    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
       now,
       pendingDeliveryFirstObservedAt: now - 2_000,
-      status: createStatus({ lag: "0", pendingDeliveryEffects: 1 }),
+      status: createStatus({
+        lag: "0",
+        nextWakeAt: new Date(now + 1).toISOString(),
+        pendingDeliveryEffects: 1,
+      }),
+    })).toBe(false);
+    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
+      now,
+      pendingDeliveryFirstObservedAt: now - 2_000,
+      status: createStatus({
+        lag: "0",
+        nextWakeAt: new Date(now).toISOString(),
+        pendingDeliveryEffects: 1,
+      }),
     })).toBe(true);
     expect(shouldNudgeHostedLocalLinqWaitForStatus({
       mailboxLagFirstObservedAt: null,
@@ -92,10 +114,14 @@ describe("hosted local Linq wait recovery policy", () => {
       now,
       status: createStatus({ lag: "1", pendingDeliveryEffects: 1 }),
     })).toBe(true);
-    expect(shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+    expect(shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
       now,
       pendingDeliveryFirstObservedAt: now - 1,
-      status: createStatus({ lag: "1", pendingDeliveryEffects: 1 }),
+      status: createStatus({
+        lag: "1",
+        nextWakeAt: new Date(now - 1).toISOString(),
+        pendingDeliveryEffects: 1,
+      }),
     })).toBe(false);
   });
 
@@ -136,6 +162,7 @@ function createStatus(input: {
   lag: string;
   lastInvocationAt?: string | null;
   lastErrorCode?: string | null;
+  nextWakeAt?: string | null;
   pendingDeliveryEffects?: number | string;
 }): HostedRunnerStatusResponse {
   return {
@@ -158,7 +185,7 @@ function createStatus(input: {
           browserVaultReplicaRef: null,
           checkpointedAt: "2026-05-08T00:00:04.000Z",
           createdAt: "2026-05-08T00:00:00.000Z",
-          nextWakeAt: null,
+          nextWakeAt: input.nextWakeAt ?? null,
           nextWakeReason: null,
           redactedStatus: {
             hostedOutboxPendingDeliveryEffects: input.pendingDeliveryEffects,

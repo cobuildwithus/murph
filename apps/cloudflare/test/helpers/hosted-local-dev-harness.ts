@@ -49,6 +49,7 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
+  runHostedAlarmInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
@@ -183,6 +184,7 @@ export async function startHostedLocalDevHarness(input: {
       },
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
       expireRunnerActivityForTest,
+      runHostedAlarmInvocationForTest,
       runHostedManualInvocationForTest,
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
@@ -479,8 +481,21 @@ export async function startHostedLocalDevHarness(input: {
   async function runHostedManualInvocationForTest(
     userId: string,
   ): Promise<HostedWorkspaceInvocationResult> {
+    return await runHostedWorkspaceInvocationForTest(userId, "manual");
+  }
+
+  async function runHostedAlarmInvocationForTest(
+    userId: string,
+  ): Promise<HostedWorkspaceInvocationResult> {
+    return await runHostedWorkspaceInvocationForTest(userId, "alarm");
+  }
+
+  async function runHostedWorkspaceInvocationForTest(
+    userId: string,
+    reason: HostedWorkspaceInvocationReason,
+  ): Promise<HostedWorkspaceInvocationResult> {
     return await requestJsonForRuntime<HostedWorkspaceInvocationResult>(
-      `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=manual`,
+      `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=${encodeURIComponent(reason)}`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

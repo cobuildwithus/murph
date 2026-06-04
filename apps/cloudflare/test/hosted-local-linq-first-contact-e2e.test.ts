@@ -1281,7 +1281,7 @@ async function startLinqScenario(
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqFirstContactLocalInboundAllowlist(),
-      LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+      LINQ_API_BASE_URL: requireLinqStub().containerBaseUrl,
       LINQ_API_TOKEN: linqApiToken,
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_EXPECT_DYNAMIC_TOOLS_ENV]:

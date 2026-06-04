@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
 import { deflateSync } from "node:zlib";
 
@@ -38,9 +39,10 @@ export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boole
 
 const linqCreateChatPath = "/chats";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
+const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
 const hostedLocalLinqWaitExpireAfterInFlightMs = 30_000;
 const hostedLocalLinqWaitNudgeAfterMailboxLagMs = 15_000;
-const hostedLocalLinqWaitManualRunAfterPendingDeliveryMs = 2_000;
+const hostedLocalLinqWaitAlarmAfterPendingDeliveryMs = 2_000;
 
 type HostedLinqInboundPartInput =
   | {
@@ -60,6 +62,7 @@ export interface HostedLocalLinqStub {
   attachmentDownloadContainerBaseUrl: string;
   attachmentDownloadBaseUrl: string;
   baseUrl: string;
+  containerBaseUrl: string;
   countObservedSends(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
   countObservedRequests(input: {
     expectedMethod: string;
@@ -301,10 +304,13 @@ export async function startHostedLocalLinqStub(input: {
       resolve();
     });
   });
-  const baseUrl = `http://127.0.0.1:${requireBoundTcpPort(activeServer, "Linq stub")}`;
+  const tcpPort = requireBoundTcpPort(activeServer, "Linq stub");
+  const baseUrl = `http://127.0.0.1:${tcpPort}`;
+  const containerBaseUrl =
+    `http://${formatHostedLocalLinqUrlHost(resolveHostedLocalLinqContainerHost())}:${tcpPort}`;
   attachmentDownloadBaseUrl = `${baseUrl}${linqAttachmentDownloadBasePath}`;
   attachmentDownloadContainerBaseUrl =
-    `http://host.docker.internal:${requireBoundTcpPort(activeServer, "Linq stub")}${linqAttachmentDownloadBasePath}`;
+    `${containerBaseUrl}${linqAttachmentDownloadBasePath}`;
 
   const waitForObservedRequests = async (input: {
     expectedCount: number;
@@ -320,7 +326,7 @@ export async function startHostedLocalLinqStub(input: {
     let pendingDeliveryFirstObservedAt: number | null = null;
     let latestStatusReadError: string | null = null;
 
-    while ((Date.now() - startedAt) < 60_000) {
+    while ((Date.now() - startedAt) < hostedLocalLinqObservedRequestWaitTimeoutMs) {
       const matchingRequests = observedRequests.filter((request) =>
         isMatchingObservedLinqRequest(
           request,
@@ -367,12 +373,12 @@ export async function startHostedLocalLinqStub(input: {
             await input.scenario.harness.expireRunnerActivityForTest(input.userId)
               .catch(() => {});
             await input.scenario.harness.nudgeUserBestEffort(input.userId);
-          } else if (shouldRunHostedLocalLinqWaitManualInvocationForStatus({
+          } else if (shouldRunHostedLocalLinqWaitAlarmInvocationForStatus({
             now,
             pendingDeliveryFirstObservedAt,
             status,
           })) {
-            await input.scenario.harness.runHostedManualInvocationForTest(input.userId)
+            await input.scenario.harness.runHostedAlarmInvocationForTest(input.userId)
               .catch(() => input.scenario.harness.nudgeUserBestEffort(input.userId));
           } else if (shouldNudgeHostedLocalLinqWaitForStatus({
             mailboxLagFirstObservedAt,
@@ -401,6 +407,7 @@ export async function startHostedLocalLinqStub(input: {
     attachmentDownloadContainerBaseUrl,
     attachmentDownloadBaseUrl,
     baseUrl,
+    containerBaseUrl,
     countObservedSends: (expectedPath, matchRequest) =>
       observedRequests.filter((request) =>
         isMatchingObservedLinqRequest(request, "POST", expectedPath, matchRequest)
@@ -526,7 +533,7 @@ export function shouldNudgeHostedLocalLinqWaitForStatus(input: {
       >= hostedLocalLinqWaitNudgeAfterMailboxLagMs;
 }
 
-export function shouldRunHostedLocalLinqWaitManualInvocationForStatus(input: {
+export function shouldRunHostedLocalLinqWaitAlarmInvocationForStatus(input: {
   now: number;
   pendingDeliveryFirstObservedAt: number | null;
   status: HostedRunnerStatusResponse;
@@ -538,7 +545,8 @@ export function shouldRunHostedLocalLinqWaitManualInvocationForStatus(input: {
   return hostedLocalLinqStatusHasPendingDelivery(input.status)
     && input.pendingDeliveryFirstObservedAt !== null
     && input.now - input.pendingDeliveryFirstObservedAt
-      >= hostedLocalLinqWaitManualRunAfterPendingDeliveryMs;
+      >= hostedLocalLinqWaitAlarmAfterPendingDeliveryMs
+    && hostedLocalLinqStatusNextWakeIsDue(input.status, input.now);
 }
 
 function readHostedLocalLinqStatusActivityAtMs(status: HostedRunnerStatusResponse): number | null {
@@ -602,6 +610,19 @@ function hostedLocalLinqStatusHasPendingDelivery(status: HostedRunnerStatusRespo
   }
 
   return false;
+}
+
+function hostedLocalLinqStatusNextWakeIsDue(
+  status: HostedRunnerStatusResponse,
+  now: number,
+): boolean {
+  const rawNextWakeAt = status.workspace?.nextWakeAt ?? null;
+  if (!rawNextWakeAt) {
+    return false;
+  }
+
+  const nextWakeAt = Date.parse(rawNextWakeAt);
+  return Number.isFinite(nextWakeAt) && nextWakeAt <= now;
 }
 
 export function buildHostedLinqInboundEvent(
@@ -1013,6 +1034,50 @@ function requireBoundTcpPort(server: HttpServer, label: string): number {
   }
 
   return address.port;
+}
+
+function resolveHostedLocalLinqContainerHost(): string {
+  const configured = process.env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (process.platform !== "linux") {
+    return "host.docker.internal";
+  }
+
+  return readLinuxDockerBridgeGatewayHost() ?? "host.docker.internal";
+}
+
+function readLinuxDockerBridgeGatewayHost(): string | null {
+  const result = spawnSync(
+    "docker",
+    [
+      "network",
+      "inspect",
+      "bridge",
+      "--format",
+      "{{range .IPAM.Config}}{{if .Gateway}}{{.Gateway}}{{end}}{{end}}",
+    ],
+    {
+      encoding: "utf8",
+    },
+  );
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  return result.stdout.trim() || null;
+}
+
+function formatHostedLocalLinqUrlHost(host: string): string {
+  const normalized = host.trim();
+  if (normalized.includes(":") && !normalized.startsWith("[")) {
+    return `[${normalized}]`;
+  }
+
+  return normalized;
 }
 
 async function sleep(ms: number): Promise<void> {
