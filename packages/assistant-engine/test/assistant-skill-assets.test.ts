@@ -479,7 +479,16 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli device account list --format json')
     expect(raw).toContain('vault-cli device connect <provider> --format json')
     expect(raw).toContain(
-      'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
+      'mention only those supported choices instead of leaving the connection for later',
+    )
+    expect(raw).toContain(
+      'do not add Apple Health/HealthKit or any unsupported source as a caveat unless the user names that source',
+    )
+    expect(raw).toContain(
+      'Do not proactively mention Apple Health, HealthKit, Health Connect, or other unsupported sources as caveats during onboarding',
+    )
+    expect(raw).toContain(
+      'If the user names an unsupported source, say Murph does not support that source yet',
     )
     expect(raw).toContain('one lightweight, bounded experiment at a time')
     expect(raw).toContain('retrospective baseline')

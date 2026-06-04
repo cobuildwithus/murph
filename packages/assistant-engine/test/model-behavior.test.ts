@@ -121,11 +121,19 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'Apple Health/HealthKit is not supported yet.',
+      'List only these supported choices when offering examples',
+    )
+    expect(prompt).toContain(
+      'do not proactively name unsupported sources as caveats',
+    )
+    expect(prompt).toContain(
+      'If the user asks for a wearable/source not in this list, say it is not supported yet',
     )
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
+    expect(prompt).not.toContain('Apple Health/HealthKit is not supported yet.')
+    expect(prompt).not.toContain('Apple Health/HealthKit')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
@@ -841,6 +849,9 @@ describe('assistant conversation onboarding guidance', () => {
     expect(prompt).toContain(
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )
+    expect(prompt).toContain(
+      'List only these supported choices when offering examples',
+    )
     expect(prompt).not.toContain('roughly 3-4 short assistant messages')
     expect(prompt).not.toContain(
       'Do not compress the whole orientation into one "send me things" reply',
@@ -850,6 +861,7 @@ describe('assistant conversation onboarding guidance', () => {
     expect(prompt).not.toContain(
       'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
     )
+    expect(prompt).not.toContain('Apple Health/HealthKit')
     expect(prompt).not.toContain(
       'say they can start by texting notes and connect wearables later',
     )
