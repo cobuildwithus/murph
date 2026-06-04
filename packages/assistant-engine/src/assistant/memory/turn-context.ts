@@ -5,8 +5,6 @@ import { normalizeNullableString } from '../shared.js'
 
 const ASSISTANT_MEMORY_TURN_VAULT_ENV =
   'ASSISTANT_MEMORY_BOUND_VAULT'
-const ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV =
-  'ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT'
 const ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV =
   'ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT'
 const ASSISTANT_MEMORY_TURN_SESSION_ID_ENV =
@@ -17,14 +15,12 @@ const ASSISTANT_MEMORY_TURN_ID_ENV =
 export const assistantMemoryTurnEnvKeys = [
   VAULT_ENV,
   ASSISTANT_MEMORY_TURN_VAULT_ENV,
-  ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV,
   ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV,
   ASSISTANT_MEMORY_TURN_SESSION_ID_ENV,
   ASSISTANT_MEMORY_TURN_ID_ENV,
 ] as const
 
 export interface AssistantMemoryTurnContextInput {
-  allowSensitiveHealthContext: boolean
   sessionId: string
   sourcePrompt: string
   turnId: string
@@ -38,7 +34,6 @@ export interface AssistantMemoryTurnProvenance {
 }
 
 export interface AssistantMemoryTurnContext {
-  allowSensitiveHealthContext: boolean
   provenance: AssistantMemoryTurnProvenance
   sourcePrompt: string
   vault: string
@@ -52,9 +47,6 @@ export function createAssistantMemoryTurnContextEnv(
   return {
     [VAULT_ENV]: resolvedVault,
     [ASSISTANT_MEMORY_TURN_ID_ENV]: input.turnId,
-    [ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]: input.allowSensitiveHealthContext
-      ? '1'
-      : '0',
     [ASSISTANT_MEMORY_TURN_SESSION_ID_ENV]: input.sessionId,
     [ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV]: input.sourcePrompt,
     [ASSISTANT_MEMORY_TURN_VAULT_ENV]: resolvedVault,
@@ -78,8 +70,6 @@ export function resolveAssistantMemoryTurnContext(
   }
 
   return {
-    allowSensitiveHealthContext:
-      env[ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]?.trim() === '1',
     provenance: {
       writtenBy: 'assistant',
       sessionId,

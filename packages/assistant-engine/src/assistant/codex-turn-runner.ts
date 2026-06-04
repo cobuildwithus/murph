@@ -143,7 +143,6 @@ export async function executeCodexTurnWithRecovery(input: {
   providerRequestOrdinal?: number | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
-  modelProgressUpdatesEnabled?: boolean | null
   progressDelivery?: AssistantProgressDelivery | null
   turnCreatedAt: string
   turnId: string
@@ -281,8 +280,6 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.routePlanningSlowestStage,
         routePlanningSlowestStageElapsedMs:
           input.routePlanningDiagnostics.routePlanningSlowestStageElapsedMs,
-        routePlanningSensitiveHealthContextAllowed:
-          input.routePlanningDiagnostics.allowSensitiveHealthContext,
         routePlanningSupportedExperimentProtocolsElapsedMs:
           input.routePlanningDiagnostics.supportedExperimentProtocolsElapsedMs,
         routePlanningTargetCapabilitiesElapsedMs:
@@ -417,7 +414,6 @@ async function executeAssistantCodexAttempt(input: {
         userMessageContent: executionPlan.input.userMessageContent,
       }),
       systemPrompt: attemptPlan.routePlan.systemPrompt,
-      modelProgressUpdatesEnabled: executionPlan.modelProgressUpdatesEnabled,
       progressDelivery: executionPlan.progressDelivery ?? null,
       turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
       sessionContext: attemptPlan.routePlan.sessionContext

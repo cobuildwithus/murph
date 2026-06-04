@@ -9,7 +9,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send one brief progress preamble to the current user conversation before longer or tool-heavy work. Use it once before the first non-progress tool call; reading a skill file, checking setup guidance, or making a routine single-command vault read is not enough by itself; do not include final conclusions.',
+    'Send one brief user-visible progress update to the current conversation before longer, tool-heavy, or user-content-inspection work. Use immediately as the first assistant action when the task may take more than a few seconds, require multiple tool steps, involve research or long vault scans, inspect/parse/render/import/save user-provided content, or recover data from PDFs, lab reports, images, screenshots, CSVs, audio/video, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. Use it before reading, parsing, rendering, importing, saving, reasoning over extracted content, or making any other non-progress tool call. Do not use for skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -19,7 +19,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         minLength: 1,
         maxLength: MAX_PROGRESS_CHARS,
         description:
-          'Brief model-authored progress preamble. Say what you are starting or checking next. No markdown links, final answers, medical interpretation, diagnoses, recommendations, or unchecked claims.',
+          'One short factual sentence about what you are starting or checking next. No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
       },
     },
     required: ['text'],

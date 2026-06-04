@@ -119,6 +119,15 @@ describe('assistant skill assets', () => {
     }
 
     const raw = await readSkillFile(conversationOnboardingSkill)
+    expect(conversationOnboardingSkill.triggerHint).toContain(
+      'Use only when onboarding is eligible or open',
+    )
+    expect(conversationOnboardingSkill.triggerHint).toContain(
+      'Do not read or follow this skill before handling concrete help',
+    )
+    expect(conversationOnboardingSkill.triggerHint).toContain(
+      'Concrete help includes user questions, health data, attachments, PDFs, lab results',
+    )
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain(
@@ -167,7 +176,22 @@ describe('assistant skill assets', () => {
       'invite product or brand names plus roughly how long they have taken each one or since when',
     )
     expect(raw).toContain(
+      'When their supplement answer will require web searches or other product-ingredient lookups',
+    )
+    expect(raw).toContain(
+      'call `send_progress_update` once before the first search or lookup',
+    )
+    expect(raw).toContain(
+      'Do not use it for a quick memory save or a single follow-up question',
+    )
+    expect(raw).toContain(
       'Make clear that PDFs or pasted results are welcome whenever the user wants to share them',
+    )
+    expect(raw).toContain(
+      'If the user sends lab PDFs, pasted lab results, or blood-test documents',
+    )
+    expect(raw).toContain(
+      'call `send_progress_update` before reading the content or using file/import tools',
     )
     expect(raw).toContain('Save useful onboarding answers as they arrive')
     expect(raw).toContain(

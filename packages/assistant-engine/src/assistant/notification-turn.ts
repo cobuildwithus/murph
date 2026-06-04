@@ -46,9 +46,6 @@ import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
-import {
-  shouldEnableAssistantModelProgressUpdates,
-} from './turn-progress.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import {
   normalizeNullableString,
@@ -189,11 +186,6 @@ export async function sendAssistantNotificationLocal(
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
-      const modelProgressUpdatesEnabled =
-        shouldEnableAssistantModelProgressUpdates(
-          messageInput,
-          ASSISTANT_NOTIFICATION_TURN_PROFILE,
-        )
       const progressDelivery = null
       const typingIndicator = startAssistantChannelTypingIndicator({
         channelDependencies:
@@ -206,7 +198,6 @@ export async function sendAssistantNotificationLocal(
       try {
         const providerOutcome = await executeCodexTurnWithRecovery({
           input: messageInput,
-          modelProgressUpdatesEnabled,
           plan: sharedPlan,
           progressDelivery,
           profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,

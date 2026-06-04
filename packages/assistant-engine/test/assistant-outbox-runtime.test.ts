@@ -1894,14 +1894,12 @@ function createMessageInput(vault: string): AssistantMessageInput {
 
 function createSharedPlan(): AssistantTurnSharedPlan {
   return {
-    allowSensitiveHealthContext: false,
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
     conversationPolicy: {
-      allowSensitiveHealthContext: false,
       audience: {
         actorId: null,
         bindingDelivery: null,

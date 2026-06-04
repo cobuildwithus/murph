@@ -57,9 +57,6 @@ import type {
   AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
-  isAssistantModelProgressAvailable,
-} from '../turn-progress.js'
-import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -98,7 +95,6 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantRoutePlanningDiagnostics {
-  allowSensitiveHealthContext: boolean
   assistantContextSnapshotElapsedMs: number | null
   cliBootstrapElapsedMs: number | null
   primarySystemPromptElapsedMs: number | null
@@ -233,7 +229,6 @@ export interface AssistantCodexTurnExecutionPlan {
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
-  modelProgressUpdatesEnabled: boolean
   progressDelivery?: AssistantProgressDelivery | null
   turnId: string
 }
@@ -315,7 +310,6 @@ export async function buildCodexTurnExecutionPlan(input: {
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
-  modelProgressUpdatesEnabled?: boolean | null
   progressDelivery?: AssistantProgressDelivery | null
   turnCreatedAt: string
   turnId: string
@@ -323,7 +317,6 @@ export async function buildCodexTurnExecutionPlan(input: {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
   const memoryTurnEnv = {
     ...createAssistantMemoryTurnContextEnv({
-      allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
       sessionId: input.resolvedSession.sessionId,
       sourcePrompt: input.input.prompt,
       turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
@@ -352,7 +345,6 @@ export async function buildCodexTurnExecutionPlan(input: {
     promptTimeContext,
     route: input.route,
     sharedPlan: input.plan,
-    modelProgressUpdatesEnabled: isAssistantModelProgressAvailable(input),
     progressDelivery: input.progressDelivery ?? null,
     turnId: input.turnId,
   }
@@ -376,7 +368,6 @@ export async function buildCodexTurnAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
-      modelProgressUpdatesEnabled: input.executionPlan.modelProgressUpdatesEnabled,
       progressDelivery: input.executionPlan.progressDelivery ?? null,
     }),
     session: input.session,
@@ -392,7 +383,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   route: CodexThreadIdentity
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
-  modelProgressUpdatesEnabled?: boolean | null
   progressDelivery?: AssistantProgressDelivery | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
@@ -415,7 +405,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   )
   const activeTurnHistory = input.activeTurnHistory ?? null
   const shouldUseCommittedTranscriptHistory =
-    input.sharedPlan.allowSensitiveHealthContext &&
     input.profile.threadScope === 'session-thread'
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
@@ -488,34 +477,27 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : []
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
-    input.sharedPlan.allowSensitiveHealthContext
-      ? await measureRoutePlanningAsync(
-          routePlanningSpans,
-          'assistantContextSnapshotElapsedMs',
-          () => readAssistantContextSnapshotPrompt({
-            allowSensitiveHealthContext:
-              input.sharedPlan.allowSensitiveHealthContext,
-            vaultRoot: input.input.vault,
-          }),
-          (elapsedMs) => {
-            assistantContextSnapshotElapsedMs = elapsedMs
-          },
-        )
-      : null
+    await measureRoutePlanningAsync(
+      routePlanningSpans,
+      'assistantContextSnapshotElapsedMs',
+      () => readAssistantContextSnapshotPrompt({
+        vaultRoot: input.input.vault,
+      }),
+      (elapsedMs) => {
+        assistantContextSnapshotElapsedMs = elapsedMs
+      },
+    )
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
   const toolSchemaHash = null
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
-    assistantModelProgressUpdatesAvailable: boolean
     injectOnboardingGuidance: boolean
   }) =>
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
-            allowSensitiveHealthContext:
-              input.sharedPlan.allowSensitiveHealthContext,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -530,8 +512,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : buildAssistantSystemPromptWithCacheMetadata({
             assistantCliContract: options.assistantCliContract,
             assistantContextSnapshotPrompt,
-            allowSensitiveHealthContext:
-              input.sharedPlan.allowSensitiveHealthContext,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -540,8 +520,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
-            assistantModelProgressUpdatesAvailable:
-              options.assistantModelProgressUpdatesAvailable,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -581,8 +559,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         : null
     const fallbackPromptResult = buildRouteSystemPromptResult({
       assistantCliContract: fallbackAssistantCliContract,
-      assistantModelProgressUpdatesAvailable:
-        input.modelProgressUpdatesEnabled === true,
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     })
 
@@ -610,8 +586,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     'primarySystemPromptElapsedMs',
     () => buildRouteSystemPromptResult({
       assistantCliContract: actualAssistantCliContract,
-      assistantModelProgressUpdatesAvailable:
-        input.modelProgressUpdatesEnabled === true,
       injectOnboardingGuidance: shouldInjectOnboardingGuidance,
     }),
   )
@@ -651,7 +625,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       resumeCodexThreadId,
     }),
     planningDiagnostics: {
-      allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
       assistantContextSnapshotElapsedMs,
       cliBootstrapElapsedMs,
       primarySystemPromptElapsedMs:

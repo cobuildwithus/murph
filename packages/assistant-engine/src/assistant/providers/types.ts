@@ -72,7 +72,6 @@ export interface AssistantProviderTurnInput {
   env?: NodeJS.ProcessEnv
   model?: string | null
   modelProvider?: string | null
-  modelProgressUpdatesEnabled?: boolean | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -134,7 +133,6 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  modelProgressUpdatesEnabled?: boolean | null
   progressDelivery?: AssistantProgressDelivery | null
   turnContextPrompt?: string | null
   userPrompt?: string | null

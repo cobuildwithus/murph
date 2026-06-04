@@ -40,13 +40,6 @@ export type AssistantProgressDeliveryResult =
     }
   | { kind: 'failed'; source: AssistantProgressDeliverySource }
 
-export function isAssistantModelProgressAvailable(input: {
-  modelProgressUpdatesEnabled?: boolean | null
-  progressDelivery?: AssistantProgressDelivery | null
-}): boolean {
-  return input.modelProgressUpdatesEnabled === true && Boolean(input.progressDelivery)
-}
-
 type DeliverAssistantProgressUpdate = typeof deliverAssistantProgressUpdate
 type AssistantProgressDeliveryContext = {
   messageInput: AssistantMessageInput
@@ -54,7 +47,7 @@ type AssistantProgressDeliveryContext = {
 }
 type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
 
-export function shouldEnableAssistantModelProgressUpdates(
+export function shouldCreateAssistantProgressDelivery(
   input: Pick<AssistantMessageInput, 'deliverResponse'>,
   profile?: {
     promptProfile?: 'conversation' | 'notification-decision' | null

@@ -690,7 +690,6 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     executeCodexTurnWithRecovery: vi.fn(async (input) => {
       assert.equal(input.input.turnTrigger, 'automation-cron')
       assert.equal(input.input.workingDirectory, undefined)
-      assert.equal(input.modelProgressUpdatesEnabled, false)
       assert.equal(input.progressDelivery, null)
       return {
         kind: 'succeeded',
@@ -1451,14 +1450,12 @@ function createCodexTarget(
 
 function createSharedPlan(): AssistantTurnSharedPlan {
   return {
-    allowSensitiveHealthContext: true,
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
     conversationPolicy: {
-      allowSensitiveHealthContext: true,
       audience: {
         actorId: null,
         bindingDelivery: null,

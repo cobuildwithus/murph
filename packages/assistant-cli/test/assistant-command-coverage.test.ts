@@ -47,7 +47,6 @@ const commandMocks = vi.hoisted(() => ({
   runAssistantDoctor: vi.fn(),
   saveAssistantSelfDeliveryTarget: vi.fn(),
   sendAssistantMessage: vi.fn(),
-  shouldExposeSensitiveHealthContext: vi.fn(),
   stopAssistantAutomation: vi.fn(),
 }))
 
@@ -122,8 +121,6 @@ vi.mock('@murphai/assistant-engine/assistant-runtime', () => ({
     commandMocks.resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy:
     commandMocks.resolveAssistantConversationPolicy,
-  shouldExposeSensitiveHealthContext:
-    commandMocks.shouldExposeSensitiveHealthContext,
 }))
 
 import {

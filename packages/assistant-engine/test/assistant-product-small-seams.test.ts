@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   resolveAssistantConversationPolicy,
-  shouldExposeSensitiveHealthContext,
 } from '../src/assistant/conversation-policy.ts'
 import {
   recordAssistantRuntimeIssue,
@@ -112,7 +111,7 @@ afterEach(async () => {
 })
 
 describe('assistant product small seams', () => {
-  it('resolves conversation audiences, directness, and sensitivity', () => {
+  it('resolves conversation audiences and directness for delivery routing', () => {
     const explicitOverride = resolveAssistantConversationPolicy({
       message: {
         deliverResponse: true,
@@ -145,7 +144,6 @@ describe('assistant product small seams', () => {
       threadId: 'thread-1',
       threadIsDirect: true,
     })
-    expect(explicitOverride.allowSensitiveHealthContext).toBe(true)
     expect(explicitOverride.operatorAuthority).toBe('direct-operator')
 
     const publicAudience = resolveAssistantConversationPolicy({
@@ -170,22 +168,12 @@ describe('assistant product small seams', () => {
       },
     })
 
-    expect(publicAudience.allowSensitiveHealthContext).toBe(false)
-
-    expect(
-      shouldExposeSensitiveHealthContext({
-        actorId: null,
-        bindingDelivery: null,
-        channel: 'local',
-        deliveryPolicy: 'explicit-target-override',
-        effectiveThreadIsDirect: false,
-        explicitTarget: 'public-thread',
-        identityId: null,
-        replyToMessageId: null,
-        threadId: 'thread-1',
-        threadIsDirect: false,
-      }),
-    ).toBe(true)
+    expect(publicAudience.audience).toMatchObject({
+      deliveryPolicy: 'explicit-target-override',
+      effectiveThreadIsDirect: false,
+      threadId: 'group-thread',
+      threadIsDirect: false,
+    })
 
     const bindingTargetOnly = resolveAssistantConversationPolicy({
       message: {
@@ -280,41 +268,6 @@ describe('assistant product small seams', () => {
       threadId: 'chat-4',
       threadIsDirect: true,
     })
-
-    expect(
-      shouldExposeSensitiveHealthContext({
-        actorId: 'actor-4',
-        bindingDelivery: {
-          kind: 'participant',
-          target: 'actor-4',
-        },
-        channel: 'email',
-        deliveryPolicy: 'explicit-target-override',
-        effectiveThreadIsDirect: true,
-        explicitTarget: 'outsider',
-        identityId: 'identity-4',
-        replyToMessageId: null,
-        threadId: 'thread-4',
-        threadIsDirect: true,
-      }),
-    ).toBe(false)
-    expect(
-      shouldExposeSensitiveHealthContext({
-        actorId: 'actor-4',
-        bindingDelivery: {
-          kind: 'participant',
-          target: 'actor-4',
-        },
-        channel: 'email',
-        deliveryPolicy: 'explicit-target-override',
-        effectiveThreadIsDirect: true,
-        explicitTarget: '   ',
-        identityId: 'identity-4',
-        replyToMessageId: null,
-        threadId: 'thread-4',
-        threadIsDirect: true,
-      }),
-    ).toBe(false)
   })
 
   it('hashes first-contact doc ids, skips indirect actor ids, and persists seen markers', async () => {
@@ -410,7 +363,6 @@ describe('assistant product small seams', () => {
     tempRoots.push(parentRoot)
 
     const env = createAssistantMemoryTurnContextEnv({
-      allowSensitiveHealthContext: true,
       sessionId: 'session-1',
       sourcePrompt: 'How am I doing?',
       turnId: 'turn-1',
@@ -418,7 +370,6 @@ describe('assistant product small seams', () => {
     })
 
     expect(resolveAssistantMemoryTurnContext(env)).toEqual({
-      allowSensitiveHealthContext: true,
       provenance: {
         sessionId: 'session-1',
         turnId: 'turn-1',

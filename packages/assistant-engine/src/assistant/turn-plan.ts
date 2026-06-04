@@ -62,7 +62,6 @@ export async function resolveAssistantTurnSharedPlan(
       vault: input.vault,
     })
   return {
-    allowSensitiveHealthContext: conversationPolicy.allowSensitiveHealthContext,
     cliAccess,
     conversationPolicy,
     onboardingGuidanceOpen,

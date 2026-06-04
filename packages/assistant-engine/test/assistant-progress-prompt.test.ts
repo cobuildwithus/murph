@@ -8,73 +8,67 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
-  it('omits progress update guidance when progress delivery is unavailable', () => {
+  it('requires progress preambles for longer or user-content-inspection work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
-      progressUpdatesAvailable: false,
     })
 
-    expect(prompt).not.toContain('send_progress_update')
+    expect(prompt).toContain(
+      'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
+    )
+    expect(prompt).toContain(
+      'continue immediately with the first file, vault, web, skill, media, or CLI action',
+    )
+    expect(prompt).toContain(
+      'content inspection, research, saving recovered data, long parsing, long scans, or multiple tool steps',
+    )
     expect(prompt).not.toContain('before the first non-progress tool call')
-    expect(prompt).not.toContain('Do not overthink the channel or task category')
-  })
-
-  it('requires progress preambles for longer tool-heavy work', () => {
-    const prompt = buildAssistantExecutionBehaviorText({
-      profile: 'gpt5-agentic',
-      progressUpdatesAvailable: true,
-    })
-
-    expect(prompt).toContain(
-      'call `send_progress_update` once before the first non-progress tool call',
-    )
-    expect(prompt).toContain('reading attachments, inspecting or parsing files')
-    expect(prompt).toContain('saving recovered data')
-    expect(prompt).toContain('multi-step tool work')
-    expect(prompt).toContain('Reading a skill file')
-    expect(prompt).toContain('checking setup guidance')
-    expect(prompt).toContain(
-      'routine single-command vault read is not enough by itself',
-    )
-    expect(prompt).toContain('quick single-step replies')
-    expect(prompt).toContain('basic context checks')
-    expect(prompt).toContain('Do not overthink the channel or task category')
-    expect(prompt).toContain(
-      'one short, factual sentence about what you are starting or checking next',
-    )
-    expect(prompt).toContain(
-      'Do not include final answers, medical interpretations, abnormalities',
-    )
   })
 
   it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'before longer or tool-heavy work',
+      'before longer, tool-heavy, or user-content-inspection work',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'Use immediately as the first assistant action',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'PDFs, lab reports, images, screenshots, CSVs, audio/video',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'large pasted text, meal/product/supplement labels',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'workout exports, wearable exports, or health documents',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'reasoning over extracted content',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'Do not use for skill-file reads alone, setup checks, routine single-command vault reads',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
       'before the first non-progress tool call',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'reading a skill file, checking setup guidance, or making a routine single-command vault read is not enough by itself',
+      'current conversation',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'current user conversation',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'not include final conclusions',
+      'or final conclusions',
     )
 
     const textProperty =
       MURPH_SEND_PROGRESS_UPDATE_TOOL.inputSchema.properties.text
     expect(textProperty.description).toContain(
-      'Say what you are starting or checking next',
+      'One short factual sentence about what you are starting or checking next',
     )
     expect(textProperty.description).toContain('No markdown links')
     expect(textProperty.description).toContain('final answers')
-    expect(textProperty.description).toContain('medical interpretation')
+    expect(textProperty.description).toContain('lab interpretations')
+    expect(textProperty.description).toContain('abnormalities')
     expect(textProperty.description).toContain('diagnoses')
-    expect(textProperty.description).toContain('recommendations')
-    expect(textProperty.description).toContain('unchecked claims')
+    expect(textProperty.description).toContain('treatment recommendations')
+    expect(textProperty.description).toContain('claims not yet verified')
   })
 })

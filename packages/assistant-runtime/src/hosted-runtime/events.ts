@@ -922,7 +922,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     "routePlanningAnyBootstrapContextPrepared",
     "routePlanningBootstrapContextPrepared",
     "routePlanningFreshThreadFallbackPrepared",
-    "routePlanningSensitiveHealthContextAllowed",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,

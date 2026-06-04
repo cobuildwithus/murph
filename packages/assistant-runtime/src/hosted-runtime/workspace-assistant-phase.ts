@@ -165,7 +165,6 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "routePlanningPrimaryInstructionsElapsedMs",
   "routePlanningPrimarySystemPromptElapsedMs",
   "routePlanningResumeBindingElapsedMs",
-  "routePlanningSensitiveHealthContextAllowed",
   "routePlanningSlowestStage",
   "routePlanningSlowestStageElapsedMs",
   "routePlanningSupportedExperimentProtocolsElapsedMs",

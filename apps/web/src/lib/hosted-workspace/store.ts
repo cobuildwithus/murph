@@ -81,7 +81,6 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "routePlanningBootstrapContextPrepared",
   "routePlanningFreshThreadFallbackPromptElapsedMs",
   "routePlanningPrimarySystemPromptElapsedMs",
-  "routePlanningSensitiveHealthContextAllowed",
   "safeErrorMessage",
   "tokenPreview",
 ]);
@@ -125,7 +124,6 @@ const ROUTE_PLANNING_REDACTED_KEY_NAMES = new Set([
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
   "routePlanningFreshThreadFallbackPrepared",
-  "routePlanningSensitiveHealthContextAllowed",
   "routePlanningSlowestStage",
 ]);
 const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [

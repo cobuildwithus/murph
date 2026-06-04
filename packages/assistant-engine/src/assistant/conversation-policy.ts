@@ -8,7 +8,6 @@ import {
   resolveAssistantOperatorAuthority,
   type AssistantOperatorAuthority,
 } from './operator-authority.js'
-import { isAssistantUserFacingChannel } from './channel-presentation.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantConversationDeliveryPolicy =
@@ -30,7 +29,6 @@ export interface AssistantConversationAudience {
 }
 
 export interface AssistantConversationPolicy {
-  allowSensitiveHealthContext: boolean
   audience: AssistantConversationAudience
   operatorAuthority: AssistantOperatorAuthority
 }
@@ -57,7 +55,6 @@ export function resolveAssistantConversationPolicy(input: {
   )
 
   return {
-    allowSensitiveHealthContext: shouldExposeSensitiveHealthContext(audience),
     audience,
     operatorAuthority,
   }
@@ -135,37 +132,6 @@ export function resolveAssistantConversationAudience(input: {
     threadId,
     threadIsDirect,
   }
-}
-
-export function shouldExposeSensitiveHealthContext(
-  audience: AssistantConversationAudience,
-): boolean {
-  if (!isAssistantUserFacingChannel(audience.channel)) {
-    return true
-  }
-
-  const effectiveThreadIsDirect =
-    audience.effectiveThreadIsDirect ?? audience.threadIsDirect
-  if (effectiveThreadIsDirect !== true) {
-    return false
-  }
-
-  if (audience.deliveryPolicy !== 'explicit-target-override') {
-    return true
-  }
-
-  const explicitTarget = normalizeNullableString(audience.explicitTarget)
-  if (!explicitTarget) {
-    return false
-  }
-
-  const privateAudienceTargets = [
-    normalizeNullableString(audience.bindingDelivery?.target),
-    normalizeNullableString(audience.actorId),
-    normalizeNullableString(audience.threadId),
-  ].filter((value): value is string => value !== null)
-
-  return privateAudienceTargets.includes(explicitTarget)
 }
 
 function resolveAssistantConversationAudienceDirectness(input: {

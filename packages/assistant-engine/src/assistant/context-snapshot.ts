@@ -101,13 +101,8 @@ export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
 }
 
 export async function readAssistantContextSnapshotPrompt(input: {
-  allowSensitiveHealthContext: boolean
   vaultRoot: string
 }): Promise<string | null> {
-  if (!input.allowSensitiveHealthContext) {
-    return null
-  }
-
   const { state } = await readAssistantContextSnapshotStateStatus({
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,

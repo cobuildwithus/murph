@@ -218,7 +218,6 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        modelProgressUpdatesEnabled: true,
       }),
     ).toMatchObject({
       dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
@@ -238,7 +237,6 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        modelProgressUpdatesEnabled: true,
         progressDelivery: {
           async send() {
             return sentProgressResult()
@@ -263,7 +261,6 @@ describe('assistant codex runtime', () => {
       buildCodexThreadResumeParams({
         input: {
           ...baseInput,
-          modelProgressUpdatesEnabled: true,
           progressDelivery: {
             async send() {
               return sentProgressResult()
@@ -2112,7 +2109,6 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         env: hostedEnv,
-        modelProgressUpdatesEnabled: true,
         progressDelivery,
         prompt: 'second stale progress turn',
         workingDirectory,
@@ -3795,7 +3791,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'process this blood test',
         progressDelivery,
         workingDirectory,
@@ -3904,7 +3899,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'try skipped progress',
         progressDelivery,
         workingDirectory,
@@ -4008,7 +4002,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'try failed progress',
         progressDelivery,
         workingDirectory,
@@ -4146,7 +4139,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'answer with commentary progress',
         progressDelivery,
         workingDirectory,
@@ -4253,7 +4245,6 @@ describe('assistant codex runtime', () => {
 
     let settled = false
     const turnPromise = executeCodexAppServerTurn({
-      modelProgressUpdatesEnabled: true,
       prompt: 'answer with delayed progress',
       progressDelivery,
       workingDirectory,
@@ -4372,7 +4363,6 @@ describe('assistant codex runtime', () => {
     })
 
     const turnPromise = executeCodexAppServerTurn({
-      modelProgressUpdatesEnabled: true,
       prompt: 'answer with stalled progress',
       progressDelivery,
       workingDirectory,
@@ -4398,9 +4388,8 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.close).toHaveBeenCalledTimes(1)
   })
 
-  it('returns unavailable for progress tool calls when model progress is disabled', async () => {
+  it('returns unavailable for progress tool calls when no progress sink exists', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-disabled-')
-    const progressDelivery = createProgressDeliveryMock()
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -4484,13 +4473,11 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         prompt: 'try disabled progress tool',
-        progressDelivery,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-disabled',
     })
-    expect(progressDelivery.send).not.toHaveBeenCalled()
   })
 
   it('sends one current-channel progress update when Codex compacts context', async () => {
@@ -4609,7 +4596,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         onProgress,
         onTraceEvent,
         prompt: 'answer after compacting context',
@@ -4728,7 +4714,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'try unsupported tool',
         progressDelivery,
         workingDirectory,
@@ -4821,7 +4806,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'try invalid progress tool',
         progressDelivery,
         workingDirectory,
@@ -4917,7 +4901,6 @@ describe('assistant codex runtime', () => {
 
     await expect(
       executeCodexAppServerTurn({
-        modelProgressUpdatesEnabled: true,
         prompt: 'resume and try progress',
         resumeSessionId: 'existing-thread-without-progress-tool',
         progressDelivery,

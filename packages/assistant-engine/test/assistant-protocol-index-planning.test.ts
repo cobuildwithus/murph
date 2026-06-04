@@ -152,7 +152,7 @@ describe('assistant protocol index planning', () => {
 
     expect(runtimeMocks.listGeneratedAssistantProtocolIndexEntries).toHaveBeenCalledTimes(1)
     expect(plan.assistantCliContract).toBe('bootstrap contract')
-    expect(plan.systemPrompt).toContain('Execution style:')
+    expect(plan.systemPrompt).toContain('Execution and stop rules:')
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
@@ -189,7 +189,10 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).toContain(skillRef)
     expect(plan.turnContextPrompt).toContain('Conversation onboarding:')
     expect(plan.turnContextPrompt).toContain(
-      `Before replying, read \`${skillRef}\``,
+      `Use \`${skillRef}\` only when the current user message is a greeting`,
+    )
+    expect(plan.turnContextPrompt).toContain(
+      'Do not read or follow the onboarding skill before handling concrete help',
     )
     expect(plan.turnContextPrompt).not.toContain(
       'roughly 5-6 short assistant messages',
@@ -261,7 +264,10 @@ describe('assistant protocol index planning', () => {
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).not.toHaveBeenCalled()
-    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
+    expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledWith({
+      vaultRoot: '/vault',
+    })
 
     const fallback = await resumedPlan.prepareFreshThreadFallback?.()
 
@@ -274,7 +280,7 @@ describe('assistant protocol index planning', () => {
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
-    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
   })
 
   it('reads only the cached assistant context snapshot on sensitive native resume', async () => {
@@ -308,9 +314,7 @@ describe('assistant protocol index planning', () => {
       },
       route,
       session: resumedSession,
-      sharedPlan: createSharedPlan({
-        allowSensitiveHealthContext: true,
-      }),
+      sharedPlan: createSharedPlan(),
     })
 
     expect(resumedPlan.resumeCodexThreadId).toBe('thread-sensitive-resume')
@@ -594,7 +598,7 @@ describe('assistant protocol index planning', () => {
     }
   })
 
-  it('does not replay committed transcript messages when sensitive context is disallowed', async () => {
+  it('replays committed transcript messages for session fresh threads', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -638,7 +642,16 @@ describe('assistant protocol index planning', () => {
       })
 
       expect(plan.resumeCodexThreadId).toBeNull()
-      expect(plan.conversationHistoryMessages).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Prior sensitive context.',
+          role: 'user',
+        },
+        {
+          content: 'Prior assistant context.',
+          role: 'assistant',
+        },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -766,7 +779,7 @@ describe('assistant protocol index planning', () => {
     }
   })
 
-  it('does not prepare committed transcript messages for public notification fallback', async () => {
+  it('prepares committed transcript messages for notification fresh-thread fallback', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -817,7 +830,16 @@ describe('assistant protocol index planning', () => {
       expect(plan.resumeCodexThreadId).toBe('thread-resume')
       expect(plan.conversationHistoryMessages).toBeUndefined()
       await expect(plan.prepareFreshThreadFallback?.()).resolves.toMatchObject({
-        conversationHistoryMessages: undefined,
+        conversationHistoryMessages: [
+          {
+            content: 'Prior sensitive context.',
+            role: 'user',
+          },
+          {
+            content: 'Prior assistant context.',
+            role: 'assistant',
+          },
+        ],
       })
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -951,14 +973,12 @@ function createSharedPlan(
   overrides: Partial<AssistantTurnSharedPlan> = {},
 ): AssistantTurnSharedPlan {
   return {
-    allowSensitiveHealthContext: false,
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
     conversationPolicy: {
-      allowSensitiveHealthContext: false,
       audience: {
         actorId: null,
         bindingDelivery: null,
@@ -985,15 +1005,5 @@ function createSharedPlan(
 function createPrivateSharedPlan(
   overrides: Partial<AssistantTurnSharedPlan> = {},
 ): AssistantTurnSharedPlan {
-  const plan = createSharedPlan({
-    ...overrides,
-    allowSensitiveHealthContext: true,
-  })
-  return {
-    ...plan,
-    conversationPolicy: {
-      ...plan.conversationPolicy,
-      allowSensitiveHealthContext: true,
-    },
-  }
+  return createSharedPlan(overrides)
 }

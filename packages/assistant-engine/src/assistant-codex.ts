@@ -96,9 +96,6 @@ import type {
   AssistantProgressDeliveryResult,
   AssistantProgressDeliverySource,
 } from './assistant/turn-progress.js'
-import {
-  isAssistantModelProgressAvailable,
-} from './assistant/turn-progress.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
@@ -208,12 +205,10 @@ type CodexAppServerActiveTurnBinding = {
 function resolveCodexAppServerProgressDelivery(
   input: Pick<
     CodexAppServerTurnInput,
-    'modelProgressUpdatesEnabled' | 'progressDelivery'
+    'progressDelivery'
   >,
 ): AssistantProgressDelivery | null {
-  return isAssistantModelProgressAvailable(input)
-    ? input.progressDelivery ?? null
-    : null
+  return input.progressDelivery ?? null
 }
 
 async function waitForCodexProgressDrain(
@@ -313,7 +308,6 @@ export interface CodexAppServerTurnInput {
   refreshThreadInstructions?: boolean
   model?: string | null
   modelProvider?: string | null
-  modelProgressUpdatesEnabled?: boolean | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null

@@ -154,7 +154,6 @@ function createRoute(input?: {
 
 function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagnostics'] {
   return {
-    allowSensitiveHealthContext: false,
     assistantContextSnapshotElapsedMs: null,
     cliBootstrapElapsedMs: null,
     primarySystemPromptElapsedMs: null,
@@ -222,14 +221,12 @@ function createAssistantSession(input?: {
 
 function createSharedPlan(): AssistantTurnSharedPlan {
   return {
-    allowSensitiveHealthContext: false,
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
     conversationPolicy: {
-      allowSensitiveHealthContext: false,
       audience: {
         actorId: null,
         bindingDelivery: null,
@@ -500,7 +497,6 @@ describe('Codex model catalog', () => {
       },
       input,
       memoryTurnEnv: {},
-      modelProgressUpdatesEnabled: false,
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',
@@ -617,7 +613,6 @@ describe('Codex model catalog', () => {
       executionContext: input.executionContext,
       input,
       memoryTurnEnv: {},
-      modelProgressUpdatesEnabled: false,
       profile: {
         promptProfile: 'conversation',
         toolProfile: 'provider-turn',

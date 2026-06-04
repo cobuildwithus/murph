@@ -74,7 +74,6 @@ describe("prepareAssistantDirectCliEnv", () => {
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
       AGENTMAIL_API_KEY: "agentmail-secret",
       AMBIENT_SECRET: "ambient-secret",
-      ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT: "1",
       ASSISTANT_MEMORY_BOUND_SESSION_ID: "asst_123",
       ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "hello",
       ASSISTANT_MEMORY_BOUND_TURN_ID: "turn_123",

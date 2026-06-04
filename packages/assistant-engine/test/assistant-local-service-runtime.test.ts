@@ -3326,10 +3326,6 @@ test('sendAssistantMessageLocal preserves boundary admission for hosted queue-on
     ['input_available', 'request_boundary', 'commit_barrier'],
   )
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.equal(
-    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.modelProgressUpdatesEnabled,
-    true,
-  )
   assert.ok(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
@@ -4951,7 +4947,6 @@ function createCodexTarget(
 
 function createSharedPlan(): AssistantTurnSharedPlan {
   return {
-    allowSensitiveHealthContext: false,
     cliAccess: {
       env: {},
       rawCommand: 'vault-cli',
@@ -4970,7 +4965,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         threadId: 'thread-1',
         threadIsDirect: false,
       },
-      allowSensitiveHealthContext: false,
       operatorAuthority: 'direct-operator',
     },
     onboardingGuidanceOpen: false,

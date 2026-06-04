@@ -125,7 +125,6 @@ export interface AssistantChatInput
 }
 
 export interface AssistantTurnSharedPlan {
-  allowSensitiveHealthContext: boolean
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
   onboardingGuidanceOpen: boolean

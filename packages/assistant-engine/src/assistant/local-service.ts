@@ -82,7 +82,7 @@ import {
 } from './channel-typing.js'
 import {
   createAssistantProgressDelivery,
-  shouldEnableAssistantModelProgressUpdates,
+  shouldCreateAssistantProgressDelivery,
   type AssistantProgressDelivery,
 } from './turn-progress.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
@@ -358,9 +358,7 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
-        const modelProgressUpdatesEnabled =
-          shouldEnableAssistantModelProgressUpdates(input)
-        const progressDelivery = modelProgressUpdatesEnabled
+        const progressDelivery = shouldCreateAssistantProgressDelivery(input)
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
                 const hosted = executionContext?.hosted
@@ -587,7 +585,6 @@ export async function sendAssistantMessageLocal(
             providerRequestOrdinal,
             resolvedSession: currentSession,
             turnCreatedAt: currentUserTurn.turnCreatedAt,
-            modelProgressUpdatesEnabled,
             progressDelivery,
             turnId: currentUserTurn.turnId,
           })

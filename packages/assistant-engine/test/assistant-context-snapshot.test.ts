@@ -103,7 +103,6 @@ describe('assistant context snapshot', () => {
         skipped: false,
       })
       const prompt = await readAssistantContextSnapshotPrompt({
-        allowSensitiveHealthContext: true,
         vaultRoot,
       })
       expect(prompt).toContain('Assistant context snapshot for navigation only:')
@@ -112,18 +111,12 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain('Saved health context includes 1 goal.')
       expect(prompt).toContain('Active experiment context for navigation only:')
       expect(prompt).toContain('Sleep consistency')
-      await expect(readAssistantContextSnapshotPrompt({
-        allowSensitiveHealthContext: false,
-        vaultRoot,
-      })).resolves.toBeNull()
-
       await markAssistantContextSnapshotDirty({
         domains: ['experiments'],
         vaultRoot,
       })
 
       await expect(readAssistantContextSnapshotPrompt({
-        allowSensitiveHealthContext: true,
         vaultRoot,
       })).resolves.toContain('Sleep consistency')
       await expect(readAssistantContextSnapshotState(vaultRoot))
@@ -222,7 +215,6 @@ describe('assistant context snapshot', () => {
         'utf8',
       )
       await expect(readAssistantContextSnapshotPrompt({
-        allowSensitiveHealthContext: true,
         vaultRoot,
       })).resolves.toBeNull()
     } finally {

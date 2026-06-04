@@ -12,7 +12,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'conversation-onboarding',
     name: 'conversation-onboarding',
     triggerHint:
-      'Use when the current prompt says first-run conversation onboarding is eligible or open, including welcome flow, name/context collection, wearable/app checkpoint, first experiment or logging path selection, and onboarding completion.',
+      'Use only when onboarding is eligible or open and the current user message is a greeting, vague getting-started message, answer to a prior onboarding question, explicit setup/onboarding request, or onboarding decline. Do not read or follow this skill before handling concrete help. Concrete help includes user questions, health data, attachments, PDFs, lab results, logging requests, device connection requests, research requests, urgent symptoms, or requests to inspect, save, update, compare, or troubleshoot anything.',
   },
   {
     slug: 'experiment-onboarding',

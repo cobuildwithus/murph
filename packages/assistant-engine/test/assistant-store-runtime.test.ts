@@ -747,7 +747,6 @@ describe('assistant turn shared plan', () => {
 
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue(cliAccess)
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
-      allowSensitiveHealthContext: false,
       audience: {
         actorId: 'bound-actor',
         bindingDelivery: null,
@@ -777,10 +776,8 @@ describe('assistant turn shared plan', () => {
     )
 
     expect(plan).toEqual({
-      allowSensitiveHealthContext: false,
       cliAccess,
       conversationPolicy: {
-        allowSensitiveHealthContext: false,
         audience: {
           actorId: 'bound-actor',
           bindingDelivery: null,
@@ -813,7 +810,6 @@ describe('assistant turn shared plan', () => {
       setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
-      allowSensitiveHealthContext: true,
       audience: {
         actorId: null,
         bindingDelivery: null,
@@ -888,7 +884,6 @@ describe('assistant turn shared plan', () => {
       setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
-      allowSensitiveHealthContext: false,
       audience: {
         actorId: null,
         bindingDelivery: null,
@@ -961,7 +956,6 @@ describe('assistant turn shared plan', () => {
       setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
-      allowSensitiveHealthContext: false,
       audience: {
         actorId: 'bound-actor',
         bindingDelivery: null,

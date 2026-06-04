@@ -2447,14 +2447,12 @@ function createSharedPlan(input?: {
   persistUserPromptOnFailure?: boolean;
 }): AssistantTurnSharedPlan {
   return {
-    allowSensitiveHealthContext: true,
     cliAccess: {
       env: {},
       rawCommand: "vault-cli" as const,
       setupCommand: "murph",
     },
     conversationPolicy: {
-      allowSensitiveHealthContext: true,
       audience:
         input?.conversationPolicy?.audience
           ? {

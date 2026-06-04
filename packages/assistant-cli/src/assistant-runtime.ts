@@ -6,7 +6,6 @@ export type {
 export {
   resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy,
-  shouldExposeSensitiveHealthContext,
 } from '@murphai/assistant-engine/assistant-runtime'
 export type {
   AssistantRuntimeStateService,
