@@ -204,6 +204,30 @@ interface RunnerContainerReadinessOptions {
   failureCleanup: "await" | "skip";
 }
 
+type RunnerContainerStartObservation =
+  | "cold-start-ready"
+  | "deploy-smoke-ready"
+  | "onStart";
+
+type RunnerContainerDestroyReason =
+  | "activity-expired"
+  | "cold-start-failure"
+  | "deploy-smoke-cleanup"
+  | "deploy-smoke-recycle"
+  | "destroy-instance"
+  | "invoke-failure"
+  | "readiness-failure"
+  | "success-recycle"
+  | "warm-health-failed"
+  | "warm-invalidated";
+
+interface RunnerContainerDestroyRequestRecord {
+  failClosed: boolean;
+  reason: RunnerContainerDestroyReason;
+  requestedAtMs: number;
+  statusBeforeDestroy: string | null;
+}
+
 interface HostedExecutionContainerSmokeHealthResult {
   codexShell?: {
     client: string | null;
@@ -324,7 +348,13 @@ export class RunnerContainer extends Container {
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
   private prewarmAbortController: AbortController | null = null;
+  private containerStartedAtMs: number | null = null;
+  private containerStartObservedBy: RunnerContainerStartObservation | null = null;
   private currentLogContext: RunnerContainerLogContext | null = null;
+  private lastActivityExpiryAtMs: number | null = null;
+  private lastActivityObservedAtMs: number | null = null;
+  private lastActivityObservedStage: string | null = null;
+  private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private successfulWarmInvocationCount = 0;
@@ -352,7 +382,9 @@ export class RunnerContainer extends Container {
     this.abortContainerPrewarm();
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     await this.withLifecycleLock(async () => {
-      await this.stopWarmContainer();
+      await this.stopWarmContainer({
+        reason: "destroy-instance",
+      });
     });
   }
 
@@ -563,7 +595,10 @@ export class RunnerContainer extends Container {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
 
       try {
-        const containerSettledForSmoke = await this.stopWarmContainer({ failClosed: false });
+        const containerSettledForSmoke = await this.stopWarmContainer({
+          failClosed: false,
+          reason: "deploy-smoke-recycle",
+        });
         if (!containerSettledForSmoke) {
           throw new Error("Hosted runner container smoke could not recycle the existing shell.");
         }
@@ -619,7 +654,10 @@ export class RunnerContainer extends Container {
           status: response.status,
         };
       } finally {
-        await this.stopWarmContainer({ failClosed: false });
+        await this.stopWarmContainer({
+          failClosed: false,
+          reason: "deploy-smoke-cleanup",
+        });
       }
     });
   }
@@ -742,11 +780,13 @@ export class RunnerContainer extends Container {
     await this.withLifecycleLock(async () => {
       const activeOperation = this.workspaceInvocationActiveOperation;
       if (activeOperation) {
+        this.lastActivityExpiryAtMs = Date.now();
         this.noteRunnerActivity("activity-expired-active-operation");
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             activeOperationKind: "workspace-invocation",
+            ...this.buildLifecycleDiagnosticDetails(),
             lifecycleStage: "activity-expired-active-operation",
             workspaceAttemptId: activeOperation.attemptId,
           },
@@ -757,20 +797,26 @@ export class RunnerContainer extends Container {
         return;
       }
 
+      this.lastActivityExpiryAtMs = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
+          ...this.buildLifecycleDiagnosticDetails(),
           lifecycleStage: "activity-expired-cleanup",
         },
         message: "Hosted execution container activity expired; running cleanup.",
         phase: "container.ready",
         userId: this.currentLogContext?.userId,
       });
-      await this.stopWarmContainer({ failClosed: false });
+      await this.stopWarmContainer({
+        failClosed: false,
+        reason: "activity-expired",
+      });
     });
   }
 
   override onStart(): void {
+    this.recordContainerStartObserved("onStart");
     const context = this.currentLogContext;
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -788,6 +834,13 @@ export class RunnerContainer extends Container {
   override onStop(params: StopParams): void {
     const context = this.currentLogContext;
     const cleanExit = params.exitCode === 0;
+    const lifecycleDetails = this.buildLifecycleDiagnosticDetails();
+    const stopClassification = classifyRunnerContainerStop({
+      activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
+      cleanExit,
+      destroyRequestPresent: this.lastDestroyRequest !== null,
+      idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
+    });
     this.stopGeneration += 1;
     this.successfulWarmInvocationCount = 0;
     this.warmShellInvalidatedByUnsettledDestroy = false;
@@ -795,10 +848,11 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
+        ...lifecycleDetails,
         exitCode: params.exitCode,
         lifecycleStage: "onStop",
         runnerPort: RUNNER_PORT,
+        stopClassification,
         stopReason: params.reason,
       },
       level: cleanExit ? "info" : "warn",
@@ -808,6 +862,12 @@ export class RunnerContainer extends Container {
       phase: cleanExit ? "container.ready" : "failed",
       userId: context?.userId,
     });
+    this.containerStartedAtMs = null;
+    this.containerStartObservedBy = null;
+    this.lastActivityExpiryAtMs = null;
+    this.lastActivityObservedAtMs = null;
+    this.lastActivityObservedStage = null;
+    this.lastDestroyRequest = null;
   }
 
   override onError(error: unknown): never {
@@ -973,6 +1033,7 @@ export class RunnerContainer extends Container {
           if (!completedSuccessfully) {
             await this.stopWarmContainer({
               failClosed: true,
+              reason: "invoke-failure",
             });
           } else if (this.recordSuccessfulWarmInvocationShouldRecycle()) {
             emitHostedExecutionStructuredLog({
@@ -988,11 +1049,13 @@ export class RunnerContainer extends Container {
             });
             await this.stopWarmContainer({
               failClosed: true,
+              reason: "success-recycle",
             });
           }
         } else if (cleanupWarmContainerOnFailure) {
           await this.stopWarmContainer({
             failClosed: true,
+            reason: "readiness-failure",
           });
         }
       } finally {
@@ -1035,7 +1098,10 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: input.userId,
       });
-      await this.stopWarmContainer({ failClosed: true });
+      await this.stopWarmContainer({
+        failClosed: true,
+        reason: "warm-invalidated",
+      });
     } else if (!isRunnerContainerStopped(status)) {
       try {
         await assertRunnerHealthy(
@@ -1077,7 +1143,9 @@ export class RunnerContainer extends Container {
         if (options.failureCleanup === "skip") {
           throw error;
         }
-        await this.stopWarmContainer();
+        await this.stopWarmContainer({
+          reason: "warm-health-failed",
+        });
       }
     }
     throwIfRunnerContainerOperationAborted(operationAbortSignal);
@@ -1115,6 +1183,7 @@ export class RunnerContainer extends Container {
         },
       });
       await assertRunnerHealthy(this, readinessTimeoutMs, operationAbortSignal);
+      this.recordContainerStartObserved("cold-start-ready");
     } catch (error) {
       if (isRunnerContainerPrewarmPreempted(operationAbortSignal)) {
         throwIfRunnerContainerOperationAborted(operationAbortSignal);
@@ -1136,7 +1205,10 @@ export class RunnerContainer extends Container {
         userId: input.userId,
       });
       if (options.failureCleanup !== "skip") {
-        await this.stopWarmContainer({ failClosed: false }).catch(() => undefined);
+        await this.stopWarmContainer({
+          failClosed: false,
+          reason: "cold-start-failure",
+        }).catch(() => undefined);
       }
       throw error;
     }
@@ -1181,11 +1253,13 @@ export class RunnerContainer extends Container {
         waitInterval: RUNNER_WAIT_INTERVAL_MS,
       },
     });
+    this.recordContainerStartObserved("deploy-smoke-ready");
   }
 
   private async destroyIfRunning(input: {
     failClosed?: boolean;
-  } = {}): Promise<boolean> {
+    reason: RunnerContainerDestroyReason;
+  }): Promise<boolean> {
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
     let statusBeforeDestroy: string | null = null;
@@ -1213,10 +1287,17 @@ export class RunnerContainer extends Container {
 
     const destroyStartedAt = Date.now();
     const stopGenerationBeforeDestroy = this.stopGeneration;
+    this.lastDestroyRequest = {
+      failClosed,
+      reason: input.reason,
+      requestedAtMs: destroyStartedAt,
+      statusBeforeDestroy,
+    };
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
         failClosed,
+        ...this.buildLifecycleDiagnosticDetails(),
         lifecycleStage: "destroy-requested",
         statusBeforeDestroy,
       },
@@ -1369,11 +1450,13 @@ export class RunnerContainer extends Container {
 
   private async stopWarmContainer(input?: {
     failClosed?: boolean;
+    reason?: RunnerContainerDestroyReason;
   }): Promise<boolean> {
     const failClosed = input?.failClosed ?? true;
+    const reason = input?.reason ?? "destroy-instance";
     let destroyed: boolean;
     try {
-      destroyed = await this.destroyIfRunning({ failClosed });
+      destroyed = await this.destroyIfRunning({ failClosed, reason });
     } catch (error) {
       this.successfulWarmInvocationCount = 0;
       this.warmShellInvalidatedByUnsettledDestroy = true;
@@ -1455,6 +1538,7 @@ export class RunnerContainer extends Container {
 
     try {
       renewActivityTimeout.call(this);
+      this.recordContainerActivityObserved(stage);
       return true;
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -1470,6 +1554,49 @@ export class RunnerContainer extends Container {
       });
       return false;
     }
+  }
+
+  private recordContainerStartObserved(observedBy: RunnerContainerStartObservation): void {
+    if (this.containerStartedAtMs === null) {
+      this.containerStartedAtMs = Date.now();
+      this.containerStartObservedBy = observedBy;
+    }
+    this.recordContainerActivityObserved(observedBy);
+    this.lastActivityExpiryAtMs = null;
+    this.lastDestroyRequest = null;
+  }
+
+  private recordContainerActivityObserved(stage: string): void {
+    this.lastActivityObservedAtMs = Date.now();
+    this.lastActivityObservedStage = stage;
+  }
+
+  private buildLifecycleDiagnosticDetails(): HostedExecutionStructuredLogDetails {
+    const nowMs = Date.now();
+    const runnerIdleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
+    const containerUptimeMs = readElapsedMs(this.containerStartedAtMs, nowMs);
+    const destroyRequestAgeMs = readElapsedMs(this.lastDestroyRequest?.requestedAtMs ?? null, nowMs);
+    const lastActivityExpiryAgeMs = readElapsedMs(this.lastActivityExpiryAtMs, nowMs);
+    const lastActivityObservedAgeMs = readElapsedMs(this.lastActivityObservedAtMs, nowMs);
+
+    return {
+      activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
+      containerStartObservedBy: this.containerStartObservedBy,
+      containerUptimeMs,
+      destroyRequestAgeMs,
+      destroyRequestFailClosed: this.lastDestroyRequest?.failClosed ?? null,
+      destroyRequestPresent: this.lastDestroyRequest !== null,
+      destroyRequestReason: this.lastDestroyRequest?.reason ?? null,
+      destroyRequestStatusBeforeDestroy: this.lastDestroyRequest?.statusBeforeDestroy ?? null,
+      idleTtlDeltaMs: lastActivityObservedAgeMs === null ? null : lastActivityObservedAgeMs - runnerIdleTtlMs,
+      lastActivityExpiryAgeMs,
+      lastActivityObservedAgeMs,
+      lastActivityObservedStage: this.lastActivityObservedStage,
+      runnerIdleTtlMs,
+      sleepAfter: String(this.sleepAfter),
+      successfulWarmInvocationCount: this.successfulWarmInvocationCount,
+      warmShellInvalidatedByUnsettledDestroy: this.warmShellInvalidatedByUnsettledDestroy,
+    };
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
@@ -1495,6 +1622,37 @@ export class RunnerContainer extends Container {
       controller.abort(new Error(RUNNER_CONTAINER_PREWARM_PREEMPTED_ABORT_MESSAGE));
     }
   }
+}
+
+function readElapsedMs(startedAtMs: number | null, nowMs: number): number | null {
+  return startedAtMs === null ? null : Math.max(0, nowMs - startedAtMs);
+}
+
+function readNullableNumber(value: HostedExecutionStructuredLogDetailValue | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function classifyRunnerContainerStop(input: {
+  activeWorkspaceInvocationPresent: boolean;
+  cleanExit: boolean;
+  destroyRequestPresent: boolean;
+  idleTtlDeltaMs: number | null;
+}): string {
+  if (input.activeWorkspaceInvocationPresent) {
+    return input.cleanExit ? "active-operation-clean-stop" : "active-operation-nonzero-stop";
+  }
+
+  if (input.destroyRequestPresent) {
+    return input.cleanExit ? "requested-clean-stop" : "requested-nonzero-stop";
+  }
+
+  if (input.idleTtlDeltaMs !== null && Math.abs(input.idleTtlDeltaMs) <= 15_000) {
+    return input.cleanExit
+      ? "unrequested-near-idle-ttl-clean-stop"
+      : "unrequested-near-idle-ttl-nonzero-stop";
+  }
+
+  return input.cleanExit ? "unrequested-clean-stop" : "unrequested-nonzero-stop";
 }
 
 export class DeploySmokeRunnerContainer extends RunnerContainer {}

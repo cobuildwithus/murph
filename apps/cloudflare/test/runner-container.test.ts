@@ -1433,7 +1433,32 @@ describe("RunnerContainer", () => {
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
+          details: expect.objectContaining({
+            activeWorkspaceInvocationPresent: false,
+            containerStartObservedBy: "cold-start-ready",
+            containerUptimeMs: 421_000,
+            destroyRequestPresent: false,
+            idleTtlDeltaMs: 121_000,
+            lastActivityExpiryAgeMs: 0,
+            lifecycleStage: "activity-expired-cleanup",
+            runnerIdleTtlMs: 300_000,
+          }),
           message: "Hosted execution container activity expired; running cleanup.",
+          phase: "container.ready",
+        }),
+      );
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            destroyRequestFailClosed: false,
+            destroyRequestPresent: true,
+            destroyRequestReason: "activity-expired",
+            destroyRequestStatusBeforeDestroy: "running",
+            failClosed: false,
+            lifecycleStage: "destroy-requested",
+          }),
+          message: "Hosted execution container destroy requested.",
           phase: "container.ready",
         }),
       );
@@ -1457,6 +1482,54 @@ describe("RunnerContainer", () => {
       expect(executeCalls[1]?.[1]?.headers).toEqual({
         "content-type": "application/json; charset=utf-8",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records activity-expiry diagnostics while yielding to active workspace work", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const { container, destroy } = createContainerDouble({
+        initialStatus: "running",
+      });
+
+      vi.setSystemTime(new Date("2026-06-04T04:10:00.000Z"));
+      container.onStart();
+      Object.assign(container, {
+        workspaceInvocationActiveOperation: {
+          attemptId: "attempt_evt_activity_expiry_active",
+          leaseGeneration: "11",
+          userId: "member_123",
+        },
+      });
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T04:13:45.000Z"));
+      await container.onActivityExpired();
+
+      expect(destroy).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeOperationKind: "workspace-invocation",
+            activeWorkspaceInvocationPresent: true,
+            containerStartObservedBy: "onStart",
+            containerUptimeMs: 225_000,
+            destroyRequestPresent: false,
+            idleTtlDeltaMs: -75_000,
+            lastActivityExpiryAgeMs: 0,
+            lifecycleStage: "activity-expired-active-operation",
+            runnerIdleTtlMs: 300_000,
+            workspaceAttemptId: "attempt_evt_activity_expiry_active",
+          }),
+          message: "Hosted execution container activity expiry yielded to active runner operation.",
+          phase: "container.ready",
+          userId: "member_123",
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1615,6 +1688,7 @@ describe("RunnerContainer", () => {
         details: expect.objectContaining({
           activeWorkspaceInvocationPresent: true,
           lifecycleStage: "onStop",
+          stopClassification: "active-operation-clean-stop",
         }),
         level: "info",
         message: "Hosted execution container lifecycle hook reported stop.",
@@ -1628,6 +1702,138 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("classifies unrequested non-zero stops near the idle TTL", () => {
+    vi.useFakeTimers();
+
+    try {
+      const { container } = createContainerDouble();
+      vi.setSystemTime(new Date("2026-06-04T03:51:50.000Z"));
+      container.onStart();
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
+      container.onStop({ exitCode: 1, reason: "exit" });
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            containerStartObservedBy: "onStart",
+            containerUptimeMs: 292_000,
+            destroyRequestPresent: false,
+            exitCode: 1,
+            idleTtlDeltaMs: -8_000,
+            lifecycleStage: "onStop",
+            runnerIdleTtlMs: 300_000,
+            sleepAfter: "300s",
+            stopClassification: "unrequested-near-idle-ttl-nonzero-stop",
+            stopReason: "exit",
+          }),
+          level: "warn",
+          message: "Hosted execution container lifecycle hook reported non-zero stop.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("classifies unrequested stops from last activity instead of process uptime", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const renewActivityTimeout = vi.fn();
+      const { container } = createContainerDouble({
+        initialStatus: "running",
+      });
+      Object.assign(container, {
+        renewActivityTimeout,
+      });
+      vi.setSystemTime(new Date("2026-06-04T03:51:50.000Z"));
+      container.onStart();
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recent_activity"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      expect(renewActivityTimeout).toHaveBeenCalled();
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T03:56:42.000Z"));
+      container.onStop({ exitCode: 1, reason: "exit" });
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            containerUptimeMs: 292_000,
+            idleTtlDeltaMs: -298_000,
+            lastActivityObservedAgeMs: 2_000,
+            lastActivityObservedStage: "invoke-finished",
+            lifecycleStage: "onStop",
+            stopClassification: "unrequested-nonzero-stop",
+          }),
+          level: "warn",
+          message: "Hosted execution container lifecycle hook reported non-zero stop.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records explicit destroy requests in stop diagnostics", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let containerRef: RunnerContainer | null = null;
+      const destroy = vi.fn(async () => {
+        containerRef?.onStop({ exitCode: 137, reason: "runtime_signal" });
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        initialStatus: "running",
+      });
+      containerRef = container;
+
+      vi.setSystemTime(new Date("2026-06-04T04:00:00.000Z"));
+      container.onStart();
+      vi.clearAllMocks();
+
+      vi.setSystemTime(new Date("2026-06-04T04:00:10.000Z"));
+      await container.destroyInstance();
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            containerUptimeMs: 10_000,
+            destroyRequestFailClosed: true,
+            destroyRequestPresent: true,
+            destroyRequestReason: "destroy-instance",
+            destroyRequestStatusBeforeDestroy: "running",
+            exitCode: 137,
+            lifecycleStage: "onStop",
+            stopClassification: "requested-nonzero-stop",
+          }),
+          level: "warn",
+          message: "Hosted execution container lifecycle hook reported non-zero stop.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("logs container lifecycle errors without aborting active workspace invocations", async () => {
