@@ -31,6 +31,9 @@ override any value explicitly.
 
 - `dev`: interactive hosted dev. Uses the production-shaped Cloudflare
   runner/container Codex app-server path with Vercel AI Gateway configuration.
+  The generated local worker config sets
+  `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=30000` by default so long live
+  Codex turns checkpoint dirty state promptly; shell env overrides still win.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
 - `e2e:stub`: deterministic hosted-local E2E defaults. It installs the
   test-only Codex app-server stub, skips Stripe listener startup, skips Vercel

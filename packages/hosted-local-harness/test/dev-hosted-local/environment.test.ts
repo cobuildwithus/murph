@@ -1392,6 +1392,21 @@ describe("buildWranglerLocalDevConfig", () => {
     }));
   });
 
+  it("shortens the hosted-local idle checkpoint default without blocking explicit overrides", () => {
+    const defaultConfig = buildWranglerLocalDevConfig({});
+    const overrideConfig = buildWranglerLocalDevConfig({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "45000",
+    });
+
+    expect(defaultConfig.vars).toEqual(expect.objectContaining({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
+    }));
+    expect(overrideConfig.vars).toEqual(expect.objectContaining({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "45000",
+    }));
+  });
+
   it("hashes caller-supplied local runner build ids before they reach image metadata", () => {
     expect(buildHostedRunnerLocalBuildId("stack-test-build-id")).toMatch(
       /^sha256-[a-f0-9]{24}$/u,
