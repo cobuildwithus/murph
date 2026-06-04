@@ -7,6 +7,8 @@ import {
   buildResetExecutionTargetSummary,
   buildResetMemberActivatedWake,
   isCloudflareHostedUserDataDeleteProven,
+  isCloudflareHostedUserDataPreDbDeleteProven,
+  isCloudflareHostedUserDataPostDbDeleteProven,
   parseResetOptions,
   RESET_TRANSACTION_OPTIONS,
   safeErrorMessage,
@@ -176,6 +178,7 @@ describe("reset hosted member runtime script guards", () => {
       deviceConnectionProviders: [],
       hasBillingRef: true,
       hasIdentity: true,
+      hasPhoneIdentity: true,
       member: {
         billingStatus: "active",
         suspendedAt: null,
@@ -190,6 +193,25 @@ describe("reset hosted member runtime script guards", () => {
       ...cleanCounts(),
       hostedAiUsageNonSkipped: 1,
     })).toThrow("hostedAiUsageNonSkipped=1");
+  });
+
+  it("requires a preserved phone identity for automatic post-reset SMS/Linq reconnect", () => {
+    const preflight = {
+      counts: cleanCounts(),
+      deviceConnectionProviders: [],
+      hasBillingRef: true,
+      hasIdentity: true,
+      hasPhoneIdentity: false,
+      member: {
+        billingStatus: "active",
+        suspendedAt: null,
+      },
+    } satisfies Parameters<typeof assertPreflightAllowsReset>[0];
+
+    expect(() => assertPreflightAllowsReset(
+      preflight,
+      parseResetOptions(["--member-id", "member_fixture", "--dry-run"]),
+    )).toThrow("phone identity is missing");
   });
 
   it("requires exactly one fresh bootstrap mailbox item after reset", () => {
@@ -255,6 +277,77 @@ describe("reset hosted member runtime script guards", () => {
       r2SkippedUserScopedPrefixes: false,
       r2Supported: true,
       runnerStateDeleted: false,
+    })).toBe(false);
+  });
+
+  it("allows pre-DB Cloudflare cleanup to be resumed only when the runner was already absent", () => {
+    const deleted = {
+      alarmCleared: true,
+      configured: true,
+      deleted: true,
+      r2DeletedObjectCount: 0,
+      r2SkippedUserScopedPrefixes: false,
+      runnerStateDeleted: true,
+    };
+    const alreadyAbsent = {
+      ...deleted,
+      deleted: false,
+      runnerStateDeleted: false,
+    };
+
+    expect(isCloudflareHostedUserDataPreDbDeleteProven({
+      deleteResult: deleted,
+      resumeSuspendedReset: false,
+    })).toBe(true);
+    expect(isCloudflareHostedUserDataPreDbDeleteProven({
+      deleteResult: alreadyAbsent,
+      resumeSuspendedReset: false,
+    })).toBe(false);
+    expect(isCloudflareHostedUserDataPreDbDeleteProven({
+      deleteResult: alreadyAbsent,
+      resumeSuspendedReset: true,
+    })).toBe(true);
+    expect(isCloudflareHostedUserDataPreDbDeleteProven({
+      deleteResult: {
+        ...alreadyAbsent,
+        r2SkippedUserScopedPrefixes: true,
+      },
+      resumeSuspendedReset: true,
+    })).toBe(false);
+  });
+
+  it("allows idempotent post-DB Cloudflare cleanup only after pre-DB deletion was proven", () => {
+    const afterDbAlreadyDeleted = {
+      alarmCleared: true,
+      configured: true,
+      deleted: false,
+      r2DeletedObjectCount: 0,
+      r2SkippedUserScopedPrefixes: false,
+      runnerStateDeleted: false,
+    };
+    const provenBeforeDb = {
+      ...afterDbAlreadyDeleted,
+      deleted: true,
+      r2DeletedObjectCount: 4,
+      runnerStateDeleted: true,
+    };
+
+    expect(isCloudflareHostedUserDataPostDbDeleteProven({
+      afterDbDelete: afterDbAlreadyDeleted,
+      beforeDbDelete: provenBeforeDb,
+    })).toBe(true);
+
+    expect(isCloudflareHostedUserDataPostDbDeleteProven({
+      afterDbDelete: afterDbAlreadyDeleted,
+      beforeDbDelete: null,
+    })).toBe(false);
+
+    expect(isCloudflareHostedUserDataPostDbDeleteProven({
+      afterDbDelete: {
+        ...afterDbAlreadyDeleted,
+        configured: false,
+      },
+      beforeDbDelete: provenBeforeDb,
     })).toBe(false);
   });
 

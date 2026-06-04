@@ -10,10 +10,16 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionMemberActivatedWake,
+  HOSTED_USER_RUNTIME_SIGNAL_NAME,
+  HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
   type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeSignal,
+} from "@murphai/hosted-execution/parsers";
+import {
   readHostedRuntimeTemporalEnvironment,
+  readHostedRuntimeTemporalWorkflowOptions,
 } from "@murphai/hosted-execution/temporal-env";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "../src/lib/hosted-execution/auth-adapter";
@@ -137,6 +143,11 @@ interface TemporalTerminateResult {
   terminated: boolean;
 }
 
+interface TemporalSignalResult {
+  signalAccepted: true;
+  workflowId: string;
+}
+
 interface CloudflareDeleteResult {
   alarmCleared: boolean | null;
   configured: boolean;
@@ -201,6 +212,7 @@ async function main(): Promise<void> {
         billingStatus: preflight.member.billingStatus,
         hasBillingRef: preflight.hasBillingRef,
         hasIdentity: preflight.hasIdentity,
+        hasPhoneIdentity: preflight.hasPhoneIdentity,
         suspended: Boolean(preflight.member.suspendedAt),
       },
     });
@@ -236,13 +248,17 @@ async function main(): Promise<void> {
       printJson("temporal-terminate-skipped", memberFingerprint, {});
     }
 
+    let cloudflareBeforeDb: CloudflareDeleteResult | null = null;
     if (!options.skipCloudflareDelete) {
       printJson("cloudflare-delete-before-db-start", memberFingerprint, {});
-      const cloudflare = await deleteCloudflareHostedUserData(options.memberId);
-      if (!cloudflare.deleted) {
+      cloudflareBeforeDb = await deleteCloudflareHostedUserData(options.memberId);
+      if (!isCloudflareHostedUserDataPreDbDeleteProven({
+        deleteResult: cloudflareBeforeDb,
+        resumeSuspendedReset: options.resumeSuspendedReset,
+      })) {
         throw new Error("Cloudflare user-data deletion before DB reset did not prove deletion.");
       }
-      printJson("cloudflare-delete-before-db-complete", memberFingerprint, cloudflare);
+      printJson("cloudflare-delete-before-db-complete", memberFingerprint, cloudflareBeforeDb);
     } else {
       printJson("cloudflare-delete-before-db-skipped", memberFingerprint, {});
     }
@@ -256,7 +272,10 @@ async function main(): Promise<void> {
     if (!options.skipCloudflareDelete) {
       printJson("cloudflare-delete-after-db-start", memberFingerprint, {});
       const cloudflare = await deleteCloudflareHostedUserData(options.memberId);
-      if (!cloudflare.deleted) {
+      if (!isCloudflareHostedUserDataPostDbDeleteProven({
+        beforeDbDelete: cloudflareBeforeDb,
+        afterDbDelete: cloudflare,
+      })) {
         throw new Error("Cloudflare user-data deletion after DB reset did not prove deletion.");
       }
       printJson("cloudflare-delete-after-db-complete", memberFingerprint, cloudflare);
@@ -279,6 +298,29 @@ async function main(): Promise<void> {
         prisma,
       });
       printJson("member-unsuspended", memberFingerprint, {});
+      if (!options.skipTemporalTerminate) {
+        try {
+          const bootstrapSignal = await signalResetBootstrapMailboxItem({
+            memberId: options.memberId,
+            mailboxItemId: resetResult.freshBootstrap.mailboxItemId,
+            prisma,
+          });
+          printJson("bootstrap-signal-complete", memberFingerprint, {
+            workflowIdFingerprint: fingerprintIdentifier(bootstrapSignal.workflowId),
+          });
+        } catch (error) {
+          await suspendMemberForReset({
+            memberId: options.memberId,
+            prisma,
+          }).catch(() => {});
+          printJson("member-resuspended-after-bootstrap-signal-failure", memberFingerprint, {});
+          throw error;
+        }
+      } else {
+        printJson("bootstrap-signal-skipped", memberFingerprint, {
+          note: "Temporal termination was skipped; operator must manually verify the fresh runtime wake path before clearing reset risk.",
+        });
+      }
     } else {
       printJson("member-left-suspended", memberFingerprint, {
         note: "Default execute behavior. Rerun with --resume-suspended-reset or explicitly unsuspend after the operator is ready.",
@@ -295,6 +337,7 @@ async function main(): Promise<void> {
         billingStatus: verification.member.billingStatus,
         hasBillingRef: verification.hasBillingRef,
         hasIdentity: verification.hasIdentity,
+        hasPhoneIdentity: verification.hasPhoneIdentity,
         suspended: Boolean(verification.member.suspendedAt),
       },
     });
@@ -493,6 +536,7 @@ async function readResetPreflight(input: {
   deviceConnectionProviders: DeviceConnectionProviderSummary[];
   hasBillingRef: boolean;
   hasIdentity: boolean;
+  hasPhoneIdentity: boolean;
   member: {
     billingStatus: string;
     suspendedAt: Date | null;
@@ -536,6 +580,7 @@ async function readResetPreflight(input: {
     deviceConnectionProviders,
     hasBillingRef: Boolean(billingRef?.stripeCustomerId || billingRef?.stripeSubscriptionId),
     hasIdentity: Boolean(identity?.privyUserId || identity?.walletAddress),
+    hasPhoneIdentity: Boolean(identity?.phoneLookupKey || identity?.phoneNumber),
     member,
   };
 }
@@ -562,6 +607,10 @@ export function assertPreflightAllowsReset(
 
   if (!preflight.hasIdentity) {
     throw new Error("Hosted member Privy/wallet identity is missing or undecryptable.");
+  }
+
+  if (!preflight.hasPhoneIdentity) {
+    throw new Error("Hosted member phone identity is missing or undecryptable; sparse post-reset SMS/Linq routing cannot reconnect automatically.");
   }
 
   if (preflight.counts.hostedUserCryptoEnvelopeControl < 1) {
@@ -775,6 +824,7 @@ async function resetHostedMemberDatabaseState(input: {
     kind: string;
     lane: string;
     laneSeq: string;
+    mailboxItemId: string;
     memberChannels: HostedExecutionMemberChannels;
   };
   freshWorkspaceVersion: string;
@@ -857,6 +907,7 @@ async function appendResetMemberActivatedMailboxItemTx(input: {
   kind: string;
   lane: string;
   laneSeq: string;
+  mailboxItemId: string;
   memberChannels: HostedExecutionMemberChannels;
 }> {
   const append = await appendHostedMailboxEnvelopeTx({
@@ -881,6 +932,7 @@ async function appendResetMemberActivatedMailboxItemTx(input: {
     kind: append.item.kind,
     lane: append.item.lane,
     laneSeq: String(append.item.laneSeq),
+    mailboxItemId: append.item.id,
     memberChannels: input.memberChannels,
   };
 }
@@ -1020,6 +1072,23 @@ async function deleteResetRowsTx(input: {
     tx: input.tx,
   });
 
+  await input.tx.hostedMemberRouting.updateMany({
+    data: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
   counts.hostedMailboxPayload = (await input.tx.hostedMailboxPayload.deleteMany({ where: { userId: input.memberId } })).count;
   counts.hostedIngressLatencyTrace = (await input.tx.hostedIngressLatencyTrace.deleteMany({ where: { userId: input.memberId } })).count;
   counts.hostedMailboxItem = (await input.tx.hostedMailboxItem.deleteMany({ where: { userId: input.memberId } })).count;
@@ -1327,6 +1396,77 @@ async function assertTemporalConnectable(): Promise<void> {
   await connection.close();
 }
 
+async function signalResetBootstrapMailboxItem(input: {
+  mailboxItemId: string;
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<TemporalSignalResult> {
+  const mailboxItem = await input.prisma.hostedMailboxItem.findUnique({
+    select: {
+      id: true,
+      lane: true,
+      laneSeq: true,
+      userId: true,
+    },
+    where: {
+      id: input.mailboxItemId,
+    },
+  });
+
+  if (!mailboxItem) {
+    throw new Error("Fresh reset bootstrap mailbox item is missing.");
+  }
+  if (mailboxItem.userId !== input.memberId) {
+    throw new Error("Fresh reset bootstrap mailbox item belongs to a different member.");
+  }
+
+  const environment = readHostedRuntimeTemporalEnvironment(process.env, {
+    defaultAddress: null,
+  });
+  if (!environment.address) {
+    throw new Error("Temporal is not configured for reset bootstrap signal.");
+  }
+
+  const workflowId = hostedUserRuntimeWorkflowId(input.memberId);
+  const signal = parseHostedRuntimeSignal({
+    kind: "mailbox_appended",
+    lane: mailboxItem.lane,
+    laneSeq: String(mailboxItem.laneSeq),
+    mailboxItemId: mailboxItem.id,
+    source: "hosted-member-runtime-reset",
+  });
+
+  const connection = await Connection.connect(buildTemporalConnectionOptions(environment));
+  try {
+    const client = new Client({
+      connection,
+      namespace: environment.namespace,
+    });
+
+    await withTimeout(
+      client.workflow.signalWithStart(HOSTED_USER_RUNTIME_WORKFLOW_TYPE, {
+        args: [{
+          options: readHostedRuntimeTemporalWorkflowOptions(process.env),
+          userId: input.memberId,
+        }],
+        signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+        signalArgs: [signal],
+        taskQueue: environment.taskQueue,
+        workflowId,
+      }),
+      TEMPORAL_TERMINATION_TIMEOUT_MS,
+      "Temporal reset bootstrap signal timed out.",
+    );
+
+    return {
+      signalAccepted: true,
+      workflowId,
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
 function buildTemporalConnectionOptions(
   environment: ReturnType<typeof readHostedRuntimeTemporalEnvironment>,
 ): ConnectionOptions {
@@ -1393,6 +1533,34 @@ export function isCloudflareHostedUserDataDeleteProven(input: {
     && input.runnerStateDeleted === true
     && input.r2Supported
     && input.r2SkippedUserScopedPrefixes === false;
+}
+
+export function isCloudflareHostedUserDataPreDbDeleteProven(input: {
+  deleteResult: CloudflareDeleteResult;
+  resumeSuspendedReset: boolean;
+}): boolean {
+  if (input.deleteResult.deleted) {
+    return true;
+  }
+
+  return input.resumeSuspendedReset
+    && input.deleteResult.configured === true
+    && input.deleteResult.alarmCleared === true
+    && input.deleteResult.runnerStateDeleted === false
+    && input.deleteResult.r2SkippedUserScopedPrefixes === false;
+}
+
+export function isCloudflareHostedUserDataPostDbDeleteProven(input: {
+  afterDbDelete: CloudflareDeleteResult;
+  beforeDbDelete: CloudflareDeleteResult | null;
+}): boolean {
+  return input.afterDbDelete.configured === true
+    && input.afterDbDelete.alarmCleared === true
+    && input.afterDbDelete.r2SkippedUserScopedPrefixes === false
+    && (
+      input.afterDbDelete.runnerStateDeleted === true
+      || input.beforeDbDelete?.deleted === true
+    );
 }
 
 function hostedUserRuntimeWorkflowId(userId: string): string {

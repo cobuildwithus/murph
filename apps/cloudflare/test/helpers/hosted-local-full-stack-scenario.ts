@@ -65,11 +65,15 @@ interface HostedActiveMemberSeedArgs {
   billingPlanCode?: "launch_monthly" | "launch_edge_monthly";
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
 }
 
 interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   homePhone: string;
   memberPhone: string;
+  privyUserId?: string | null;
+  walletAddress?: string | null;
 }
 
 export interface HostedLocalFullStackScenario {
@@ -339,6 +343,10 @@ export async function startHostedLocalFullStackScenario(input: {
           homePhone: seedInput.homePhone,
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
+          privyUserId: seedInput.privyUserId,
+          stripeCustomerId: seedInput.stripeCustomerId,
+          stripeSubscriptionId: seedInput.stripeSubscriptionId,
+          walletAddress: seedInput.walletAddress,
         });
       },
       seedActiveHostedMember: async (seedInput) => {
@@ -352,6 +360,8 @@ export async function startHostedLocalFullStackScenario(input: {
             ...(seedInput.environment ?? {}),
           },
           memberId: seedInput.memberId,
+          stripeCustomerId: seedInput.stripeCustomerId,
+          stripeSubscriptionId: seedInput.stripeSubscriptionId,
         });
       },
       stop: async () => {

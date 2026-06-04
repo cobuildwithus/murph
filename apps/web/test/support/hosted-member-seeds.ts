@@ -39,11 +39,15 @@ interface HostedActiveMemberSeedInput {
   billingPlanCode?: HostedMemberTestSeedBillingPlanCode;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
 }
 
 interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   homePhone: string;
   memberPhone: string;
+  privyUserId?: string | null;
+  walletAddress?: string | null;
 }
 
 interface HostedMemberSeedPrismaClient {
@@ -72,6 +76,8 @@ interface HostedMemberBillingStoreModule {
     currentBillingPlanCode: HostedMemberTestSeedBillingPlanCode;
     currentCheckoutOffer: "standard";
     memberId: string;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
     tx: unknown;
   }): Promise<unknown>;
 }
@@ -162,16 +168,18 @@ export async function seedHostedActiveMember(
         memberId: input.memberId,
         prisma: tx,
       });
-      await seedHostedMemberBillingRefTx({
-        billingPlanCode: input.billingPlanCode,
-        memberId: input.memberId,
-        modules,
-        tx,
-      });
       await modules.provisionHostedCryptoDomainRootsForUserTx({
         reason: "hosted-member.test-seed",
         tx,
         userId: input.memberId,
+      });
+      await seedHostedMemberBillingRefTx({
+        billingPlanCode: input.billingPlanCode,
+        memberId: input.memberId,
+        modules,
+        stripeCustomerId: input.stripeCustomerId,
+        stripeSubscriptionId: input.stripeSubscriptionId,
+        tx,
       });
     });
   } finally {
@@ -205,16 +213,18 @@ export async function seedHostedActiveLinqMember(
         memberId: input.memberId,
         prisma: tx,
       });
-      await seedHostedMemberBillingRefTx({
-        billingPlanCode: input.billingPlanCode,
-        memberId: input.memberId,
-        modules,
-        tx,
-      });
       await modules.provisionHostedCryptoDomainRootsForUserTx({
         reason: "hosted-member.test-seed",
         tx,
         userId: input.memberId,
+      });
+      await seedHostedMemberBillingRefTx({
+        billingPlanCode: input.billingPlanCode,
+        memberId: input.memberId,
+        modules,
+        stripeCustomerId: input.stripeCustomerId,
+        stripeSubscriptionId: input.stripeSubscriptionId,
+        tx,
       });
       await modules.upsertHostedMemberIdentity({
         maskedPhoneNumberHint: modules.readHostedPhoneHint(input.memberPhone),
@@ -223,15 +233,15 @@ export async function seedHostedActiveLinqMember(
         phoneNumber: input.memberPhone,
         phoneNumberVerifiedAt: new Date(),
         prisma: tx,
-        privyUserId: null,
+        privyUserId: input.privyUserId ?? null,
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: input.memberPhone,
-        walletAddress: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+        walletAddress: input.walletAddress ?? null,
+        walletChainType: input.walletAddress ? "ethereum" : null,
+        walletCreatedAt: input.walletAddress ? new Date() : null,
+        walletProvider: input.walletAddress ? "privy" : null,
       });
       await modules.upsertHostedMemberHomeLinqRecipientPhoneTx({
         clearPending: true,
@@ -378,6 +388,8 @@ async function seedHostedMemberBillingRefTx(input: {
   billingPlanCode?: HostedMemberTestSeedBillingPlanCode;
   memberId: string;
   modules: HostedMemberSeedModules;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
   tx: unknown;
 }): Promise<void> {
   if (!input.billingPlanCode) {
@@ -389,6 +401,8 @@ async function seedHostedMemberBillingRefTx(input: {
     currentBillingPlanCode: input.billingPlanCode,
     currentCheckoutOffer: "standard",
     memberId: input.memberId,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
     tx: input.tx,
   });
 }

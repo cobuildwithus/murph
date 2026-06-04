@@ -37,6 +37,7 @@ export type HostedLocalE2eScenarioName =
   | "direct-r2-presigned-put"
   | "idle-checkpoint-deferred-progress"
   | "mailbox-platform-env"
+  | "member-reset-smoke"
   | "linq-first-contact"
   | "linq-delivery"
   | "linq-scheduled-reminder"
@@ -109,6 +110,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
     name: "mailbox-platform-env",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-member-reset-smoke-e2e.test.ts",
+    manualOnly: true,
+    name: "member-reset-smoke",
+    processIsolation: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
