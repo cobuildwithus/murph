@@ -58,10 +58,11 @@ export function buildAssistantExecutionBehaviorText(input: {
   const progressUpdateGuidance =
     input.progressUpdatesAvailable === true
       ? `
-- When a task will likely take noticeable time before the user sees a final reply, send \`send_progress_update\` once early. Treat it as a required short preamble: one brief user-facing sentence that acknowledges the request and states the first step.
-- Use it for large PDFs, CSVs, images, lab reports, research, long vault scans, or multi-step file parsing/import. This is not narrating a plan; it is the current-channel acknowledgement before a longer tool loop. After a light file pass shows import-worthy health data, a good update is: "File received. I'm saving the relevant health data now." Keep it minimal and conversational, and do not write a multi-step plan.
-- Progress updates must be truthful about what you are doing next and must not include conclusions you have not verified.
-- For lab reports or blood tests, acknowledge receipt and say you will extract, check, or save results only if that is actually the intended work. Do not state interpretations, abnormalities, diagnoses, or recommendations in a progress update.`
+- If the current request might take a while, call \`send_progress_update\` once near the start.
+- Use it for any longer work, including reading attachments, parsing or saving files, research, long vault scans, or multi-step tool work.
+- Do not overthink the channel or task category. The update goes to the current user conversation.
+- Keep it to one short, factual sentence about what you are starting or checking next.
+- Do not include final answers, medical interpretations, abnormalities, diagnoses, recommendations, or claims you have not verified.`
       : ''
   const sections = [
     `Execution style:

@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAssistantExecutionBehaviorText,
 } from '../src/assistant/model-behavior.ts'
+import {
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
+} from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
   it('omits progress update guidance when progress delivery is unavailable', () => {
@@ -12,22 +15,50 @@ describe('assistant progress prompt contract', () => {
     })
 
     expect(prompt).not.toContain('send_progress_update')
-    expect(prompt).not.toContain('large PDFs, CSVs, images, lab reports')
-    expect(prompt).not.toContain('File received.')
+    expect(prompt).not.toContain('If the current request might take a while')
+    expect(prompt).not.toContain('Do not overthink the channel or task category')
   })
 
-  it('requires early progress updates for long attachment work when available', () => {
+  it('requires early progress updates for work that might take a while', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
       progressUpdatesAvailable: true,
     })
 
-    expect(prompt).toContain('send `send_progress_update` once early')
-    expect(prompt).toContain('large PDFs, CSVs, images, lab reports')
-    expect(prompt).toContain('multi-step file parsing/import')
-    expect(prompt).toContain('This is not narrating a plan')
     expect(prompt).toContain(
-      "File received. I'm saving the relevant health data now.",
+      'If the current request might take a while, call `send_progress_update` once near the start',
     )
+    expect(prompt).toContain('reading attachments, parsing or saving files')
+    expect(prompt).toContain('multi-step tool work')
+    expect(prompt).toContain('Do not overthink the channel or task category')
+    expect(prompt).toContain(
+      'one short, factual sentence about what you are starting or checking next',
+    )
+    expect(prompt).toContain(
+      'Do not include final answers, medical interpretations, abnormalities',
+    )
+  })
+
+  it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'current request might take a while',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'user-facing, factual',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'not include final conclusions',
+    )
+
+    const textProperty =
+      MURPH_SEND_PROGRESS_UPDATE_TOOL.inputSchema.properties.text
+    expect(textProperty.description).toContain(
+      'Say what you are starting or checking next',
+    )
+    expect(textProperty.description).toContain('No markdown links')
+    expect(textProperty.description).toContain('final answers')
+    expect(textProperty.description).toContain('medical interpretation')
+    expect(textProperty.description).toContain('unchecked claims')
   })
 })

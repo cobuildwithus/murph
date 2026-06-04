@@ -105,15 +105,17 @@ describe('assistant GPT-5 execution prompt overlay', () => {
     }))
 
     expect(prompt).toContain('send_progress_update')
-    expect(prompt).toContain('large PDFs, CSVs, images, lab reports')
-    expect(prompt).toContain('multi-step file parsing/import')
     expect(prompt).toContain(
-      'After a light file pass shows import-worthy health data',
+      'If the current request might take a while',
+    )
+    expect(prompt).toContain('reading attachments, parsing or saving files')
+    expect(prompt).toContain('multi-step tool work')
+    expect(prompt).toContain(
+      'Do not overthink the channel or task category',
     )
     expect(prompt).toContain(
-      "File received. I'm saving the relevant health data now.",
+      'Do not include final answers, medical interpretations, abnormalities',
     )
-    expect(prompt).toContain('Do not state interpretations, abnormalities, diagnoses')
   })
 })
 

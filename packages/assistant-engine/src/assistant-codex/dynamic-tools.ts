@@ -9,7 +9,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send one brief progress update to the user in the current conversation when the current task will take noticeable time. The update must be user-facing, factual, and not include final conclusions.',
+    'Send one brief progress update to the current user conversation when the current request might take a while. The update must be user-facing, factual, and not include final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -19,7 +19,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         minLength: 1,
         maxLength: MAX_PROGRESS_CHARS,
         description:
-          'Brief model-authored progress update. No markdown links, no final answer, no medical interpretation, no claims that have not been checked yet.',
+          'Brief model-authored progress update. Say what you are starting or checking next. No markdown links, final answers, medical interpretation, or unchecked claims.',
       },
     },
     required: ['text'],
