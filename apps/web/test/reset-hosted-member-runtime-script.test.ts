@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertPreflightAllowsReset,
   assertPostResetCounts,
   assertResetExecutionTargetConfirmed,
   buildResetExecutionTargetSummary,
@@ -162,6 +163,33 @@ describe("reset hosted member runtime script guards", () => {
       hostedMemberIdentityPhoneFields: 1,
       hostedMemberRouting: 1,
     })).not.toThrow();
+  });
+
+  it("allows pre-reset usage rows with non-skipped meter status to be wiped", () => {
+    const preflight = {
+      counts: {
+        ...cleanCounts(),
+        hostedAiUsage: 3,
+        hostedAiUsageNonSkipped: 2,
+        hostedAiUsagePeriod: 1,
+      },
+      deviceConnectionProviders: [],
+      hasBillingRef: true,
+      hasIdentity: true,
+      member: {
+        billingStatus: "active",
+        suspendedAt: null,
+      },
+    } satisfies Parameters<typeof assertPreflightAllowsReset>[0];
+
+    expect(() => assertPreflightAllowsReset(
+      preflight,
+      parseResetOptions(["--member-id", "member_fixture", "--dry-run"]),
+    )).not.toThrow();
+    expect(() => assertPostResetCounts({
+      ...cleanCounts(),
+      hostedAiUsageNonSkipped: 1,
+    })).toThrow("hostedAiUsageNonSkipped=1");
   });
 
   it("requires exactly one fresh bootstrap mailbox item after reset", () => {

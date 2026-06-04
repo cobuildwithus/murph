@@ -540,7 +540,7 @@ async function readResetPreflight(input: {
   };
 }
 
-function assertPreflightAllowsReset(
+export function assertPreflightAllowsReset(
   preflight: Awaited<ReturnType<typeof readResetPreflight>>,
   options: ResetOptions,
 ): void {
@@ -566,10 +566,6 @@ function assertPreflightAllowsReset(
 
   if (preflight.counts.hostedUserCryptoEnvelopeControl < 1) {
     throw new Error("Hosted member does not have a decryptable control crypto root to preserve.");
-  }
-
-  if (preflight.counts.hostedAiUsageNonSkipped > 0) {
-    throw new Error("Hosted member has AI usage rows that are not stripe_meter_status=skipped.");
   }
 
   if (options.execute && !options.skipTemporalTerminate && !isTemporalConfigured()) {
@@ -794,10 +790,6 @@ async function resetHostedMemberDatabaseState(input: {
       memberId: input.memberId,
       prisma: tx,
     });
-    if (preCounts.hostedAiUsageNonSkipped > 0) {
-      throw new Error("AI usage status changed after preflight.");
-    }
-
     const existingWorkspace = await tx.hostedWorkspace.findUnique({
       select: {
         version: true,
