@@ -133,7 +133,14 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('roughly how long they have taken them or since when')
     expect(raw).toContain('age plus gender')
     expect(raw).toContain(
-      'One high-level setup detail first: what age and gender should I use for context?',
+      'ask a natural optional question for age and gender context',
+    )
+    expect(raw).toContain('Do not use a fixed script for this turn')
+    expect(raw).toContain(
+      'age and gender can help Murph interpret health context',
+    )
+    expect(raw).toContain(
+      'invite the user\'s own gender wording without choosing labels for them',
     )
     expect(raw).toContain(
       'before the wearable/app checkpoint or more detailed protocol/supplement questions',
@@ -142,10 +149,17 @@ describe('assistant skill assets', () => {
       'before moving to current protocol or supplement questions',
     )
     expect(raw).toContain(
-      'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
+      'asks what Murph should call the user and invites one current health curiosity, focus area, or concern',
     )
     expect(raw).toContain(
-      'Are you already trying any health protocols or experiments, or mostly starting fresh?',
+      'whether they are already trying any health protocols or experiments',
+    )
+    expect(raw).toContain('mostly starting fresh')
+    expect(raw).toContain(
+      'invite product or brand names plus roughly how long they have taken each one or since when',
+    )
+    expect(raw).toContain(
+      'Make clear that PDFs or pasted results are welcome whenever the user wants to share them',
     )
     expect(raw).toContain('Save useful onboarding answers as they arrive')
     expect(raw).toContain(
@@ -154,36 +168,59 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Do not wait until all setup prompts are done',
     )
+    const nameContextIndex = raw.indexOf(
+      '2. Name and context. After the welcome',
+    )
     const highLevelIndex = raw.indexOf(
-      'One high-level setup detail first: what age and gender should I use for context?',
+      'ask a natural optional question for age and gender context',
     )
     const wearableIndex = raw.indexOf(
       '4. Data sources and wearables. This is a required onboarding checkpoint',
     )
     const protocolsIndex = raw.indexOf(
-      'Are you already trying any health protocols or experiments, or mostly starting fresh?',
+      '6. Current protocols or experiments.',
     )
     const supplementsIndex = raw.indexOf(
-      'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
+      '7. Supplements.',
     )
     const bloodTestsIndex = raw.indexOf(
-      'Do you have any recent blood tests or lab panels',
+      '8. Blood tests.',
     )
+    const orientationIndex = raw.indexOf('9. Orientation.')
+    expect(nameContextIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThanOrEqual(0)
+    expect(highLevelIndex).toBeGreaterThan(nameContextIndex)
     expect(wearableIndex).toBeGreaterThan(highLevelIndex)
     expect(protocolsIndex).toBeGreaterThan(wearableIndex)
     expect(supplementsIndex).toBeGreaterThan(protocolsIndex)
     expect(bloodTestsIndex).toBeGreaterThan(supplementsIndex)
+    expect(orientationIndex).toBeGreaterThan(bloodTestsIndex)
     expect(raw).toContain(
       'whether they have recent blood tests or lab panels',
     )
     expect(raw).toContain(
-      'you can send the PDFs or copy/paste the results whenever you want',
+      'PDFs or pasted results are welcome whenever the user wants to share them',
     )
     expect(raw).toContain('they can skip anything they do not want to share')
     expect(raw).toContain(
       'Do not press for skipped demographic details, birth date, birth month/year, or sex assigned at birth',
     )
+    expect(raw.slice(nameContextIndex, highLevelIndex)).not.toContain('```text')
+    expect(raw.slice(highLevelIndex, wearableIndex)).not.toContain('```text')
+    expect(raw.slice(protocolsIndex, supplementsIndex)).not.toContain('```text')
+    expect(raw.slice(supplementsIndex, bloodTestsIndex)).not.toContain('```text')
+    expect(raw.slice(bloodTestsIndex, orientationIndex)).not.toContain('```text')
+    expect(raw.match(/Do not use a fixed script for this turn/g)?.length).toBe(5)
+    const removedFixedScripts = [
+      'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
+      'One high-level setup detail first: what age and gender should I use for context? You can skip either.',
+      'Are you already trying any health protocols or experiments, or mostly starting fresh?',
+      'Are you taking any supplements right now? Product or brand names help, plus roughly how long you\'ve taken each one or since when.',
+      'Do you have any recent blood tests or lab panels, like Function Health or doctor-ordered tests? If you do, you can send the PDFs or copy/paste the results whenever you want.',
+    ]
+    for (const removedFixedScript of removedFixedScripts) {
+      expect(raw).not.toContain(removedFixedScript)
+    }
     expect(raw).not.toContain(
       'A few setup details are helpful if you\'re comfortable sharing',
     )
@@ -241,7 +278,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'After required canonical memory/goal writes succeed, mark onboarding complete',
     )
-    expect(raw).toContain('If a required canonical write fails, do not mark onboarding complete')
+    expect(raw).toContain(
+      'If a required canonical write fails, do not mark onboarding complete',
+    )
     expect(raw).toContain('On a retry after a failed or interrupted save')
     expect(raw).toContain(
       'Inspect existing memory/goals or use the returned record ids from earlier writes',
@@ -250,6 +289,18 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'When the user clearly declines onboarding, mark onboarding complete with `vault-cli assistant onboarding complete --reason user_declined` without creating memory or goal records',
     )
+    const rejectedPersistenceExpansions = [
+      'narrowest matching `vault-cli` surface',
+      'web lookup before saving an identifiable product',
+      'vault-cli supplement save',
+      'vault-cli regimen save',
+      'vault-cli blood-test save',
+      'vault-cli protocol import-json',
+      'Completion may intentionally skip saving',
+    ]
+    for (const rejectedPersistenceExpansion of rejectedPersistenceExpansions) {
+      expect(raw).not.toContain(rejectedPersistenceExpansion)
+    }
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
   })
