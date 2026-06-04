@@ -79,7 +79,6 @@ export const HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS = [
 const hostedAssistantAllowedProviderIdSet = new Set<string>(
   HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS,
 )
-const DEFAULT_HOSTED_ASSISTANT_MODEL = 'gpt-5.5'
 const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'low'
 const DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY: AssistantApprovalPolicy = 'never'
 const DEFAULT_HOSTED_ASSISTANT_SANDBOX: AssistantSandbox = 'danger-full-access'
@@ -439,7 +438,7 @@ function resolveHostedAssistantSeedPlan(
       provider: 'codex-cli',
       approvalPolicy:
         raw.approvalPolicy ?? DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY,
-      model: raw.model ?? DEFAULT_HOSTED_ASSISTANT_MODEL,
+      model: raw.model,
       modelProvider: providerSelection.modelProvider,
       reasoningEffort:
         raw.reasoningEffort ?? DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT,

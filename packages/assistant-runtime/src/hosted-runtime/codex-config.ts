@@ -44,7 +44,6 @@ import {
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
-const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -118,14 +117,13 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
   runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
-  const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL)
-    ?? DEFAULT_HOSTED_CODEX_MODEL;
+  const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
     [HOSTED_RUNTIME_PROCESS_ENV]: "1",
     [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
-    HOSTED_ASSISTANT_MODEL: hostedModel,
+    ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)
       ?? DEFAULT_HOSTED_CODEX_REASONING_EFFORT,

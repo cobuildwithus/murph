@@ -93,7 +93,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     "hosted-openai",
   );
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, "gpt-5.5");
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "low");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_APPROVAL_POLICY, "never");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_SANDBOX, "danger-full-access");
@@ -101,7 +101,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(result.runtimeEnv.PATH, HOSTED_RUNNER_EXECUTABLE_PATH);
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /^model = "gpt-5\.5"$/mu);
+  assert.doesNotMatch(config, /^model = /mu);
   assert.match(config, /^model_provider = "hosted-openai"$/mu);
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(
@@ -247,7 +247,7 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
   assert.equal(result.runtimeEnv.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION, undefined);
 });
 
-test("hosted Codex runtime config falls back to the default model for blank env values", async () => {
+test("hosted Codex runtime config omits the model for blank env values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
@@ -258,9 +258,9 @@ test("hosted Codex runtime config falls back to the default model for blank env 
     },
   });
 
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, "gpt-5.5");
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, undefined);
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /^model = "gpt-5\.5"$/mu);
+  assert.doesNotMatch(config, /^model = /mu);
 });
 
 test("hosted Codex runtime config preserves explicit model and reasoning env", async () => {
@@ -275,6 +275,8 @@ test("hosted Codex runtime config preserves explicit model and reasoning env", a
     },
   });
 
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, "gpt-explicit");
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "high");
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /model = "gpt-explicit"/u);
   assert.match(config, /model_reasoning_effort = "high"/u);
