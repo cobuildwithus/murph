@@ -94,7 +94,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   );
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, "gpt-5.5");
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "xhigh");
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "low");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_APPROVAL_POLICY, "never");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_SANDBOX, "danger-full-access");
   assert.equal(result.runtimeEnv[HOSTED_RUNTIME_PROCESS_ENV], "1");
@@ -103,7 +103,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /^model = "gpt-5\.5"$/mu);
   assert.match(config, /^model_provider = "hosted-openai"$/mu);
-  assert.match(config, /model_reasoning_effort = "xhigh"/u);
+  assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(
     config,
     new RegExp(

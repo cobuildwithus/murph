@@ -80,7 +80,7 @@ const hostedAssistantAllowedProviderIdSet = new Set<string>(
   HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS,
 )
 const DEFAULT_HOSTED_ASSISTANT_MODEL = 'gpt-5.5'
-const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'xhigh'
+const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'low'
 const DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY: AssistantApprovalPolicy = 'never'
 const DEFAULT_HOSTED_ASSISTANT_SANDBOX: AssistantSandbox = 'danger-full-access'
 

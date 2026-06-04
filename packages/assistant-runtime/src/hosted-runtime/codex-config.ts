@@ -45,7 +45,7 @@ import {
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
-const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "xhigh";
+const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // Match local Codex defaults while staying below the gpt-5.5 context window.

@@ -32,7 +32,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
     HOSTED_ASSISTANT_MODEL: "gpt-5.5",
     HOSTED_ASSISTANT_PROVIDER: "openai",
-    HOSTED_ASSISTANT_REASONING_EFFORT: "xhigh",
+    HOSTED_ASSISTANT_REASONING_EFFORT: "low",
     HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
     HOSTED_WEB_BASE_URL: "https://app.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
@@ -390,7 +390,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=xhigh.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     );
 
     expect(
@@ -401,7 +401,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=xhigh.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     );
 
     expect(
@@ -411,7 +411,7 @@ describe("deploy preflight helpers", () => {
       ),
     ).toEqual(expect.not.arrayContaining([
       "production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.5.",
-      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=xhigh.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     ]));
   });
 

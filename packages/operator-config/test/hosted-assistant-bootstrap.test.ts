@@ -58,7 +58,7 @@ function assertCodexOpenAiProfile(
   const {
     approvalPolicy = 'never',
     model = 'gpt-5.5',
-    reasoningEffort = 'xhigh',
+    reasoningEffort = 'low',
     sandbox = 'danger-full-access',
   } = expected
 
@@ -373,7 +373,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
               provider: 'codex-cli',
               model: 'gpt-5.5',
               modelProvider: 'openai',
-              reasoningEffort: 'xhigh',
+              reasoningEffort: 'low',
               sandbox: 'danger-full-access',
             },
           }),

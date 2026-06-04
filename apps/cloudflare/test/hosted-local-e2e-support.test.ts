@@ -170,7 +170,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(env).toMatchObject({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_ASSISTANT_REASONING_EFFORT: "xhigh",
+      HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
       NODE_ENV: "test",
