@@ -56,7 +56,7 @@ export function buildAssistantExecutionBehaviorText(input: {
 }): string {
   const progressUpdateGuidance = `
 - A required \`send_progress_update\` call is not a final answer and does not conflict with acting directly. After sending it, continue immediately with the first file, vault, web, skill, media, or CLI action needed for the task.
-- Reading a skill file, checking setup guidance, or making a routine single-command vault read is not enough by itself to require a progress update. If the overall task also involves content inspection, research, saving recovered data, long parsing, long scans, or multiple tool steps, the progress update is still required first.`
+- Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work. Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed.`
 
   return `Execution and stop rules:
 - When the next safe step is clear, do the work in this turn instead of asking for extra permission.${progressUpdateGuidance}

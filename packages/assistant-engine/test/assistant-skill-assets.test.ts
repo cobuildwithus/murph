@@ -180,7 +180,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('rough, stream-of-consciousness context dump')
     expect(raw).toContain(
-      'Include a short examples list to help the user formulate a typed reply or voice memo',
+      'Include a short examples list to help the user answer',
     )
     expect(raw).toContain('keep the examples in list form, not one long paragraph')
     expect(raw).toContain('- usual weekly exercise rhythm')
@@ -193,18 +193,27 @@ describe('assistant skill assets', () => {
       '- injuries, limitations, or anything they are trying to improve',
     )
     expect(raw).toContain(
-      'The visible assistant message for this turn must include three elements',
+      'Ask one natural question, include the compact examples list',
     )
     expect(raw).toContain(
-      'answer by typing a messy list or sending a stream-of-consciousness voice memo',
+      'end the visible message with exactly: "Feel free to send me a voice memo."',
+    )
+    expect(raw).not.toContain('A messy answer is perfect')
+    expect(raw).not.toContain('typed or voice memo')
+    expect(raw).not.toContain('messy typed list or a stream-of-consciousness voice memo')
+    expect(raw).toContain(
+      'If a voice memo or audio answer already has a transcript',
     )
     expect(raw).toContain(
-      'Keep the voice memo option in the same message as the examples',
+      'use it directly',
     )
     expect(raw).toContain(
+      'No progress update is needed solely because the answer arrived as automatically parsed audio',
+    )
+    expect(raw).not.toContain(
       'If the user sends a voice memo and the assistant will inspect, transcribe, summarize, or save it',
     )
-    expect(raw).toContain(
+    expect(raw).not.toContain(
       'call `send_progress_update` before reading the content or using file/transcription tools',
     )
     expect(raw).toContain(
@@ -324,15 +333,29 @@ describe('assistant skill assets', () => {
       expect(movementSection).toContain(movementExample)
     }
     expect(movementSection).toContain(
-      'The visible assistant message for this turn must include three elements',
+      'Ask one natural question, include the compact examples list',
     )
     expect(movementSection).toContain(
-      'answer by typing a messy list or sending a stream-of-consciousness voice memo',
+      'end the visible message with exactly: "Feel free to send me a voice memo."',
+    )
+    expect(movementSection).not.toContain('A messy answer is perfect')
+    expect(movementSection).not.toContain('typed or voice memo')
+    expect(movementSection).not.toContain(
+      'messy typed list or a stream-of-consciousness voice memo',
     )
     expect(movementSection).toContain(
-      'Keep the voice memo option in the same message as the examples',
+      'If a voice memo or audio answer already has a transcript',
     )
     expect(movementSection).toContain(
+      'use it directly',
+    )
+    expect(movementSection).toContain(
+      'No progress update is needed solely because the answer arrived as automatically parsed audio',
+    )
+    expect(movementSection).not.toContain(
+      'If the user sends a voice memo and the assistant will inspect, transcribe, summarize, or save it',
+    )
+    expect(movementSection).not.toContain(
       'call `send_progress_update` before reading the content or using file/transcription tools',
     )
     expect(movementSection).toContain(

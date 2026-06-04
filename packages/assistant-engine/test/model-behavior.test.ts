@@ -101,14 +101,12 @@ describe('assistant execution prompt contract', () => {
       'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
     )
     expect(prompt).toContain(
-      'content inspection, research, saving recovered data, long parsing, long scans, or multiple tool steps',
+      'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
     )
     expect(prompt).toContain(
-      'call `send_progress_update` first',
+      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content',
     )
-    expect(prompt).toContain(
-      'The progress update is the first real action, not optional narration',
-    )
+    expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 })
@@ -210,9 +208,15 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires inspecting that content, call `send_progress_update` first',
+      'If the current task requires inspecting non-audio user content, call `send_progress_update` first',
     )
     expect(prompt).toContain(
+      'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',
+    )
+    expect(prompt).toContain(
+      'When transcripts are missing and the task truly needs the media content, call `send_progress_update` before bounded local media tools',
+    )
+    expect(prompt).not.toContain(
       'This applies even when the platform has already extracted the text',
     )
     expect(prompt).toContain(

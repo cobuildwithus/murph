@@ -20,8 +20,12 @@ describe('assistant progress prompt contract', () => {
       'continue immediately with the first file, vault, web, skill, media, or CLI action',
     )
     expect(prompt).toContain(
-      'content inspection, research, saving recovered data, long parsing, long scans, or multiple tool steps',
+      'Use it for longer, multi-step, research, long parsing/scans, or non-audio content-inspection work',
     )
+    expect(prompt).toContain(
+      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, and automatically transcribed voice memo or audio content',
+    )
+    expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 
@@ -34,7 +38,10 @@ describe('assistant progress prompt contract', () => {
       'Use immediately as the first assistant action',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'PDFs, lab reports, images, screenshots, CSVs, audio/video',
+      'PDFs, lab reports, images, screenshots, CSVs',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
+      'audio/video, large pasted text',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'large pasted text, meal/product/supplement labels',
@@ -43,6 +50,12 @@ describe('assistant progress prompt contract', () => {
       'workout exports, wearable exports, or health documents',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'Skip automatically transcribed voice memo or audio content',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'manual media tools or broader long-running work are needed',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
       'reasoning over extracted content',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
