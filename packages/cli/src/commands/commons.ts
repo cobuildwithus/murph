@@ -73,12 +73,7 @@ export const commonsProtocolShowResultSchema = z.object({
   catalogHash: z.string().min(1),
   lookup: z.string().min(1),
   protocol: commonsEntitySummarySchema.extend({
-    aliases: z.array(z.string().min(1)),
-    attribution: z.unknown().nullable(),
-    body: z.string(),
     experimentOnboarding: z.unknown().nullable(),
-    lineage: z.unknown().nullable(),
-    measurementPlan: z.unknown().nullable(),
     protocol: z.unknown().nullable(),
     safety: z.unknown().nullable(),
     testPlans: z.array(z.unknown()),
@@ -200,7 +195,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         .int()
         .positive()
         .max(200)
-        .default(20)
+        .default(5)
         .describe("Maximum number of catalog hits to return."),
     }),
     examples: [
@@ -422,19 +417,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       return {
         catalogHash: reader.catalogHash,
         lookup: args.key,
-        protocol: {
-          ...toEntitySummary(entity),
-          aliases: entity.aliases ?? [],
-          attribution: entity.attribution ?? null,
-          body: entity.body,
-          experimentOnboarding: entity.experimentOnboarding ?? null,
-          lineage: entity.lineage ?? null,
-          measurementPlan: entity.measurementPlan ?? null,
-          protocol: entity.protocol ?? null,
-          safety: entity.safety ?? null,
-          testPlans: entity.testPlans ?? [],
-          whyItWorks: entity.whyItWorks ?? [],
-        },
+        protocol: toProtocolShowDetail(entity),
       };
     },
   });
@@ -833,6 +816,43 @@ function toEntityDetail(entity: HealthCommonsCatalogEntity) {
     testPlans: entity.testPlans ?? [],
     whyItWorks: entity.whyItWorks ?? [],
   };
+}
+
+function toProtocolShowDetail(
+  entity: HealthCommonsCatalogEntity & { entityType: typeof protocolEntityType },
+) {
+  const hasOnboarding = entity.experimentOnboarding !== undefined
+    && entity.experimentOnboarding !== null;
+
+  return {
+    ...toEntitySummary(entity),
+    experimentOnboarding: toProtocolShowOnboarding(entity.experimentOnboarding),
+    protocol: hasOnboarding ? null : entity.protocol ?? null,
+    safety: hasOnboarding ? null : entity.safety ?? null,
+    testPlans: hasOnboarding ? [] : entity.testPlans ?? [],
+    whyItWorks: hasOnboarding ? [] : entity.whyItWorks ?? [],
+  };
+}
+
+function toProtocolShowOnboarding(value: unknown): unknown | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return {
+    setupSlots: value.setupSlots ?? null,
+    safetyScreen: value.safetyScreen ?? null,
+    planDefaults: value.planDefaults ?? null,
+    logging: value.logging ?? null,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toSourceSummary(entity: SourceArtifactEntity) {

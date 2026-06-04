@@ -2185,7 +2185,7 @@
                           }
                         },
                         "limit": {
-                          "default": 20,
+                          "default": 5,
                           "description": "Maximum number of catalog hits to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
@@ -10480,7 +10480,7 @@
                   }
                 },
                 "limit": {
-                  "default": 200,
+                  "default": 50,
                   "description": "Maximum number of timeline entries to return.",
                   "type": "integer",
                   "exclusiveMinimum": 0,

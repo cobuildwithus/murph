@@ -78,7 +78,6 @@ const timelineEntrySchema = z.object({
   path: pathSchema.nullable(),
   relatedIds: z.array(z.string().min(1)),
   tags: z.array(z.string().min(1)),
-  data: z.record(z.string(), z.unknown()),
 })
 
 const timelineResultSchema = z.object({
@@ -372,7 +371,7 @@ export function registerSearchCommands(
           .int()
           .positive()
           .max(500)
-          .default(200)
+          .default(50)
           .describe('Maximum number of timeline entries to return.'),
       }),
       examples: [
@@ -435,7 +434,19 @@ export function registerSearchCommands(
             entryTypes,
             limit: options.limit,
           },
-          items: items as z.infer<typeof timelineResultSchema>['items'],
+          items: items.map((item) => ({
+            id: item.id,
+            entryType: item.entryType,
+            occurredAt: item.occurredAt,
+            date: item.date,
+            title: item.title,
+            kind: item.kind,
+            stream: item.stream,
+            experimentSlug: item.experimentSlug,
+            path: item.path,
+            relatedIds: item.relatedIds,
+            tags: item.tags,
+          })),
         }
       },
     },

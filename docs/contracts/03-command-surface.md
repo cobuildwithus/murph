@@ -824,7 +824,7 @@ The query text may be passed either positionally as `vault-cli search query <que
     "kinds": [],
     "streams": [],
     "entryTypes": [],
-    "limit": 200
+    "limit": 50
   },
   "items": [
     {
@@ -838,12 +838,7 @@ The query text may be passed either positionally as `vault-cli search query <que
       "experimentSlug": null,
       "path": "ledger/metric-samples/heart_rate/2026/2026-03.jsonl",
       "relatedIds": ["smp_123", "smp_124"],
-      "tags": ["sample_summary", "heart_rate"],
-      "data": {
-        "stream": "heart_rate",
-        "sampleCount": 2,
-        "averageValue": 69
-      }
+      "tags": ["sample_summary", "heart_rate"]
     }
   ]
 }

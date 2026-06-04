@@ -62,6 +62,25 @@ test("commons search reads the public catalog without requiring a vault", async 
   assert.ok(data.hits.every((hit) => hit.matchedFields.length > 0));
 });
 
+test("commons search defaults to a compact result count", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    filters: {
+      limit: number;
+    };
+    hits: unknown[];
+  }>(cli, [
+    "commons",
+    "search",
+    "sauna",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.filters.limit, 5);
+  assert.ok(data.hits.length <= 5);
+});
+
 test("commons protocol list and show expose protocol revisions distinctly from private protocol commands", async () => {
   const cli = createCommonsSliceCli();
 
@@ -97,9 +116,21 @@ test("commons protocol list and show expose protocol revisions distinctly from p
   const showResult = await runInProcessJsonCli<{
     lookup: string;
     protocol: {
+      aliases?: unknown;
+      attribution?: unknown;
+      body?: unknown;
       entityType: string;
+      experimentOnboarding: {
+        contextReview?: unknown;
+        logging?: unknown;
+        planDefaults?: unknown;
+        safetyScreen?: unknown;
+        setupSlots?: unknown;
+      } | null;
       key: string;
-      protocol: unknown;
+      lineage?: unknown;
+      measurementPlan?: unknown;
+      protocol: unknown | null;
       revision: {
         pageRevisionId: string;
         runSpecRevisionId: string | null;
@@ -120,8 +151,24 @@ test("commons protocol list and show expose protocol revisions distinctly from p
   assert.equal(showData.protocol.entityType, "protocol_variant");
   assert.match(showData.protocol.revision.pageRevisionId, /^sha256:/u);
   assert.match(showData.protocol.revision.runSpecRevisionId ?? "", /^sha256:/u);
-  assert.ok(showData.protocol.protocol && typeof showData.protocol.protocol === "object");
-  assert.ok(showData.protocol.testPlans.length > 0);
+  assert.ok(
+    showData.protocol.experimentOnboarding &&
+      typeof showData.protocol.experimentOnboarding === "object",
+  );
+  assert.equal("contextReview" in showData.protocol.experimentOnboarding, false);
+  assert.ok(showData.protocol.experimentOnboarding.setupSlots);
+  assert.ok(showData.protocol.experimentOnboarding.safetyScreen);
+  assert.equal(showData.protocol.protocol, null);
+  assert.deepEqual(showData.protocol.testPlans, []);
+  for (const omittedField of [
+    "aliases",
+    "attribution",
+    "body",
+    "lineage",
+    "measurementPlan",
+  ] as const) {
+    assert.equal(omittedField in showData.protocol, false);
+  }
 });
 
 test("commons protocol explore expands sauna matches into family variants and a starter candidate", async () => {
@@ -360,11 +407,20 @@ test("commons get inspects generic entities and accepts measurement method disam
 
   const getResult = await runInProcessJsonCli<{
     entity: {
+      aliases: string[];
+      attribution: unknown | null;
+      body: string;
       entityType: string;
       entityTypeLabel: string;
+      experimentOnboarding: {
+        contextReview?: unknown;
+      } | null;
       key: string;
+      lineage: unknown | null;
       measurementMethod: unknown | null;
       measurementPlan: unknown | null;
+      protocol: unknown | null;
+      testPlans: unknown[];
     };
     lookup: string;
   }>(cli, [
@@ -381,6 +437,13 @@ test("commons get inspects generic entities and accepts measurement method disam
   assert.equal(getData.entity.entityTypeLabel, "protocol");
   assert.equal(getData.entity.measurementMethod, null);
   assert.ok("measurementPlan" in getData.entity);
+  assert.ok(getData.entity.aliases.length > 0);
+  assert.ok(getData.entity.attribution && typeof getData.entity.attribution === "object");
+  assert.ok(getData.entity.lineage && typeof getData.entity.lineage === "object");
+  assert.equal(typeof getData.entity.body, "string");
+  assert.ok(getData.entity.protocol && typeof getData.entity.protocol === "object");
+  assert.ok(getData.entity.testPlans.length > 0);
+  assert.ok(getData.entity.experimentOnboarding?.contextReview);
 
   const absentMeasurementMethod = await runInProcessJsonCli(cli, [
     "commons",

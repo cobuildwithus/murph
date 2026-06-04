@@ -552,6 +552,7 @@ test('timeline forwards repeatable filters and selective entry types', async () 
       to: string | null
     }
     items: Array<{
+      data?: unknown
       id: string
     }>
     vault: string
@@ -570,9 +571,10 @@ test('timeline forwards repeatable filters and selective entry types', async () 
     kinds: [],
     streams: [],
     entryTypes: [],
-    limit: 200,
+    limit: 50,
   })
   assert.equal(requireData(defaultTimeline.envelope).items[0]?.id, 'entry_01')
+  assert.equal('data' in (requireData(defaultTimeline.envelope).items[0] ?? {}), false)
   assert.deepEqual(timelineCalls[0]?.filters, {
     from: undefined,
     to: undefined,
@@ -583,7 +585,7 @@ test('timeline forwards repeatable filters and selective entry types', async () 
     includeEvents: true,
     includeAssessments: true,
     includeDailySampleSummaries: true,
-    limit: 200,
+    limit: 50,
   })
 
   const filteredTimeline = await runSearchCli<{
