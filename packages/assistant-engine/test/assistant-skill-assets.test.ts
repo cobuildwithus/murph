@@ -293,7 +293,28 @@ describe('assistant skill assets', () => {
       'Do not mark onboarding complete until first experiment setup is resolved',
     )
     expect(raw).toContain(
-      'Ask one clear question that lets them choose: set up the proposed experiment now or defer',
+      'three or four lightweight, bounded first-experiment options',
+    )
+    expect(raw).toContain(
+      'not a single recommendation',
+    )
+    expect(raw).toContain(
+      'The assistant may label one option as the lowest-friction default',
+    )
+    expect(raw).toContain(
+      'but the user should still be able to choose among the options or defer',
+    )
+    expect(raw).toContain(
+      'Keep the options concise, meaningfully distinct by intervention, outcome, or burden',
+    )
+    expect(raw).toContain(
+      'If you cannot find at least three reasonable experiment options',
+    )
+    expect(raw).toContain(
+      'Ask one clear question that lets them choose one option to set up now or defer',
+    )
+    expect(raw).toContain(
+      'If the user chooses an option to set up, or if baseline logging is needed as part of the chosen option',
     )
     expect(raw).toContain(
       'A resolved first experiment setup means one of: an active first experiment was created through experiment onboarding, the user explicitly deferred or declined, or setup is blocked by a specific safety/logistics issue',
@@ -316,6 +337,13 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain(
       'Creating an active experiment remains a separate confirmed flow',
     )
+    expect(raw).not.toContain('propose one lightweight, bounded first experiment')
+    expect(raw).not.toContain(
+      'set up the proposed experiment now or defer',
+    )
+    expect(raw).not.toContain('as part of the proposed experiment')
+    expect(raw).not.toContain('two or three lightweight')
+    expect(raw).not.toContain('at least two reasonable experiment options')
     expect(raw).not.toContain('first experiment or logging path')
     expect(raw).not.toContain('first experiment or logging setup')
     expect(raw).not.toContain('simple logging habit')
