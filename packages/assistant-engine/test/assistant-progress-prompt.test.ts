@@ -31,7 +31,13 @@ describe('assistant progress prompt contract', () => {
     expect(prompt).toContain('reading attachments, inspecting or parsing files')
     expect(prompt).toContain('saving recovered data')
     expect(prompt).toContain('multi-step tool work')
+    expect(prompt).toContain('Reading a skill file')
+    expect(prompt).toContain('checking setup guidance')
+    expect(prompt).toContain(
+      'routine single-command vault read is not enough by itself',
+    )
     expect(prompt).toContain('quick single-step replies')
+    expect(prompt).toContain('basic context checks')
     expect(prompt).toContain('Do not overthink the channel or task category')
     expect(prompt).toContain(
       'one short, factual sentence about what you are starting or checking next',
@@ -48,6 +54,9 @@ describe('assistant progress prompt contract', () => {
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'before the first non-progress tool call',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'reading a skill file, checking setup guidance, or making a routine single-command vault read is not enough by itself',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'current user conversation',

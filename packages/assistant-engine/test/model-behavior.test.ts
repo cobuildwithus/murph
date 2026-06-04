@@ -113,6 +113,12 @@ describe('assistant GPT-5 execution prompt overlay', () => {
     )
     expect(prompt).toContain('reading attachments, inspecting or parsing files')
     expect(prompt).toContain('multi-step tool work')
+    expect(prompt).toContain('Reading a skill file')
+    expect(prompt).toContain('checking setup guidance')
+    expect(prompt).toContain(
+      'routine single-command vault read is not enough by itself',
+    )
+    expect(prompt).toContain('basic context checks')
     expect(prompt).toContain(
       'Do not overthink the channel or task category',
     )

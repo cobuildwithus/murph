@@ -60,7 +60,8 @@ export function buildAssistantExecutionBehaviorText(input: {
       ? `
 - For any longer or tool-heavy request, call \`send_progress_update\` once before the first non-progress tool call so the user sees a short preamble.
 - This is required for reading attachments, inspecting or parsing files, saving recovered data, research, long vault scans, or multi-step tool work.
-- For quick single-step replies, skip the progress update and answer directly.
+- Reading a skill file, checking setup guidance, or making a routine single-command vault read is not enough by itself to send a progress update.
+- For quick single-step replies and basic context checks, skip the progress update and answer directly.
 - Do not overthink the channel or task category. The update goes to the current user conversation.
 - Keep it to one short, factual sentence about what you are starting or checking next.
 - Do not include final answers, medical interpretations, abnormalities, diagnoses, recommendations, or claims you have not verified.`

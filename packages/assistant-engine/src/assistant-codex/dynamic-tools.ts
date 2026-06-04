@@ -9,7 +9,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send one brief progress preamble to the current user conversation before longer or tool-heavy work. Use it once before the first non-progress tool call; do not include final conclusions.',
+    'Send one brief progress preamble to the current user conversation before longer or tool-heavy work. Use it once before the first non-progress tool call; reading a skill file, checking setup guidance, or making a routine single-command vault read is not enough by itself; do not include final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
