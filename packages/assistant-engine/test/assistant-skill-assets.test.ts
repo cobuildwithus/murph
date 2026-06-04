@@ -167,6 +167,12 @@ describe('assistant skill assets', () => {
       'before moving to current protocol or supplement questions',
     )
     expect(raw).toContain(
+      'text-only notes means no wearable/app is required, not that later onboarding answers must be typed',
+    )
+    expect(raw).toContain(
+      'Do not let this suppress later voice memo or attachment options',
+    )
+    expect(raw).toContain(
       'What should I call you? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
     )
     expect(raw).toContain(
@@ -187,7 +193,13 @@ describe('assistant skill assets', () => {
       '- injuries, limitations, or anything they are trying to improve',
     )
     expect(raw).toContain(
-      'stream-of-consciousness voice memo if that is easier',
+      'The visible assistant message for this turn must include three elements',
+    )
+    expect(raw).toContain(
+      'answer by typing a messy list or sending a stream-of-consciousness voice memo',
+    )
+    expect(raw).toContain(
+      'Keep the voice memo option in the same message as the examples',
     )
     expect(raw).toContain(
       'If the user sends a voice memo and the assistant will inspect, transcribe, summarize, or save it',
@@ -312,7 +324,13 @@ describe('assistant skill assets', () => {
       expect(movementSection).toContain(movementExample)
     }
     expect(movementSection).toContain(
-      'stream-of-consciousness voice memo if that is easier',
+      'The visible assistant message for this turn must include three elements',
+    )
+    expect(movementSection).toContain(
+      'answer by typing a messy list or sending a stream-of-consciousness voice memo',
+    )
+    expect(movementSection).toContain(
+      'Keep the voice memo option in the same message as the examples',
     )
     expect(movementSection).toContain(
       'call `send_progress_update` before reading the content or using file/transcription tools',
