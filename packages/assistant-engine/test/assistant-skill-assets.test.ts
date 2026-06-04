@@ -139,9 +139,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'age and gender can help Murph interpret health context',
     )
+    expect(raw).toContain('make both fields optional')
     expect(raw).toContain(
+      'ask for gender with a clear option such as "prefer not to say"',
+    )
+    expect(raw).toContain(
+      'Do not turn this into a question about labels or phrasing',
+    )
+    expect(raw).not.toContain(
       'invite the user\'s own gender wording without choosing labels for them',
     )
+    expect(raw).not.toContain('gender wording')
     expect(raw).toContain(
       'before the wearable/app checkpoint or more detailed protocol/supplement questions',
     )
