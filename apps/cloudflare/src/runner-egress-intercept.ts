@@ -114,6 +114,7 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
 export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
   "runner.provider_egress_diagnostic";
 const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 1;
+const OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
 const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
@@ -159,6 +160,31 @@ const OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS = [
   "output",
   "string",
 ] as const;
+const OPENAI_CACHE_DIAGNOSTIC_CODEX_REQUEST_KINDS = new Set([
+  "compaction",
+  "memory",
+  "prewarm",
+  "turn",
+]);
+const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_TRIGGER_KINDS = new Set([
+  "auto",
+  "manual",
+]);
+const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_REASON_KINDS = new Set([
+  "context_limit",
+  "model_downshift",
+  "user_requested",
+]);
+const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_IMPLEMENTATION_KINDS = new Set([
+  "responses",
+  "responses_compact",
+  "responses_compaction_v2",
+]);
+const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_PHASE_KINDS = new Set([
+  "mid_turn",
+  "pre_turn",
+  "standalone_turn",
+]);
 
 const MAPBOX_EGRESS_POLICY = [
   {
@@ -633,6 +659,9 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
       requestBytes,
+      turnMetadataHeader: input.request.headers.get(
+        OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
+      ),
     });
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -692,6 +721,7 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   fingerprintSecret?: string | null;
   method: string;
   requestBytes: Uint8Array;
+  turnMetadataHeader?: string | null;
 }): Promise<HostedRunnerDiagnosticJson> {
   const fingerprintKey = await createOpenAiCacheDiagnosticFingerprintKey(
     input.fingerprintSecret ?? null,
@@ -706,6 +736,10 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
     providerKind: "openai",
     requestBytes: input.requestBytes.byteLength,
   };
+  appendCodexTurnMetadataDiagnostics({
+    diagnostic,
+    turnMetadataHeader: input.turnMetadataHeader ?? null,
+  });
 
   await appendFingerprintDiagnostics({
     bytes: input.requestBytes,
@@ -969,6 +1003,79 @@ function readStringRecordProperty(record: Record<string, unknown>, key: string):
   const value = record[key];
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function appendCodexTurnMetadataDiagnostics(input: {
+  diagnostic: HostedRunnerDiagnosticJson;
+  turnMetadataHeader: string | null;
+}): void {
+  const header = input.turnMetadataHeader?.trim();
+  if (!header) {
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(header);
+  } catch {
+    input.diagnostic.codexTurnMetadataStatus = "invalid";
+    return;
+  }
+  if (!isHostedOpenAiDiagnosticRecord(parsed)) {
+    input.diagnostic.codexTurnMetadataStatus = "invalid";
+    return;
+  }
+
+  input.diagnostic.codexTurnMetadataStatus = "valid";
+  appendAllowedStringDiagnosticKind({
+    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_REQUEST_KINDS,
+    field: "codexRequestKind",
+    output: input.diagnostic,
+    value: parsed.request_kind,
+  });
+
+  const compaction = parsed.compaction;
+  if (!isHostedOpenAiDiagnosticRecord(compaction)) {
+    return;
+  }
+
+  appendAllowedStringDiagnosticKind({
+    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_TRIGGER_KINDS,
+    field: "codexCompactionTriggerKind",
+    output: input.diagnostic,
+    value: compaction.trigger,
+  });
+  appendAllowedStringDiagnosticKind({
+    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_REASON_KINDS,
+    field: "codexCompactionReasonKind",
+    output: input.diagnostic,
+    value: compaction.reason,
+  });
+  appendAllowedStringDiagnosticKind({
+    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_IMPLEMENTATION_KINDS,
+    field: "codexCompactionImplementationKind",
+    output: input.diagnostic,
+    value: compaction.implementation,
+  });
+  appendAllowedStringDiagnosticKind({
+    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_PHASE_KINDS,
+    field: "codexCompactionPhaseKind",
+    output: input.diagnostic,
+    value: compaction.phase,
+  });
+}
+
+function appendAllowedStringDiagnosticKind(input: {
+  allowed: ReadonlySet<string>;
+  field: string;
+  output: HostedRunnerDiagnosticJson;
+  value: unknown;
+}): void {
+  const normalized = typeof input.value === "string" ? input.value.trim() : "";
+  if (!normalized) {
+    return;
+  }
+  input.output[input.field] = input.allowed.has(normalized) ? normalized : "other";
 }
 
 function encodeOpenAiDiagnosticJsonValue(value: unknown): Uint8Array | null {

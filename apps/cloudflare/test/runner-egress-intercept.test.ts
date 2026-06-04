@@ -1297,6 +1297,99 @@ describe("hostedRunnerIntercept", () => {
       .not.toContain(syntheticHiddenText);
   });
 
+  it("records Codex compaction metadata without raw turn identifiers", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return new Response(JSON.stringify({ loggedCount: 1 }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const sensitiveSessionId = "session-sensitive-diagnostic-id";
+    const sensitiveThreadId = "thread-sensitive-diagnostic-id";
+    const sensitiveTurnId = "turn-sensitive-diagnostic-id";
+    const requestBody = {
+      input: [],
+      model: "gpt-5.5",
+    };
+    const codexTurnMetadata = JSON.stringify({
+      compaction: {
+        implementation: "responses_compaction_v2",
+        phase: "pre_turn",
+        reason: "context_limit",
+        strategy: "memento",
+        trigger: "auto",
+      },
+      request_kind: "compaction",
+      session_id: sensitiveSessionId,
+      thread_id: sensitiveThreadId,
+      turn_id: sensitiveTurnId,
+      window_id: `${sensitiveThreadId}:7`,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses/compact", {
+        body: JSON.stringify(requestBody),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json; charset=utf-8",
+          "x-codex-turn-metadata": codexTurnMetadata,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await Promise.all(waitUntilPromises);
+
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        redactedJson?: Record<string, unknown>;
+      }>;
+    };
+    const redactedJson = runtimeLogBody.entries?.[0]?.redactedJson;
+    expect(redactedJson).toEqual(expect.objectContaining({
+      codexCompactionImplementationKind: "responses_compaction_v2",
+      codexCompactionPhaseKind: "pre_turn",
+      codexCompactionReasonKind: "context_limit",
+      codexCompactionTriggerKind: "auto",
+      codexRequestKind: "compaction",
+      codexTurnMetadataStatus: "valid",
+      endpointKind: "responses_compact",
+    }));
+    if (redactedJson) {
+      parseDiagnosticRuntimeLog(redactedJson);
+    }
+
+    const runtimeLogJson = JSON.stringify(runtimeLogBody);
+    expect(runtimeLogJson).not.toContain(sensitiveSessionId);
+    expect(runtimeLogJson).not.toContain(sensitiveThreadId);
+    expect(runtimeLogJson).not.toContain(sensitiveTurnId);
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(sensitiveThreadId);
+  });
+
   it("records OpenAI cache diagnostics with provider-token write-fence metadata when authority headers are absent", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
