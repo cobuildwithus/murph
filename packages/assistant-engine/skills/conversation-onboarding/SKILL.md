@@ -20,7 +20,7 @@ Expect roughly 7-8 short assistant messages after the welcome unless the user mo
 - User has been asked separately whether they have recent blood tests or lab panels, such as Function Health or doctor-ordered tests, and knows they can send PDFs or copy/paste results if they want Murph to use them.
 - Useful setup answers are persisted canonically when the user shared them: preferred name/nickname goes to memory, broad health context, supplements, protocols, experiments, dated age context, gender, or interests go to memory, and concrete durable goals go to goal records.
 - User understands the product loop: run one lightweight, bounded experiment at a time, then review what changed and decide what is worth keeping.
-- User has chosen a first experiment path or a logging habit, or explicitly declined. Creating an active experiment remains a separate confirmed flow.
+- User has resolved the first experiment or logging path: an active first experiment was created, a simple logging habit was chosen, the user explicitly deferred or declined, or setup is blocked by a specific safety/logistics issue. Onboarding is not complete until this path is resolved.
 
 ## Saving answers
 
@@ -83,13 +83,18 @@ Treat "not yet," "none," or no answer as enough to continue. Do not imply labs a
 
 9. Orientation. Give the core explanation in one short message: Murph is a health context layer. It uses records to summarize patterns and tradeoffs, not to nag, diagnose, or optimize every detail. Mention that the easiest way to start is to text useful context as it happens, especially things connected sources cannot see: meals, supplements, symptoms, questions, mood, perceived effort, travel, illness, caffeine, alcohol, or unusual days. If wearable data is already visible, do not ask them to send activity, steps, workouts, sleep, or recovery by message unless the user needs to add a missing or subjective detail for an experiment.
 
-10. First experiment. Help them pick a lightweight first experiment, logging habit, or first question. Use their goals to propose the path, for example sleep, strength, energy, or simple baseline logging. Suggest one reversible starting point with the option to simply log for a few days first. Favor treating recent wearable, lab, or logged history as a retrospective baseline when it already covers the target signal; suggest fresh baseline logging mainly when the signal is missing, stale or sparse, subjective and not logged, or the protocol calls for a prospective baseline.
+10. First experiment or logging decision. This is required before onboarding completion. Use their goals and collected context to propose one lightweight first experiment or a simple logging habit. Ask one clear question that lets them choose: start the proposed experiment now, log for a few days first, or defer. Do not settle for "text me workouts" as onboarding completion when a bounded first experiment can be proposed. Favor treating recent wearable, lab, or logged history as a retrospective baseline when it already covers the target signal; suggest fresh baseline logging mainly when the signal is missing, stale or sparse, subjective and not logged, or the protocol calls for a prospective baseline.
+
+If the user chooses the experiment path, read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` immediately. Continue into experiment setup and do not mark conversation onboarding complete until the run is created, the user explicitly defers or declines, or a real safety/logistics blocker prevents setup.
 
 11. Optional reminders. Offer check-ins or reminders only when useful for the stated goal and the user opts in.
 
 ## Completion
 
-- When the user has answered the opening context question meaningfully and the high-level age/gender prompt, wearable/app checkpoint, current protocol/experiment prompt, supplement prompt, and blood-test prompt have been asked, answered, skipped, or declined, verify that every useful setup answer they supplied has already been persisted through the saving rules above.
+- When the user has answered the opening context question meaningfully and the high-level age/gender prompt, wearable/app checkpoint, current protocol/experiment prompt, supplement prompt, and blood-test prompt have been asked, answered, skipped, or declined, verify that the orientation step has happened and the first experiment or logging path is resolved.
+- Do not mark onboarding complete until the first experiment or logging path is resolved.
+- A resolved first experiment or logging path means one of: an active first experiment was created through experiment onboarding, a simple logging habit was chosen, the user explicitly deferred or declined, or setup is blocked by a specific safety/logistics issue.
+- After the orientation and first experiment/logging path checks are satisfied, verify that every useful setup answer they supplied has already been persisted through the saving rules above.
 - If any useful answer has not been saved yet, save it through the same canonical vault commands before marking onboarding complete.
 - After required canonical memory/goal writes succeed, mark onboarding complete as an internal action with `vault-cli assistant onboarding complete --reason user_answered`.
 - If a required canonical write fails, do not mark onboarding complete. Briefly tell the user setup context did not finish saving yet and continue normally.

@@ -219,6 +219,9 @@ describe('assistant skill assets', () => {
       '8. Blood tests.',
     )
     const orientationIndex = raw.indexOf('9. Orientation.')
+    const firstExperimentIndex = raw.indexOf(
+      '10. First experiment or logging decision.',
+    )
     expect(nameContextIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThanOrEqual(0)
     expect(highLevelIndex).toBeGreaterThan(nameContextIndex)
@@ -227,6 +230,25 @@ describe('assistant skill assets', () => {
     expect(supplementsIndex).toBeGreaterThan(protocolsIndex)
     expect(bloodTestsIndex).toBeGreaterThan(supplementsIndex)
     expect(orientationIndex).toBeGreaterThan(bloodTestsIndex)
+    expect(firstExperimentIndex).toBeGreaterThan(orientationIndex)
+    expect(raw).toContain(
+      'Do not mark onboarding complete until the first experiment or logging path is resolved',
+    )
+    expect(raw).toContain(
+      'Ask one clear question that lets them choose: start the proposed experiment now, log for a few days first, or defer',
+    )
+    expect(raw).toContain(
+      'A resolved first experiment or logging path means one of: an active first experiment was created through experiment onboarding, a simple logging habit was chosen, the user explicitly deferred or declined, or setup is blocked by a specific safety/logistics issue',
+    )
+    expect(raw).toContain(
+      'read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` immediately',
+    )
+    expect(raw).toContain(
+      'Do not settle for "text me workouts" as onboarding completion',
+    )
+    expect(raw).not.toContain(
+      'Creating an active experiment remains a separate confirmed flow',
+    )
     expect(raw).toContain(
       'whether they have recent blood tests or lab panels',
     )
