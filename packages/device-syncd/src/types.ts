@@ -521,6 +521,7 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   account: PublicDeviceSyncAccount;
   connectSourceId?: string | null;
   connectTarget?: string | null;
+  sourceProviderSlug?: string | null;
   connection: ProviderConnectionResult;
   provider: DeviceSyncProvider;
   now: string;
@@ -750,6 +751,7 @@ export interface CompleteConnectionResult {
   returnTo: string | null;
   connectSourceId?: string | null;
   connectTarget?: string | null;
+  sourceProviderSlug?: string | null;
 }
 
 export interface HandleWebhookResult {

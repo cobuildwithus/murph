@@ -306,8 +306,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     provider: string;
     scopes: string[];
   };
-  connectSourceId?: string | null;
-  connectTarget?: string | null;
+  sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   now: string;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -344,7 +343,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     persist: async (tx) => {
       const linkedSource = resolveHostedJunctionLinkedSource({
         account: input.account,
-        connectTarget: input.connectTarget ?? null,
+        sourceProviderSlug: input.sourceProviderSlug ?? null,
       });
       if (linkedSource) {
         await input.store.upsertConnectionSource({
@@ -377,13 +376,13 @@ function resolveHostedJunctionLinkedSource(input: {
     id: string;
     provider: string;
   };
-  connectTarget: string | null;
+  sourceProviderSlug: string | null;
 }): { sourceInstanceKey: string; sourceProviderSlug: string } | null {
   if (input.account.provider !== "junction") {
     return null;
   }
 
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.connectTarget);
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     return null;
   }

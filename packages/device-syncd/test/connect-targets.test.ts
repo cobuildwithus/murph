@@ -15,7 +15,7 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
     JUNCTION_ENV: "sandbox",
-    JUNCTION_PROVIDER_FILTER: "oura,strava,whoop,fitbit",
+    JUNCTION_PROVIDER_FILTER: "oura,strava,whoop_v2,fitbit",
     JUNCTION_REGION: "us",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
@@ -35,7 +35,7 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
     [
       { connectSourceId: "oura", connectTarget: "oura", provider: "oura", sourceProviderSlug: null },
       { connectSourceId: "strava", connectTarget: "strava", provider: "strava", sourceProviderSlug: null },
-      { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop" },
+      { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
       { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
     ],
   );
@@ -57,14 +57,14 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
     connectTarget: "whoop",
     label: "WHOOP",
     provider: "junction",
-    sourceProviderSlug: "whoop",
+    sourceProviderSlug: "whoop_v2",
   });
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTargetBySourceId(configs, "WHOOP"), {
     connectSourceId: "whoop",
     connectTarget: "whoop",
     label: "WHOOP",
     provider: "junction",
-    sourceProviderSlug: "whoop",
+    sourceProviderSlug: "whoop_v2",
   });
 });
 
@@ -73,7 +73,7 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
     JUNCTION_ENV: "sandbox",
-    JUNCTION_PROVIDER_FILTER: "whoop",
+    JUNCTION_PROVIDER_FILTER: "whoop_v2",
     JUNCTION_REGION: "us",
     WHOOP_CLIENT_ID: "whoop-client-id",
     WHOOP_CLIENT_SECRET: "whoop-client-secret",
@@ -88,7 +88,7 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
     })),
     [
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "whoop", sourceProviderSlug: null },
-      { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop" },
+      { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
     ],
   );
 });
@@ -123,7 +123,7 @@ test("lightweight connect target config reader matches provider config target pr
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
     JUNCTION_ENV: "sandbox",
-    JUNCTION_PROVIDER_FILTER: "oura,strava,whoop,fitbit",
+    JUNCTION_PROVIDER_FILTER: "oura,strava,whoop_v2,fitbit",
     JUNCTION_REGION: "us",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
@@ -200,6 +200,6 @@ test("connect targets keep Oura and Strava direct with the default Junction sour
     connectTarget: "whoop",
     label: "WHOOP",
     provider: "junction",
-    sourceProviderSlug: "whoop",
+    sourceProviderSlug: "whoop_v2",
   });
 });

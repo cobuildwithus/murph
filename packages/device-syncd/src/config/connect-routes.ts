@@ -47,7 +47,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "whoop",
     label: "WHOOP",
-    routes: [directRoute("whoop"), junctionLinkRoute("whoop")],
+    routes: [directRoute("whoop"), junctionLinkRoute("whoop_v2", { connectTarget: "whoop" })],
   },
   {
     connectSourceId: "mapmyfitness",

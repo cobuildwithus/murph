@@ -835,7 +835,7 @@ describe("device sync settings routes", () => {
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
-    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "whoop");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "whoop_v2");
     vi.stubEnv("JUNCTION_REGION", "us");
 
     const response = await connectSourceStartRoute.POST(
@@ -862,7 +862,44 @@ describe("device sync settings routes", () => {
       {
         connectSourceId: "whoop",
         connectTarget: "whoop",
-        sourceProviderSlug: "whoop",
+        sourceProviderSlug: "whoop_v2",
+      },
+    );
+  });
+
+  it("uses the preferred source target when a visible source selector omits provider", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "whoop_v2");
+    vi.stubEnv("JUNCTION_REGION", "us");
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/whoop/start",
+        {
+          connectTarget: "whoop",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "whoop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "junction",
+      "/device-sync/connect/complete?source=connect&connectSource=whoop&connectTarget=whoop",
+      {
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        sourceProviderSlug: "whoop_v2",
       },
     );
   });

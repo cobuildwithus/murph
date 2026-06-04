@@ -185,7 +185,9 @@ test("Junction default connect targets cover the shared provider filter", () => 
   });
 
   assert.deepEqual(
-    listConfiguredDeviceSyncConnectTargets(configs).map((target) => target.connectTarget),
+    listConfiguredDeviceSyncConnectTargets(configs).map((target) =>
+      target.sourceProviderSlug ?? target.connectTarget
+    ),
     JUNCTION_DEFAULT_PROVIDER_FILTER,
   );
 });

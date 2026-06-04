@@ -41,18 +41,16 @@ export class HostedDeviceSyncPublicIngressService {
       hooks: {
         onConnectionEstablished: async ({
           account,
-          connectSourceId,
-          connectTarget,
           connection,
           now,
           provider,
+          sourceProviderSlug,
         }) => {
           await handleHostedDeviceSyncConnectionEstablished({
             account,
-            connectSourceId: connectSourceId ?? null,
-            connectTarget: connectTarget ?? null,
             connection,
             now,
+            sourceProviderSlug: sourceProviderSlug ?? null,
             store: this.context.store,
           });
 

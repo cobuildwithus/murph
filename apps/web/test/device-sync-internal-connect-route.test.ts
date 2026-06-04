@@ -104,7 +104,7 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret-value");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
-    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit,whoop");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit,whoop_v2");
     vi.stubEnv("JUNCTION_REGION", "us");
     mocks.createHostedDeviceConnectIntent.mockResolvedValueOnce({
       claim: "dc_fitbit_opaque",

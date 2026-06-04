@@ -2914,6 +2914,7 @@ test("public ingress preserves callback redirect context on OAuth callback failu
     connectTarget: "garmin",
     provider: "demo",
     returnTo: "https://app.example.test/settings/devices",
+    sourceProviderSlug: "garmin",
   });
 
   await assert.rejects(
@@ -2955,6 +2956,7 @@ test("public ingress passes connect source context to connection-established hoo
     connectTarget: "garmin",
     provider: "demo",
     returnTo: "https://app.example.test/settings/devices",
+    sourceProviderSlug: "garmin",
   });
 
   const connected = await ingress.handleOAuthCallback({
@@ -2967,6 +2969,8 @@ test("public ingress passes connect source context to connection-established hoo
   assert.equal(connectionEvents[0]?.account.id, connected.account.id);
   assert.equal(connectionEvents[0]?.connectSourceId, "garmin");
   assert.equal(connectionEvents[0]?.connectTarget, "garmin");
+  assert.equal(connectionEvents[0]?.sourceProviderSlug, "garmin");
+  assert.equal(connected.sourceProviderSlug, "garmin");
 });
 
 test("public ingress best-effort revokes pending provider access when OAuth persistence fails", async () => {

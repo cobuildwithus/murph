@@ -68,6 +68,8 @@ const CONNECT_SOURCE_ID_STATE_METADATA_KEY =
   "__murphConnectSourceId";
 const CONNECT_TARGET_STATE_METADATA_KEY =
   "__murphConnectTarget";
+const SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY =
+  "__murphSourceProviderSlug";
 
 function toIngressWebhook(parsed: {
   acceptanceMode: DeviceSyncWebhookAcceptanceMode;
@@ -247,15 +249,18 @@ function buildConnectionStateMetadata(input: {
   providerMetadata: Record<string, unknown> | undefined;
   connectSourceId?: string | null;
   connectTarget?: string | null;
+  sourceProviderSlug?: string | null;
 }): Record<string, unknown> {
   const metadata = sanitizeConnectionStateMetadata(input.providerMetadata);
   const connectSourceId = normalizeString(input.connectSourceId);
   const connectTarget = normalizeString(input.connectTarget);
+  const sourceProviderSlug = normalizeString(input.sourceProviderSlug);
 
   return {
     ...metadata,
     ...(connectSourceId ? { [CONNECT_SOURCE_ID_STATE_METADATA_KEY]: connectSourceId } : {}),
     ...(connectTarget ? { [CONNECT_TARGET_STATE_METADATA_KEY]: connectTarget } : {}),
+    ...(sourceProviderSlug ? { [SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY]: sourceProviderSlug } : {}),
   };
 }
 
@@ -269,6 +274,7 @@ function buildProviderConnectionStateMetadata(
   delete providerMetadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_TARGET_STATE_METADATA_KEY];
+  delete providerMetadata[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
   return sanitizeConnectionStateMetadata(providerMetadata);
 }
 
@@ -281,6 +287,7 @@ function sanitizeConnectionStateMetadata(
   delete metadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
   delete metadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete metadata[CONNECT_TARGET_STATE_METADATA_KEY];
+  delete metadata[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
 
   for (const key of Object.keys(metadata)) {
     if (isBlockedConnectionStateMetadataKey(key)) {
@@ -337,6 +344,11 @@ function readConnectSourceId(
 
 function readConnectTarget(metadata: Record<string, unknown> | undefined): string | null {
   const value = metadata?.[CONNECT_TARGET_STATE_METADATA_KEY];
+  return typeof value === "string" ? normalizeString(value) ?? null : null;
+}
+
+function readSourceProviderSlug(metadata: Record<string, unknown> | undefined): string | null {
+  const value = metadata?.[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
   return typeof value === "string" ? normalizeString(value) ?? null : null;
 }
 
@@ -507,6 +519,7 @@ export class DeviceSyncPublicIngress {
       providerMetadata: started.stateMetadata,
       connectSourceId: input.connectSourceId ?? null,
       connectTarget: input.connectTarget ?? null,
+      sourceProviderSlug: input.sourceProviderSlug ?? null,
     });
     if (seededAccount) {
       stateMetadata = setSeededConnectionStateMetadata(stateMetadata, seededAccount);
@@ -602,6 +615,7 @@ export class DeviceSyncPublicIngress {
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
     const connectSourceId = readConnectSourceId(stateRecord.metadata);
     const connectTarget = readConnectTarget(stateRecord.metadata);
+    const sourceProviderSlug = readSourceProviderSlug(stateRecord.metadata);
     const callbackContext = {
       connectSourceId,
       connectTarget,
@@ -731,6 +745,7 @@ export class DeviceSyncPublicIngress {
         account,
         ...(connectSourceId ? { connectSourceId } : {}),
         ...(connectTarget ? { connectTarget } : {}),
+        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
         connection: {
           ...connection,
           ...(initialJobs ? { initialJobs } : {}),
@@ -744,6 +759,7 @@ export class DeviceSyncPublicIngress {
         returnTo,
         ...(connectSourceId ? { connectSourceId } : {}),
         ...(connectTarget ? { connectTarget } : {}),
+        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
       };
     } catch (error) {
       if (connection) {

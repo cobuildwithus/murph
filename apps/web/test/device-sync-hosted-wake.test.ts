@@ -1401,6 +1401,7 @@ describe("appendHostedDeviceSyncWake", () => {
           },
           connectSourceId: "garmin",
           connectTarget: "garmin",
+          sourceProviderSlug: "garmin",
           connection: {
             initialJobs: [],
             nextReconcileAt: null,
@@ -1474,6 +1475,7 @@ describe("appendHostedDeviceSyncWake", () => {
           },
           connectSourceId: connectTarget,
           connectTarget,
+          sourceProviderSlug: connectTarget,
           connection: {
             initialJobs: [],
             nextReconcileAt: null,

@@ -1,3 +1,4 @@
+import { resolveJunctionConnectSourceLabel } from "@murphai/device-syncd/connect-config";
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 
 const INTERMEDIARY_DEVICE_SYNC_PROVIDERS = new Set(["junction"]);
@@ -19,25 +20,16 @@ export function formatHostedDeviceSyncProviderLabel(provider: string): string {
 }
 
 export function formatHostedDeviceSyncSourceLabel(sourceProviderSlug: string): string {
+  const junctionLabel = resolveJunctionConnectSourceLabel(sourceProviderSlug);
+  if (junctionLabel) {
+    return junctionLabel;
+  }
+
   const normalized = sourceProviderSlug.trim().toLowerCase().replace(/_/gu, "-");
 
   switch (normalized) {
-    case "dexcom-v3":
-      return "Dexcom";
-    case "fitbit":
-      return "Fitbit";
-    case "freestyle-libre":
-      return "Freestyle Libre";
-    case "garmin":
-      return "Garmin";
-    case "oura":
-      return "Oura";
-    case "strava":
-      return "Strava";
     case "whoop":
-      return "WHOOP";
-    case "withings":
-      return "Withings";
+      return formatDeviceSyncProviderLabel("whoop");
     default:
       return UNKNOWN_SOURCE_LABEL;
   }

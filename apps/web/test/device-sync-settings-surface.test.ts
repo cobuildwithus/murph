@@ -300,7 +300,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         firstSeenAt: "2026-04-01T08:00:00.000Z",
         lastSeenAt: "2026-04-03T08:00:00.000Z",
         resourceCount: 1,
-        sourceProviderSlug: "whoop",
+        sourceProviderSlug: "whoop_v2",
         status: "unavailable",
       }],
       connectTargets: [
@@ -314,7 +314,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
           connectSourceId: "whoop",
           connectTarget: "whoop",
           provider: "junction",
-          sourceProviderSlug: "whoop",
+          sourceProviderSlug: "whoop_v2",
         },
       ],
       connections: [buildConnection({
@@ -331,6 +331,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       connectTarget: "whoop",
       primaryAction: { kind: "reconnect", label: "Reconnect" },
       provider: "junction",
+      providerLabel: "WHOOP",
       state: "reauthorization_required",
     });
   });

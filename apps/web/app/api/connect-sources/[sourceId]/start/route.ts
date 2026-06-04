@@ -59,16 +59,13 @@ function resolveHostedConnectSourceTarget(
   selector: HostedConnectSourceTargetSelector | null,
 ) {
   const configs = readHostedConnectSourceTargetConfigs();
-  const target = selector
+  const target = selector && isSpecificHostedConnectSourceTargetSelector(selector)
     ? resolveSelectedHostedConnectSourceTarget(
         listConfiguredDeviceSyncReconnectTargets(configs),
         sourceId,
         selector,
       )
-    : resolveConfiguredDeviceSyncConnectTargetBySourceId(
-        configs,
-        sourceId,
-      );
+    : resolvePreferredHostedConnectSourceTarget(configs, sourceId, selector);
 
   if (!target) {
     throw deviceSyncError({
@@ -80,6 +77,12 @@ function resolveHostedConnectSourceTarget(
   }
 
   return target;
+}
+
+function isSpecificHostedConnectSourceTargetSelector(
+  selector: HostedConnectSourceTargetSelector,
+): boolean {
+  return Boolean(selector.provider || selector.sourceProviderSlug);
 }
 
 async function readHostedConnectSourceTargetSelector(
@@ -130,6 +133,23 @@ function resolveSelectedHostedConnectSourceTarget(
       || selector.sourceProviderSlug === (target.sourceProviderSlug ?? null)
     )
   ) ?? null;
+}
+
+function resolvePreferredHostedConnectSourceTarget(
+  configs: Parameters<typeof resolveConfiguredDeviceSyncConnectTargetBySourceId>[0],
+  sourceId: string,
+  selector: HostedConnectSourceTargetSelector | null,
+): DeviceSyncConnectTarget | null {
+  const target = resolveConfiguredDeviceSyncConnectTargetBySourceId(
+    configs,
+    sourceId,
+  );
+
+  if (!target || (selector?.connectTarget && selector.connectTarget !== target.connectTarget)) {
+    return null;
+  }
+
+  return target;
 }
 
 function readOptionalString(value: unknown): string | null {

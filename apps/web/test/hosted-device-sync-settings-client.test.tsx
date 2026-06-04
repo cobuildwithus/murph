@@ -332,6 +332,65 @@ test("HostedDeviceSyncSettingsClient retries reconnect after consent is accepted
   });
 });
 
+test("HostedDeviceSyncSettingsClient reconnects Junction WHOOP through the Junction target", async () => {
+  const source = createReconnectSource({
+    provider: "junction",
+    providerLabel: "WHOOP",
+  });
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    authorizationUrl: "https://provider.example.test/oauth/start",
+  });
+
+  const { document, window } = loadLinkedom().parseHTML(
+    "<html><body><div id='root'></div></body></html>",
+  );
+  installHostedDeviceSyncClientGlobals(window, document);
+  const assign = mockWindowLocation(window, "https://app.example.test/settings");
+
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  const root: Root = createRoot(container);
+  cleanupRender = async () => {
+    await act(async () => {
+      root.unmount();
+    });
+  };
+
+  await act(async () => {
+    root.render(
+      createElement(HostedDeviceSyncSettingsClient, {
+        authenticated: true,
+        initialLoadError: null,
+        initialResponse: {
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          ok: true,
+          sources: [source],
+        },
+      }),
+    );
+  });
+
+  const reconnectButton = container.querySelector("[data-hosted-device-sync-reconnect='true']");
+  assert.ok(reconnectButton instanceof window.HTMLButtonElement);
+
+  await act(async () => {
+    reconnectButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(assign).toHaveBeenCalledWith("https://provider.example.test/oauth/start");
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      connectTarget: "whoop",
+      provider: "junction",
+    },
+    url: "/api/connect-sources/whoop/start",
+  });
+});
+
 test("HostedDeviceSyncSettingsClient closes reconnect consent dialog when retry fails normally", async () => {
   const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
   const source = createReconnectSource();
@@ -485,7 +544,9 @@ function createConnectedSource(): HostedDeviceSyncSettingsSource {
   };
 }
 
-function createReconnectSource(): HostedDeviceSyncSettingsSource {
+function createReconnectSource(
+  overrides: Partial<HostedDeviceSyncSettingsSource> = {},
+): HostedDeviceSyncSettingsSource {
   return {
     ...createConnectedSource(),
     connectSourceId: "whoop",
@@ -502,5 +563,6 @@ function createReconnectSource(): HostedDeviceSyncSettingsSource {
     state: "reauthorization_required",
     statusLabel: "Needs access",
     tone: "attention",
+    ...overrides,
   };
 }
